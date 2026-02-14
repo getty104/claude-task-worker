@@ -7,7 +7,7 @@ GitHub IssueやPRを定期ポーリングし、Claude CLIに処理を委譲す�
 ```bash
 npm install
 npm run build
-npm lknk
+npm link
 ```
 
 ## 使い方
