@@ -18,7 +18,7 @@ export async function fixReviewPointWorker(intervalMinutes: number): Promise<voi
 
         console.log(`[fix-review-point] Processing PR #${pr.number} (branch: ${pr.headRefName})`);
         await addLabel("pr", pr.number, "in-progress");
-        run("claude", ["-p", "/fix-review-point", pr.headRefName], pr.number);
+        run("claude", ["-p", "/fix-review-point", pr.headRefName], pr.number, `PR #${pr.number} (${pr.headRefName})`);
       }
     } catch (err) {
       console.error(`[fix-review-point] tick error: ${err}`);
