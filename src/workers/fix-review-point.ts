@@ -1,7 +1,7 @@
 import { getCurrentUser, getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
-const POLLING_INTERVAL_MS = 60 * 1000;
+const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "fix-onetime";
 const LABEL_FIX_REPEAT = "fix-repeat";
 const LABEL_IN_PROGRESS = "in-progress";

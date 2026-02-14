@@ -1,7 +1,7 @@
 import { getCurrentUser, listIssues, removeLabel, addLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
-const POLLING_INTERVAL_MS = 60 * 1000;
+const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function execIssueWorker(): Promise<void> {
   const user = await getCurrentUser();

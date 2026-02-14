@@ -151,7 +151,7 @@ let renderInterval: ReturnType<typeof setInterval> | undefined;
 
 function ensureRenderInterval(): void {
   if (renderInterval) return;
-  renderInterval = setInterval(renderTable, 5000);
+  renderInterval = setInterval(renderTable, 1000);
   renderInterval.unref();
 }
 
