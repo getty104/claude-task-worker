@@ -19,7 +19,6 @@ export async function fixReviewPointWorker(): Promise<void> {
         const unresolved = await hasUnresolvedReviews(owner, name, pr.number);
         if (!unresolved) continue;
 
-        console.log(`[fix-review-point] Processing PR #${pr.number} (branch: ${pr.headRefName})`);
         await addLabel("pr", pr.number, "in-progress");
         run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`], pr.number, `PR #${pr.number} (${pr.headRefName})`, () => {
           removeLabel("pr", pr.number, "in-progress");

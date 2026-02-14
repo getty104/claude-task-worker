@@ -2,6 +2,7 @@
 
 import { execIssueWorker } from "./workers/exec-issue.js";
 import { fixReviewPointWorker } from "./workers/fix-review-point.js";
+import { shutdown } from "./process-manager.js";
 
 const WORKERS: Record<string, () => Promise<void>> = {
   "exec-issue": execIssueWorker,
@@ -37,6 +38,13 @@ process.on("unhandledRejection", (err) => {
   console.error("[worker] unhandled rejection:", err);
   process.exit(1);
 });
+
+const handleTermination = () => {
+  shutdown();
+  process.exit(0);
+};
+process.on("SIGTERM", handleTermination);
+process.on("SIGINT", handleTermination);
 
 if (workerType === "both") {
   Promise.all([execIssueWorker(), fixReviewPointWorker()]);

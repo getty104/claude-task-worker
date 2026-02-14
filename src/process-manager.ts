@@ -1,6 +1,8 @@
-import { spawn } from "node:child_process";
+import { spawn, ChildProcess } from "node:child_process";
 
 type TaskStatus = "running" | "completed" | "failed";
+
+const childProcesses = new Map<number, ChildProcess>();
 
 function getDisplayWidth(str: string): number {
   let width = 0;
@@ -164,9 +166,11 @@ export function run(command: string, args: string[], id: number, title: string, 
   ensureRenderInterval();
   renderTable();
 
-  const child = spawn(command, args, { stdio: "inherit" });
+  const child = spawn(command, args, { stdio: ["ignore", "ignore", "inherit"] });
+  childProcesses.set(id, child);
 
   child.on("close", (code) => {
+    childProcesses.delete(id);
     const task = tasks.get(id);
     if (task) {
       task.status = code === 0 ? "completed" : "failed";
@@ -177,6 +181,7 @@ export function run(command: string, args: string[], id: number, title: string, 
   });
 
   child.on("error", (err) => {
+    childProcesses.delete(id);
     const task = tasks.get(id);
     if (task) {
       task.status = "failed";
@@ -185,4 +190,11 @@ export function run(command: string, args: string[], id: number, title: string, 
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     renderTable();
   });
+}
+
+export function shutdown(): void {
+  for (const [id, child] of childProcesses) {
+    child.kill("SIGTERM");
+    childProcesses.delete(id);
+  }
 }
