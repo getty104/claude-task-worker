@@ -2,6 +2,53 @@ import { spawn } from "node:child_process";
 
 type TaskStatus = "running" | "completed" | "failed";
 
+function getDisplayWidth(str: string): number {
+  let width = 0;
+  for (const char of str) {
+    const code = char.codePointAt(0)!;
+    if (
+      (code >= 0x1100 && code <= 0x115f) ||
+      (code >= 0x2e80 && code <= 0x303e) ||
+      (code >= 0x3040 && code <= 0x33bf) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x4e00 && code <= 0xa4cf) ||
+      (code >= 0xac00 && code <= 0xd7af) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xfe30 && code <= 0xfe6f) ||
+      (code >= 0xff01 && code <= 0xff60) ||
+      (code >= 0xffe0 && code <= 0xffe6) ||
+      (code >= 0x20000 && code <= 0x2fffd) ||
+      (code >= 0x30000 && code <= 0x3fffd)
+    ) {
+      width += 2;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
+function truncateToWidth(str: string, maxWidth: number): string {
+  let width = 0;
+  let i = 0;
+  const chars = [...str];
+  while (i < chars.length) {
+    const charWidth = getDisplayWidth(chars[i]);
+    if (width + charWidth > maxWidth - 3) {
+      return chars.slice(0, i).join("") + "...";
+    }
+    width += charWidth;
+    i++;
+  }
+  return str;
+}
+
+function padToWidth(str: string, targetWidth: number): string {
+  const currentWidth = getDisplayWidth(str);
+  const padding = targetWidth - currentWidth;
+  return padding > 0 ? str + " ".repeat(padding) : str;
+}
+
 interface TaskEntry {
   id: number;
   title: string;
@@ -32,16 +79,18 @@ function renderTable(): void {
   const runningTasks = entries.filter((t) => t.status === "running");
   const finishedTasks = entries.filter((t) => t.status !== "running");
 
+  const maxTitleWidth = 40;
+
   const allRows = [
     ...runningTasks.map((t) => ({
       id: `#${t.id}`,
-      title: t.title.length > 40 ? t.title.slice(0, 37) + "..." : t.title,
+      title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
       status: t.status,
       duration: formatDuration(t.startedAt),
     })),
     ...finishedTasks.map((t) => ({
       id: `#${t.id}`,
-      title: t.title.length > 40 ? t.title.slice(0, 37) + "..." : t.title,
+      title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
       status: t.status,
       duration: formatDuration(t.startedAt, t.finishedAt),
     })),
@@ -49,17 +98,18 @@ function renderTable(): void {
 
   const colWidths = {
     id: Math.max(3, ...allRows.map((r) => r.id.length)),
-    title: Math.max(5, ...allRows.map((r) => r.title.length)),
+    title: Math.max(5, ...allRows.map((r) => getDisplayWidth(r.title))),
     status: Math.max(6, ...allRows.map((r) => r.status.length)),
     duration: Math.max(8, ...allRows.map((r) => r.duration.length)),
   };
 
-  const pad = (s: string, w: number) => s + " ".repeat(w - s.length);
+  const pad = (s: string, w: number, useDisplayWidth = false) =>
+    useDisplayWidth ? padToWidth(s, w) : s + " ".repeat(w - s.length);
   const line = (l: string, m: string, r: string, f: string) =>
     `${l}${f.repeat(colWidths.id + 2)}${m}${f.repeat(colWidths.title + 2)}${m}${f.repeat(colWidths.status + 2)}${m}${f.repeat(colWidths.duration + 2)}${r}`;
 
   const row = (id: string, title: string, status: string, duration: string) =>
-    `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title)} │ ${pad(status, colWidths.status)} │ ${pad(duration, colWidths.duration)} │`;
+    `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(status, colWidths.status)} │ ${pad(duration, colWidths.duration)} │`;
 
   const lines: string[] = [];
   lines.push(line("┌", "┬", "┐", "─"));
