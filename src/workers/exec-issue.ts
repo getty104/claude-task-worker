@@ -5,7 +5,7 @@ const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function execIssueWorker(): Promise<void> {
   const user = await getCurrentUser();
-  console.log(`[exec-issue] Polling issues every 1 minute for user ${user}`);
+  console.log(`[exec-issue] Polling issues every 30 seconds for user ${user}`);
 
   const tick = async () => {
     try {

@@ -9,7 +9,7 @@ const LABEL_IN_PROGRESS = "in-progress";
 export async function fixReviewPointWorker(): Promise<void> {
   const { owner, name } = await getRepoInfo();
   const user = await getCurrentUser();
-  console.log(`[fix-review-point] Polling PRs every 1 minute for ${owner}/${name} (assignee: ${user})`);
+  console.log(`[fix-review-point] Polling PRs every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
   const tick = async () => {
     try {

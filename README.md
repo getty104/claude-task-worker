@@ -50,7 +50,7 @@ claude-task-worker both
 ## 前提条件
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) がインストール・認証済みであること
-- [Claude CLI (`claude`)](https://docs.anthropic.com/en/docs/claude-code) がインストール済みであること
+- [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) がインストール済みであること
 - [base-tools](https://github.com/getty104/claude-code-marketplace) がインストール済みであること
 
 ## 開発
