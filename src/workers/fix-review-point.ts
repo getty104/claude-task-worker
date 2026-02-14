@@ -1,15 +1,16 @@
-import { getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
 const POLLING_INTERVAL_MS = 60 * 1000;
 
 export async function fixReviewPointWorker(): Promise<void> {
   const { owner, name } = await getRepoInfo();
-  console.log(`[fix-review-point] Polling PRs every 1 minute for ${owner}/${name}`);
+  const user = await getCurrentUser();
+  console.log(`[fix-review-point] Polling PRs every 1 minute for ${owner}/${name} (assignee: ${user})`);
 
   const tick = async () => {
     try {
-      const prs = await listPullRequests();
+      const prs = await listPullRequests(user);
       const candidates = prs.filter((pr) => !pr.labels.some((l) => l.name === "in-progress"));
 
       for (const pr of candidates) {

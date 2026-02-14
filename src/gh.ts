@@ -50,12 +50,16 @@ export async function listIssues(assignee: string, label: string): Promise<Issue
   return JSON.parse(output);
 }
 
-export async function listPullRequests(): Promise<PullRequest[]> {
-  const output = await execGh([
+export async function listPullRequests(assignee?: string): Promise<PullRequest[]> {
+  const args = [
     "pr", "list",
     "--json", "number,headRefName,labels",
     "--limit", "100",
-  ]);
+  ];
+  if (assignee) {
+    args.push("--assignee", assignee);
+  }
+  const output = await execGh(args);
   return JSON.parse(output);
 }
 
