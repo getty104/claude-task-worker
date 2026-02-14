@@ -1,9 +1,11 @@
 import { getCurrentUser, listIssues, removeLabel, addLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
-export async function execIssueWorker(intervalMinutes: number): Promise<void> {
+const POLLING_INTERVAL_MS = 60 * 1000;
+
+export async function execIssueWorker(): Promise<void> {
   const user = await getCurrentUser();
-  console.log(`[exec-issue] Polling issues every ${intervalMinutes} minutes for user ${user}`);
+  console.log(`[exec-issue] Polling issues every 1 minute for user ${user}`);
 
   const tick = async () => {
     try {
@@ -23,5 +25,5 @@ export async function execIssueWorker(intervalMinutes: number): Promise<void> {
   };
 
   await tick();
-  setInterval(tick, intervalMinutes * 60 * 1000);
+  setInterval(tick, POLLING_INTERVAL_MS);
 }

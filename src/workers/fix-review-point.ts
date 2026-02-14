@@ -1,9 +1,11 @@
 import { getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
-export async function fixReviewPointWorker(intervalMinutes: number): Promise<void> {
+const POLLING_INTERVAL_MS = 60 * 1000;
+
+export async function fixReviewPointWorker(): Promise<void> {
   const { owner, name } = await getRepoInfo();
-  console.log(`[fix-review-point] Polling PRs every ${intervalMinutes} minutes for ${owner}/${name}`);
+  console.log(`[fix-review-point] Polling PRs every 1 minute for ${owner}/${name}`);
 
   const tick = async () => {
     try {
@@ -28,5 +30,5 @@ export async function fixReviewPointWorker(intervalMinutes: number): Promise<voi
   };
 
   await tick();
-  setInterval(tick, intervalMinutes * 60 * 1000);
+  setInterval(tick, POLLING_INTERVAL_MS);
 }

@@ -13,7 +13,7 @@ npm lknk
 ## 使い方
 
 ```bash
-claude-task-worker <worker-type> <interval-minutes>
+claude-task-worker <worker-type>
 ```
 
 ### exec-issue
@@ -24,7 +24,7 @@ claude-task-worker <worker-type> <interval-minutes>
 - `claude -p /exec-issue <issue番号>` を非同期で実行
 
 ```bash
-claude-task-worker exec-issue 5
+claude-task-worker exec-issue
 ```
 
 ### fix-review-point
@@ -36,7 +36,7 @@ claude-task-worker exec-issue 5
 - `claude -p /fix-review-point <ブランチ名>` を非同期で実行
 
 ```bash
-claude-task-worker fix-review-point 3
+claude-task-worker fix-review-point
 ```
 
 ## 前提条件
