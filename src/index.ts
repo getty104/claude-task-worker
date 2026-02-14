@@ -14,6 +14,7 @@ function printUsage(): void {
 Worker types:
   exec-issue        Poll issues and run /exec-issue
   fix-review-point  Poll PRs and run /fix-review-point
+  both              Poll both issues and PRs
 
 Example:
   claude-task-worker exec-issue`);
@@ -26,8 +27,7 @@ if (!workerType) {
   process.exit(1);
 }
 
-const worker = WORKERS[workerType];
-if (!worker) {
+if (workerType !== "both" && !WORKERS[workerType]) {
   console.error(`Unknown worker type: ${workerType}`);
   printUsage();
   process.exit(1);
@@ -38,4 +38,8 @@ process.on("unhandledRejection", (err) => {
   process.exit(1);
 });
 
-worker();
+if (workerType === "both") {
+  Promise.all([execIssueWorker(), fixReviewPointWorker()]);
+} else {
+  WORKERS[workerType]();
+}
