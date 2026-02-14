@@ -15,7 +15,7 @@ export async function execIssueWorker(intervalMinutes: number): Promise<void> {
         console.log(`[exec-issue] Processing issue #${issue.number}: ${issue.title}`);
         await removeLabel(issue.number, "dev-ready");
         await addLabel("issue", issue.number, "in-progress");
-        run("claude", ["-p", "/exec-issue", String(issue.number)], issue.number, issue.title);
+        run("claude", ["--dangerously-skip-permissions", "-p", `/exec-issue ${issue.number}`], issue.number, issue.title);
       }
     } catch (err) {
       console.error(`[exec-issue] tick error: ${err}`);
