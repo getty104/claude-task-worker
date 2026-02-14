@@ -1,0 +1,22 @@
+{
+  "name": "claude-task-worker",
+  "version": "0.1.0",
+  "description": "CLI tool that polls GitHub Issues/PRs and delegates work to Claude CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "claude-task-worker": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
