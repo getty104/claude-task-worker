@@ -67,28 +67,132 @@ export async function removeLabel(number: number, label: string): Promise<void> 
   await execGh(["issue", "edit", String(number), "--remove-label", label]);
 }
 
-export async function hasUnresolvedReviews(owner: string, repo: string, prNumber: number): Promise<boolean> {
-  const query = `
-    query($owner: String!, $repo: String!, $number: Int!) {
+interface ReviewComment {
+  author: string;
+  body: string;
+  url: string;
+  createdAt: string;
+}
+
+interface UnresolvedThread {
+  threadId: string;
+  path: string;
+  line: number | null;
+  isOutdated: boolean;
+  comments: ReviewComment[];
+}
+
+interface UnresolvedReviewsResult {
+  prNumber: number;
+  title: string;
+  url: string;
+  state: string;
+  author: string;
+  requestedReviewers: string[];
+  unresolvedThreads: UnresolvedThread[];
+}
+
+export async function fetchUnresolvedReviews(owner: string, repo: string, prNumber: number): Promise<UnresolvedReviewsResult> {
+  const buildQuery = (withCursor: boolean) => `
+    query($owner: String!, $repo: String!, $number: Int!${withCursor ? ", $cursor: String" : ""}) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
-          reviewThreads(first: 100) {
-            nodes { isResolved }
+          number
+          title
+          url
+          state
+          author { login }
+          reviewRequests(first: 100) {
+            nodes {
+              requestedReviewer {
+                ... on User { login }
+              }
+            }
+          }
+          reviewThreads(first: 100${withCursor ? ", after: $cursor" : ""}) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                id
+                isResolved
+                isOutdated
+                path
+                line
+                comments(last: 100) {
+                  nodes {
+                    author { login }
+                    body
+                    url
+                    createdAt
+                  }
+                }
+              }
+            }
           }
         }
       }
     }
   `;
 
-  const output = await execGh([
-    "api", "graphql",
-    "-F", `owner=${owner}`,
-    "-F", `repo=${repo}`,
-    "-F", `number=${prNumber}`,
-    "-f", `query=${query}`,
-  ]);
+  const pages: any[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
 
-  const parsed = JSON.parse(output);
-  const threads = parsed.data.repository.pullRequest.reviewThreads.nodes as { isResolved: boolean }[];
-  return threads.some((t) => !t.isResolved);
+  while (hasNextPage) {
+    const args = [
+      "api", "graphql",
+      "-F", `owner=${owner}`,
+      "-F", `repo=${repo}`,
+      "-F", `number=${prNumber}`,
+      "-f", `query=${buildQuery(cursor !== null)}`,
+    ];
+    if (cursor) {
+      args.push("-f", `cursor=${cursor}`);
+    }
+
+    const output = await execGh(args);
+    const parsed = JSON.parse(output);
+    pages.push(parsed);
+
+    const pageInfo = parsed.data.repository.pullRequest.reviewThreads.pageInfo;
+    hasNextPage = pageInfo.hasNextPage;
+    cursor = pageInfo.endCursor ?? null;
+  }
+
+  const firstPr = pages[0].data.repository.pullRequest;
+
+  const unresolvedThreads: UnresolvedThread[] = pages.flatMap((page) =>
+    page.data.repository.pullRequest.reviewThreads.edges
+      .filter((edge: any) => !edge.node.isResolved)
+      .map((edge: any) => ({
+        threadId: edge.node.id,
+        path: edge.node.path,
+        line: edge.node.line,
+        isOutdated: edge.node.isOutdated,
+        comments: edge.node.comments.nodes.map((c: any) => ({
+          author: c.author.login,
+          body: c.body,
+          url: c.url,
+          createdAt: c.createdAt,
+        })),
+      }))
+  );
+
+  return {
+    prNumber: firstPr.number,
+    title: firstPr.title,
+    url: firstPr.url,
+    state: firstPr.state,
+    author: firstPr.author.login,
+    requestedReviewers: firstPr.reviewRequests.nodes.map((n: any) => n.requestedReviewer?.login).filter(Boolean),
+    unresolvedThreads,
+  };
+}
+
+export async function hasUnresolvedReviews(owner: string, repo: string, prNumber: number): Promise<boolean> {
+  const result = await fetchUnresolvedReviews(owner, repo, prNumber);
+  return result.unresolvedThreads.length > 0;
 }
