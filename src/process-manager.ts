@@ -72,6 +72,13 @@ function formatDuration(start: Date, end: Date = new Date()): string {
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
+function formatTime(date: Date): string {
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  const s = String(date.getSeconds()).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
 function renderTable(): void {
   const entries = [...tasks.values()];
   if (entries.length === 0) return;
@@ -86,12 +93,14 @@ function renderTable(): void {
       id: `#${t.id}`,
       title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
       status: t.status,
+      time: formatTime(t.startedAt),
       duration: formatDuration(t.startedAt),
     })),
     ...finishedTasks.map((t) => ({
       id: `#${t.id}`,
       title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
       status: t.status,
+      time: formatTime(t.finishedAt ?? t.startedAt),
       duration: formatDuration(t.startedAt, t.finishedAt),
     })),
   ];
@@ -100,24 +109,26 @@ function renderTable(): void {
     id: Math.max(3, ...allRows.map((r) => r.id.length)),
     title: Math.max(5, ...allRows.map((r) => getDisplayWidth(r.title))),
     status: Math.max(6, ...allRows.map((r) => r.status.length)),
+    time: Math.max(4, ...allRows.map((r) => r.time.length)),
     duration: Math.max(8, ...allRows.map((r) => r.duration.length)),
   };
 
   const pad = (s: string, w: number, useDisplayWidth = false) =>
     useDisplayWidth ? padToWidth(s, w) : s + " ".repeat(w - s.length);
+  const cols = [colWidths.id, colWidths.title, colWidths.status, colWidths.time, colWidths.duration];
   const line = (l: string, m: string, r: string, f: string) =>
-    `${l}${f.repeat(colWidths.id + 2)}${m}${f.repeat(colWidths.title + 2)}${m}${f.repeat(colWidths.status + 2)}${m}${f.repeat(colWidths.duration + 2)}${r}`;
+    `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
 
-  const row = (id: string, title: string, status: string, duration: string) =>
-    `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(status, colWidths.status)} │ ${pad(duration, colWidths.duration)} │`;
+  const row = (id: string, title: string, status: string, time: string, duration: string) =>
+    `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`;
 
   const lines: string[] = [];
   lines.push(line("┌", "┬", "┐", "─"));
-  lines.push(row("#", "Title", "Status", "Duration"));
+  lines.push(row("#", "Title", "Status", "Time", "Duration"));
   lines.push(line("├", "┼", "┤", "─"));
 
   for (const r of allRows.filter((r) => r.status === "running")) {
-    lines.push(row(r.id, r.title, r.status, r.duration));
+    lines.push(row(r.id, r.title, r.status, r.time, r.duration));
   }
 
   if (runningTasks.length > 0 && finishedTasks.length > 0) {
@@ -125,7 +136,7 @@ function renderTable(): void {
   }
 
   for (const r of allRows.filter((r) => r.status !== "running")) {
-    lines.push(row(r.id, r.title, r.status, r.duration));
+    lines.push(row(r.id, r.title, r.status, r.time, r.duration));
   }
 
   lines.push(line("└", "┴", "┘", "─"));
