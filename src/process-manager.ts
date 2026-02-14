@@ -92,7 +92,7 @@ function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-export function run(command: string, args: string[], id: number, title: string): void {
+export function run(command: string, args: string[], id: number, title: string, onComplete?: () => void): void {
   tasks.set(id, {
     id,
     title,
@@ -112,6 +112,7 @@ export function run(command: string, args: string[], id: number, title: string):
       task.finishedAt = new Date();
     }
     renderTable();
+    onComplete?.();
   });
 
   child.on("error", (err) => {

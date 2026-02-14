@@ -13,7 +13,7 @@ export async function execIssueWorker(intervalMinutes: number): Promise<void> {
         if (isRunning(issue.number)) continue;
 
         console.log(`[exec-issue] Processing issue #${issue.number}: ${issue.title}`);
-        await removeLabel(issue.number, "dev-ready");
+        await removeLabel("issue", issue.number, "dev-ready");
         await addLabel("issue", issue.number, "in-progress");
         run("claude", ["--dangerously-skip-permissions", "-p", `/exec-issue ${issue.number}`], issue.number, issue.title);
       }

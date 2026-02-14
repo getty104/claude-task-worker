@@ -63,8 +63,8 @@ export async function addLabel(type: "issue" | "pr", number: number, label: stri
   await execGh([type, "edit", String(number), "--add-label", label]);
 }
 
-export async function removeLabel(number: number, label: string): Promise<void> {
-  await execGh(["issue", "edit", String(number), "--remove-label", label]);
+export async function removeLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
+  await execGh([type, "edit", String(number), "--remove-label", label]);
 }
 
 interface ReviewComment {

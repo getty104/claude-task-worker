@@ -1,4 +1,4 @@
-import { getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel } from "../gh.js";
+import { getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
 export async function fixReviewPointWorker(intervalMinutes: number): Promise<void> {
@@ -18,7 +18,9 @@ export async function fixReviewPointWorker(intervalMinutes: number): Promise<voi
 
         console.log(`[fix-review-point] Processing PR #${pr.number} (branch: ${pr.headRefName})`);
         await addLabel("pr", pr.number, "in-progress");
-        run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`], pr.number, `PR #${pr.number} (${pr.headRefName})`);
+        run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`], pr.number, `PR #${pr.number} (${pr.headRefName})`, () => {
+          removeLabel("pr", pr.number, "in-progress");
+        });
       }
     } catch (err) {
       console.error(`[fix-review-point] tick error: ${err}`);
