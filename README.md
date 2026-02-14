@@ -5,7 +5,9 @@ GitHub IssueやPRを定期ポーリングし、Claude CLIに処理を委譲す�
 ## インストール
 
 ```bash
-npm install -g claude-task-worker
+npm install
+npm run build
+npm lknk
 ```
 
 ## 使い方
