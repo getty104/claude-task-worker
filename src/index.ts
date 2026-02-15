@@ -2,11 +2,15 @@
 
 import { execIssueWorker } from "./workers/exec-issue.js";
 import { fixReviewPointWorker } from "./workers/fix-review-point.js";
+import { createIssueWorker } from "./workers/create-issue.js";
+import { updateIssueWorker } from "./workers/update-issue.js";
 import { shutdown } from "./process-manager.js";
 
 const WORKERS: Record<string, () => Promise<void>> = {
   "exec-issue": execIssueWorker,
   "fix-review-point": fixReviewPointWorker,
+  "create-issue": createIssueWorker,
+  "update-issue": updateIssueWorker,
 };
 
 function printUsage(): void {
@@ -15,7 +19,9 @@ function printUsage(): void {
 Worker types:
   exec-issue        Poll issues and run /exec-issue
   fix-review-point  Poll PRs and run /fix-review-point
-  both              Poll both issues and PRs
+  create-issue      Poll issues and run /create-issue
+  update-issue      Poll issues and run update command
+  both              Poll all workers
 
 Example:
   claude-task-worker exec-issue`);
@@ -47,7 +53,7 @@ process.on("SIGTERM", handleTermination);
 process.on("SIGINT", handleTermination);
 
 if (workerType === "both") {
-  Promise.all([execIssueWorker(), fixReviewPointWorker()]);
+  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
 } else {
   WORKERS[workerType]();
 }

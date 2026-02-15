@@ -200,3 +200,26 @@ export async function hasUnresolvedReviews(owner: string, repo: string, prNumber
   const result = await fetchUnresolvedReviews(owner, repo, prNumber);
   return result.unresolvedThreads.length > 0;
 }
+
+export async function getIssueBody(issueNumber: number): Promise<string> {
+  const output = await execGh(["issue", "view", String(issueNumber), "--json", "body"]);
+  const parsed = JSON.parse(output);
+  return parsed.body ?? "";
+}
+
+export async function closeIssue(issueNumber: number): Promise<void> {
+  await execGh(["issue", "close", String(issueNumber)]);
+}
+
+export async function getLastIssueComment(issueNumber: number): Promise<{ author: string; body: string } | null> {
+  const output = await execGh(["issue", "view", String(issueNumber), "--json", "comments"]);
+  const parsed = JSON.parse(output);
+  const comments = parsed.comments ?? [];
+  if (comments.length === 0) return null;
+  const last = comments[comments.length - 1];
+  return { author: last.author.login, body: last.body };
+}
+
+export async function commentOnIssue(issueNumber: number, body: string): Promise<void> {
+  await execGh(["issue", "comment", String(issueNumber), "--body", body]);
+}
