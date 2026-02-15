@@ -5,6 +5,7 @@ import { fixReviewPointWorker } from "./workers/fix-review-point.js";
 import { createIssueWorker } from "./workers/create-issue.js";
 import { updateIssueWorker } from "./workers/update-issue.js";
 import { shutdown } from "./process-manager.js";
+import { init } from "./commands/init.js";
 
 const WORKERS: Record<string, () => Promise<void>> = {
   "exec-issue": execIssueWorker,
@@ -14,9 +15,12 @@ const WORKERS: Record<string, () => Promise<void>> = {
 };
 
 function printUsage(): void {
-  console.log(`Usage: claude-task-worker <worker-type>
+  console.log(`Usage: claude-task-worker <command>
 
-Worker types:
+Commands:
+  init              Create required GitHub labels
+
+Workers:
   exec-issue        Poll issues and run /exec-issue
   fix-review-point  Poll PRs and run /fix-review-point
   create-issue      Poll issues and run /create-issue
@@ -24,6 +28,7 @@ Worker types:
   both              Poll all workers
 
 Example:
+  claude-task-worker init
   claude-task-worker exec-issue`);
 }
 
@@ -34,8 +39,8 @@ if (!workerType) {
   process.exit(1);
 }
 
-if (workerType !== "both" && !WORKERS[workerType]) {
-  console.error(`Unknown worker type: ${workerType}`);
+if (workerType !== "both" && workerType !== "init" && !WORKERS[workerType]) {
+  console.error(`Unknown command: ${workerType}`);
   printUsage();
   process.exit(1);
 }
@@ -52,7 +57,9 @@ const handleTermination = () => {
 process.on("SIGTERM", handleTermination);
 process.on("SIGINT", handleTermination);
 
-if (workerType === "both") {
+if (workerType === "init") {
+  init();
+} else if (workerType === "both") {
   Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
 } else {
   WORKERS[workerType]();

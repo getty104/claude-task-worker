@@ -223,3 +223,12 @@ export async function getLastIssueComment(issueNumber: number): Promise<{ author
 export async function commentOnIssue(issueNumber: number, body: string): Promise<void> {
   await execGh(["issue", "comment", String(issueNumber), "--body", body]);
 }
+
+export async function createLabel(name: string): Promise<boolean> {
+  try {
+    await execGh(["label", "create", name]);
+    return true;
+  } catch {
+    return false;
+  }
+}
