@@ -23,7 +23,7 @@ export async function updateIssueWorker(): Promise<void> {
           continue;
         }
 
-        const prompt = `/update-issue\n番号: ${issue.number}\n依頼内容: ${lastComment.body}`;
+        const prompt = `/update-issue\nIssue番号: ${issue.number}\n依頼内容: \n${lastComment.body}`;
         run(
           "claude",
           ["--dangerously-skip-permissions", "-p", prompt],
