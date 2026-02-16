@@ -39,12 +39,12 @@ claude-task-worker exec-issue
 claude-task-worker fix-review-point
 ```
 
-### both
+### all
 
-`exec-issue` と `fix-review-point` の両方を同時にポーリングする。
+すべてのワーカーを同時にポーリングする。
 
 ```bash
-claude-task-worker both
+claude-task-worker all
 ```
 
 ## 前提条件

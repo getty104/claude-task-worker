@@ -25,7 +25,7 @@ Workers:
   fix-review-point  Poll PRs and run /fix-review-point
   create-issue      Poll issues and run /create-issue
   update-issue      Poll issues and run update command
-  both              Poll all workers
+  all               Poll all workers
 
 Example:
   claude-task-worker init
@@ -39,7 +39,7 @@ if (!workerType) {
   process.exit(1);
 }
 
-if (workerType !== "both" && workerType !== "init" && !WORKERS[workerType]) {
+if (workerType !== "all" && workerType !== "init" && !WORKERS[workerType]) {
   console.error(`Unknown command: ${workerType}`);
   printUsage();
   process.exit(1);
@@ -59,7 +59,7 @@ process.on("SIGINT", handleTermination);
 
 if (workerType === "init") {
   init();
-} else if (workerType === "both") {
+} else if (workerType === "all") {
   Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
 } else {
   WORKERS[workerType]();
