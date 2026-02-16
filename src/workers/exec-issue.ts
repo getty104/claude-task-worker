@@ -1,11 +1,12 @@
-import { getCurrentUser, listIssues, removeLabel, addLabel } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function execIssueWorker(): Promise<void> {
+  const { owner, name } = await getRepoInfo();
   const user = await getCurrentUser();
-  console.log(`[exec-issue] Polling issues every 30 seconds for user ${user}`);
+  console.log(`[exec-issue] Polling issues every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
   const tick = async () => {
     try {
