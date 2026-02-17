@@ -1,5 +1,6 @@
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getIssueBody, closeIssue } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
+import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
 const POLLING_INTERVAL_MS = 30 * 1000;
 
@@ -19,17 +20,23 @@ export async function createIssueWorker(): Promise<void> {
         await addLabel("issue", issue.number, "in-progress");
 
         const body = await getIssueBody(issue.number);
+        const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         run(
           "claude",
-          ["--dangerously-skip-permissions", "-p", `/create-issue ${body}`],
+          ["--dangerously-skip-permissions", "-p", `/create-issue ${body}`, "--worktree"],
           issue.number,
           issue.title,
-          async () => {
+          async (status) => {
             try {
               await removeLabel("issue", issue.number, "in-progress");
               await closeIssue(issue.number);
             } catch (err) {
               console.error(`[create-issue] Failed to close issue #${issue.number}: ${err}`);
+            }
+            if (status === "completed") {
+              await notifyTaskCompleted("create-issue", issue.number, issue.title, issueUrl);
+            } else {
+              await notifyTaskFailed("create-issue", issue.number, issue.title, issueUrl);
             }
           },
         );

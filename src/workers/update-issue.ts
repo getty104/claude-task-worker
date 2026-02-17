@@ -1,5 +1,6 @@
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getLastIssueComment, commentOnIssue } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
+import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
 const POLLING_INTERVAL_MS = 30 * 1000;
 
@@ -25,17 +26,23 @@ export async function updateIssueWorker(): Promise<void> {
         }
 
         const prompt = `/update-issue\nIssue番号: ${issue.number}\n依頼内容: \n${lastComment.body}`;
+        const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         run(
           "claude",
           ["--dangerously-skip-permissions", "-p", prompt],
           issue.number,
           issue.title,
-          async () => {
+          async (status) => {
             try {
               await removeLabel("issue", issue.number, "in-progress");
               await commentOnIssue(issue.number, `@${lastComment.author} Updated`);
             } catch (err) {
               console.error(`[update-issue] Failed to finalize issue #${issue.number}: ${err}`);
+            }
+            if (status === "completed") {
+              await notifyTaskCompleted("update-issue", issue.number, issue.title, issueUrl);
+            } else {
+              await notifyTaskFailed("update-issue", issue.number, issue.title, issueUrl);
             }
           },
         );

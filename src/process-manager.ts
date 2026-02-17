@@ -155,7 +155,7 @@ function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-export function run(command: string, args: string[], id: number, title: string, onComplete?: () => void): void {
+export function run(command: string, args: string[], id: number, title: string, onComplete?: (status: "completed" | "failed") => void): void {
   tasks.set(id, {
     id,
     title,
@@ -177,7 +177,7 @@ export function run(command: string, args: string[], id: number, title: string, 
       task.finishedAt = new Date();
     }
     renderTable();
-    onComplete?.();
+    onComplete?.(code === 0 ? "completed" : "failed");
   });
 
   child.on("error", (err) => {
@@ -189,6 +189,7 @@ export function run(command: string, args: string[], id: number, title: string, 
     }
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     renderTable();
+    onComplete?.("failed");
   });
 }
 

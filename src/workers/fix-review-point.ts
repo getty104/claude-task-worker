@@ -1,5 +1,6 @@
 import { getCurrentUser, getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
+import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
 const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "fix-onetime";
@@ -27,13 +28,19 @@ export async function fixReviewPointWorker(): Promise<void> {
         if (!unresolved) continue;
 
         const isOnetime = pr.labels.some((l) => l.name === LABEL_FIX_ONETIME);
+        const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
 
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-        run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`], pr.number, `PR #${pr.number} (${pr.headRefName})`, () => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`, "--worktree"], pr.number, `PR #${pr.number} (${pr.headRefName})`, async (status) => {
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);
           for (const label of labelsToRemove) {
             removeLabel("pr", pr.number, label);
+          }
+          if (status === "completed") {
+            await notifyTaskCompleted("fix-review-point", pr.number, `PR #${pr.number} (${pr.headRefName})`, prUrl);
+          } else {
+            await notifyTaskFailed("fix-review-point", pr.number, `PR #${pr.number} (${pr.headRefName})`, prUrl);
           }
         });
       }
