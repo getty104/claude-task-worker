@@ -17,7 +17,6 @@ export async function execIssueWorker(): Promise<void> {
         if (isRunning(issue.number)) continue;
 
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
-        console.log(`[exec-issue] Processing issue #${issue.number}: ${issue.title}`);
         await removeLabel("issue", issue.number, "dev-ready");
         await addLabel("issue", issue.number, "in-progress");
         run("claude", ["--dangerously-skip-permissions", "-p", `/exec-issue ${issue.number}`, "--worktree"], issue.number, issue.title, async (status) => {
