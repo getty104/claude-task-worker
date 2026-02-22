@@ -19,19 +19,23 @@ async function send(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
-interface TokenLimitStatus {
-  percentUsed: number;
-  limit: number;
-  projectedUsage: number;
-  status: string;
+interface ActiveBlockInfo {
+  tokenLimitStatus: {
+    percentUsed: number;
+    limit: number;
+    projectedUsage: number;
+    status: string;
+  };
+  endTime: string;
 }
 
-async function getTokenLimitStatus(): Promise<TokenLimitStatus | null> {
+async function getActiveBlockInfo(): Promise<ActiveBlockInfo | null> {
   try {
     const { stdout } = await execAsync("ccusage blocks --token-limit max --active --json");
     const data = JSON.parse(stdout);
     const activeBlock = data.blocks?.find((b: { isActive: boolean }) => b.isActive);
-    return activeBlock?.tokenLimitStatus ?? null;
+    if (!activeBlock?.tokenLimitStatus) return null;
+    return { tokenLimitStatus: activeBlock.tokenLimitStatus, endTime: activeBlock.endTime };
   } catch {
     return null;
   }
@@ -43,12 +47,24 @@ function formatTokenCount(tokens: number): string {
   return String(tokens);
 }
 
-async function buildTokenLimitText(): Promise<string> {
-  const status = await getTokenLimitStatus();
-  if (!status) return "";
+function formatEndTimeJST(endTime: string): string {
+  const date = new Date(endTime);
+  return date.toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }) + " JST";
+}
 
+async function buildTokenLimitText(): Promise<string> {
+  const info = await getActiveBlockInfo();
+  if (!info) return "";
+
+  const { tokenLimitStatus: status, endTime } = info;
   const emoji = status.status === "ok" ? "🟢" : status.status === "warning" ? "🟡" : "🔴";
-  return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.projectedUsage)} / ${formatTokenCount(status.limit)})`;
+  return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.projectedUsage)} / ${formatTokenCount(status.limit)}) | Ends: ${formatEndTimeJST(endTime)}`;
 }
 
 export async function notifyTaskCompleted(workerName: string, id: number, title: string, url: string): Promise<void> {
