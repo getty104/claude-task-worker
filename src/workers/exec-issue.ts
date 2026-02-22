@@ -19,7 +19,7 @@ export async function execIssueWorker(): Promise<void> {
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         await removeLabel("issue", issue.number, "dev-ready");
         await addLabel("issue", issue.number, "in-progress");
-        run("claude", ["--dangerously-skip-permissions", "-p", `/exec-issue ${issue.number}`, "--worktree"], issue.number, issue.title, async (status) => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number}`, "--worktree"], issue.number, issue.title, async (status) => {
           if (status === "completed") {
             await notifyTaskCompleted("exec-issue", issue.number, issue.title, issueUrl);
           } else {

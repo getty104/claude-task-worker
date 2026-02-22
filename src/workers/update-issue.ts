@@ -25,7 +25,7 @@ export async function updateIssueWorker(): Promise<void> {
           continue;
         }
 
-        const prompt = `/update-issue\nIssue番号: ${issue.number}\n依頼内容: \n${lastComment.body}`;
+        const prompt = `/base-tools:update-issue\nIssue番号: ${issue.number}\n依頼内容: \n${lastComment.body}`;
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         run(
           "claude",

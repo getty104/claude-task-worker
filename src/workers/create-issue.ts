@@ -23,7 +23,7 @@ export async function createIssueWorker(): Promise<void> {
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         run(
           "claude",
-          ["--dangerously-skip-permissions", "-p", `/create-issue ${body}`, "--worktree"],
+          ["--dangerously-skip-permissions", "-p", `/base-tools:create-issue ${body}`, "--worktree"],
           issue.number,
           issue.title,
           async (status) => {
