@@ -31,7 +31,7 @@ export async function fixReviewPointWorker(): Promise<void> {
         const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
 
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-        run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`, "--worktree"], pr.number, `PR #${pr.number} (${pr.headRefName})`, async (status) => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/fix-review-point ${pr.headRefName}`, "--worktree", pr.headRefName], pr.number, `PR #${pr.number} (${pr.headRefName})`, async (status) => {
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);
           for (const label of labelsToRemove) {
