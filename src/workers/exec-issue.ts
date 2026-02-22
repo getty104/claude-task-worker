@@ -14,12 +14,14 @@ export async function execIssueWorker(): Promise<void> {
       const issues = await listIssues(user, "dev-ready");
 
       for (const issue of issues) {
+        if (issue.labels.some(l => l.name === "in-progress")) continue;
         if (isRunning(issue.number)) continue;
 
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
-        await removeLabel("issue", issue.number, "dev-ready");
         await addLabel("issue", issue.number, "in-progress");
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number}`, "--worktree"], issue.number, issue.title, async (status) => {
+          await removeLabel("issue", issue.number, "dev-ready");
+          await removeLabel("issue", issue.number, "in-progress");
           if (status === "completed") {
             await notifyTaskCompleted("exec-issue", issue.number, issue.title, issueUrl);
           } else {
