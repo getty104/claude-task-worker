@@ -1,3 +1,8 @@
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
+
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 
 async function send(payload: Record<string, unknown>): Promise<void> {
@@ -14,14 +19,48 @@ async function send(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
+interface TokenLimitStatus {
+  percentUsed: number;
+  limit: number;
+  projectedUsage: number;
+  status: string;
+}
+
+async function getTokenLimitStatus(): Promise<TokenLimitStatus | null> {
+  try {
+    const { stdout } = await execAsync("ccusage blocks --token-limit max --active --json");
+    const data = JSON.parse(stdout);
+    const activeBlock = data.blocks?.find((b: { isActive: boolean }) => b.isActive);
+    return activeBlock?.tokenLimitStatus ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`;
+  return String(tokens);
+}
+
+async function buildTokenLimitText(): Promise<string> {
+  const status = await getTokenLimitStatus();
+  if (!status) return "";
+
+  const emoji = status.status === "ok" ? "🟢" : status.status === "warning" ? "🟡" : "🔴";
+  return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.projectedUsage)} / ${formatTokenCount(status.limit)})`;
+}
+
 export async function notifyTaskCompleted(workerName: string, id: number, title: string, url: string): Promise<void> {
+  const tokenText = await buildTokenLimitText();
   await send({
-    text: `✅ [${workerName}] Task completed: <${url}|#${id} ${title}>`,
+    text: `✅ [${workerName}] Task completed: <${url}|#${id} ${title}>${tokenText}`,
   });
 }
 
 export async function notifyTaskFailed(workerName: string, id: number, title: string, url: string): Promise<void> {
+  const tokenText = await buildTokenLimitText();
   await send({
-    text: `❌ [${workerName}] Task failed: <${url}|#${id} ${title}>`,
+    text: `❌ [${workerName}] Task failed: <${url}|#${id} ${title}>${tokenText}`,
   });
 }
