@@ -1,4 +1,4 @@
-import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getLastIssueComment, commentOnIssue } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getLastIssueComment } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
@@ -35,7 +35,6 @@ export async function updateIssueWorker(): Promise<void> {
           async (status) => {
             try {
               await removeLabel("issue", issue.number, "cc-in-progress");
-              await commentOnIssue(issue.number, `@${lastComment.author} Updated`);
             } catch (err) {
               console.error(`[update-issue] Failed to finalize issue #${issue.number}: ${err}`);
             }
