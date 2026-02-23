@@ -3,9 +3,9 @@ import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
 const POLLING_INTERVAL_MS = 30 * 1000;
-const LABEL_FIX_ONETIME = "fix-onetime";
-const LABEL_FIX_REPEAT = "fix-repeat";
-const LABEL_IN_PROGRESS = "in-progress";
+const LABEL_FIX_ONETIME = "cc-fix-onetime";
+const LABEL_FIX_REPEAT = "cc-fix-repeat";
+const LABEL_IN_PROGRESS = "cc-in-progress";
 
 export async function fixReviewPointWorker(): Promise<void> {
   const { owner, name } = await getRepoInfo();

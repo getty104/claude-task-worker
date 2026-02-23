@@ -11,13 +11,13 @@ export async function createIssueWorker(): Promise<void> {
 
   const tick = async () => {
     try {
-      const issues = await listIssues(user, "create-issue");
+      const issues = await listIssues(user, "cc-create-issue");
 
       for (const issue of issues) {
         if (isRunning(issue.number)) continue;
 
-        await removeLabel("issue", issue.number, "create-issue");
-        await addLabel("issue", issue.number, "in-progress");
+        await removeLabel("issue", issue.number, "cc-create-issue");
+        await addLabel("issue", issue.number, "cc-in-progress");
 
         const body = await getIssueBody(issue.number);
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
@@ -28,7 +28,7 @@ export async function createIssueWorker(): Promise<void> {
           issue.title,
           async (status) => {
             try {
-              await removeLabel("issue", issue.number, "in-progress");
+              await removeLabel("issue", issue.number, "cc-in-progress");
               await closeIssue(issue.number);
             } catch (err) {
               console.error(`[create-issue] Failed to close issue #${issue.number}: ${err}`);

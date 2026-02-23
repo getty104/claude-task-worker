@@ -35,7 +35,7 @@ claude-task-worker all             # Run all workers concurrently
 2. 30秒間隔でGitHub APIをポーリング
 3. ラベル・アサイン条件でフィルタリング
 4. `isRunning()` で重複実行防止
-5. トリガーラベル除去 → `in-progress` ラベル付与
+5. トリガーラベル除去 → `cc-in-progress` ラベル付与
 6. Claude CLIプロセスを非同期spawn
 7. 完了時コールバックでラベルクリーンアップ
 
@@ -43,10 +43,10 @@ claude-task-worker all             # Run all workers concurrently
 
 | Worker | トリガーラベル | 完了時 |
 |--------|-------------|--------|
-| exec-issue | `dev-ready` | `in-progress` 除去 |
-| fix-review-point | `fix-onetime` or `fix-repeat` | `in-progress` 除去、`fix-onetime` は除去・`fix-repeat` は維持 |
-| create-issue | `create-issue` | Issue クローズ |
-| update-issue | `update-issue` | `@author Updated` コメント投稿 |
+| exec-issue | `cc-exec-issue` | `cc-in-progress` 除去 |
+| fix-review-point | `cc-fix-onetime` or `cc-fix-repeat` | `cc-in-progress` 除去、`cc-fix-onetime` は除去・`cc-fix-repeat` は維持 |
+| create-issue | `cc-create-issue` | Issue クローズ |
+| update-issue | `cc-update-issue` | `@author Updated` コメント投稿 |
 
 ## Conventions
 

@@ -11,17 +11,17 @@ export async function updateIssueWorker(): Promise<void> {
 
   const tick = async () => {
     try {
-      const issues = await listIssues(user, "update-issue");
+      const issues = await listIssues(user, "cc-update-issue");
 
       for (const issue of issues) {
         if (isRunning(issue.number)) continue;
 
-        await removeLabel("issue", issue.number, "update-issue");
-        await addLabel("issue", issue.number, "in-progress");
+        await removeLabel("issue", issue.number, "cc-update-issue");
+        await addLabel("issue", issue.number, "cc-in-progress");
 
         const lastComment = await getLastIssueComment(issue.number);
         if (!lastComment) {
-          await removeLabel("issue", issue.number, "in-progress");
+          await removeLabel("issue", issue.number, "cc-in-progress");
           continue;
         }
 
@@ -34,7 +34,7 @@ export async function updateIssueWorker(): Promise<void> {
           issue.title,
           async (status) => {
             try {
-              await removeLabel("issue", issue.number, "in-progress");
+              await removeLabel("issue", issue.number, "cc-in-progress");
               await commentOnIssue(issue.number, `@${lastComment.author} Updated`);
             } catch (err) {
               console.error(`[update-issue] Failed to finalize issue #${issue.number}: ${err}`);
