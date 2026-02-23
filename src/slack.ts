@@ -23,7 +23,7 @@ interface ActiveBlockInfo {
   tokenLimitStatus: {
     percentUsed: number;
     limit: number;
-    projectedUsage: number;
+    currentUsage: number;
     status: string;
   };
   endTime: string;
@@ -34,17 +34,23 @@ async function getActiveBlockInfo(): Promise<ActiveBlockInfo | null> {
     const { stdout } = await execAsync("ccusage blocks --token-limit max --active");
 
     const timeRemainingMatch = stdout.match(/Time Remaining:\s+(\d+)h\s+(\d+)m/);
-    if (!timeRemainingMatch) return null;
+    if (!timeRemainingMatch) {
+      console.error("[slack] Failed to parse Time Remaining from ccusage output");
+      return null;
+    }
     const endDate = new Date(Date.now() + (parseInt(timeRemainingMatch[1]) * 60 + parseInt(timeRemainingMatch[2])) * 60 * 1000);
 
-    const currentUsageMatch = stdout.match(/Current Usage:\s+[\d,]+\s+\(([\d.]+)%\)/);
-    if (!currentUsageMatch) return null;
+    const currentUsageMatch = stdout.match(/Current Usage:\s+([\d,]+)\s+\(([\d.]+)%\)/);
+    if (!currentUsageMatch) {
+      console.error("[slack] Failed to parse Current Usage from ccusage output");
+      return null;
+    }
 
     const limitMatch = stdout.match(/Limit:\s+([\d,]+)\s+tokens/);
-    if (!limitMatch) return null;
-
-    const projectedTokensMatch = stdout.match(/Total Tokens:\s+([\d,]+)/);
-    if (!projectedTokensMatch) return null;
+    if (!limitMatch) {
+      console.error("[slack] Failed to parse Limit from ccusage output");
+      return null;
+    }
 
     const projectedStatusMatch = stdout.match(/Projected Usage:\s+[\d.]+%\s+(\w+)/);
     const statusWord = projectedStatusMatch?.[1]?.toLowerCase() ?? "ok";
@@ -52,14 +58,15 @@ async function getActiveBlockInfo(): Promise<ActiveBlockInfo | null> {
 
     return {
       tokenLimitStatus: {
-        percentUsed: parseFloat(currentUsageMatch[1]),
+        percentUsed: parseFloat(currentUsageMatch[2]),
         limit: parseInt(limitMatch[1].replace(/,/g, "")),
-        projectedUsage: parseInt(projectedTokensMatch[1].replace(/,/g, "")),
+        currentUsage: parseInt(currentUsageMatch[1].replace(/,/g, "")),
         status,
       },
       endTime: endDate.toISOString(),
     };
-  } catch {
+  } catch (err) {
+    console.error(`[slack] Failed to get active block info: ${err}`);
     return null;
   }
 }
@@ -87,7 +94,7 @@ async function buildTokenLimitText(): Promise<string> {
 
   const { tokenLimitStatus: status, endTime } = info;
   const emoji = status.status === "ok" ? "🟢" : status.status === "warning" ? "🟡" : "🔴";
-  return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.projectedUsage)} / ${formatTokenCount(status.limit)}) | Ends: ${formatEndTimeJST(endTime)}`;
+  return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.currentUsage)} / ${formatTokenCount(status.limit)}) | Ends: ${formatEndTimeJST(endTime)}`;
 }
 
 export async function notifyTaskCompleted(workerName: string, id: number, title: string, url: string): Promise<void> {
