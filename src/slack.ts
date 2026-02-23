@@ -31,11 +31,34 @@ interface ActiveBlockInfo {
 
 async function getActiveBlockInfo(): Promise<ActiveBlockInfo | null> {
   try {
-    const { stdout } = await execAsync("ccusage blocks --token-limit max --active --json");
-    const data = JSON.parse(stdout);
-    const activeBlock = data.blocks?.find((b: { isActive: boolean }) => b.isActive);
-    if (!activeBlock?.tokenLimitStatus) return null;
-    return { tokenLimitStatus: activeBlock.tokenLimitStatus, endTime: activeBlock.endTime };
+    const { stdout } = await execAsync("ccusage blocks --token-limit max --active");
+
+    const timeRemainingMatch = stdout.match(/Time Remaining:\s+(\d+)h\s+(\d+)m/);
+    if (!timeRemainingMatch) return null;
+    const endDate = new Date(Date.now() + (parseInt(timeRemainingMatch[1]) * 60 + parseInt(timeRemainingMatch[2])) * 60 * 1000);
+
+    const currentUsageMatch = stdout.match(/Current Usage:\s+[\d,]+\s+\(([\d.]+)%\)/);
+    if (!currentUsageMatch) return null;
+
+    const limitMatch = stdout.match(/Limit:\s+([\d,]+)\s+tokens/);
+    if (!limitMatch) return null;
+
+    const projectedTokensMatch = stdout.match(/Total Tokens:\s+([\d,]+)/);
+    if (!projectedTokensMatch) return null;
+
+    const projectedStatusMatch = stdout.match(/Projected Usage:\s+[\d.]+%\s+(\w+)/);
+    const statusWord = projectedStatusMatch?.[1]?.toLowerCase() ?? "ok";
+    const status = statusWord === "warning" ? "warning" : statusWord === "critical" || statusWord === "error" ? "error" : "ok";
+
+    return {
+      tokenLimitStatus: {
+        percentUsed: parseFloat(currentUsageMatch[1]),
+        limit: parseInt(limitMatch[1].replace(/,/g, "")),
+        projectedUsage: parseInt(projectedTokensMatch[1].replace(/,/g, "")),
+        status,
+      },
+      endTime: endDate.toISOString(),
+    };
   } catch {
     return null;
   }
