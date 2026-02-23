@@ -14,9 +14,9 @@ export async function createIssueWorker(): Promise<void> {
       const issues = await listIssues(user, "cc-create-issue");
 
       for (const issue of issues) {
+        if (issue.labels.some(l => l.name === "cc-in-progress")) continue;
         if (isRunning(issue.number)) continue;
 
-        await removeLabel("issue", issue.number, "cc-create-issue");
         await addLabel("issue", issue.number, "cc-in-progress");
 
         const body = await getIssueBody(issue.number);
@@ -28,6 +28,7 @@ export async function createIssueWorker(): Promise<void> {
           issue.title,
           async (status) => {
             try {
+              await removeLabel("issue", issue.number, "cc-create-issue");
               await removeLabel("issue", issue.number, "cc-in-progress");
               await closeIssue(issue.number);
             } catch (err) {
