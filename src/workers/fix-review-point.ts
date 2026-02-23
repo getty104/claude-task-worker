@@ -35,7 +35,7 @@ export async function fixReviewPointWorker(): Promise<void> {
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);
           for (const label of labelsToRemove) {
-            removeLabel("pr", pr.number, label);
+            await removeLabel("pr", pr.number, label);
           }
           if (status === "completed") {
             await notifyTaskCompleted("fix-review-point", pr.number, `PR #${pr.number} (${pr.headRefName})`, prUrl);
