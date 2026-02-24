@@ -23,9 +23,9 @@ export async function execIssueWorker(): Promise<void> {
           await removeLabel("issue", issue.number, "cc-exec-issue");
           await removeLabel("issue", issue.number, "cc-in-progress");
           if (status === "completed") {
-            await notifyTaskCompleted("exec-issue", issue.number, issue.title, issueUrl);
+            await notifyTaskCompleted("exec-issue", name, issue.number, issue.title, issueUrl);
           } else {
-            await notifyTaskFailed("exec-issue", issue.number, issue.title, issueUrl);
+            await notifyTaskFailed("exec-issue", name, issue.number, issue.title, issueUrl);
           }
         });
       }

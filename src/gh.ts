@@ -10,6 +10,7 @@ interface PullRequest {
   number: number;
   headRefName: string;
   labels: { name: string }[];
+  title: string;
 }
 
 interface RepoInfo {
@@ -53,13 +54,23 @@ export async function listIssues(assignee: string, label: string): Promise<Issue
 export async function listPullRequests(assignee?: string): Promise<PullRequest[]> {
   const args = [
     "pr", "list",
-    "--json", "number,headRefName,labels",
+    "--json", "number,headRefName,labels,title",
     "--limit", "100",
   ];
   if (assignee) {
     args.push("--assignee", assignee);
   }
   const output = await execGh(args);
+  return JSON.parse(output);
+}
+
+export async function listPullRequestsForIssue(issueNumber: number): Promise<PullRequest[]> {
+  const output = await execGh([
+    "pr", "list",
+    "--search", `issue:${issueNumber}`,
+    "--json", "number,headRefName,labels,title",
+    "--limit", "100",
+  ]);
   return JSON.parse(output);
 }
 

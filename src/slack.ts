@@ -97,16 +97,16 @@ async function buildTokenLimitText(): Promise<string> {
   return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.currentUsage)} / ${formatTokenCount(status.limit)}) | Ends: ${formatEndTimeJST(endTime)}`;
 }
 
-export async function notifyTaskCompleted(workerName: string, id: number, title: string, url: string): Promise<void> {
+export async function notifyTaskCompleted(workerName: string, repoName: string, id: number, title: string, url: string): Promise<void> {
   const tokenText = await buildTokenLimitText();
   await send({
-    text: `✅ [${workerName}] Task completed: <${url}|#${id} ${title}>${tokenText}`,
+    text: `✅ [${workerName}] ${repoName} | Task completed: <${url}|#${id} ${title}>${tokenText}`,
   });
 }
 
-export async function notifyTaskFailed(workerName: string, id: number, title: string, url: string): Promise<void> {
+export async function notifyTaskFailed(workerName: string, repoName: string, id: number, title: string, url: string): Promise<void> {
   const tokenText = await buildTokenLimitText();
   await send({
-    text: `❌ [${workerName}] Task failed: <${url}|#${id} ${title}>${tokenText}`,
+    text: `❌ [${workerName}] ${repoName} | Task failed: <${url}|#${id} ${title}>${tokenText}`,
   });
 }

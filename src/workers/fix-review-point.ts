@@ -38,9 +38,9 @@ export async function fixReviewPointWorker(): Promise<void> {
             await removeLabel("pr", pr.number, label);
           }
           if (status === "completed") {
-            await notifyTaskCompleted("fix-review-point", pr.number, `PR #${pr.number} (${pr.headRefName})`, prUrl);
+            await notifyTaskCompleted("fix-review-point", name, pr.number, pr.title, prUrl);
           } else {
-            await notifyTaskFailed("fix-review-point", pr.number, `PR #${pr.number} (${pr.headRefName})`, prUrl);
+            await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl);
           }
         });
       }
