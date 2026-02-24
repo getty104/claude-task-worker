@@ -35,9 +35,9 @@ export async function createIssueWorker(): Promise<void> {
               console.error(`[create-issue] Failed to close issue #${issue.number}: ${err}`);
             }
             if (status === "completed") {
-              await notifyTaskCompleted("create-issue", issue.number, issue.title, issueUrl);
+              await notifyTaskCompleted("create-issue", name, issue.number, issue.title, issueUrl);
             } else {
-              await notifyTaskFailed("create-issue", issue.number, issue.title, issueUrl);
+              await notifyTaskFailed("create-issue", name, issue.number, issue.title, issueUrl);
             }
           },
         );

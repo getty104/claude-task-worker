@@ -41,9 +41,9 @@ export async function updateIssueWorker(): Promise<void> {
               console.error(`[update-issue] Failed to finalize issue #${issue.number}: ${err}`);
             }
             if (status === "completed") {
-              await notifyTaskCompleted("update-issue", issue.number, issue.title, issueUrl);
+              await notifyTaskCompleted("update-issue", name, issue.number, issue.title, issueUrl);
             } else {
-              await notifyTaskFailed("update-issue", issue.number, issue.title, issueUrl);
+              await notifyTaskFailed("update-issue", name, issue.number, issue.title, issueUrl);
             }
           },
         );
