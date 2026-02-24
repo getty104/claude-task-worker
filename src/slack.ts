@@ -58,7 +58,7 @@ async function getActiveBlockInfo(): Promise<ActiveBlockInfo | null> {
 
     return {
       tokenLimitStatus: {
-        percentUsed: parseFloat(currentUsageMatch[2]) * 2,
+        percentUsed: parseFloat(currentUsageMatch[2]) * 2.5,
         limit: parseInt(limitMatch[1].replace(/,/g, "")),
         currentUsage: parseInt(currentUsageMatch[1].replace(/,/g, "")),
         status,
