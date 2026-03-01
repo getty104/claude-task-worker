@@ -235,9 +235,12 @@ export async function commentOnIssue(issueNumber: number, body: string): Promise
   await execGh(["issue", "comment", String(issueNumber), "--body", body]);
 }
 
-export async function createLabel(name: string): Promise<boolean> {
+export async function createLabel(name: string, color?: string, force?: boolean): Promise<boolean> {
   try {
-    await execGh(["label", "create", name]);
+    const args = ["label", "create", name];
+    if (color) args.push("--color", color);
+    if (force) args.push("--force");
+    await execGh(args);
     return true;
   } catch {
     return false;

@@ -1,13 +1,13 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh.js";
 
-const LABELS = [
-  "cc-create-issue",
-  "cc-update-issue",
-  "cc-exec-issue",
-  "cc-fix-onetime",
-  "cc-fix-repeat",
-  "cc-in-progress",
+const LABELS: { name: string; color: string }[] = [
+  { name: "cc-create-issue", color: "0075ca" },
+  { name: "cc-update-issue", color: "e4e669" },
+  { name: "cc-exec-issue",   color: "7057ff" },
+  { name: "cc-fix-onetime",  color: "d93f0b" },
+  { name: "cc-fix-repeat",   color: "e99695" },
+  { name: "cc-in-progress",  color: "0e8a16" },
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
@@ -63,11 +63,11 @@ export async function init(): Promise<void> {
   console.log("[init] Creating labels...");
 
   for (const label of LABELS) {
-    const created = await createLabel(label);
-    if (created) {
-      console.log(`[init] Created label: ${label}`);
+    const ok = await createLabel(label.name, label.color, true);
+    if (ok) {
+      console.log(`[init] Ensured label: ${label.name}`);
     } else {
-      console.log(`[init] Label already exists: ${label}`);
+      console.log(`[init] Failed to create label: ${label.name}`);
     }
   }
 
