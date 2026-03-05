@@ -1,9 +1,12 @@
 import { exec } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
+const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
+const USAGE_CACHE_TTL_SECONDS = 360;
 
 async function send(payload: Record<string, unknown>): Promise<void> {
   if (!WEBHOOK_URL) return;
@@ -19,82 +22,80 @@ async function send(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
-interface ActiveBlockInfo {
-  tokenLimitStatus: {
-    percentUsed: number;
-    limit: number;
-    currentUsage: number;
-    status: string;
-  };
-  endTime: string;
+interface UsageInfo {
+  fiveHourUtilization: number;
+  sevenDayUtilization: number;
 }
 
-async function getActiveBlockInfo(): Promise<ActiveBlockInfo | null> {
+async function getOAuthToken(): Promise<string> {
+  const { stdout } = await execAsync(
+    'security find-generic-password -s "Claude Code-credentials" -w'
+  );
+  const credentials = JSON.parse(stdout.trim());
+  return credentials.oauth_token ?? credentials.access_token ?? credentials;
+}
+
+function readUsageCache(): UsageInfo | null {
   try {
-    const { stdout } = await execAsync("ccusage blocks --token-limit max --active");
+    const raw = readFileSync(USAGE_CACHE_PATH, "utf-8");
+    const cached = JSON.parse(raw);
+    if (Date.now() - cached.timestamp < USAGE_CACHE_TTL_SECONDS * 1000) {
+      return cached.data as UsageInfo;
+    }
+  } catch {
+    // cache miss
+  }
+  return null;
+}
 
-    const timeRemainingMatch = stdout.match(/Time Remaining:\s+(\d+)h\s+(\d+)m/);
-    if (!timeRemainingMatch) {
-      console.error("[slack] Failed to parse Time Remaining from ccusage output");
+function writeUsageCache(data: UsageInfo): void {
+  try {
+    writeFileSync(USAGE_CACHE_PATH, JSON.stringify({ timestamp: Date.now(), data }));
+  } catch {
+    // ignore write errors
+  }
+}
+
+async function fetchUsageInfo(): Promise<UsageInfo | null> {
+  const cached = readUsageCache();
+  if (cached) return cached;
+
+  try {
+    const token = await getOAuthToken();
+    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.error(`[slack] Usage API returned ${res.status}`);
       return null;
     }
-    const endDate = new Date(Date.now() + (parseInt(timeRemainingMatch[1]) * 60 + parseInt(timeRemainingMatch[2])) * 60 * 1000);
-
-    const currentUsageMatch = stdout.match(/Current Usage:\s+([\d,]+)\s+\(([\d.]+)%\)/);
-    if (!currentUsageMatch) {
-      console.error("[slack] Failed to parse Current Usage from ccusage output");
-      return null;
-    }
-
-    const limitMatch = stdout.match(/Limit:\s+([\d,]+)\s+tokens/);
-    if (!limitMatch) {
-      console.error("[slack] Failed to parse Limit from ccusage output");
-      return null;
-    }
-
-    const projectedStatusMatch = stdout.match(/Projected Usage:\s+[\d.]+%\s+(\w+)/);
-    const statusWord = projectedStatusMatch?.[1]?.toLowerCase() ?? "ok";
-    const status = statusWord === "warning" ? "warning" : statusWord === "critical" || statusWord === "error" ? "error" : "ok";
-
-    return {
-      tokenLimitStatus: {
-        percentUsed: parseFloat(currentUsageMatch[2]) * 2.5,
-        limit: parseInt(limitMatch[1].replace(/,/g, "")),
-        currentUsage: parseInt(currentUsageMatch[1].replace(/,/g, "")),
-        status,
-      },
-      endTime: endDate.toISOString(),
+    const body = await res.json();
+    const data: UsageInfo = {
+      fiveHourUtilization: body.five_hour.utilization,
+      sevenDayUtilization: body.seven_day.utilization,
     };
+    writeUsageCache(data);
+    return data;
   } catch (err) {
-    console.error(`[slack] Failed to get active block info: ${err}`);
+    console.error(`[slack] Failed to fetch usage info: ${err}`);
     return null;
   }
 }
 
-function formatTokenCount(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`;
-  return String(tokens);
-}
-
-function formatEndTimeJST(endTime: string): string {
-  const date = new Date(endTime);
-  return date.toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }) + " JST";
+function utilizationEmoji(value: number): string {
+  if (value < 0.5) return "🟢";
+  if (value < 0.8) return "🟡";
+  return "🔴";
 }
 
 async function buildTokenLimitText(): Promise<string> {
-  const info = await getActiveBlockInfo();
-  if (!info) return "";
+  const usage = await fetchUsageInfo();
+  if (!usage) return "";
 
-  const { tokenLimitStatus: status, endTime } = info;
-  const emoji = status.status === "ok" ? "🟢" : status.status === "warning" ? "🟡" : "🔴";
-  return ` | ${emoji} Token: ${status.percentUsed.toFixed(1)}% (${formatTokenCount(status.currentUsage)} / ${formatTokenCount(status.limit)}) | Ends: ${formatEndTimeJST(endTime)}`;
+  const fiveH = (usage.fiveHourUtilization * 100).toFixed(1);
+  const sevenD = (usage.sevenDayUtilization * 100).toFixed(1);
+  const emoji = utilizationEmoji(Math.max(usage.fiveHourUtilization, usage.sevenDayUtilization));
+  return ` | ${emoji} 5h: ${fiveH}% / 7d: ${sevenD}%`;
 }
 
 export async function notifyTaskCompleted(workerName: string, repoName: string, id: number, title: string, url: string): Promise<void> {
