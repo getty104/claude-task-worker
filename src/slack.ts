@@ -8,7 +8,7 @@ const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 const USAGE_CACHE_TTL_SECONDS = 360;
 
-async function send(payload: Record<string, unknown>): Promise<void> {
+export async function send(payload: Record<string, unknown>): Promise<void> {
   if (!WEBHOOK_URL) return;
 
   try {
@@ -32,7 +32,7 @@ async function getOAuthToken(): Promise<string> {
     'security find-generic-password -s "Claude Code-credentials" -w'
   );
   const credentials = JSON.parse(stdout.trim());
-  return credentials.oauth_token ?? credentials.access_token ?? credentials;
+  return credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? credentials;
 }
 
 function readUsageCache(): UsageInfo | null {
@@ -43,7 +43,6 @@ function readUsageCache(): UsageInfo | null {
       return cached.data as UsageInfo;
     }
   } catch {
-    // cache miss
   }
   return null;
 }
@@ -52,7 +51,6 @@ function writeUsageCache(data: UsageInfo): void {
   try {
     writeFileSync(USAGE_CACHE_PATH, JSON.stringify({ timestamp: Date.now(), data }));
   } catch {
-    // ignore write errors
   }
 }
 
@@ -63,7 +61,10 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
   try {
     const token = await getOAuthToken();
     const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "anthropic-beta": "oauth-2025-04-20",
+      },
     });
     if (!res.ok) {
       console.error(`[slack] Usage API returned ${res.status}`);
@@ -88,7 +89,7 @@ function utilizationEmoji(value: number): string {
   return "🔴";
 }
 
-async function buildTokenLimitText(): Promise<string> {
+export async function buildTokenLimitText(): Promise<string> {
   const usage = await fetchUsageInfo();
   if (!usage) return "";
 

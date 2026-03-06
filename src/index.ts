@@ -6,6 +6,7 @@ import { createIssueWorker } from "./workers/create-issue.js";
 import { updateIssueWorker } from "./workers/update-issue.js";
 import { shutdown } from "./process-manager.js";
 import { init } from "./commands/init.js";
+import { buildTokenLimitText, send } from "./slack.js";
 
 const WORKERS: Record<string, () => Promise<void>> = {
   "exec-issue": execIssueWorker,
@@ -19,6 +20,7 @@ function printUsage(): void {
 
 Commands:
   init              Create required GitHub labels
+  usage             Notify current usage to Slack
 
 Workers:
   exec-issue        Poll issues and run /exec-issue
@@ -39,7 +41,7 @@ if (!workerType) {
   process.exit(1);
 }
 
-if (workerType !== "all" && workerType !== "init" && !WORKERS[workerType]) {
+if (workerType !== "all" && workerType !== "init" && workerType !== "usage" && !WORKERS[workerType]) {
   console.error(`Unknown command: ${workerType}`);
   printUsage();
   process.exit(1);
@@ -59,6 +61,16 @@ process.on("SIGINT", handleTermination);
 
 if (workerType === "init") {
   init();
+} else if (workerType === "usage") {
+  (async () => {
+    const text = await buildTokenLimitText();
+    if (!text) {
+      console.error("Failed to fetch usage info");
+      process.exit(1);
+    }
+    console.log(text.trim());
+    await send({ text: `📊 Usage${text}` });
+  })();
 } else if (workerType === "all") {
   Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
 } else {
