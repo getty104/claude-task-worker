@@ -24,7 +24,9 @@ export async function send(payload: Record<string, unknown>): Promise<void> {
 
 interface UsageInfo {
   fiveHourUtilization: number;
+  fiveHourResetsAt: string;
   sevenDayUtilization: number;
+  sevenDayResetsAt: string;
 }
 
 async function getOAuthToken(): Promise<string> {
@@ -73,7 +75,9 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
     const body = await res.json();
     const data: UsageInfo = {
       fiveHourUtilization: body.five_hour.utilization,
+      fiveHourResetsAt: body.five_hour.resets_at,
       sevenDayUtilization: body.seven_day.utilization,
+      sevenDayResetsAt: body.seven_day.resets_at,
     };
     writeUsageCache(data);
     return data;
@@ -84,19 +88,32 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
 }
 
 function utilizationEmoji(value: number): string {
-  if (value < 0.5) return "🟢";
-  if (value < 0.8) return "🟡";
+  if (value < 50) return "🟢";
+  if (value < 80) return "🟡";
   return "🔴";
+}
+
+function formatResetTimeJST(isoString: string): string {
+  const date = new Date(isoString);
+  return date.toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 export async function buildTokenLimitText(): Promise<string> {
   const usage = await fetchUsageInfo();
   if (!usage) return "";
 
-  const fiveH = (usage.fiveHourUtilization * 100).toFixed(1);
-  const sevenD = (usage.sevenDayUtilization * 100).toFixed(1);
+  const fiveH = usage.fiveHourUtilization.toFixed(1);
+  const sevenD = usage.sevenDayUtilization.toFixed(1);
   const emoji = utilizationEmoji(Math.max(usage.fiveHourUtilization, usage.sevenDayUtilization));
-  return ` | ${emoji} 5h: ${fiveH}% / 7d: ${sevenD}%`;
+  const fiveHReset = formatResetTimeJST(usage.fiveHourResetsAt);
+  const sevenDReset = formatResetTimeJST(usage.sevenDayResetsAt);
+  return ` | ${emoji} 5h: ${fiveH}% (reset: ${fiveHReset}) / 7d: ${sevenD}% (reset: ${sevenDReset})`;
 }
 
 export async function notifyTaskCompleted(workerName: string, repoName: string, id: number, title: string, url: string): Promise<void> {
