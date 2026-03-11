@@ -71,6 +71,8 @@ claude-task-worker fix-review-point
 - Issue本文を取得し、`claude -p "/base-tools:create-issue <Issue本文>" --worktree` を非同期で実行
 - 完了後、元のIssueをクローズ
 
+`init` コマンドを実行すると、Issueテンプレート（`.github/ISSUE_TEMPLATE/cc-create-issue.yml`）と自動アサイン用のGitHub Actionsワークフローが作成される。このテンプレートを使ってIssueを作成すると、`cc-create-issue` ラベルの付与と作成者へのアサインが自動で行われるため、ワーカーが即座にIssueを検知して処理を開始できる。
+
 ```bash
 claude-task-worker create-issue
 ```
