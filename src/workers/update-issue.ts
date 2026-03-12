@@ -1,7 +1,11 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getLastIssueComment } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
+import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
+const execFileAsync = promisify(execFile);
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function updateIssueWorker(): Promise<void> {
@@ -28,12 +32,14 @@ export async function updateIssueWorker(): Promise<void> {
 
         const prompt = `/base-tools:update-issue\nIssue番号: ${issue.number}\n依頼内容: \n${lastComment.body}`;
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
+        const worktreeId = generateWorktreeName();
         run(
           "claude",
-          ["--dangerously-skip-permissions", "-p", prompt],
+          ["--permission-mode", "auto", "-p", prompt, "--worktree", worktreeId],
           issue.number,
           issue.title,
           async (status) => {
+            await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
             try {
               await removeLabel("issue", issue.number, "cc-update-issue");
               await removeLabel("issue", issue.number, "cc-in-progress");

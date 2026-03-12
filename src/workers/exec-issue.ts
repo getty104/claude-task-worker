@@ -1,7 +1,11 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
+import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
 
+const execFileAsync = promisify(execFile);
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function execIssueWorker(): Promise<void> {
@@ -18,8 +22,10 @@ export async function execIssueWorker(): Promise<void> {
         if (isRunning(issue.number)) continue;
 
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
+        const worktreeId = generateWorktreeName();
         await addLabel("issue", issue.number, "cc-in-progress");
-        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number}`, "--worktree"], issue.number, issue.title, async (status) => {
+        run("claude", ["--permission-mode", "auto", "-p", `/base-tools:exec-issue ${issue.number}`, "--worktree", worktreeId], issue.number, issue.title, async (status) => {
+          await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
           await removeLabel("issue", issue.number, "cc-exec-issue");
           await removeLabel("issue", issue.number, "cc-in-progress");
           if (status === "completed") {
