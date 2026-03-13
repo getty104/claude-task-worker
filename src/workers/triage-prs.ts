@@ -1,6 +1,11 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
+import { generateWorktreeName } from "../random-name.js";
 import { notifyError } from "../slack.js";
+
+const execFileAsync = promisify(execFile);
 
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -2;
@@ -23,7 +28,10 @@ export async function triagePrsWorker(): Promise<void> {
 
       if (candidates.length === 0) return;
 
-      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs"], TASK_ID, "Triage PRs");
+      const worktreeId = generateWorktreeName();
+      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs", "--worktree", worktreeId], TASK_ID, "Triage PRs", async () => {
+        await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
+      });
     } catch (err) {
       console.error(`[triage-prs] tick error: ${err}`);
       await notifyError("triage-prs", name, err);
