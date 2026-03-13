@@ -123,9 +123,18 @@ export async function notifyTaskCompleted(workerName: string, repoName: string, 
   });
 }
 
-export async function notifyTaskFailed(workerName: string, repoName: string, id: number, title: string, url: string): Promise<void> {
+export async function notifyTaskFailed(workerName: string, repoName: string, id: number, title: string, url: string, output?: string): Promise<void> {
   const tokenText = await buildTokenLimitText();
+  const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
+  const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
   await send({
-    text: `❌ [${workerName}] ${repoName} | Task failed: <${url}|#${id} ${title}>${tokenText}`,
+    text: `❌ [${workerName}] ${repoName} | Task failed: <${url}|#${id} ${title}>${tokenText}${outputBlock}`,
+  });
+}
+
+export async function notifyError(workerName: string, repoName: string, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  await send({
+    text: `🚨 [${workerName}] ${repoName} | Error: ${message}`,
   });
 }

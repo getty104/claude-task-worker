@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getIssueBody, closeIssue } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
-import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
+import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
 const execFileAsync = promisify(execFile);
 const POLLING_INTERVAL_MS = 30 * 1000;
@@ -28,10 +28,10 @@ export async function createIssueWorker(): Promise<void> {
         const worktreeId = generateWorktreeName();
         run(
           "claude",
-          ["--permission-mode", "auto", "-p", `/base-tools:create-issue ${body}`, "--worktree", worktreeId],
+          ["--dangerously-skip-permissions", "-p", `/base-tools:create-issue ${body}`, "--worktree", worktreeId],
           issue.number,
           issue.title,
-          async (status) => {
+          async (status, output) => {
             await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
             try {
               await removeLabel("issue", issue.number, "cc-create-issue");
@@ -43,13 +43,14 @@ export async function createIssueWorker(): Promise<void> {
             if (status === "completed") {
               await notifyTaskCompleted("create-issue", name, issue.number, issue.title, issueUrl);
             } else {
-              await notifyTaskFailed("create-issue", name, issue.number, issue.title, issueUrl);
+              await notifyTaskFailed("create-issue", name, issue.number, issue.title, issueUrl, output);
             }
           },
         );
       }
     } catch (err) {
       console.error(`[create-issue] tick error: ${err}`);
+      await notifyError("create-issue", name, err);
     }
   };
 

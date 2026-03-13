@@ -155,7 +155,7 @@ function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-export function run(command: string, args: string[], id: number, title: string, onComplete?: (status: "completed" | "failed") => void): void {
+export function run(command: string, args: string[], id: number, title: string, onComplete?: (status: "completed" | "failed", output: string) => void): void {
   tasks.set(id, {
     id,
     title,
@@ -166,8 +166,13 @@ export function run(command: string, args: string[], id: number, title: string, 
   ensureRenderInterval();
   renderTable();
 
-  const child = spawn(command, args, { stdio: ["ignore", "ignore", "inherit"] });
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "inherit"] });
   childProcesses.set(id, child);
+
+  const outputChunks: Buffer[] = [];
+  child.stdout?.on("data", (chunk: Buffer) => {
+    outputChunks.push(chunk);
+  });
 
   child.on("close", (code) => {
     childProcesses.delete(id);
@@ -177,7 +182,8 @@ export function run(command: string, args: string[], id: number, title: string, 
       task.finishedAt = new Date();
     }
     renderTable();
-    onComplete?.(code === 0 ? "completed" : "failed");
+    const output = Buffer.concat(outputChunks).toString("utf-8");
+    onComplete?.(code === 0 ? "completed" : "failed", output);
   });
 
   child.on("error", (err) => {
@@ -189,7 +195,7 @@ export function run(command: string, args: string[], id: number, title: string, 
     }
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     renderTable();
-    onComplete?.("failed");
+    onComplete?.("failed", err.message);
   });
 }
 

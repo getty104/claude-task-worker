@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
-import { notifyTaskCompleted, notifyTaskFailed } from "../slack.js";
+import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
 const execFileAsync = promisify(execFile);
 const POLLING_INTERVAL_MS = 30 * 1000;
@@ -36,7 +36,7 @@ export async function fixReviewPointWorker(): Promise<void> {
 
         const worktreeId = generateWorktreeName();
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-        run("claude", ["--permission-mode", "auto", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, async (status) => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, async (status, output) => {
           await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);
@@ -46,12 +46,13 @@ export async function fixReviewPointWorker(): Promise<void> {
           if (status === "completed") {
             await notifyTaskCompleted("fix-review-point", name, pr.number, pr.title, prUrl);
           } else {
-            await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl);
+            await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl, output);
           }
         });
       }
     } catch (err) {
       console.error(`[fix-review-point] tick error: ${err}`);
+      await notifyError("fix-review-point", name, err);
     }
   };
 
