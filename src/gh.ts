@@ -116,12 +116,25 @@ export async function listPullRequestsForIssue(issueNumber: number): Promise<Pul
   return JSON.parse(output);
 }
 
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 1000): Promise<T> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      console.error(`[gh] Attempt ${attempt}/${maxRetries} failed, retrying in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export async function addLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
-  await execGh([type, "edit", String(number), "--add-label", label]);
+  await withRetry(() => execGh([type, "edit", String(number), "--add-label", label]));
 }
 
 export async function removeLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
-  await execGh([type, "edit", String(number), "--remove-label", label]);
+  await withRetry(() => execGh([type, "edit", String(number), "--remove-label", label]));
 }
 
 interface ReviewComment {
