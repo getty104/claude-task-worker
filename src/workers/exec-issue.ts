@@ -27,7 +27,6 @@ export async function execIssueWorker(): Promise<void> {
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number}`, "--worktree", worktreeId], issue.number, issue.title, async (status, output) => {
           await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
           await removeLabel("issue", issue.number, "cc-exec-issue");
-          await removeLabel("issue", issue.number, "cc-in-progress");
           if (status === "completed") {
             await notifyTaskCompleted("exec-issue", name, issue.number, issue.title, issueUrl);
           } else {
