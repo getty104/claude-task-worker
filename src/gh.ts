@@ -114,16 +114,6 @@ export async function removeLabel(type: "issue" | "pr", number: number, label: s
   await withRetry(() => execGh([type, "edit", String(number), "--remove-label", label]));
 }
 
-export async function getIssueBody(issueNumber: number): Promise<string> {
-  const output = await execGh(["issue", "view", String(issueNumber), "--json", "body"]);
-  const parsed = JSON.parse(output);
-  return parsed.body ?? "";
-}
-
-export async function closeIssue(issueNumber: number): Promise<void> {
-  await execGh(["issue", "close", String(issueNumber)]);
-}
-
 export async function getLastIssueComment(issueNumber: number): Promise<{ author: string; body: string } | null> {
   const output = await execGh(["issue", "view", String(issueNumber), "--json", "comments"]);
   const parsed = JSON.parse(output);

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getIssueBody, closeIssue } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -23,12 +23,11 @@ export async function createIssueWorker(): Promise<void> {
 
         await addLabel("issue", issue.number, "cc-in-progress");
 
-        const body = await getIssueBody(issue.number);
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         const worktreeId = generateWorktreeName();
         run(
           "claude",
-          ["--dangerously-skip-permissions", "-p", `/base-tools:create-issue ${body}`, "--worktree", worktreeId],
+          ["--dangerously-skip-permissions", "-p", `/base-tools:create-issue #${issue.number}`, "--worktree", worktreeId],
           issue.number,
           issue.title,
           async (status, output) => {
@@ -36,9 +35,9 @@ export async function createIssueWorker(): Promise<void> {
             try {
               await removeLabel("issue", issue.number, "cc-create-issue");
               await removeLabel("issue", issue.number, "cc-in-progress");
-              await closeIssue(issue.number);
+              await addLabel("issue", issue.number, "cc-created-issue");
             } catch (err) {
-              console.error(`[create-issue] Failed to close issue #${issue.number}: ${err}`);
+              console.error(`[create-issue] Failed to cleanup labels for issue #${issue.number}: ${err}`);
             }
             if (status === "completed") {
               await notifyTaskCompleted("create-issue", name, issue.number, issue.title, issueUrl);
