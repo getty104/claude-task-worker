@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -28,9 +28,6 @@ export async function fixReviewPointWorker(): Promise<void> {
 
       for (const pr of candidates) {
         if (isRunning(pr.number)) continue;
-
-        const unresolved = await hasUnresolvedReviews(owner, name, pr.number);
-        if (!unresolved) continue;
 
         const isOnetime = pr.labels.some((l) => l.name === LABEL_FIX_ONETIME);
         const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
