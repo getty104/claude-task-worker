@@ -93,12 +93,16 @@ export function isCICompleted(checks: StatusCheck[]): boolean {
   });
 }
 
-export async function listPullRequestsWithChecks(): Promise<PullRequestWithChecks[]> {
-  const output = await execGh([
+export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
+  const args = [
     "pr", "list",
     "--json", "number,headRefName,labels,title,statusCheckRollup",
     "--limit", "100",
-  ]);
+  ];
+  if (assignee) {
+    args.push("--assignee", assignee);
+  }
+  const output = await execGh(args);
   return JSON.parse(output);
 }
 

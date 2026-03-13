@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getCurrentUser, getRepoInfo, listPullRequests, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, hasUnresolvedReviews, addLabel, removeLabel } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -18,10 +18,11 @@ export async function fixReviewPointWorker(): Promise<void> {
 
   const tick = async () => {
     try {
-      const prs = await listPullRequests(user);
+      const prs = await listPullRequestsWithChecks(user);
       const candidates = prs.filter((pr) => {
         const labels = pr.labels.map((l) => l.name);
         if (labels.includes(LABEL_IN_PROGRESS)) return false;
+        if (!isCICompleted(pr.statusCheckRollup)) return false;
         return labels.includes(LABEL_FIX_ONETIME) || labels.includes(LABEL_FIX_REPEAT);
       });
 

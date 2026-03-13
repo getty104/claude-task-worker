@@ -1,4 +1,4 @@
-import { getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyError } from "../slack.js";
 
@@ -7,13 +7,14 @@ const TASK_ID = -2;
 
 export async function triagePrsWorker(): Promise<void> {
   const { name } = await getRepoInfo();
-  console.log(`[triage-prs] Polling PRs every 5 minutes for ${name}`);
+  const user = await getCurrentUser();
+  console.log(`[triage-prs] Polling PRs every 5 minutes for ${name} (assignee: ${user})`);
 
   const tick = async () => {
     try {
       if (isRunning(TASK_ID)) return;
 
-      const prs = await listPullRequestsWithChecks();
+      const prs = await listPullRequestsWithChecks(user);
       const candidates = prs.filter(
         pr =>
           !pr.labels.some(l => l.name === "cc-in-progress") &&
