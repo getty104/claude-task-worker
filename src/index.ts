@@ -4,6 +4,8 @@ import { execIssueWorker } from "./workers/exec-issue.js";
 import { fixReviewPointWorker } from "./workers/fix-review-point.js";
 import { createIssueWorker } from "./workers/create-issue.js";
 import { updateIssueWorker } from "./workers/update-issue.js";
+import { triageIssuesWorker } from "./workers/triage-issues.js";
+import { triagePrsWorker } from "./workers/triage-prs.js";
 import { shutdown } from "./process-manager.js";
 import { init } from "./commands/init.js";
 import { buildTokenLimitText, send } from "./slack.js";
@@ -13,6 +15,8 @@ const WORKERS: Record<string, () => Promise<void>> = {
   "fix-review-point": fixReviewPointWorker,
   "create-issue": createIssueWorker,
   "update-issue": updateIssueWorker,
+  "triage-issues": triageIssuesWorker,
+  "triage-prs": triagePrsWorker,
 };
 
 function printUsage(): void {
@@ -27,7 +31,10 @@ Workers:
   fix-review-point  Poll PRs and run /fix-review-point
   create-issue      Poll issues and run /create-issue
   update-issue      Poll issues and run update command
-  all               Poll all workers
+  triage-issues     Poll and triage issues every 5 minutes
+  triage-prs        Poll and triage PRs every 5 minutes
+  all               Poll all workers (except triage)
+  yolo              Poll all workers including triage
 
 Example:
   claude-task-worker init
@@ -41,7 +48,7 @@ if (!workerType) {
   process.exit(1);
 }
 
-if (workerType !== "all" && workerType !== "init" && workerType !== "usage" && !WORKERS[workerType]) {
+if (workerType !== "all" && workerType !== "yolo" && workerType !== "init" && workerType !== "usage" && !WORKERS[workerType]) {
   console.error(`Unknown command: ${workerType}`);
   printUsage();
   process.exit(1);
@@ -73,6 +80,8 @@ if (workerType === "init") {
   })();
 } else if (workerType === "all") {
   Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
+} else if (workerType === "yolo") {
+  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), triageIssuesWorker(), triagePrsWorker()]);
 } else {
   WORKERS[workerType]();
 }

@@ -64,6 +64,44 @@ export async function listPullRequests(assignee?: string): Promise<PullRequest[]
   return JSON.parse(output);
 }
 
+export async function listAllIssues(): Promise<Issue[]> {
+  const output = await execGh([
+    "issue", "list",
+    "--json", "number,title,labels",
+    "--limit", "100",
+  ]);
+  return JSON.parse(output);
+}
+
+interface StatusCheck {
+  __typename: string;
+  status?: string;
+  state?: string;
+}
+
+interface PullRequestWithChecks extends PullRequest {
+  statusCheckRollup: StatusCheck[];
+}
+
+export function isCICompleted(checks: StatusCheck[]): boolean {
+  if (checks.length === 0) return true;
+  return checks.every(check => {
+    if (check.__typename === "CheckRun") {
+      return check.status === "COMPLETED";
+    }
+    return check.state !== "PENDING";
+  });
+}
+
+export async function listPullRequestsWithChecks(): Promise<PullRequestWithChecks[]> {
+  const output = await execGh([
+    "pr", "list",
+    "--json", "number,headRefName,labels,title,statusCheckRollup",
+    "--limit", "100",
+  ]);
+  return JSON.parse(output);
+}
+
 export async function listPullRequestsForIssue(issueNumber: number): Promise<PullRequest[]> {
   const output = await execGh([
     "pr", "list",
