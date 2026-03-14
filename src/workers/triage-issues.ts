@@ -20,7 +20,7 @@ export async function triageIssuesWorker(): Promise<void> {
 
       if (candidates.length === 0) return;
 
-      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-issues"], TASK_ID, "Triage Issues");
+      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-issues"], TASK_ID, "Triage Issues", "triage-issues");
     } catch (err) {
       console.error(`[triage-issues] tick error: ${err}`);
       await notifyError("triage-issues", name, err);

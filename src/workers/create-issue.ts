@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
-import { isRunning, run } from "../process-manager.js";
+import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
@@ -20,6 +20,7 @@ export async function createIssueWorker(): Promise<void> {
       for (const issue of issues) {
         if (issue.labels.some(l => l.name === "cc-in-progress")) continue;
         if (isRunning(issue.number)) continue;
+        if (isWorkerAtCapacity("create-issue")) break;
 
         await addLabel("issue", issue.number, "cc-in-progress");
 
@@ -30,6 +31,7 @@ export async function createIssueWorker(): Promise<void> {
           ["--dangerously-skip-permissions", "-p", `/base-tools:create-issue #${issue.number}`, "--worktree", worktreeId],
           issue.number,
           issue.title,
+          "create-issue",
           async (status, output) => {
             await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
             try {

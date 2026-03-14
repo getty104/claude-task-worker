@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
-import { isRunning, run } from "../process-manager.js";
+import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
@@ -28,13 +28,14 @@ export async function fixReviewPointWorker(): Promise<void> {
 
       for (const pr of candidates) {
         if (isRunning(pr.number)) continue;
+        if (isWorkerAtCapacity("fix-review-point")) break;
 
         const isOnetime = pr.labels.some((l) => l.name === LABEL_FIX_ONETIME);
         const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
 
         const worktreeId = generateWorktreeName();
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, async (status, output) => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", async (status, output) => {
           await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);

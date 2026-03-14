@@ -29,7 +29,7 @@ export async function triagePrsWorker(): Promise<void> {
       if (candidates.length === 0) return;
 
       const worktreeId = generateWorktreeName();
-      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs", "--worktree", worktreeId], TASK_ID, "Triage PRs", async () => {
+      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs", "--worktree", worktreeId], TASK_ID, "Triage PRs", "triage-prs", async () => {
         await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
       });
     } catch (err) {

@@ -55,6 +55,7 @@ interface TaskEntry {
   id: number;
   title: string;
   status: TaskStatus;
+  workerName: string;
   startedAt: Date;
   finishedAt?: Date;
 }
@@ -64,6 +65,18 @@ const tasks = new Map<number, TaskEntry>();
 export function isRunning(id: number): boolean {
   const task = tasks.get(id);
   return task?.status === "running";
+}
+
+const MAX_CONCURRENT_TASKS_PER_WORKER = 4;
+
+export function isWorkerAtCapacity(workerName: string): boolean {
+  let count = 0;
+  for (const task of tasks.values()) {
+    if (task.workerName === workerName && task.status === "running") {
+      count++;
+    }
+  }
+  return count >= MAX_CONCURRENT_TASKS_PER_WORKER;
 }
 
 function formatDuration(start: Date, end: Date = new Date()): string {
@@ -155,11 +168,12 @@ function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-export function run(command: string, args: string[], id: number, title: string, onComplete?: (status: "completed" | "failed", output: string) => void): void {
+export function run(command: string, args: string[], id: number, title: string, workerName: string, onComplete?: (status: "completed" | "failed", output: string) => void): void {
   tasks.set(id, {
     id,
     title,
     status: "running",
+    workerName,
     startedAt: new Date(),
   });
 
