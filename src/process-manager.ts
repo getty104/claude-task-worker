@@ -107,6 +107,7 @@ function renderTable(): void {
     ...runningTasks.map((t) => ({
       id: `#${t.id}`,
       title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
+      worker: t.workerName,
       status: t.status,
       time: formatTime(t.startedAt),
       duration: formatDuration(t.startedAt),
@@ -114,6 +115,7 @@ function renderTable(): void {
     ...finishedTasks.map((t) => ({
       id: `#${t.id}`,
       title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
+      worker: t.workerName,
       status: t.status,
       time: formatTime(t.finishedAt ?? t.startedAt),
       duration: formatDuration(t.startedAt, t.finishedAt),
@@ -123,6 +125,7 @@ function renderTable(): void {
   const colWidths = {
     id: Math.max(3, ...allRows.map((r) => r.id.length)),
     title: Math.max(5, ...allRows.map((r) => getDisplayWidth(r.title))),
+    worker: Math.max(6, ...allRows.map((r) => r.worker.length)),
     status: Math.max(6, ...allRows.map((r) => r.status.length)),
     time: Math.max(4, ...allRows.map((r) => r.time.length)),
     duration: Math.max(8, ...allRows.map((r) => r.duration.length)),
@@ -130,20 +133,20 @@ function renderTable(): void {
 
   const pad = (s: string, w: number, useDisplayWidth = false) =>
     useDisplayWidth ? padToWidth(s, w) : s + " ".repeat(w - s.length);
-  const cols = [colWidths.id, colWidths.title, colWidths.status, colWidths.time, colWidths.duration];
+  const cols = [colWidths.id, colWidths.title, colWidths.worker, colWidths.status, colWidths.time, colWidths.duration];
   const line = (l: string, m: string, r: string, f: string) =>
     `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
 
-  const row = (id: string, title: string, status: string, time: string, duration: string) =>
-    `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`;
+  const row = (id: string, title: string, worker: string, status: string, time: string, duration: string) =>
+    `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`;
 
   const lines: string[] = [];
   lines.push(line("┌", "┬", "┐", "─"));
-  lines.push(row("#", "Title", "Status", "Time", "Duration"));
+  lines.push(row("#", "Title", "Worker", "Status", "Time", "Duration"));
   lines.push(line("├", "┼", "┤", "─"));
 
   for (const r of allRows.filter((r) => r.status === "running")) {
-    lines.push(row(r.id, r.title, r.status, r.time, r.duration));
+    lines.push(row(r.id, r.title, r.worker, r.status, r.time, r.duration));
   }
 
   if (runningTasks.length > 0 && finishedTasks.length > 0) {
@@ -151,7 +154,7 @@ function renderTable(): void {
   }
 
   for (const r of allRows.filter((r) => r.status !== "running")) {
-    lines.push(row(r.id, r.title, r.status, r.time, r.duration));
+    lines.push(row(r.id, r.title, r.worker, r.status, r.time, r.duration));
   }
 
   lines.push(line("└", "┴", "┘", "─"));
