@@ -7,7 +7,7 @@ import { notifyError } from "../slack.js";
 
 const execFileAsync = promisify(execFile);
 
-const POLLING_INTERVAL_MS = 10 * 60 * 1000;
+const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -2;
 
 export async function triagePrsWorker(): Promise<void> {

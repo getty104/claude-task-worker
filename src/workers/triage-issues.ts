@@ -2,7 +2,7 @@ import { getRepoInfo, listAllIssues } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyError } from "../slack.js";
 
-const POLLING_INTERVAL_MS = 10 * 60 * 1000;
+const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -1;
 
 export async function triageIssuesWorker(): Promise<void> {
