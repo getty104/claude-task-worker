@@ -13,7 +13,7 @@ const TASK_ID = -2;
 export async function triagePrsWorker(): Promise<void> {
   const { name } = await getRepoInfo();
   const user = await getCurrentUser();
-  console.log(`[triage-prs] Polling PRs every 10 minutes for ${name} (assignee: ${user})`);
+  console.log(`[triage-prs] Polling PRs every 5 minutes for ${name} (assignee: ${user})`);
 
   const tick = async () => {
     try {
