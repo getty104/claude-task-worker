@@ -5,9 +5,14 @@ import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js"
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -1;
 
-export async function triageIssuesWorker(): Promise<void> {
+export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }): Promise<void> {
   const { owner, name } = await getRepoInfo();
   console.log(`[triage-issues] Polling issues every 5 minutes for ${name}`);
+
+  let firstRunResolve: (() => void) | undefined;
+  const firstRunPromise = options?.waitForFirstRun
+    ? new Promise<void>(resolve => { firstRunResolve = resolve; })
+    : undefined;
 
   const tick = async () => {
     try {
@@ -18,7 +23,11 @@ export async function triageIssuesWorker(): Promise<void> {
         issue => !issue.labels.some(l => l.name === "cc-in-progress")
       );
 
-      if (candidates.length === 0) return;
+      if (candidates.length === 0) {
+        firstRunResolve?.();
+        firstRunResolve = undefined;
+        return;
+      }
 
       const repoUrl = `https://github.com/${owner}/${name}`;
       run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-issues"], TASK_ID, "Triage Issues", "triage-issues", async (status, output) => {
@@ -27,13 +36,18 @@ export async function triageIssuesWorker(): Promise<void> {
         } else {
           await notifyTaskFailed("triage-issues", name, TASK_ID, "Triage Issues", repoUrl, output);
         }
+        firstRunResolve?.();
+        firstRunResolve = undefined;
       });
     } catch (err) {
       console.error(`[triage-issues] tick error: ${err}`);
       await notifyError("triage-issues", name, err);
+      firstRunResolve?.();
+      firstRunResolve = undefined;
     }
   };
 
   await tick();
   setInterval(tick, POLLING_INTERVAL_MS);
+  if (firstRunPromise) await firstRunPromise;
 }

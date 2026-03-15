@@ -81,7 +81,14 @@ if (workerType === "init") {
 } else if (workerType === "all") {
   Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
 } else if (workerType === "yolo") {
-  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), triageIssuesWorker(), triagePrsWorker()]);
+  (async () => {
+    await Promise.all([
+      triageIssuesWorker({ waitForFirstRun: true }),
+      triagePrsWorker({ waitForFirstRun: true }),
+    ]);
+    console.log("[yolo] Triage workers completed first run, starting remaining workers");
+    Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
+  })();
 } else {
   WORKERS[workerType]();
 }
