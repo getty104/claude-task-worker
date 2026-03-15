@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
 import { isRunning, isWorkerAtCapacity, isWorkerRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
-
-const execFileAsync = promisify(execFile);
+import { removeWorktree } from "../worktree.js";
 const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "cc-fix-onetime";
 const LABEL_FIX_REPEAT = "cc-fix-repeat";
@@ -38,7 +35,7 @@ export async function fixReviewPointWorker(): Promise<void> {
         const worktreeId = generateWorktreeName();
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", async (status, output) => {
-          await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
+          await removeWorktree(worktreeId);
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);
           for (const label of labelsToRemove) {

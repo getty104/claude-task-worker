@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
 import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
-
-const execFileAsync = promisify(execFile);
+import { removeWorktree } from "../worktree.js";
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function createIssueWorker(): Promise<void> {
@@ -33,7 +30,7 @@ export async function createIssueWorker(): Promise<void> {
           issue.title,
           "create-issue",
           async (status, output) => {
-            await execFileAsync("git", ["worktree", "remove", "--force", `.claude/worktrees/${worktreeId}`]);
+            await removeWorktree(worktreeId);
             try {
               await removeLabel("issue", issue.number, "cc-create-issue");
               await removeLabel("issue", issue.number, "cc-in-progress");
