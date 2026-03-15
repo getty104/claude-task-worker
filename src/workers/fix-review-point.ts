@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
-import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
+import { isRunning, isWorkerAtCapacity, isWorkerRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
@@ -18,6 +18,8 @@ export async function fixReviewPointWorker(): Promise<void> {
 
   const tick = async () => {
     try {
+      if (isWorkerRunning("triage-prs")) return;
+
       const prs = await listPullRequestsWithChecks(user);
       const candidates = prs.filter((pr) => {
         const labels = pr.labels.map((l) => l.name);

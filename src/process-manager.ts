@@ -69,6 +69,15 @@ export function isRunning(id: number): boolean {
 
 const MAX_CONCURRENT_TASKS_PER_WORKER = 4;
 
+export function isWorkerRunning(workerName: string): boolean {
+  for (const task of tasks.values()) {
+    if (task.workerName === workerName && task.status === "running") {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function isWorkerAtCapacity(workerName: string): boolean {
   let count = 0;
   for (const task of tasks.values()) {
