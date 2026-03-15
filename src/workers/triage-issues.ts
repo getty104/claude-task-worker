@@ -1,12 +1,12 @@
 import { getRepoInfo, listAllIssues } from "../gh.js";
 import { isRunning, run } from "../process-manager.js";
-import { notifyError } from "../slack.js";
+import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -1;
 
 export async function triageIssuesWorker(): Promise<void> {
-  const { name } = await getRepoInfo();
+  const { owner, name } = await getRepoInfo();
   console.log(`[triage-issues] Polling issues every 5 minutes for ${name}`);
 
   const tick = async () => {
@@ -20,7 +20,14 @@ export async function triageIssuesWorker(): Promise<void> {
 
       if (candidates.length === 0) return;
 
-      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-issues"], TASK_ID, "Triage Issues", "triage-issues");
+      const repoUrl = `https://github.com/${owner}/${name}`;
+      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-issues"], TASK_ID, "Triage Issues", "triage-issues", async (status, output) => {
+        if (status === "completed") {
+          await notifyTaskCompleted("triage-issues", name, TASK_ID, "Triage Issues", repoUrl);
+        } else {
+          await notifyTaskFailed("triage-issues", name, TASK_ID, "Triage Issues", repoUrl, output);
+        }
+      });
     } catch (err) {
       console.error(`[triage-issues] tick error: ${err}`);
       await notifyError("triage-issues", name, err);
