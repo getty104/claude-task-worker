@@ -2,13 +2,13 @@ import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted 
 import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
-const POLLING_INTERVAL_MS = 5 * 60 * 1000;
+const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -2;
 
 export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): Promise<void> {
   const { owner, name } = await getRepoInfo();
   const user = await getCurrentUser();
-  console.log(`[triage-prs] Polling PRs every 5 minutes for ${name} (assignee: ${user})`);
+  console.log(`[triage-prs] Polling PRs every 10 minutes for ${name} (assignee: ${user})`);
 
   let firstRunResolve: (() => void) | undefined;
   const firstRunPromise = options?.waitForFirstRun
