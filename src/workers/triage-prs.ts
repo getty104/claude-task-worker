@@ -1,4 +1,5 @@
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh.js";
+import { syncDefaultBranch } from "../git.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
@@ -6,7 +7,7 @@ const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -2;
 
 export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): Promise<void> {
-  const { owner, name } = await getRepoInfo();
+  const { owner, name, defaultBranch } = await getRepoInfo();
   const user = await getCurrentUser();
   console.log(`[triage-prs] Polling PRs every 10 minutes for ${name} (assignee: ${user})`);
 
@@ -33,6 +34,7 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
       }
 
       const repoUrl = `https://github.com/${owner}/${name}`;
+      syncDefaultBranch(defaultBranch);
       run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs"], TASK_ID, "Triage PRs", "triage-prs", async (status, output) => {
         if (status === "completed") {
           await notifyTaskCompleted("triage-prs", name, TASK_ID, "Triage PRs", repoUrl);

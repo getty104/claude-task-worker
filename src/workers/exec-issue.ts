@@ -1,4 +1,5 @@
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
+import { syncDefaultBranch } from "../git.js";
 import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -6,7 +7,7 @@ import { removeWorktree } from "../worktree.js";
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function execIssueWorker(): Promise<void> {
-  const { owner, name } = await getRepoInfo();
+  const { owner, name, defaultBranch } = await getRepoInfo();
   const user = await getCurrentUser();
   console.log(`[exec-issue] Polling issues every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
@@ -22,6 +23,7 @@ export async function execIssueWorker(): Promise<void> {
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         const worktreeId = generateWorktreeName();
         await addLabel("issue", issue.number, "cc-in-progress");
+        syncDefaultBranch(defaultBranch);
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number}`, "--worktree", worktreeId], issue.number, issue.title, "exec-issue", async (status, output) => {
           await removeWorktree(worktreeId);
           await removeLabel("issue", issue.number, "cc-exec-issue");

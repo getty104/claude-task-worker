@@ -16,6 +16,7 @@ interface PullRequest {
 interface RepoInfo {
   owner: string;
   name: string;
+  defaultBranch: string;
 }
 
 function execGh(args: string[]): Promise<string> {
@@ -35,9 +36,9 @@ export async function getCurrentUser(): Promise<string> {
 }
 
 export async function getRepoInfo(): Promise<RepoInfo> {
-  const output = await execGh(["repo", "view", "--json", "owner,name"]);
+  const output = await execGh(["repo", "view", "--json", "owner,name,defaultBranchRef"]);
   const parsed = JSON.parse(output);
-  return { owner: parsed.owner.login, name: parsed.name };
+  return { owner: parsed.owner.login, name: parsed.name, defaultBranch: parsed.defaultBranchRef.name };
 }
 
 export async function listIssues(assignee: string, label: string): Promise<Issue[]> {

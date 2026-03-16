@@ -1,4 +1,5 @@
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
+import { syncDefaultBranch } from "../git.js";
 import { isRunning, isWorkerAtCapacity, isWorkerRunning, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -9,7 +10,7 @@ const LABEL_FIX_REPEAT = "cc-fix-repeat";
 const LABEL_IN_PROGRESS = "cc-in-progress";
 
 export async function fixReviewPointWorker(): Promise<void> {
-  const { owner, name } = await getRepoInfo();
+  const { owner, name, defaultBranch } = await getRepoInfo();
   const user = await getCurrentUser();
   console.log(`[fix-review-point] Polling PRs every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
@@ -34,6 +35,7 @@ export async function fixReviewPointWorker(): Promise<void> {
 
         const worktreeId = generateWorktreeName();
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
+        syncDefaultBranch(defaultBranch);
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", async (status, output) => {
           await removeWorktree(worktreeId);
           const labelsToRemove = [LABEL_IN_PROGRESS];

@@ -1,4 +1,5 @@
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
+import { syncDefaultBranch } from "../git.js";
 import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -6,7 +7,7 @@ import { removeWorktree } from "../worktree.js";
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function createIssueWorker(): Promise<void> {
-  const { owner, name } = await getRepoInfo();
+  const { owner, name, defaultBranch } = await getRepoInfo();
   const user = await getCurrentUser();
   console.log(`[create-issue] Polling issues every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
@@ -23,6 +24,7 @@ export async function createIssueWorker(): Promise<void> {
 
         const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
         const worktreeId = generateWorktreeName();
+        syncDefaultBranch(defaultBranch);
         run(
           "claude",
           ["--dangerously-skip-permissions", "-p", `/base-tools:create-issue #${issue.number}`, "--worktree", worktreeId],
