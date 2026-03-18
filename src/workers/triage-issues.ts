@@ -3,12 +3,12 @@ import { syncDefaultBranch } from "../git.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
-const POLLING_INTERVAL_MS = 15 * 60 * 1000;
+const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -1;
 
 export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }): Promise<void> {
   const { owner, name, defaultBranch } = await getRepoInfo();
-  console.log(`[triage-issues] Polling issues every 15 minutes for ${name}`);
+  console.log(`[triage-issues] Polling issues every 10 minutes for ${name}`);
 
   let firstRunResolve: (() => void) | undefined;
   const firstRunPromise = options?.waitForFirstRun
