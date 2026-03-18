@@ -8,7 +8,8 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-fix-onetime",  color: "d93f0b" },
   { name: "cc-fix-repeat",   color: "e99695" },
   { name: "cc-in-progress",  color: "0e8a16" },
-  { name: "cc-created-issue", color: "f9a825" },
+  { name: "cc-issue-created", color: "f9a825" },
+  { name: "cc-pr-created",    color: "0075ca" },
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"

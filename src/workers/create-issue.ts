@@ -36,7 +36,7 @@ export async function createIssueWorker(): Promise<void> {
             try {
               await removeLabel("issue", issue.number, "cc-create-issue");
               await removeLabel("issue", issue.number, "cc-in-progress");
-              await addLabel("issue", issue.number, "cc-created-issue");
+              await addLabel("issue", issue.number, "cc-issue-created");
             } catch (err) {
               console.error(`[create-issue] Failed to cleanup labels for issue #${issue.number}: ${err}`);
             }
