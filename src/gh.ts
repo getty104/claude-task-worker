@@ -58,9 +58,8 @@ export async function listAllIssues(assignee: string): Promise<Issue[]> {
   const output = await execGh([
     "issue", "list",
     "--assignee", assignee,
-    "--sort", "created",
-    "--order", "asc",
-    "--json", "number,title,labels,body,state",
+    "--search", "sort:created-asc",
+    "--json", "number,title,labels",
     "--limit", "5",
   ]);
   return JSON.parse(output);
