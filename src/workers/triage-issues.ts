@@ -1,4 +1,4 @@
-import { getRepoInfo, listAllIssues } from "../gh.js";
+import { getCurrentUser, getRepoInfo, listAllIssues } from "../gh.js";
 import { syncDefaultBranch } from "../git.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
@@ -7,6 +7,7 @@ const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -1;
 
 export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }): Promise<void> {
+  const assignee = await getCurrentUser();
   const { owner, name, defaultBranch } = await getRepoInfo();
   console.log(`[triage-issues] Polling issues every 10 minutes for ${name}`);
 
@@ -19,7 +20,7 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
     try {
       if (isRunning(TASK_ID)) return;
 
-      const issues = await listAllIssues();
+      const issues = await listAllIssues(assignee);
       const EXCLUDE_LABELS = ["cc-create-issue", "cc-update-issue", "cc-exec-issue", "cc-pr-created"];
       const candidates = issues.filter(
         issue => !issue.labels.some(l => EXCLUDE_LABELS.includes(l.name))

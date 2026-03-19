@@ -4,6 +4,8 @@ interface Issue {
   number: number;
   title: string;
   labels: { name: string }[];
+  body: string;
+  state: string;
 }
 
 interface PullRequest {
@@ -52,11 +54,14 @@ export async function listIssues(assignee: string, label: string): Promise<Issue
   return JSON.parse(output);
 }
 
-export async function listAllIssues(): Promise<Issue[]> {
+export async function listAllIssues(assignee: string): Promise<Issue[]> {
   const output = await execGh([
     "issue", "list",
-    "--json", "number,title,labels",
-    "--limit", "100",
+    "--assignee", assignee,
+    "--sort", "created",
+    "--order", "asc",
+    "--json", "number,title,labels,body,state",
+    "--limit", "5",
   ]);
   return JSON.parse(output);
 }
