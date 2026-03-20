@@ -2,6 +2,7 @@ import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted 
 import { syncDefaultBranch } from "../git.js";
 import { isRunning, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
+import { removeAllAgentWorktrees } from "../worktree.js";
 
 const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -2;
@@ -36,6 +37,7 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
       const repoUrl = `https://github.com/${owner}/${name}`;
       syncDefaultBranch(defaultBranch);
       run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs"], TASK_ID, "Triage PRs", "triage-prs", async (status, output) => {
+        await removeAllAgentWorktrees();
         if (status === "completed") {
           await notifyTaskCompleted("triage-prs", name, TASK_ID, "Triage PRs", repoUrl);
         } else {
