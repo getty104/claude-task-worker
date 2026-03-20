@@ -10,6 +10,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-in-progress",  color: "0e8a16" },
   { name: "cc-issue-created", color: "f9a825" },
   { name: "cc-pr-created",    color: "006b75" },
+  { name: "cc-triage-scope",  color: "c5def5" },
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"

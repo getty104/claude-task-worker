@@ -58,6 +58,7 @@ export async function listAllIssues(assignee: string): Promise<Issue[]> {
   const output = await execGh([
     "issue", "list",
     "--assignee", assignee,
+    "--label", "cc-triage-scope",
     "--search", "sort:created-asc",
     "--json", "number,title,labels",
     "--limit", "5",
@@ -88,6 +89,7 @@ export function isCICompleted(checks: StatusCheck[]): boolean {
 export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
   const args = [
     "pr", "list",
+    "--label", "cc-triage-scope",
     "--json", "number,headRefName,labels,title,statusCheckRollup",
     "--limit", "100",
   ];
