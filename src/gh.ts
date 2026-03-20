@@ -86,13 +86,15 @@ export function isCICompleted(checks: StatusCheck[]): boolean {
   });
 }
 
-export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
+export async function listPullRequestsWithChecks(assignee?: string, options?: { triageScope?: boolean }): Promise<PullRequestWithChecks[]> {
   const args = [
     "pr", "list",
-    "--label", "cc-triage-scope",
     "--json", "number,headRefName,labels,title,statusCheckRollup",
     "--limit", "100",
   ];
+  if (options?.triageScope) {
+    args.push("--label", "cc-triage-scope");
+  }
   if (assignee) {
     args.push("--assignee", assignee);
   }

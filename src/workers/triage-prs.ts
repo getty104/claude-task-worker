@@ -20,7 +20,7 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
     try {
       if (isRunning(TASK_ID)) return;
 
-      const prs = await listPullRequestsWithChecks(user);
+      const prs = await listPullRequestsWithChecks(user, { triageScope: true });
       const candidates = prs.filter(
         pr =>
           !pr.labels.some(l => l.name === "cc-fix-onetime") &&
