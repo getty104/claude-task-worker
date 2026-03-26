@@ -204,7 +204,7 @@ export function run(command: string, args: string[], id: number, title: string, 
   ensureRenderInterval();
   renderTable();
 
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "inherit"] });
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "inherit"], detached: true });
   childProcesses.set(id, child);
 
   const outputChunks: Buffer[] = [];
