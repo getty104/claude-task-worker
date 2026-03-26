@@ -237,6 +237,19 @@ export function run(command: string, args: string[], id: number, title: string, 
   });
 }
 
+export function waitForAllProcesses(): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (childProcesses.size === 0) {
+        resolve();
+      } else {
+        setTimeout(check, 500);
+      }
+    };
+    check();
+  });
+}
+
 export function shutdown(): void {
   for (const [id, child] of childProcesses) {
     child.kill("SIGTERM");
