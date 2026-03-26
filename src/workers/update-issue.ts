@@ -39,6 +39,7 @@ export async function updateIssueWorker(): Promise<void> {
           issue.number,
           issue.title,
           "update-issue",
+          worktreeId,
           async (status, output) => {
             await removeWorktree(worktreeId);
             try {

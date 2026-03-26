@@ -24,7 +24,7 @@ export async function execIssueWorker(): Promise<void> {
         const worktreeId = generateWorktreeName();
         await addLabel("issue", issue.number, "cc-in-progress");
         syncDefaultBranch(defaultBranch);
-        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number} --triage-scope`, "--worktree", worktreeId], issue.number, issue.title, "exec-issue", async (status, output) => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number} --triage-scope`, "--worktree", worktreeId], issue.number, issue.title, "exec-issue", worktreeId, async (status, output) => {
           await removeWorktree(worktreeId);
           await removeLabel("issue", issue.number, "cc-exec-issue");
           await removeLabel("issue", issue.number, "cc-in-progress");

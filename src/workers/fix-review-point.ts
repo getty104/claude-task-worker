@@ -36,7 +36,7 @@ export async function fixReviewPointWorker(): Promise<void> {
         const worktreeId = generateWorktreeName();
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
         syncDefaultBranch(defaultBranch);
-        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", async (status, output) => {
+        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", worktreeId, async (status, output) => {
           await removeWorktree(worktreeId);
           const labelsToRemove = [LABEL_IN_PROGRESS];
           if (isOnetime) labelsToRemove.push(LABEL_FIX_ONETIME);

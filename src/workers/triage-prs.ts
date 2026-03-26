@@ -36,7 +36,7 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
 
       const repoUrl = `https://github.com/${owner}/${name}`;
       syncDefaultBranch(defaultBranch);
-      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs"], TASK_ID, "Triage PRs", "triage-prs", async (status, output) => {
+      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-prs"], TASK_ID, "Triage PRs", "triage-prs", undefined, async (status, output) => {
         await removeAllAgentWorktrees();
         if (status === "completed") {
           await notifyTaskCompleted("triage-prs", name, TASK_ID, "Triage PRs", repoUrl);
