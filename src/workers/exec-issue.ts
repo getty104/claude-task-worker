@@ -25,15 +25,15 @@ export async function execIssueWorker(): Promise<void> {
         await addLabel("issue", issue.number, "cc-in-progress");
         syncDefaultBranch(defaultBranch);
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number} --triage-scope`, "--worktree", worktreeId], issue.number, issue.title, "exec-issue", worktreeId, async (status, output) => {
-          await removeWorktree(worktreeId);
-          await removeLabel("issue", issue.number, "cc-exec-issue");
-          await removeLabel("issue", issue.number, "cc-in-progress");
           if (status === "completed") {
             await addLabel("issue", issue.number, "cc-pr-created");
             await notifyTaskCompleted("exec-issue", name, issue.number, issue.title, issueUrl);
           } else {
             await notifyTaskFailed("exec-issue", name, issue.number, issue.title, issueUrl, output);
           }
+          await removeLabel("issue", issue.number, "cc-exec-issue");
+          await removeLabel("issue", issue.number, "cc-in-progress");
+          await removeWorktree(worktreeId);
         });
       }
     } catch (err) {
