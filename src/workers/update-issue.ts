@@ -1,6 +1,6 @@
 import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel, getLastIssueComment } from "../gh.js";
 import { syncDefaultBranch } from "../git.js";
-import { isRunning, isWorkerAtCapacity, run } from "../process-manager.js";
+import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 import { removeWorktree } from "../worktree.js";
@@ -12,6 +12,7 @@ export async function updateIssueWorker(): Promise<void> {
   console.log(`[update-issue] Polling issues every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
   const tick = async () => {
+    if (isShuttingDown()) return;
     try {
       const issues = await listIssues(user, "cc-update-issue");
 

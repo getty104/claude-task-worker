@@ -1,6 +1,6 @@
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
 import { syncDefaultBranch } from "../git.js";
-import { isRunning, isWorkerAtCapacity, isWorkerRunning, run } from "../process-manager.js";
+import { isRunning, isWorkerAtCapacity, isWorkerRunning, isShuttingDown, run } from "../process-manager.js";
 import { generateWorktreeName } from "../random-name.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 import { removeWorktree } from "../worktree.js";
@@ -15,6 +15,7 @@ export async function fixReviewPointWorker(): Promise<void> {
   console.log(`[fix-review-point] Polling PRs every 30 seconds for ${owner}/${name} (assignee: ${user})`);
 
   const tick = async () => {
+    if (isShuttingDown()) return;
     try {
       if (isWorkerRunning("triage-prs")) return;
 

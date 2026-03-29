@@ -6,7 +6,7 @@ import { createIssueWorker } from "./workers/create-issue.js";
 import { updateIssueWorker } from "./workers/update-issue.js";
 import { triageIssuesWorker } from "./workers/triage-issues.js";
 import { triagePrsWorker } from "./workers/triage-prs.js";
-import { shutdown, waitForAllProcesses } from "./process-manager.js";
+import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager.js";
 import { init } from "./commands/init.js";
 import { buildTokenLimitText, send } from "./slack.js";
 
@@ -64,13 +64,12 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
-let shuttingDown = false;
 process.on("SIGINT", () => {
-  if (shuttingDown) {
+  if (isShuttingDown()) {
     shutdown();
     process.exit(1);
   }
-  shuttingDown = true;
+  setShuttingDown();
   console.log("\n[worker] Waiting for running tasks to complete... (Press Ctrl-C again to force exit)");
   waitForAllProcesses().then(() => process.exit(0));
 });

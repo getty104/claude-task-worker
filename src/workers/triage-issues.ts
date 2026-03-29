@@ -1,6 +1,6 @@
 import { getCurrentUser, getRepoInfo, listAllIssues } from "../gh.js";
 import { syncDefaultBranch } from "../git.js";
-import { isRunning, run } from "../process-manager.js";
+import { isRunning, isShuttingDown, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
@@ -17,6 +17,7 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
     : undefined;
 
   const tick = async () => {
+    if (isShuttingDown()) return;
     try {
       if (isRunning(TASK_ID)) return;
 

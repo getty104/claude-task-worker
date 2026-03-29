@@ -63,6 +63,16 @@ interface TaskEntry {
 
 const tasks = new Map<number, TaskEntry>();
 
+let shuttingDown = false;
+
+export function setShuttingDown(): void {
+  shuttingDown = true;
+}
+
+export function isShuttingDown(): boolean {
+  return shuttingDown;
+}
+
 export function isRunning(id: number): boolean {
   const task = tasks.get(id);
   return task?.status === "running";

@@ -1,6 +1,6 @@
 import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh.js";
 import { syncDefaultBranch } from "../git.js";
-import { isRunning, run } from "../process-manager.js";
+import { isRunning, isShuttingDown, run } from "../process-manager.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
 import { removeAllAgentWorktrees } from "../worktree.js";
 
@@ -18,6 +18,7 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
     : undefined;
 
   const tick = async () => {
+    if (isShuttingDown()) return;
     try {
       if (isRunning(TASK_ID)) return;
 
