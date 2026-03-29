@@ -1,5 +1,5 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
-import { createLabel } from "../gh.js";
+import { createLabel } from "../gh";
 
 const LABELS: { name: string; color: string }[] = [
   { name: "cc-create-issue", color: "0075ca" },

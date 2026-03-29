@@ -1,8 +1,8 @@
-import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh.js";
-import { syncDefaultBranch } from "../git.js";
-import { isRunning, isShuttingDown, run } from "../process-manager.js";
-import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
-import { removeAllAgentWorktrees } from "../worktree.js";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh";
+import { syncDefaultBranch } from "../git";
+import { isRunning, isShuttingDown, run } from "../process-manager";
+import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { removeAllAgentWorktrees } from "../worktree";
 
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -2;

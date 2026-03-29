@@ -1,9 +1,9 @@
-import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh.js";
-import { syncDefaultBranch } from "../git.js";
-import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager.js";
-import { generateWorktreeName } from "../random-name.js";
-import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
-import { removeWorktree } from "../worktree.js";
+import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh";
+import { syncDefaultBranch } from "../git";
+import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
+import { generateWorktreeName } from "../random-name";
+import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { removeWorktree } from "../worktree";
 const POLLING_INTERVAL_MS = 30 * 1000;
 
 export async function createIssueWorker(): Promise<void> {

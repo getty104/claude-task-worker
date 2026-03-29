@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
-import { execIssueWorker } from "./workers/exec-issue.js";
-import { fixReviewPointWorker } from "./workers/fix-review-point.js";
-import { createIssueWorker } from "./workers/create-issue.js";
-import { updateIssueWorker } from "./workers/update-issue.js";
-import { triageIssuesWorker } from "./workers/triage-issues.js";
-import { triagePrsWorker } from "./workers/triage-prs.js";
-import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager.js";
-import { init } from "./commands/init.js";
-import { buildTokenLimitText, send } from "./slack.js";
+import { execIssueWorker } from "./workers/exec-issue";
+import { fixReviewPointWorker } from "./workers/fix-review-point";
+import { createIssueWorker } from "./workers/create-issue";
+import { updateIssueWorker } from "./workers/update-issue";
+import { triageIssuesWorker } from "./workers/triage-issues";
+import { triagePrsWorker } from "./workers/triage-prs";
+import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
+import { init } from "./commands/init";
+import { buildTokenLimitText, send } from "./slack";
 
 const WORKERS: Record<string, () => Promise<void>> = {
   "exec-issue": execIssueWorker,

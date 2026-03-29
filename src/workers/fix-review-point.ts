@@ -1,9 +1,9 @@
-import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh.js";
-import { syncDefaultBranch } from "../git.js";
-import { isRunning, isWorkerAtCapacity, isWorkerRunning, isShuttingDown, run } from "../process-manager.js";
-import { generateWorktreeName } from "../random-name.js";
-import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack.js";
-import { removeWorktree } from "../worktree.js";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh";
+import { syncDefaultBranch } from "../git";
+import { isRunning, isWorkerAtCapacity, isWorkerRunning, isShuttingDown, run } from "../process-manager";
+import { generateWorktreeName } from "../random-name";
+import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { removeWorktree } from "../worktree";
 const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "cc-fix-onetime";
 const LABEL_FIX_REPEAT = "cc-fix-repeat";
