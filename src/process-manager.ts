@@ -201,7 +201,7 @@ function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-export function run(command: string, args: string[], id: number, title: string, workerName: string, path?: string, onComplete?: (status: "completed" | "failed", output: string) => void): void {
+export function run(command: string, args: string[], id: number, title: string, workerName: string, path?: string, onComplete?: (status: "completed" | "failed", output: string) => Promise<void>): void {
   tasks.set(id, {
     id,
     title,
@@ -222,28 +222,28 @@ export function run(command: string, args: string[], id: number, title: string, 
     outputChunks.push(chunk);
   });
 
-  child.on("close", (code) => {
+  child.on("close", async (code) => {
     childProcesses.delete(id);
+    const output = Buffer.concat(outputChunks).toString("utf-8");
+    await onComplete?.(code === 0 ? "completed" : "failed", output);
     const task = tasks.get(id);
     if (task) {
       task.status = code === 0 ? "completed" : "failed";
       task.finishedAt = new Date();
     }
     renderTable();
-    const output = Buffer.concat(outputChunks).toString("utf-8");
-    onComplete?.(code === 0 ? "completed" : "failed", output);
   });
 
-  child.on("error", (err) => {
+  child.on("error", async (err) => {
     childProcesses.delete(id);
+    console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
+    await onComplete?.("failed", err.message);
     const task = tasks.get(id);
     if (task) {
       task.status = "failed";
       task.finishedAt = new Date();
     }
-    console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     renderTable();
-    onComplete?.("failed", err.message);
   });
 }
 
