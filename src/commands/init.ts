@@ -1,5 +1,7 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
+import { dirname } from "node:path";
 import { createLabel } from "../gh";
+import { DEFAULT_CONFIG, CONFIG_PATH } from "../config.js";
 
 const LABELS: { name: string; color: string }[] = [
   { name: "cc-create-issue", color: "0075ca" },
@@ -62,6 +64,12 @@ async function createFileIfNotExists(path: string, content: string): Promise<boo
   }
 }
 
+async function createConfigIfNotExists(): Promise<void> {
+  await mkdir(dirname(CONFIG_PATH), { recursive: true });
+  const created = await createFileIfNotExists(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
+  console.log(created ? `[init] Created: ${CONFIG_PATH}` : `[init] Already exists: ${CONFIG_PATH}`);
+}
+
 export async function init(): Promise<void> {
   console.log("[init] Creating labels...");
 
@@ -85,6 +93,9 @@ export async function init(): Promise<void> {
   const workflowPath = ".github/workflows/assign-creator-on-cc-create-issue.yml";
   const workflowCreated = await createFileIfNotExists(workflowPath, ASSIGN_CREATOR_WORKFLOW);
   console.log(workflowCreated ? `[init] Created: ${workflowPath}` : `[init] Already exists: ${workflowPath}`);
+
+  console.log("[init] Creating config file...");
+  await createConfigIfNotExists();
 
   console.log("[init] Done.");
 }
