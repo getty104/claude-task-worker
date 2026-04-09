@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from "node:child_process";
+import { config } from "./config.js";
 
 type TaskStatus = "running" | "completed" | "failed";
 
@@ -78,8 +79,6 @@ export function isRunning(id: number): boolean {
   return task?.status === "running";
 }
 
-const MAX_CONCURRENT_TASKS_PER_WORKER = 4;
-
 export function isWorkerRunning(workerName: string): boolean {
   for (const task of tasks.values()) {
     if (task.workerName === workerName && task.status === "running") {
@@ -96,7 +95,7 @@ export function isWorkerAtCapacity(workerName: string): boolean {
       count++;
     }
   }
-  return count >= MAX_CONCURRENT_TASKS_PER_WORKER;
+  return count >= config.maxConcurrentTasks;
 }
 
 function formatDuration(start: Date, end: Date = new Date()): string {
