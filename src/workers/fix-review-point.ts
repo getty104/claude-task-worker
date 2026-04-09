@@ -1,8 +1,9 @@
-import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel } from "../gh";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel, commentOnPR } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isWorkerRunning, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { config } from "../config";
 import { removeWorktree } from "../worktree";
 const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "cc-fix-onetime";
@@ -42,6 +43,13 @@ export async function fixReviewPointWorker(): Promise<void> {
           if (isOnetime) await removeLabel("pr", pr.number, LABEL_FIX_ONETIME);
           await removeLabel("pr", pr.number, LABEL_IN_PROGRESS);
           if (status === "completed") {
+            if (config.fixReviewPointCallbackCommentMessage) {
+              try {
+                await commentOnPR(pr.number, config.fixReviewPointCallbackCommentMessage);
+              } catch (err) {
+                console.error(`[fix-review-point] failed to post comment on PR #${pr.number}: ${err}`);
+              }
+            }
             await notifyTaskCompleted("fix-review-point", name, pr.number, pr.title, prUrl);
           } else {
             await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl, output);

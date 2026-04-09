@@ -136,6 +136,10 @@ export async function commentOnIssue(issueNumber: number, body: string): Promise
   await execGh(["issue", "comment", String(issueNumber), "--body", body]);
 }
 
+export async function commentOnPR(prNumber: number, body: string): Promise<void> {
+  await execGh(["pr", "comment", String(prNumber), "--body", body]);
+}
+
 export async function createLabel(name: string, color?: string, force?: boolean): Promise<boolean> {
   try {
     const args = ["label", "create", name];
