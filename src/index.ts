@@ -23,7 +23,7 @@ function printUsage(): void {
   console.log(`Usage: claude-task-worker <command>
 
 Commands:
-  init              Create required GitHub labels
+  init              Create required GitHub labels and config file
   usage             Notify current usage to Slack
 
 Workers:

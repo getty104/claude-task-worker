@@ -7,12 +7,14 @@ interface Config {
   fixReviewPointCallbackCommentMessage?: string;
 }
 
-const DEFAULT_CONFIG: Config = {
+export const DEFAULT_CONFIG: Config = {
   maxConcurrentTasks: 4,
 };
 
+export const CONFIG_PATH = join(homedir(), ".config", "claude-task-worker.json");
+
 function loadConfig(): Config {
-  const configPath = join(homedir(), ".config", "claude-task-worker.json");
+  const configPath = CONFIG_PATH;
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(readFileSync(configPath, "utf-8"));
