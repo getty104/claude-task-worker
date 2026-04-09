@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 interface Config {
   maxConcurrentTasks: number;
+  fixReviewPointCallbackCommentMessage?: string;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -30,6 +31,13 @@ function loadConfig(): Config {
       console.warn(`[config] invalid maxConcurrentTasks: ${val}, using default ${DEFAULT_CONFIG.maxConcurrentTasks}`);
     } else {
       result.maxConcurrentTasks = val;
+    }
+  }
+
+  if ("fixReviewPointCallbackCommentMessage" in raw) {
+    const val = raw["fixReviewPointCallbackCommentMessage"];
+    if (typeof val === "string") {
+      result.fixReviewPointCallbackCommentMessage = val;
     }
   }
 
