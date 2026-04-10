@@ -2,6 +2,7 @@ import { getCurrentUser, getRepoInfo, listAllIssues } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isShuttingDown, run } from "../process-manager";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { config } from "../config.js";
 
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -1;
@@ -35,7 +36,7 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
 
       const repoUrl = `https://github.com/${owner}/${name}`;
       syncDefaultBranch(defaultBranch);
-      run("claude", ["--dangerously-skip-permissions", "-p", "/base-tools:triage-issues"], TASK_ID, "Triage Issues", "triage-issues", undefined, async (status, output) => {
+      run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:triage-issues ${config.maxConcurrentTasks}`], TASK_ID, "Triage Issues", "triage-issues", undefined, async (status, output) => {
         if (status === "completed") {
           await notifyTaskCompleted("triage-issues", name, TASK_ID, "Triage Issues", repoUrl);
         } else {
