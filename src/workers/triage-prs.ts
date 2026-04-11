@@ -5,7 +5,7 @@ import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { removeAllAgentWorktrees } from "../worktree";
 import { config } from "../config.js";
 
-const POLLING_INTERVAL_MS = 5 * 60 * 1000;
+const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -2;
 
 export async function triagePrsWorker(): Promise<void> {

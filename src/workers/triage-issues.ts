@@ -4,7 +4,7 @@ import { isRunning, isShuttingDown, run } from "../process-manager";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { config } from "../config.js";
 
-const POLLING_INTERVAL_MS = 5 * 60 * 1000;
+const POLLING_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_ID = -1;
 
 export async function triageIssuesWorker(): Promise<void> {
