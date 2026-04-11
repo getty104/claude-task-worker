@@ -22,7 +22,7 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
     try {
       if (isRunning(TASK_ID)) return;
 
-      const issues = await listAllIssues(assignee);
+      const issues = await listAllIssues(assignee, config.maxConcurrentTasks);
       const EXCLUDE_LABELS = ["cc-create-issue", "cc-update-issue", "cc-exec-issue", "cc-pr-created"];
       const candidates = issues.filter(
         issue => !issue.labels.some(l => EXCLUDE_LABELS.includes(l.name))

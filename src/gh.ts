@@ -54,14 +54,14 @@ export async function listIssues(assignee: string, label: string): Promise<Issue
   return JSON.parse(output);
 }
 
-export async function listAllIssues(assignee: string): Promise<Issue[]> {
+export async function listAllIssues(assignee: string, limit: number = 5): Promise<Issue[]> {
   const output = await execGh([
     "issue", "list",
     "--assignee", assignee,
     "--label", "cc-triage-scope",
     "--search", "sort:created-asc",
     "--json", "number,title,labels",
-    "--limit", "5",
+    "--limit", String(limit),
   ]);
   return JSON.parse(output);
 }
