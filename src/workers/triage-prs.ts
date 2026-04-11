@@ -1,4 +1,4 @@
-import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted } from "../gh";
+import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isShuttingDown, run } from "../process-manager";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
@@ -23,12 +23,7 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
     try {
       if (isRunning(TASK_ID)) return;
 
-      const prs = await listPullRequestsWithChecks(user, { triageScope: true });
-      const candidates = prs.filter(
-        pr =>
-          !pr.labels.some(l => l.name === "cc-fix-onetime") &&
-          isCICompleted(pr.statusCheckRollup)
-      );
+      const candidates = await listPullRequestsWithChecks(user, { triageScope: true });
 
       if (candidates.length === 0) {
         firstRunResolve?.();

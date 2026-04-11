@@ -73,23 +73,26 @@ interface StatusCheck {
 }
 
 interface PullRequestWithChecks extends PullRequest {
+  url: string;
+  reviewDecision: string;
   statusCheckRollup: StatusCheck[];
 }
 
 export function isCICompleted(checks: StatusCheck[]): boolean {
   if (checks.length === 0) return true;
-  return checks.every(check => {
-    if (check.__typename === "CheckRun") {
-      return check.status === "COMPLETED";
-    }
-    return check.state !== "PENDING";
-  });
+  return checks.every(check =>
+    check.status === "COMPLETED" ||
+    check.state === "SUCCESS" ||
+    check.state === "FAILURE" ||
+    check.state === "ERROR"
+  );
 }
 
 export async function listPullRequestsWithChecks(assignee?: string, options?: { triageScope?: boolean }): Promise<PullRequestWithChecks[]> {
   const args = [
     "pr", "list",
-    "--json", "number,headRefName,labels,title,statusCheckRollup",
+    "--state", "open",
+    "--json", "number,title,url,labels,headRefName,statusCheckRollup,reviewDecision",
     "--limit", "100",
   ];
   if (options?.triageScope) {
@@ -99,7 +102,16 @@ export async function listPullRequestsWithChecks(assignee?: string, options?: { 
     args.push("--assignee", assignee);
   }
   const output = await execGh(args);
-  return JSON.parse(output);
+  const prs: PullRequestWithChecks[] = JSON.parse(output);
+
+  if (options?.triageScope) {
+    return prs.filter(pr =>
+      !pr.labels.some(l => l.name === "cc-fix-onetime") &&
+      isCICompleted(pr.statusCheckRollup)
+    );
+  }
+
+  return prs;
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 1000): Promise<T> {
