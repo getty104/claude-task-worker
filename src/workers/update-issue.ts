@@ -42,17 +42,18 @@ export async function updateIssueWorker(): Promise<void> {
           "update-issue",
           worktreeId,
           async (status, output) => {
-            await removeWorktree(worktreeId);
             try {
-              await removeLabel("issue", issue.number, "cc-update-issue");
-              await removeLabel("issue", issue.number, "cc-in-progress");
+              if (status === "completed") {
+                await notifyTaskCompleted("update-issue", name, issue.number, issue.title, issueUrl);
+              } else {
+                await notifyTaskFailed("update-issue", name, issue.number, issue.title, issueUrl, output);
+              }
             } catch (err) {
-              console.error(`[update-issue] Failed to finalize issue #${issue.number}: ${err}`);
-            }
-            if (status === "completed") {
-              await notifyTaskCompleted("update-issue", name, issue.number, issue.title, issueUrl);
-            } else {
-              await notifyTaskFailed("update-issue", name, issue.number, issue.title, issueUrl, output);
+              console.error(`[update-issue] post-task error for #${issue.number}: ${err}`);
+            } finally {
+              await removeLabel("issue", issue.number, "cc-update-issue").catch(err => console.error(`[update-issue] removeLabel cc-update-issue failed for #${issue.number}: ${err}`));
+              await removeLabel("issue", issue.number, "cc-in-progress").catch(err => console.error(`[update-issue] removeLabel cc-in-progress failed for #${issue.number}: ${err}`));
+              await removeWorktree(worktreeId).catch(err => console.error(`[update-issue] removeWorktree failed for #${issue.number}: ${err}`));
             }
           },
         );

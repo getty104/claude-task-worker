@@ -26,16 +26,21 @@ export async function execIssueWorker(): Promise<void> {
         await addLabel("issue", issue.number, "cc-in-progress");
         syncDefaultBranch(defaultBranch);
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:exec-issue ${issue.number} --triage-scope`, "--worktree", worktreeId], issue.number, issue.title, "exec-issue", worktreeId, async (status, output) => {
-          if (status === "completed") {
-            await addLabel("issue", issue.number, "cc-pr-created");
-            await notifyTaskCompleted("exec-issue", name, issue.number, issue.title, issueUrl);
-          } else {
-            await notifyTaskFailed("exec-issue", name, issue.number, issue.title, issueUrl, output);
+          try {
+            if (status === "completed") {
+              await addLabel("issue", issue.number, "cc-pr-created");
+              await notifyTaskCompleted("exec-issue", name, issue.number, issue.title, issueUrl);
+            } else {
+              await notifyTaskFailed("exec-issue", name, issue.number, issue.title, issueUrl, output);
+            }
+          } catch (err) {
+            console.error(`[exec-issue] post-task error for #${issue.number}: ${err}`);
+          } finally {
+            await removeLabel("issue", issue.number, "cc-exec-issue").catch(err => console.error(`[exec-issue] removeLabel cc-exec-issue failed for #${issue.number}: ${err}`));
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await removeLabel("issue", issue.number, "cc-in-progress").catch(err => console.error(`[exec-issue] removeLabel cc-in-progress failed for #${issue.number}: ${err}`));
+            await removeWorktree(worktreeId);
           }
-          await removeLabel("issue", issue.number, "cc-exec-issue");
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await removeLabel("issue", issue.number, "cc-in-progress");
-          await removeWorktree(worktreeId);
         });
       }
     } catch (err) {

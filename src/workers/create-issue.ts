@@ -34,17 +34,18 @@ export async function createIssueWorker(): Promise<void> {
           "create-issue",
           worktreeId,
           async (status, output) => {
-            await removeWorktree(worktreeId);
             try {
-              await removeLabel("issue", issue.number, "cc-create-issue");
-              await removeLabel("issue", issue.number, "cc-in-progress");
+              if (status === "completed") {
+                await notifyTaskCompleted("create-issue", name, issue.number, issue.title, issueUrl);
+              } else {
+                await notifyTaskFailed("create-issue", name, issue.number, issue.title, issueUrl, output);
+              }
             } catch (err) {
-              console.error(`[create-issue] Failed to cleanup labels for issue #${issue.number}: ${err}`);
-            }
-            if (status === "completed") {
-              await notifyTaskCompleted("create-issue", name, issue.number, issue.title, issueUrl);
-            } else {
-              await notifyTaskFailed("create-issue", name, issue.number, issue.title, issueUrl, output);
+              console.error(`[create-issue] post-task error for #${issue.number}: ${err}`);
+            } finally {
+              await removeLabel("issue", issue.number, "cc-create-issue").catch(err => console.error(`[create-issue] removeLabel cc-create-issue failed for #${issue.number}: ${err}`));
+              await removeLabel("issue", issue.number, "cc-in-progress").catch(err => console.error(`[create-issue] removeLabel cc-in-progress failed for #${issue.number}: ${err}`));
+              await removeWorktree(worktreeId).catch(err => console.error(`[create-issue] removeWorktree failed for #${issue.number}: ${err}`));
             }
           },
         );

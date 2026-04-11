@@ -39,20 +39,25 @@ export async function fixReviewPointWorker(): Promise<void> {
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
         syncDefaultBranch(defaultBranch);
         run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", worktreeId, async (status, output) => {
-          await removeWorktree(worktreeId);
-          if (isOnetime) await removeLabel("pr", pr.number, LABEL_FIX_ONETIME);
-          await removeLabel("pr", pr.number, LABEL_IN_PROGRESS);
-          if (status === "completed") {
-            if (config.fixReviewPointCallbackCommentMessage) {
-              try {
-                await commentOnPR(pr.number, config.fixReviewPointCallbackCommentMessage);
-              } catch (err) {
-                console.error(`[fix-review-point] failed to post comment on PR #${pr.number}: ${err}`);
+          try {
+            if (status === "completed") {
+              if (config.fixReviewPointCallbackCommentMessage) {
+                try {
+                  await commentOnPR(pr.number, config.fixReviewPointCallbackCommentMessage);
+                } catch (err) {
+                  console.error(`[fix-review-point] failed to post comment on PR #${pr.number}: ${err}`);
+                }
               }
+              await notifyTaskCompleted("fix-review-point", name, pr.number, pr.title, prUrl);
+            } else {
+              await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl, output);
             }
-            await notifyTaskCompleted("fix-review-point", name, pr.number, pr.title, prUrl);
-          } else {
-            await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl, output);
+          } catch (err) {
+            console.error(`[fix-review-point] post-task error for PR #${pr.number}: ${err}`);
+          } finally {
+            if (isOnetime) await removeLabel("pr", pr.number, LABEL_FIX_ONETIME).catch(err => console.error(`[fix-review-point] removeLabel ${LABEL_FIX_ONETIME} failed for PR #${pr.number}: ${err}`));
+            await removeLabel("pr", pr.number, LABEL_IN_PROGRESS).catch(err => console.error(`[fix-review-point] removeLabel ${LABEL_IN_PROGRESS} failed for PR #${pr.number}: ${err}`));
+            await removeWorktree(worktreeId).catch(err => console.error(`[fix-review-point] removeWorktree failed for PR #${pr.number}: ${err}`));
           }
         });
       }

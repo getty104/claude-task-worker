@@ -37,13 +37,18 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
       const repoUrl = `https://github.com/${owner}/${name}`;
       syncDefaultBranch(defaultBranch);
       run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:triage-issues ${config.maxConcurrentTasks}`], TASK_ID, "Triage Issues", "triage-issues", undefined, async (status, output) => {
-        if (status === "completed") {
-          await notifyTaskCompleted("triage-issues", name, TASK_ID, "Triage Issues", repoUrl);
-        } else {
-          await notifyTaskFailed("triage-issues", name, TASK_ID, "Triage Issues", repoUrl, output);
+        try {
+          if (status === "completed") {
+            await notifyTaskCompleted("triage-issues", name, TASK_ID, "Triage Issues", repoUrl);
+          } else {
+            await notifyTaskFailed("triage-issues", name, TASK_ID, "Triage Issues", repoUrl, output);
+          }
+        } catch (err) {
+          console.error(`[triage-issues] post-task error: ${err}`);
+        } finally {
+          firstRunResolve?.();
+          firstRunResolve = undefined;
         }
-        firstRunResolve?.();
-        firstRunResolve = undefined;
       });
     } catch (err) {
       console.error(`[triage-issues] tick error: ${err}`);

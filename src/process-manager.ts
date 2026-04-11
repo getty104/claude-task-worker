@@ -224,10 +224,15 @@ export function run(command: string, args: string[], id: number, title: string, 
   child.on("close", async (code) => {
     childProcesses.delete(id);
     const output = Buffer.concat(outputChunks).toString("utf-8");
-    await onComplete?.(code === 0 ? "completed" : "failed", output);
+    const finalStatus = code === 0 ? "completed" : "failed";
+    try {
+      await onComplete?.(finalStatus, output);
+    } catch (err) {
+      console.error(`[worker] onComplete error for #${id}: ${err}`);
+    }
     const task = tasks.get(id);
     if (task) {
-      task.status = code === 0 ? "completed" : "failed";
+      task.status = finalStatus;
       task.finishedAt = new Date();
     }
     renderTable();
@@ -236,7 +241,11 @@ export function run(command: string, args: string[], id: number, title: string, 
   child.on("error", async (err) => {
     childProcesses.delete(id);
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
-    await onComplete?.("failed", err.message);
+    try {
+      await onComplete?.("failed", err.message);
+    } catch (callbackErr) {
+      console.error(`[worker] onComplete error for #${id}: ${callbackErr}`);
+    }
     const task = tasks.get(id);
     if (task) {
       task.status = "failed";

@@ -34,14 +34,19 @@ export async function triagePrsWorker(options?: { waitForFirstRun?: boolean }): 
       const repoUrl = `https://github.com/${owner}/${name}`;
       syncDefaultBranch(defaultBranch);
       run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:triage-prs ${config.maxConcurrentTasks}`], TASK_ID, "Triage PRs", "triage-prs", undefined, async (status, output) => {
-        await removeAllAgentWorktrees();
-        if (status === "completed") {
-          await notifyTaskCompleted("triage-prs", name, TASK_ID, "Triage PRs", repoUrl);
-        } else {
-          await notifyTaskFailed("triage-prs", name, TASK_ID, "Triage PRs", repoUrl, output);
+        try {
+          await removeAllAgentWorktrees();
+          if (status === "completed") {
+            await notifyTaskCompleted("triage-prs", name, TASK_ID, "Triage PRs", repoUrl);
+          } else {
+            await notifyTaskFailed("triage-prs", name, TASK_ID, "Triage PRs", repoUrl, output);
+          }
+        } catch (err) {
+          console.error(`[triage-prs] post-task error: ${err}`);
+        } finally {
+          firstRunResolve?.();
+          firstRunResolve = undefined;
         }
-        firstRunResolve?.();
-        firstRunResolve = undefined;
       });
     } catch (err) {
       console.error(`[triage-prs] tick error: ${err}`);
