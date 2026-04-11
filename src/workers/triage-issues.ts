@@ -7,15 +7,10 @@ import { config } from "../config.js";
 const POLLING_INTERVAL_MS = 5 * 60 * 1000;
 const TASK_ID = -1;
 
-export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }): Promise<void> {
+export async function triageIssuesWorker(): Promise<void> {
   const assignee = await getCurrentUser();
   const { owner, name, defaultBranch } = await getRepoInfo();
   console.log(`[triage-issues] Polling issues every 5 minutes for ${name}`);
-
-  let firstRunResolve: (() => void) | undefined;
-  const firstRunPromise = options?.waitForFirstRun
-    ? new Promise<void>(resolve => { firstRunResolve = resolve; })
-    : undefined;
 
   const tick = async () => {
     if (isShuttingDown()) return;
@@ -28,11 +23,7 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
         issue => !issue.labels.some(l => EXCLUDE_LABELS.includes(l.name))
       );
 
-      if (candidates.length === 0) {
-        firstRunResolve?.();
-        firstRunResolve = undefined;
-        return;
-      }
+      if (candidates.length === 0) return;
 
       const repoUrl = `https://github.com/${owner}/${name}`;
       syncDefaultBranch(defaultBranch);
@@ -45,20 +36,14 @@ export async function triageIssuesWorker(options?: { waitForFirstRun?: boolean }
           }
         } catch (err) {
           console.error(`[triage-issues] post-task error: ${err}`);
-        } finally {
-          firstRunResolve?.();
-          firstRunResolve = undefined;
         }
       });
     } catch (err) {
       console.error(`[triage-issues] tick error: ${err}`);
       await notifyError("triage-issues", name, err);
-      firstRunResolve?.();
-      firstRunResolve = undefined;
     }
   };
 
   await tick();
   setInterval(tick, POLLING_INTERVAL_MS);
-  if (firstRunPromise) await firstRunPromise;
 }
