@@ -33,6 +33,7 @@ export async function execIssueWorker(): Promise<void> {
             await notifyTaskFailed("exec-issue", name, issue.number, issue.title, issueUrl, output);
           }
           await removeLabel("issue", issue.number, "cc-exec-issue");
+          await new Promise(resolve => setTimeout(resolve, 1000));
           await removeLabel("issue", issue.number, "cc-in-progress");
           await removeWorktree(worktreeId);
         });
