@@ -80,12 +80,13 @@ interface PullRequestWithChecks extends PullRequest {
 
 export function isCICompleted(checks: StatusCheck[]): boolean {
   if (checks.length === 0) return true;
+  if (checks.some(check => check.status === "FAILURE")) return true;
   return checks.every(check =>
     check.status === "COMPLETED" ||
     check.state === "SUCCESS" ||
     check.state === "FAILURE" ||
     check.state === "ERROR"
-  );
+  )
 }
 
 export async function listPullRequestsWithChecks(assignee?: string, options?: { triageScope?: boolean }): Promise<PullRequestWithChecks[]> {
