@@ -114,12 +114,13 @@ export async function listPullRequestsWithChecks(assignee?: string, options?: { 
   return prs;
 }
 
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 1000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, baseDelayMs = 1000): Promise<T> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       if (attempt === maxRetries) throw err;
+      const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
       console.error(`[gh] Attempt ${attempt}/${maxRetries} failed, retrying in ${delayMs}ms...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
@@ -128,11 +129,27 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 1000
 }
 
 export async function addLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
-  await withRetry(() => execGh([type, "edit", String(number), "--add-label", label]));
+  await withRetry(async () => {
+    try {
+      await execGh([type, "edit", String(number), "--add-label", label]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("already exists") || message.includes("already has")) return;
+      throw err;
+    }
+  });
 }
 
 export async function removeLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
-  await withRetry(() => execGh([type, "edit", String(number), "--remove-label", label]));
+  await withRetry(async () => {
+    try {
+      await execGh([type, "edit", String(number), "--remove-label", label]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("not found") || message.includes("does not exist") || message.includes("could not remove")) return;
+      throw err;
+    }
+  });
 }
 
 export async function getLastIssueComment(issueNumber: number): Promise<{ author: string; body: string } | null> {
