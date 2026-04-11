@@ -43,7 +43,7 @@ export async function getRepoInfo(): Promise<RepoInfo> {
   return { owner: parsed.owner.login, name: parsed.name, defaultBranch: parsed.defaultBranchRef.name };
 }
 
-export async function listIssues(assignee: string, label: string): Promise<Issue[]> {
+export async function listIssuesByLabel(assignee: string, label: string): Promise<Issue[]> {
   const output = await execGh([
     "issue", "list",
     "--assignee", assignee,
@@ -54,7 +54,7 @@ export async function listIssues(assignee: string, label: string): Promise<Issue
   return JSON.parse(output);
 }
 
-export async function listAllIssues(assignee: string, limit: number = 5): Promise<Issue[]> {
+export async function listTriageScopeIssues(assignee: string, limit: number = 5): Promise<Issue[]> {
   const output = await execGh([
     "issue", "list",
     "--assignee", assignee,

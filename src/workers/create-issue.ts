@@ -1,4 +1,4 @@
-import { getCurrentUser, getRepoInfo, listIssues, removeLabel, addLabel } from "../gh";
+import { getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
@@ -14,7 +14,7 @@ export async function createIssueWorker(): Promise<void> {
   const tick = async () => {
     if (isShuttingDown()) return;
     try {
-      const issues = await listIssues(user, "cc-create-issue");
+      const issues = await listIssuesByLabel(user, "cc-create-issue");
 
       for (const issue of issues) {
         if (issue.labels.some(l => l.name === "cc-in-progress")) continue;
