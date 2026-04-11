@@ -5,13 +5,14 @@ import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { removeAllAgentWorktrees } from "../worktree";
 import { config } from "../config.js";
 
-const POLLING_INTERVAL_MS = 10 * 60 * 1000;
+const INTERVAL_MINUTE = 10;
+const POLLING_INTERVAL_MS = INTERVAL_MINUTE * 60 * 1000;
 const TASK_ID = -2;
 
 export async function triagePrsWorker(): Promise<void> {
   const { owner, name, defaultBranch } = await getRepoInfo();
   const user = await getCurrentUser();
-  console.log(`[triage-prs] Polling PRs every 5 minutes for ${name} (assignee: ${user})`);
+  console.log(`[triage-prs] Polling PRs every ${INTERVAL_MINUTE} minutes for ${name} (assignee: ${user})`);
 
   const tick = async () => {
     if (isShuttingDown()) return;

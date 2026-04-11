@@ -4,13 +4,14 @@ import { isRunning, isShuttingDown, run } from "../process-manager";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { config } from "../config.js";
 
-const POLLING_INTERVAL_MS = 10 * 60 * 1000;
+const INTERVAL_MINUTE = 10;
+const POLLING_INTERVAL_MS = INTERVAL_MINUTE * 60 * 1000;
 const TASK_ID = -1;
 
 export async function triageIssuesWorker(): Promise<void> {
   const assignee = await getCurrentUser();
   const { owner, name, defaultBranch } = await getRepoInfo();
-  console.log(`[triage-issues] Polling issues every 5 minutes for ${name}`);
+  console.log(`[triage-issues] Polling issues every ${INTERVAL_MINUTE} minutes for ${name}`);
 
   const tick = async () => {
     if (isShuttingDown()) return;
