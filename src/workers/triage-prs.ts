@@ -5,7 +5,7 @@ import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { removeAllAgentWorktrees } from "../worktree";
 import { config } from "../config.js";
 
-const INTERVAL_MINUTE = 10;
+const INTERVAL_MINUTE = 5;
 const POLLING_INTERVAL_MS = INTERVAL_MINUTE * 60 * 1000;
 const TASK_ID = -2;
 
