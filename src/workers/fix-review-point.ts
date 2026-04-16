@@ -4,7 +4,7 @@ import { isRunning, isWorkerAtCapacity, isWorkerRunning, isShuttingDown, run } f
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { config } from "../config";
-import { removeWorktree } from "../worktree";
+import { removeWorktree, removeWorktreeByBranch } from "../worktree";
 const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "cc-fix-onetime";
 const LABEL_FIX_REPEAT = "cc-fix-repeat";
@@ -35,6 +35,7 @@ export async function fixReviewPointWorker(): Promise<void> {
         const isOnetime = pr.labels.some((l) => l.name === LABEL_FIX_ONETIME);
         const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
 
+        await removeWorktreeByBranch(pr.headRefName);
         const worktreeId = generateWorktreeName();
         await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
         syncDefaultBranch(defaultBranch);
