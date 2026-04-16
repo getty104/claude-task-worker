@@ -6,12 +6,14 @@ import { DEFAULT_CONFIG, CONFIG_PATH } from "../config.js";
 const LABELS: { name: string; color: string }[] = [
   { name: "cc-create-issue", color: "0075ca" },
   { name: "cc-update-issue", color: "e4e669" },
+  { name: "cc-answer-questions", color: "5319e7" },
   { name: "cc-exec-issue",   color: "7057ff" },
   { name: "cc-fix-onetime",  color: "d93f0b" },
   { name: "cc-fix-repeat",   color: "b60205" },
   { name: "cc-in-progress",  color: "0e8a16" },
   { name: "cc-issue-created", color: "f9a825" },
   { name: "cc-pr-created",    color: "006b75" },
+  { name: "cc-triage",        color: "d4c5f9" },
   { name: "cc-triage-scope",  color: "c5def5" },
 ];
 

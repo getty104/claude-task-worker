@@ -4,6 +4,8 @@ import { execIssueWorker } from "./workers/exec-issue";
 import { fixReviewPointWorker } from "./workers/fix-review-point";
 import { createIssueWorker } from "./workers/create-issue";
 import { updateIssueWorker } from "./workers/update-issue";
+import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
+import { triageIssueWorker } from "./workers/triage-issue";
 import { triageIssuesWorker } from "./workers/triage-issues";
 import { triagePrsWorker } from "./workers/triage-prs";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
@@ -15,6 +17,8 @@ const WORKERS: Record<string, () => Promise<void>> = {
   "fix-review-point": fixReviewPointWorker,
   "create-issue": createIssueWorker,
   "update-issue": updateIssueWorker,
+  "answer-issue-questions": answerIssueQuestionsWorker,
+  "triage-issue": triageIssueWorker,
   "triage-issues": triageIssuesWorker,
   "triage-prs": triagePrsWorker,
 };
@@ -31,6 +35,8 @@ Workers:
   fix-review-point  Poll PRs and run /fix-review-point
   create-issue      Poll issues and run /create-issue
   update-issue      Poll issues and run update command
+  answer-issue-questions  Poll issues and run /answer-questions
+  triage-issue      Poll cc-triage issues and run /triage-issues per issue
   triage-issues     Poll and triage issues every 5 minutes
   triage-prs        Poll and triage PRs every 5 minutes
   all               Poll all workers (except triage)
@@ -87,10 +93,10 @@ if (workerType === "init") {
     await send({ text: `📊 Usage${text}` });
   })();
 } else if (workerType === "all") {
-  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
+  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker()]);
 } else if (workerType === "yolo") {
   (async () => {
-    await Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker()]);
+    await Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker()]);
     console.log("[yolo] Workers completed first run, starting triage workers");
     triagePrsWorker();
     triageIssuesWorker();

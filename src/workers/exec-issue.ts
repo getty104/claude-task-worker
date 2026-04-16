@@ -39,7 +39,6 @@ export async function execIssueWorker(): Promise<void> {
           } finally {
             await addLabel("issue", issue.number, LABEL_TRIAGE_SCOPE).catch(err => console.error(`[exec-issue] addLabel ${LABEL_TRIAGE_SCOPE} failed for #${issue.number}: ${err}`));
             await removeLabel("issue", issue.number, "cc-exec-issue").catch(err => console.error(`[exec-issue] removeLabel cc-exec-issue failed for #${issue.number}: ${err}`));
-            await new Promise(resolve => setTimeout(resolve, 1000));
             await removeLabel("issue", issue.number, "cc-in-progress").catch(err => console.error(`[exec-issue] removeLabel cc-in-progress failed for #${issue.number}: ${err}`));
             await removeWorktree(worktreeId);
           }
