@@ -9,6 +9,7 @@ const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_FIX_ONETIME = "cc-fix-onetime";
 const LABEL_FIX_REPEAT = "cc-fix-repeat";
 const LABEL_IN_PROGRESS = "cc-in-progress";
+const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 export async function fixReviewPointWorker(): Promise<void> {
   const { owner, name, defaultBranch } = await getRepoInfo();
@@ -56,6 +57,7 @@ export async function fixReviewPointWorker(): Promise<void> {
           } catch (err) {
             console.error(`[fix-review-point] post-task error for PR #${pr.number}: ${err}`);
           } finally {
+            await addLabel("pr", pr.number, LABEL_TRIAGE_SCOPE).catch(err => console.error(`[fix-review-point] addLabel ${LABEL_TRIAGE_SCOPE} failed for PR #${pr.number}: ${err}`));
             if (isOnetime) await removeLabel("pr", pr.number, LABEL_FIX_ONETIME).catch(err => console.error(`[fix-review-point] removeLabel ${LABEL_FIX_ONETIME} failed for PR #${pr.number}: ${err}`));
             await removeLabel("pr", pr.number, LABEL_IN_PROGRESS).catch(err => console.error(`[fix-review-point] removeLabel ${LABEL_IN_PROGRESS} failed for PR #${pr.number}: ${err}`));
             await removeWorktree(worktreeId).catch(err => console.error(`[fix-review-point] removeWorktree failed for PR #${pr.number}: ${err}`));

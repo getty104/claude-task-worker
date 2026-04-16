@@ -5,6 +5,7 @@ import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { removeWorktree } from "../worktree";
 const POLLING_INTERVAL_MS = 30 * 1000;
+const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 export async function createIssueWorker(): Promise<void> {
   const { owner, name, defaultBranch } = await getRepoInfo();
@@ -43,6 +44,7 @@ export async function createIssueWorker(): Promise<void> {
             } catch (err) {
               console.error(`[create-issue] post-task error for #${issue.number}: ${err}`);
             } finally {
+              await addLabel("issue", issue.number, LABEL_TRIAGE_SCOPE).catch(err => console.error(`[create-issue] addLabel ${LABEL_TRIAGE_SCOPE} failed for #${issue.number}: ${err}`));
               await removeLabel("issue", issue.number, "cc-create-issue").catch(err => console.error(`[create-issue] removeLabel cc-create-issue failed for #${issue.number}: ${err}`));
               await removeLabel("issue", issue.number, "cc-in-progress").catch(err => console.error(`[create-issue] removeLabel cc-in-progress failed for #${issue.number}: ${err}`));
               await removeWorktree(worktreeId).catch(err => console.error(`[create-issue] removeWorktree failed for #${issue.number}: ${err}`));
