@@ -78,6 +78,7 @@ export async function listPullRequestsWithChecks(assignee?: string): Promise<Pul
     "pr", "list",
     "--state", "open",
     "--json", "number,title,labels,headRefName,statusCheckRollup",
+    "--search", "sort:created-asc",
     "--limit", "100",
   ];
   if (assignee) {
