@@ -11,6 +11,7 @@ const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 interface IssueWorkerConfig {
   name: string;
   triggerLabel: string;
+  excludeLabel?: string;
   buildPrompt: (issue: Issue) => Promise<string | null> | string | null;
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
@@ -25,8 +26,11 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       if (isShuttingDown()) return;
       try {
         const issues = await listIssuesByLabel(user, config.triggerLabel);
+        const candidates = config.excludeLabel
+          ? issues.filter((issue) => !issue.labels.some((l) => l.name === config.excludeLabel))
+          : issues;
 
-        for (const issue of issues) {
+        for (const issue of candidates) {
           if (issue.labels.some(l => l.name === "cc-in-progress")) continue;
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
