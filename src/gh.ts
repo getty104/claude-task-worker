@@ -1,11 +1,9 @@
 import { execFile } from "node:child_process";
 
-interface Issue {
+export interface Issue {
   number: number;
   title: string;
   labels: { name: string }[];
-  body: string;
-  state: string;
 }
 
 interface PullRequest {
@@ -49,32 +47,18 @@ export async function listIssuesByLabel(assignee: string, label: string): Promis
     "--assignee", assignee,
     "--label", label,
     "--json", "number,title,labels",
+    "--search", "sort:created-asc",
     "--limit", "100",
   ]);
   return JSON.parse(output);
 }
 
-export async function listTriageScopeIssues(assignee: string, limit: number = 5): Promise<Issue[]> {
-  const output = await execGh([
-    "issue", "list",
-    "--assignee", assignee,
-    "--label", "cc-triage-scope",
-    "--search", "sort:created-asc",
-    "--json", "number,title,labels",
-    "--limit", String(limit),
-  ]);
-  return JSON.parse(output);
-}
-
 interface StatusCheck {
-  __typename: string;
   status?: string;
   state?: string;
 }
 
-interface PullRequestWithChecks extends PullRequest {
-  url: string;
-  reviewDecision: string;
+export interface PullRequestWithChecks extends PullRequest {
   statusCheckRollup: StatusCheck[];
 }
 
@@ -89,30 +73,19 @@ export function isCICompleted(checks: StatusCheck[]): boolean {
   )
 }
 
-export async function listPullRequestsWithChecks(assignee?: string, options?: { triageScope?: boolean }): Promise<PullRequestWithChecks[]> {
+export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
   const args = [
     "pr", "list",
     "--state", "open",
-    "--json", "number,title,url,labels,headRefName,statusCheckRollup,reviewDecision",
+    "--json", "number,title,labels,headRefName,statusCheckRollup",
     "--limit", "100",
   ];
-  if (options?.triageScope) {
-    args.push("--label", "cc-triage-scope");
-  }
   if (assignee) {
     args.push("--assignee", assignee);
   }
   const output = await execGh(args);
   const prs: PullRequestWithChecks[] = JSON.parse(output);
-
-  if (options?.triageScope) {
-    return prs.filter(pr =>
-      !pr.labels.some(l => l.name === "cc-fix-onetime") &&
-      isCICompleted(pr.statusCheckRollup)
-    );
-  }
-
-  return prs;
+  return prs.filter(pr => isCICompleted(pr.statusCheckRollup));
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, baseDelayMs = 1000): Promise<T> {
@@ -160,10 +133,6 @@ export async function getLastIssueComment(issueNumber: number): Promise<{ author
   if (comments.length === 0) return null;
   const last = comments[comments.length - 1];
   return { author: last.author.login, body: last.body };
-}
-
-export async function commentOnIssue(issueNumber: number, body: string): Promise<void> {
-  await execGh(["issue", "comment", String(issueNumber), "--body", body]);
 }
 
 export async function commentOnPR(prNumber: number, body: string): Promise<void> {

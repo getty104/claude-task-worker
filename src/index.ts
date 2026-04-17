@@ -6,8 +6,7 @@ import { createIssueWorker } from "./workers/create-issue";
 import { updateIssueWorker } from "./workers/update-issue";
 import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
 import { triageIssueWorker } from "./workers/triage-issue";
-import { triageIssuesWorker } from "./workers/triage-issues";
-import { triagePrsWorker } from "./workers/triage-prs";
+import { triagePrWorker } from "./workers/triage-pr";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
 import { init } from "./commands/init";
 import { buildTokenLimitText, send } from "./slack";
@@ -19,8 +18,7 @@ const WORKERS: Record<string, () => Promise<void>> = {
   "update-issue": updateIssueWorker,
   "answer-issue-questions": answerIssueQuestionsWorker,
   "triage-issue": triageIssueWorker,
-  "triage-issues": triageIssuesWorker,
-  "triage-prs": triagePrsWorker,
+  "triage-pr": triagePrWorker,
 };
 
 function printUsage(): void {
@@ -37,8 +35,7 @@ Workers:
   update-issue      Poll issues and run update command
   answer-issue-questions  Poll issues and run /answer-questions
   triage-issue      Poll cc-triage issues and run /triage-issues per issue
-  triage-issues     Poll and triage issues every 5 minutes
-  triage-prs        Poll and triage PRs every 5 minutes
+  triage-pr         Poll and triage PRs every 5 minutes
   all               Poll all workers (except triage)
   yolo              Poll all workers including triage
 
@@ -98,8 +95,7 @@ if (workerType === "init") {
   (async () => {
     await Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker()]);
     console.log("[yolo] Workers completed first run, starting triage workers");
-    triagePrsWorker();
-    triageIssuesWorker();
+    triagePrWorker();
   })();
 } else {
   WORKERS[workerType]();

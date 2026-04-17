@@ -79,14 +79,6 @@ export function isRunning(id: number): boolean {
   return task?.status === "running";
 }
 
-export function isWorkerRunning(workerName: string): boolean {
-  for (const task of tasks.values()) {
-    if (task.workerName === workerName && task.status === "running") {
-      return true;
-    }
-  }
-  return false;
-}
 
 export function isWorkerAtCapacity(workerName: string): boolean {
   let count = 0;

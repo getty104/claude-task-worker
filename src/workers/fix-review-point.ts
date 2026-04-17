@@ -1,75 +1,19 @@
-import { getCurrentUser, getRepoInfo, listPullRequestsWithChecks, isCICompleted, addLabel, removeLabel, commentOnPR } from "../gh";
-import { syncDefaultBranch } from "../git";
-import { isRunning, isWorkerAtCapacity, isWorkerRunning, isShuttingDown, run } from "../process-manager";
-import { generateWorktreeName } from "../random-name";
-import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { commentOnPR } from "../gh";
 import { config } from "../config";
-import { removeWorktree, removeWorktreeByBranch } from "../worktree";
-const POLLING_INTERVAL_MS = 30 * 1000;
-const LABEL_FIX_ONETIME = "cc-fix-onetime";
-const LABEL_FIX_REPEAT = "cc-fix-repeat";
-const LABEL_IN_PROGRESS = "cc-in-progress";
-const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
+import { createPrPollingWorker } from "./pr-worker";
 
-export async function fixReviewPointWorker(): Promise<void> {
-  const { owner, name, defaultBranch } = await getRepoInfo();
-  const user = await getCurrentUser();
-  console.log(`[fix-review-point] Polling PRs every 30 seconds for ${owner}/${name} (assignee: ${user})`);
-
-  const tick = async () => {
-    if (isShuttingDown()) return;
-    try {
-      if (isWorkerRunning("triage-prs")) return;
-
-      const prs = await listPullRequestsWithChecks(user);
-      const candidates = prs.filter((pr) => {
-        const labels = pr.labels.map((l) => l.name);
-        if (labels.includes(LABEL_IN_PROGRESS)) return false;
-        if (!isCICompleted(pr.statusCheckRollup)) return false;
-        return labels.includes(LABEL_FIX_ONETIME) || labels.includes(LABEL_FIX_REPEAT);
-      });
-
-      for (const pr of candidates) {
-        if (isRunning(pr.number)) continue;
-        if (isWorkerAtCapacity("fix-review-point")) break;
-
-        const isOnetime = pr.labels.some((l) => l.name === LABEL_FIX_ONETIME);
-        const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
-
-        await removeWorktreeByBranch(pr.headRefName);
-        const worktreeId = generateWorktreeName();
-        await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-        syncDefaultBranch(defaultBranch);
-        run("claude", ["--dangerously-skip-permissions", "-p", `/base-tools:fix-review-point ${pr.headRefName}`, "--worktree", worktreeId], pr.number, `PR #${pr.number} (${pr.headRefName})`, "fix-review-point", worktreeId, async (status, output) => {
-          try {
-            if (status === "completed") {
-              if (config.fixReviewPointCallbackCommentMessage) {
-                try {
-                  await commentOnPR(pr.number, config.fixReviewPointCallbackCommentMessage);
-                } catch (err) {
-                  console.error(`[fix-review-point] failed to post comment on PR #${pr.number}: ${err}`);
-                }
-              }
-              await notifyTaskCompleted("fix-review-point", name, pr.number, pr.title, prUrl);
-            } else {
-              await notifyTaskFailed("fix-review-point", name, pr.number, pr.title, prUrl, output);
-            }
-          } catch (err) {
-            console.error(`[fix-review-point] post-task error for PR #${pr.number}: ${err}`);
-          } finally {
-            await addLabel("pr", pr.number, LABEL_TRIAGE_SCOPE).catch(err => console.error(`[fix-review-point] addLabel ${LABEL_TRIAGE_SCOPE} failed for PR #${pr.number}: ${err}`));
-            if (isOnetime) await removeLabel("pr", pr.number, LABEL_FIX_ONETIME).catch(err => console.error(`[fix-review-point] removeLabel ${LABEL_FIX_ONETIME} failed for PR #${pr.number}: ${err}`));
-            await removeLabel("pr", pr.number, LABEL_IN_PROGRESS).catch(err => console.error(`[fix-review-point] removeLabel ${LABEL_IN_PROGRESS} failed for PR #${pr.number}: ${err}`));
-            await removeWorktree(worktreeId).catch(err => console.error(`[fix-review-point] removeWorktree failed for PR #${pr.number}: ${err}`));
-          }
-        });
+export const fixReviewPointWorker = createPrPollingWorker({
+  name: "fix-review-point",
+  pollingIntervalMs: 30 * 1000,
+  command: "/base-tools:fix-review-point",
+  triggerLabel: "cc-fix-onetime",
+  onCompleted: async (pr) => {
+    if (config.fixReviewPointCallbackCommentMessage) {
+      try {
+        await commentOnPR(pr.number, config.fixReviewPointCallbackCommentMessage);
+      } catch (err) {
+        console.error(`[fix-review-point] failed to post comment on PR #${pr.number}: ${err}`);
       }
-    } catch (err) {
-      console.error(`[fix-review-point] tick error: ${err}`);
-      await notifyError("fix-review-point", name, err);
     }
-  };
-
-  await tick();
-  setInterval(tick, POLLING_INTERVAL_MS);
-}
+  },
+});
