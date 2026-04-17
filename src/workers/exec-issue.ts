@@ -3,6 +3,7 @@ import { createIssuePollingWorker } from "./issue-worker";
 
 export const execIssueWorker = createIssuePollingWorker({
   name: "exec-issue",
+  pollingIntervalMs: 30 * 1000,
   triggerLabel: "cc-exec-issue",
   buildPrompt: (issue) => `/base-tools:exec-issue ${issue.number} --triage-scope`,
   onCompleted: async (issueNumber) => {

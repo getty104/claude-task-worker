@@ -3,6 +3,7 @@ import { createIssuePollingWorker } from "./issue-worker";
 
 export const updateIssueWorker = createIssuePollingWorker({
   name: "update-issue",
+  pollingIntervalMs: 30 * 1000,
   triggerLabel: "cc-update-issue",
   buildPrompt: async (issue) => {
     const lastComment = await getLastIssueComment(issue.number);

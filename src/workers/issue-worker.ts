@@ -5,13 +5,13 @@ import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { removeWorktree } from "../worktree";
 
-const POLLING_INTERVAL_MS = 30 * 1000;
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 interface IssueWorkerConfig {
   name: string;
+  pollingIntervalMs: number;
   triggerLabel: string;
-  excludeLabel?: string;
+  excludeLabels?: string[];
   buildPrompt: (issue: Issue) => Promise<string | null> | string | null;
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
@@ -20,14 +20,14 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
   return async () => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
-    console.log(`[${config.name}] Polling issues every 30 seconds for ${owner}/${name} (assignee: ${user})`);
+    console.log(`[${config.name}] Polling issues every ${Math.round(config.pollingIntervalMs / 1000)} seconds for ${owner}/${name} (assignee: ${user})`);
 
     const tick = async () => {
       if (isShuttingDown()) return;
       try {
         const issues = await listIssuesByLabel(user, config.triggerLabel);
-        const candidates = config.excludeLabel
-          ? issues.filter((issue) => !issue.labels.some((l) => l.name === config.excludeLabel))
+        const candidates = config.excludeLabels?.length
+          ? issues.filter((issue) => !issue.labels.some((l) => config.excludeLabels!.includes(l.name)))
           : issues;
 
         for (const issue of candidates) {
@@ -83,6 +83,6 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
     };
 
     await tick();
-    setInterval(tick, POLLING_INTERVAL_MS);
+    setInterval(tick, config.pollingIntervalMs);
   };
 }

@@ -5,5 +5,5 @@ export const triagePrWorker = createPrPollingWorker({
   pollingIntervalMs: 5 * 60 * 1000,
   command: "/base-tools:triage-pr",
   triggerLabel: "cc-triage-scope",
-  excludeLabel: "cc-fix-onetime",
+  excludeLabels: ["cc-fix-onetime"],
 });

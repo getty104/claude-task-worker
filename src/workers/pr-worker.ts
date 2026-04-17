@@ -13,7 +13,7 @@ interface PrWorkerConfig {
   pollingIntervalMs: number;
   command: string;
   triggerLabel: string;
-  excludeLabel?: string;
+  excludeLabels?: string[];
   onCompleted?: (pr: PullRequestWithChecks) => Promise<void>;
   onFinally?: (pr: PullRequestWithChecks) => Promise<void>;
 }
@@ -30,7 +30,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
         const prs = await listPullRequestsWithChecks(user);
         const candidates = prs.filter((pr) => {
           const names = pr.labels.map((l) => l.name);
-          return names.includes(config.triggerLabel) && (!config.excludeLabel || !names.includes(config.excludeLabel));
+          return names.includes(config.triggerLabel) && !config.excludeLabels?.some((label) => names.includes(label));
         });
 
         for (const pr of candidates) {
