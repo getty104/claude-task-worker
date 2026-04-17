@@ -7,6 +7,7 @@ import { updateIssueWorker } from "./workers/update-issue";
 import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
 import { triageIssueWorker } from "./workers/triage-issue";
 import { triagePrWorker } from "./workers/triage-pr";
+import { checkDependabotWorker } from "./workers/check-dependabot";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
 import { init } from "./commands/init";
 import { buildTokenLimitText, send } from "./slack";
@@ -19,6 +20,7 @@ const WORKERS: Record<string, () => Promise<void>> = {
   "answer-issue-questions": answerIssueQuestionsWorker,
   "triage-issue": triageIssueWorker,
   "triage-pr": triagePrWorker,
+  "check-dependabot": checkDependabotWorker,
 };
 
 function printUsage(): void {
@@ -36,6 +38,7 @@ Workers:
   answer-issue-questions  Poll issues and run /answer-issue-questions
   triage-issue      Poll cc-triage-scope issues and run /triage-issues per issue
   triage-pr         Poll and triage PRs every 5 minutes
+  check-dependabot  Poll dependabot PRs every 1 hour
   all               Poll all workers (except triage)
   yolo              Poll all workers including triage
 
@@ -96,6 +99,7 @@ if (workerType === "init") {
     await Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker()]);
     console.log("[yolo] Workers completed first run, starting triage workers");
     triagePrWorker();
+    checkDependabotWorker();
   })();
 } else {
   WORKERS[workerType]();
