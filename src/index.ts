@@ -34,7 +34,7 @@ Workers:
   create-issue      Poll issues and run /create-issue
   update-issue      Poll issues and run update command
   answer-issue-questions  Poll issues and run /answer-questions
-  triage-issue      Poll cc-triage issues and run /triage-issues per issue
+  triage-issue      Poll cc-triage-scope issues and run /triage-issues per issue
   triage-pr         Poll and triage PRs every 5 minutes
   all               Poll all workers (except triage)
   yolo              Poll all workers including triage
