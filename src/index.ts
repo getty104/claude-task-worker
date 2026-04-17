@@ -33,7 +33,7 @@ Workers:
   fix-review-point  Poll PRs and run /fix-review-point
   create-issue      Poll issues and run /create-issue
   update-issue      Poll issues and run update command
-  answer-issue-questions  Poll issues and run /answer-questions
+  answer-issue-questions  Poll issues and run /answer-issue-questions
   triage-issue      Poll cc-triage-scope issues and run /triage-issues per issue
   triage-pr         Poll and triage PRs every 5 minutes
   all               Poll all workers (except triage)
