@@ -149,11 +149,11 @@ claude-task-worker <command>
 
 ### all
 
-通常ワーカー6つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, triage-issue）を同時にポーリングする。
+通常ワーカー5つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions）を同時にポーリングする。
 
 ### yolo
 
-すべてのワーカー8つ（`all` + triage-pr + check-dependabot）を同時にポーリングする。
+すべてのワーカー8つ（`all` + triage-issue + triage-pr + check-dependabot）を同時にポーリングする。
 
 ### usage
 

@@ -39,8 +39,8 @@ Workers:
   triage-issue      Poll cc-triage-scope issues and run /triage-issues per issue
   triage-pr         Poll and triage PRs every 5 minutes
   check-dependabot  Poll dependabot PRs every 1 hour
-  all               Poll all workers (except triage)
-  yolo              Poll all workers including triage
+  all               Poll all workers except triage-issue, triage-pr, check-dependabot
+  yolo              Poll all workers including triage-issue, triage-pr, check-dependabot
 
 Example:
   claude-task-worker init
