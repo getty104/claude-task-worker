@@ -93,7 +93,7 @@ if (workerType === "init") {
     await send({ text: `📊 Usage${text}` });
   })();
 } else if (workerType === "all") {
-  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker()]);
+  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker()]);
 } else if (workerType === "yolo") {
   (async () => {
     await Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker(), checkDependabotWorker(), triagePrWorker()]);
