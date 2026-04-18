@@ -2,7 +2,7 @@
 
 GitHub Issues/PRを定期ポーリングし、Claude Codeに処理を委譲するCLIツール。
 
-[base-tools](https://github.com/getty104/claude-code-marketplace) プラグインと組み合わせることで、GitHub Issue の実装からPRのレビュー対応までを自動化する。
+[base-tools](https://github.com/getty104/claude-code-marketplace) プラグインと組み合わせることで、GitHub Issue の実装からPRのレビュー対応、Dependabot PRの対応までを自動化する。
 
 ## アーキテクチャ
 
@@ -11,31 +11,35 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   GitHub                            │
-│  Issue (cc-exec-issue)  ──┐                         │
-│  Issue (cc-create-issue) ─┤                         │
-│  Issue (cc-update-issue) ─┤    ┌──────────────────┐ │
-│  PR (cc-fix-onetime)    ──┼───▶│claude-task-worker│ │
-│  PR (cc-fix-repeat)     ──┘    └────────┬─────────┘ │
-└─────────────────────────────────────────┼───────────┘
-                                          │ invoke
-                                          ▼
-                               ┌─────────────────────┐
-                               │    Claude Code CLI   │
-                               │  + base-tools plugin │
-                               └─────────────────────┘
+│  Issue (cc-exec-issue)              ──┐             │
+│  Issue (cc-create-issue)             ─┤             │
+│  Issue (cc-update-issue)             ─┤             │
+│  Issue (cc-answer-issue-questions)   ─┤  ┌────────────────────┐
+│  Issue (cc-triage-scope)             ─┼─▶│ claude-task-worker │
+│  PR    (cc-fix-onetime)              ─┤  └─────────┬──────────┘
+│  PR    (cc-triage-scope)             ─┤             │
+│  PR    (dependencies, Dependabot)    ─┘             │
+└──────────────────────────────────────────────────────┘
+                                            │ invoke
+                                            ▼
+                                 ┌─────────────────────┐
+                                 │    Claude Code CLI  │
+                                 │  + base-tools plugin│
+                                 └─────────────────────┘
 ```
 
 ### Worker と base-tools スキルの対応
 
-| Label | Worker | 呼び出されるスキル | 間隔 |
+| Worker | トリガーラベル | 呼び出されるスキル | 間隔 |
 |---|---|---|---|
-| `cc-exec-issue` | `exec-issue` | `/base-tools:exec-issue` | 30秒 |
-| `cc-create-issue` | `create-issue` | `/base-tools:create-issue` | 30秒 |
-| `cc-update-issue` | `update-issue` | `/base-tools:update-issue` | 30秒 |
-| `cc-fix-onetime` | `fix-review-point` | `/base-tools:fix-review-point` | 30秒 |
-| `cc-fix-repeat` | `fix-review-point` | `/base-tools:fix-review-point`（繰り返し） | 30秒 |
-| ― | `triage-issues` | `/base-tools:triage-issues` | 10分 |
-| ― | `triage-prs` | `/base-tools:triage-prs` | 10分 |
+| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 30秒 |
+| `create-issue` | `cc-create-issue` | `/base-tools:create-issue` | 30秒 |
+| `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 30秒 |
+| `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 30秒 |
+| `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 30秒 |
+| `triage-issue` | `cc-triage-scope` (Issue) | `/base-tools:triage-issue` | 5分 |
+| `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 5分 |
+| `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
 
 ## セットアップ
 
@@ -55,7 +59,7 @@ npm link
 
 ### 初期化
 
-対象リポジトリで実行すると、必要なGitHubラベル・Issueテンプレート・GitHub Actionsワークフローが作成される。
+対象リポジトリで実行すると、必要なGitHubラベル・Issueテンプレート・GitHub Actionsワークフロー・設定ファイルが作成される。
 
 ```bash
 claude-task-worker init
@@ -63,15 +67,23 @@ claude-task-worker init
 
 作成されるラベル:
 
-| ラベル名 | 色 | 用途 |
-|---------|-----|------|
-| `cc-create-issue` | 🔵 blue | Issue作成トリガー |
-| `cc-update-issue` | 🟡 yellow | Issue更新トリガー |
-| `cc-exec-issue` | 🟣 purple | Issue実行トリガー |
-| `cc-fix-onetime` | 🔴 red | PR修正トリガー（1回） |
-| `cc-fix-repeat` | 🟠 light red | PR修正トリガー（繰り返し） |
-| `cc-in-progress` | 🟢 green | 処理中ステータス |
-| `cc-created-issue` | 🟠 orange | Issue作成完了マーク |
+| ラベル名 | 用途 |
+|---------|------|
+| `cc-create-issue` | Issue作成トリガー |
+| `cc-update-issue` | Issue更新トリガー |
+| `cc-answer-issue-questions` | Issue確認事項への回答トリガー |
+| `cc-exec-issue` | Issue実行トリガー |
+| `cc-fix-onetime` | PR修正トリガー（1回） |
+| `cc-triage-scope` | トリアージ対象マーク（Issue/PR） |
+| `cc-in-progress` | 処理中ステータス |
+| `cc-issue-created` | Issue作成完了マーク |
+| `cc-pr-created` | PR作成完了マーク |
+
+作成されるファイル:
+
+- `.github/ISSUE_TEMPLATE/cc-create-issue.yml` — `cc-create-issue` ラベル付きIssue作成用テンプレート
+- `.github/workflows/assign-creator-on-cc-create-issue.yml` — Issue作成者を自動アサインするワークフロー
+- `~/.config/claude-task-worker.json` — 設定ファイル
 
 ## コマンド
 
@@ -84,94 +96,71 @@ claude-task-worker <command>
 `cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（30秒間隔）
 
 - `cc-in-progress` ラベルを付与
-- `claude -p "/base-tools:exec-issue <issue番号>" --worktree` を非同期で実行
-- 完了後、`cc-exec-issue` ラベルを除去
-
-```bash
-claude-task-worker exec-issue
-```
+- `/base-tools:exec-issue <issue番号> --triage-scope` を非同期で実行
+- 完了後、`cc-exec-issue` ラベルを除去し、`cc-pr-created` ラベルを付与
 
 ### fix-review-point
 
-`cc-fix-onetime` または `cc-fix-repeat` ラベルが付いたPRを定期取得し、Claude Codeで修正を実行する。（30秒間隔）
+`cc-fix-onetime` ラベルが付いたPRを定期取得し、Claude Codeで修正を実行する。（30秒間隔）
 
 - CI完了済みで `cc-in-progress` がないPRが対象
-- `cc-in-progress` ラベルを付与
-- `claude -p "/base-tools:fix-review-point <ブランチ名>" --worktree` を非同期で実行
-- 完了後:
-  - `cc-in-progress` ラベルを除去
-  - `cc-fix-onetime` の場合: ラベルを除去（1回限り）
-  - `cc-fix-repeat` の場合: ラベルを維持（次回のポーリングで再度チェック）
-
-```bash
-claude-task-worker fix-review-point
-```
+- 完了後、設定ファイルに `fixReviewPointCallbackCommentMessage` が設定されていればPRにコメント投稿
 
 ### create-issue
 
 `cc-create-issue` ラベルが付いたIssueを定期取得し、Claude CodeでIssue作成を実行する。（30秒間隔）
 
-- `cc-in-progress` ラベルを付与
-- `claude -p "/base-tools:create-issue #<issue番号>" --worktree` を非同期で実行
-- 完了後、`cc-create-issue` と `cc-in-progress` ラベルを除去し、`cc-created-issue` ラベルを付与
-
-`init` コマンドを実行すると、Issueテンプレート（`.github/ISSUE_TEMPLATE/cc-create-issue.yml`）と自動アサイン用のGitHub Actionsワークフローが作成される。このテンプレートを使ってIssueを作成すると、`cc-create-issue` ラベルの付与と作成者へのアサインが自動で行われるため、ワーカーが即座にIssueを検知して処理を開始できる。
-
-```bash
-claude-task-worker create-issue
-```
+`init` コマンドで作成されるIssueテンプレートを使えば、`cc-create-issue` ラベル付与と作成者アサインが自動で行われ、ワーカーが即座に検知・処理を開始する。
 
 ### update-issue
 
 `cc-update-issue` ラベルが付いたIssueを定期取得し、最新コメントの依頼内容に基づいてClaude CodeでIssue更新を実行する。（30秒間隔）
 
-- `cc-update-issue` ラベルを外し、`cc-in-progress` ラベルを付与
-- Issueの最新コメントを取得し、`claude -p "/base-tools:update-issue"` を非同期で実行
-- 完了後、`cc-update-issue` と `cc-in-progress` ラベルを除去
+### answer-issue-questions
 
-```bash
-claude-task-worker update-issue
-```
+`cc-answer-issue-questions` ラベルが付いたIssueを定期取得し、Issueに記載された確認事項への回答をClaude Codeで生成する。（30秒間隔）
 
-### triage-issues
+- 完了後、`cc-update-issue` ラベルを付与して update-issue ワーカーに引き継ぎ
 
-全Issueを定期取得し、`cc-in-progress` ラベルがないIssueをClaude Codeで自動トリアージする。（10分間隔）
+### triage-issue
 
-```bash
-claude-task-worker triage-issues
-```
+`cc-triage-scope` ラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（5分間隔）
 
-### triage-prs
+- `cc-pr-created` / `cc-create-issue` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
 
-全PRを定期取得し、CI完了済みで `cc-in-progress` ラベルがないPRをClaude Codeで自動トリアージする。（10分間隔）
+### triage-pr
 
-```bash
-claude-task-worker triage-prs
-```
+`cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（5分間隔）
+
+- `cc-fix-onetime` が付いているPRは除外
+
+### check-dependabot
+
+`dependencies` ラベルが付いたDependabot PRを定期取得し、依存ライブラリのバージョンアップ内容を確認する。（1時間間隔）
+
+- `cc-triage-scope` が付いているPRは除外
+- 完了後、`cc-triage-scope` ラベルを付与して triage-pr ワーカーに引き継ぎ
+
+### all
+
+通常ワーカー6つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, triage-issue）を同時にポーリングする。
+
+### yolo
+
+すべてのワーカー8つ（`all` + triage-pr + check-dependabot）を同時にポーリングする。
 
 ### usage
 
 現在のClaude API使用状況をSlackに通知する。
 
-```bash
-claude-task-worker usage
-```
+## 設定ファイル
 
-### all
+`~/.config/claude-task-worker.json`
 
-通常ワーカー4つ（exec-issue, fix-review-point, create-issue, update-issue）を同時にポーリングする。
-
-```bash
-claude-task-worker all
-```
-
-### yolo
-
-すべてのワーカー6つ（通常4つ + triage-issues + triage-prs）を同時にポーリングする。
-
-```bash
-claude-task-worker yolo
-```
+| キー | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `maxConcurrentTasks` | number | 4 | 同時実行可能なタスクの最大数 |
+| `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
 
 ## Slack通知
 
