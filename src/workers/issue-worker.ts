@@ -38,17 +38,18 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           const hadTriageScope = issue.labels.some((l) => l.name === LABEL_TRIAGE_SCOPE);
           await addLabel("issue", issue.number, "cc-in-progress");
 
-          const prompt = await config.buildPrompt(issue);
-          if (prompt === null) {
-            await removeLabel("issue", issue.number, config.triggerLabel).catch(() => {});
-            await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
-            continue;
-          }
+          try {
+            const prompt = await config.buildPrompt(issue);
+            if (prompt === null) {
+              await removeLabel("issue", issue.number, config.triggerLabel).catch(() => {});
+              await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
+              continue;
+            }
 
-          const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
-          const worktreeId = generateWorktreeName();
-          syncDefaultBranch(defaultBranch);
-          run(
+            const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
+            const worktreeId = generateWorktreeName();
+            syncDefaultBranch(defaultBranch);
+            run(
             "claude",
             ["--permission-mode", "auto", "-p", prompt, "--worktree", worktreeId],
             issue.number,
@@ -75,6 +76,11 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               }
             },
           );
+          } catch (err) {
+            console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
+            await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
+            await notifyError(config.name, name, err);
+          }
         }
       } catch (err) {
         console.error(`[${config.name}] tick error: ${err}`);

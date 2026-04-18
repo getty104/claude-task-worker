@@ -41,11 +41,12 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
           const prUrl = `https://github.com/${owner}/${name}/pull/${pr.number}`;
           const hadTriageScope = pr.labels.some((l) => l.name === LABEL_TRIAGE_SCOPE);
 
-          await removeWorktreeByBranch(pr.headRefName);
-          const worktreeId = generateWorktreeName();
           await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-          syncDefaultBranch(defaultBranch);
-          run(
+          try {
+            await removeWorktreeByBranch(pr.headRefName);
+            const worktreeId = generateWorktreeName();
+            syncDefaultBranch(defaultBranch);
+            run(
             "claude",
             ["--permission-mode", "auto", "-p", `${config.command} ${pr.number}`, "--worktree", worktreeId],
             pr.number,
@@ -75,6 +76,11 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               }
             },
           );
+          } catch (err) {
+            console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);
+            await removeLabel("pr", pr.number, LABEL_IN_PROGRESS).catch(() => {});
+            await notifyError(config.name, name, err);
+          }
         }
       } catch (err) {
         console.error(`[${config.name}] tick error: ${err}`);
