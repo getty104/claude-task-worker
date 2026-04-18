@@ -214,7 +214,6 @@ export function run(command: string, args: string[], id: number, title: string, 
   });
 
   child.on("close", async (code) => {
-    childProcesses.delete(id);
     const output = Buffer.concat(outputChunks).toString("utf-8");
     const finalStatus = code === 0 ? "completed" : "failed";
     try {
@@ -227,11 +226,11 @@ export function run(command: string, args: string[], id: number, title: string, 
       task.status = finalStatus;
       task.finishedAt = new Date();
     }
+    childProcesses.delete(id);
     renderTable();
   });
 
   child.on("error", async (err) => {
-    childProcesses.delete(id);
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     try {
       await onComplete?.("failed", err.message);
@@ -243,6 +242,7 @@ export function run(command: string, args: string[], id: number, title: string, 
       task.status = "failed";
       task.finishedAt = new Date();
     }
+    childProcesses.delete(id);
     renderTable();
   });
 }
@@ -260,9 +260,15 @@ export function waitForAllProcesses(): Promise<void> {
   });
 }
 
-export function shutdown(): void {
-  for (const [id, child] of childProcesses) {
-    child.kill("SIGTERM");
-    childProcesses.delete(id);
+export function shutdown(signal: NodeJS.Signals = "SIGTERM"): void {
+  for (const [, child] of childProcesses) {
+    if (!child.pid) continue;
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      try {
+        child.kill(signal);
+      } catch {}
+    }
   }
 }

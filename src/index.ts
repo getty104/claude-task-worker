@@ -65,19 +65,24 @@ process.on("unhandledRejection", (err) => {
   process.exit(1);
 });
 
-process.on("SIGTERM", () => {
-  shutdown();
+process.on("SIGTERM", async () => {
+  if (isShuttingDown()) return;
+  setShuttingDown();
+  shutdown("SIGTERM");
+  await waitForAllProcesses();
   process.exit(0);
 });
 
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   if (isShuttingDown()) {
-    shutdown();
+    shutdown("SIGKILL");
     process.exit(1);
   }
   setShuttingDown();
-  console.log("\n[worker] Waiting for running tasks to complete... (Press Ctrl-C again to force exit)");
-  waitForAllProcesses().then(() => process.exit(0));
+  console.log("\n[worker] Stopping tasks and running cleanup... (Press Ctrl-C again to force exit)");
+  shutdown("SIGTERM");
+  await waitForAllProcesses();
+  process.exit(0);
 });
 
 if (workerType === "init") {
