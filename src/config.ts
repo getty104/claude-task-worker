@@ -7,7 +7,8 @@ interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  maxConcurrentTasks: 4,
+  maxConcurrentTasks: 2,
+  fixReviewPointCallbackCommentMessage: ""
 };
 
 export const CONFIG_PATH = join(process.cwd(), "claude-task-worker.json");
