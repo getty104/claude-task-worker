@@ -68,19 +68,19 @@ process.on("unhandledRejection", (err) => {
 process.on("SIGTERM", async () => {
   if (isShuttingDown()) return;
   setShuttingDown();
-  shutdown("SIGTERM");
+  console.log("\n[worker] Stopping new tasks. Waiting for in-flight tasks to finish... (Send SIGTERM again to force kill)");
   await waitForAllProcesses();
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   if (isShuttingDown()) {
+    console.log("\n[worker] Force killing running tasks...");
     shutdown("SIGKILL");
     process.exit(1);
   }
   setShuttingDown();
-  console.log("\n[worker] Stopping tasks and running cleanup... (Press Ctrl-C again to force exit)");
-  shutdown("SIGTERM");
+  console.log("\n[worker] Stopping new tasks. Waiting for in-flight tasks to finish... (Press Ctrl-C again to force kill)");
   await waitForAllProcesses();
   process.exit(0);
 });
