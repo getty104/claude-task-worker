@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 interface Config {
@@ -11,7 +10,7 @@ export const DEFAULT_CONFIG: Config = {
   maxConcurrentTasks: 4,
 };
 
-export const CONFIG_PATH = join(homedir(), ".config", "claude-task-worker.json");
+export const CONFIG_PATH = join(process.cwd(), "claude-task-worker.json");
 
 function loadConfig(): Config {
   const configPath = CONFIG_PATH;

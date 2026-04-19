@@ -89,7 +89,7 @@ claude-task-worker init
 
 - `.github/ISSUE_TEMPLATE/cc-create-issue.yml` — `cc-create-issue` ラベル付きIssue作成用テンプレート
 - `.github/workflows/assign-creator-on-cc-create-issue.yml` — Issue作成者を自動アサインするワークフロー
-- `~/.config/claude-task-worker.json` — 設定ファイル
+- `claude-task-worker.json` — 設定ファイル（コマンド実行ディレクトリ直下）
 
 ## コマンド
 
@@ -161,7 +161,7 @@ claude-task-worker <command>
 
 ## 設定ファイル
 
-`~/.config/claude-task-worker.json`
+コマンドを実行したディレクトリ直下の `claude-task-worker.json` を読み込む。
 
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|

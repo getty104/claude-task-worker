@@ -1,5 +1,4 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
-import { dirname } from "node:path";
 import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, CONFIG_PATH } from "../config.js";
 
@@ -65,7 +64,6 @@ async function createFileIfNotExists(path: string, content: string): Promise<boo
 }
 
 async function createConfigIfNotExists(): Promise<void> {
-  await mkdir(dirname(CONFIG_PATH), { recursive: true });
   const created = await createFileIfNotExists(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
   console.log(created ? `[init] Created: ${CONFIG_PATH}` : `[init] Already exists: ${CONFIG_PATH}`);
 }
