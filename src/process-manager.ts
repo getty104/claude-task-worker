@@ -215,7 +215,7 @@ export function run(command: string, args: string[], id: number, title: string, 
 
   child.on("close", async (code) => {
     const output = Buffer.concat(outputChunks).toString("utf-8");
-    const finalStatus = code === 0 ? "completed" : "failed";
+    const finalStatus = shuttingDown ? "completed" : code === 0 ? "completed" : "failed";
     try {
       await onComplete?.(finalStatus, output);
     } catch (err) {
