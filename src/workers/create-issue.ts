@@ -1,4 +1,3 @@
-import { addLabel } from "../gh";
 import { createIssuePollingWorker } from "./issue-worker";
 
 export const createIssueWorker = createIssuePollingWorker({
@@ -6,7 +5,4 @@ export const createIssueWorker = createIssuePollingWorker({
   pollingIntervalMs: 30 * 1000,
   triggerLabel: "cc-create-issue",
   buildPrompt: (issue) => `/base-tools:create-issue #${issue.number}`,
-  onCompleted: async (issueNumber) => {
-    await addLabel("issue", issueNumber, "cc-answer-issue-questions");
-  },
 });
