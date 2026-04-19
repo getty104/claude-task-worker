@@ -43,7 +43,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 | `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 30秒 |
 | `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 30秒 |
 | `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 30秒 |
-| `triage-issue` | `cc-triage-scope` (Issue) | `/base-tools:triage-issue` | 5分 |
+| `triage-issue` | `cc-triage-scope` (Issue) | `/base-tools:triage-issue` | 10分 |
 | `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 5分 |
 | `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
 
@@ -130,7 +130,7 @@ claude-task-worker <command>
 
 ### triage-issue
 
-`cc-triage-scope` ラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（5分間隔）
+`cc-triage-scope` ラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（10分間隔）
 
 - `cc-pr-created` / `cc-create-issue` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
 
