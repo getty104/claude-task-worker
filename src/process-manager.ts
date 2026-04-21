@@ -217,7 +217,12 @@ export function run(command: string, args: string[], id: number, title: string, 
     const output = Buffer.concat(outputChunks).toString("utf-8");
     const finalStatus = code === 0 ? "completed" : "failed";
     try {
-      await onComplete?.(finalStatus, output);
+      await Promise.race([
+        onComplete?.(finalStatus, output) ?? Promise.resolve(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("onComplete timed out after 120s")), 120_000).unref(),
+        ),
+      ]);
     } catch (err) {
       console.error(`[worker] onComplete error for #${id}: ${err}`);
     }
@@ -233,7 +238,12 @@ export function run(command: string, args: string[], id: number, title: string, 
   child.on("error", async (err) => {
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     try {
-      await onComplete?.("failed", err.message);
+      await Promise.race([
+        onComplete?.("failed", err.message) ?? Promise.resolve(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("onComplete timed out after 120s")), 120_000).unref(),
+        ),
+      ]);
     } catch (callbackErr) {
       console.error(`[worker] onComplete error for #${id}: ${callbackErr}`);
     }
