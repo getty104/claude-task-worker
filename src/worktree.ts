@@ -1,8 +1,18 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readdir } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
+
+async function forceRemoveIfExists(path: string): Promise<void> {
+  try {
+    await stat(path);
+  } catch {
+    return;
+  }
+  await rm(path, { recursive: true, force: true });
+  console.log(`[worktree] Force removed remaining directory: ${path}`);
+}
 
 export async function removeWorktree(worktreeId: string): Promise<void> {
   const worktreePath = `.claude/worktrees/${worktreeId}`;
@@ -11,6 +21,7 @@ export async function removeWorktree(worktreeId: string): Promise<void> {
   } catch (error) {
     console.error(`[worktree] Failed to remove worktree ${worktreeId}:`, error);
   }
+  await forceRemoveIfExists(worktreePath);
 }
 
 export async function removeWorktreeByBranch(branchName: string): Promise<void> {
@@ -25,8 +36,13 @@ export async function removeWorktreeByBranch(branchName: string): Promise<void> 
       const worktreeLine = entry.split("\n").find(l => l.startsWith("worktree "));
       if (!worktreeLine) continue;
       const worktreePath = worktreeLine.replace("worktree ", "");
-      await execFileAsync("git", ["worktree", "remove", "--force", worktreePath]);
-      console.log(`[worktree] Removed worktree for branch ${branchName}: ${worktreePath}`);
+      try {
+        await execFileAsync("git", ["worktree", "remove", "--force", worktreePath]);
+        console.log(`[worktree] Removed worktree for branch ${branchName}: ${worktreePath}`);
+      } catch (error) {
+        console.error(`[worktree] Failed to remove worktree for branch ${branchName}:`, error);
+      }
+      await forceRemoveIfExists(worktreePath);
     }
   } catch (error) {
     console.error(`[worktree] Failed to remove worktree for branch ${branchName}:`, error);
