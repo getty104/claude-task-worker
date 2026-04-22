@@ -48,7 +48,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             syncDefaultBranch(defaultBranch);
             run(
             "claude",
-            ["--dangerously-skip-permissions", "--model", "sonnet", "-p", `${config.command} ${pr.number}`, "--worktree", worktreeId],
+            ["--dangerously-skip-permissions", "--model", "sonnet", "--effort", "high", "-p", `${config.command} ${pr.number}`, "--worktree", worktreeId],
             pr.number,
             `PR #${pr.number} (${pr.headRefName})`,
             config.name,
