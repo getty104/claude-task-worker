@@ -51,7 +51,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             syncDefaultBranch(defaultBranch);
             run(
             "claude",
-            ["--permission-mode", "auto", "-p", prompt, "--worktree", worktreeId],
+            ["--dangerously-skip-permissions", "--model", "sonnet", "-p", prompt, "--worktree", worktreeId],
             issue.number,
             issue.title,
             config.name,
