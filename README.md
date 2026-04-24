@@ -102,7 +102,7 @@ claude-task-worker <command>
 `cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（30秒間隔）
 
 - `cc-in-progress` ラベルを付与
-- `/base-tools:exec-issue <issue番号> --triage-scope` を非同期で実行
+- `/base-tools:exec-issue <issue番号>` を非同期で実行
 - 完了後、`cc-exec-issue` ラベルを除去し、`cc-pr-created` ラベルを付与
 
 ### fix-review-point
@@ -165,7 +165,7 @@ claude-task-worker <command>
 
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `maxConcurrentTasks` | number | 4 | 同時実行可能なタスクの最大数 |
+| `maxConcurrentTasks` | number | 2 | 同時実行可能なタスクの最大数 |
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
 | `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort` を上書きする設定（詳細は下記） |
 
