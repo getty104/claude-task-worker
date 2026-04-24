@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from "node:child_process";
-import { config } from "./config.js";
+import { loadConfig } from "./config.js";
 
 type TaskStatus = "running" | "completed" | "failed";
 
@@ -87,7 +87,7 @@ export function isWorkerAtCapacity(workerName: string): boolean {
       count++;
     }
   }
-  return count >= config.maxConcurrentTasks;
+  return count >= loadConfig().maxConcurrentTasks;
 }
 
 function formatDuration(start: Date, end: Date = new Date()): string {

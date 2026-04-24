@@ -13,7 +13,7 @@ export const DEFAULT_CONFIG: Config = {
 
 export const CONFIG_PATH = join(process.cwd(), "claude-task-worker.json");
 
-function loadConfig(): Config {
+export function loadConfig(): Config {
   const configPath = CONFIG_PATH;
   let raw: Record<string, unknown>;
   try {
@@ -45,5 +45,3 @@ function loadConfig(): Config {
 
   return result;
 }
-
-export const config = loadConfig();

@@ -1,5 +1,5 @@
 import { commentOnPR } from "../gh";
-import { config } from "../config";
+import { loadConfig } from "../config";
 import { createPrPollingWorker } from "./pr-worker";
 
 export const fixReviewPointWorker = createPrPollingWorker({
@@ -8,6 +8,7 @@ export const fixReviewPointWorker = createPrPollingWorker({
   command: "/base-tools:fix-review-point",
   triggerLabel: "cc-fix-onetime",
   onCompleted: async (pr) => {
+    const config = loadConfig();
     if (config.fixReviewPointCallbackCommentMessage) {
       try {
         await commentOnPR(pr.number, config.fixReviewPointCallbackCommentMessage);
