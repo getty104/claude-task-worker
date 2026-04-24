@@ -1,3 +1,4 @@
+import { getWorkerConfig } from "../config";
 import { type Issue, getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
@@ -49,9 +50,10 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             const worktreeId = generateWorktreeName();
             syncDefaultBranch(defaultBranch);
+            const { model, effort } = getWorkerConfig(config.name);
             run(
             "claude",
-            ["--dangerously-skip-permissions", "--model", "sonnet", "--effort", "high", "-p", prompt, "--worktree", worktreeId],
+            ["--dangerously-skip-permissions", "--model", model, "--effort", effort, "-p", prompt, "--worktree", worktreeId],
             issue.number,
             issue.title,
             config.name,

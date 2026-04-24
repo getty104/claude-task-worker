@@ -1,3 +1,4 @@
+import { getWorkerConfig } from "../config";
 import { type PullRequestWithChecks, getCurrentUser, getRepoInfo, listPullRequestsWithChecks, addLabel, removeLabel } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
@@ -46,9 +47,10 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             await removeWorktreeByBranch(pr.headRefName);
             const worktreeId = generateWorktreeName();
             syncDefaultBranch(defaultBranch);
+            const { model, effort } = getWorkerConfig(config.name);
             run(
             "claude",
-            ["--dangerously-skip-permissions", "--model", "sonnet", "--effort", "high", "-p", `${config.command} ${pr.number}`, "--worktree", worktreeId],
+            ["--dangerously-skip-permissions", "--model", model, "--effort", effort, "-p", `${config.command} ${pr.number}`, "--worktree", worktreeId],
             pr.number,
             `PR #${pr.number} (${pr.headRefName})`,
             config.name,
