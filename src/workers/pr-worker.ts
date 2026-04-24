@@ -57,7 +57,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               try {
                 if (status === "completed") {
                   await config.onCompleted?.(pr);
-                  await notifyTaskCompleted(config.name, name, pr.number, pr.title, prUrl);
+                  await notifyTaskCompleted(config.name, name, pr.number, pr.title, prUrl, output);
                 } else {
                   await notifyTaskFailed(config.name, name, pr.number, pr.title, prUrl, output);
                 }

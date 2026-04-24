@@ -116,10 +116,12 @@ export async function buildTokenLimitText(): Promise<string> {
   return ` | ${emoji} 5h: ${fiveH}% (reset: ${fiveHReset}) / 7d: ${sevenD}% (reset: ${sevenDReset})`;
 }
 
-export async function notifyTaskCompleted(workerName: string, repoName: string, id: number, title: string, url: string): Promise<void> {
+export async function notifyTaskCompleted(workerName: string, repoName: string, id: number, title: string, url: string, output?: string): Promise<void> {
   const tokenText = await buildTokenLimitText();
+  const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
+  const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
   await send({
-    text: `✅ [${workerName}] ${repoName} | Task completed: <${url}|#${id} ${title}>${tokenText}`,
+    text: `✅ [${workerName}] ${repoName} | Task completed: <${url}|#${id} ${title}>${tokenText}${outputBlock}`,
   });
 }
 

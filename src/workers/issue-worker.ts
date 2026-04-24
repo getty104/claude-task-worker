@@ -60,7 +60,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               try {
                 if (status === "completed") {
                   await config.onCompleted?.(issue.number);
-                  await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl);
+                  await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
                 } else {
                   await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
                 }
