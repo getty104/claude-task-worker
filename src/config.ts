@@ -27,6 +27,17 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   effort: "high",
 };
 
+export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
+  "answer-issue-questions": { model: "opus", effort: "high" },
+  "create-issue": { model: "opus", effort: "high" },
+  "update-issue": { model: "sonnet", effort: "high" },
+  "exec-issue": { model: "sonnet", effort: "high" },
+  "fix-review-point": { model: "sonnet", effort: "high" },
+  "triage-issue": { model: "sonnet", effort: "high" },
+  "triage-pr": { model: "sonnet", effort: "high" },
+  "check-dependabot": { model: "sonnet", effort: "high" },
+};
+
 export const DEFAULT_CONFIG: Config = {
   maxConcurrentTasks: 2,
   fixReviewPointCallbackCommentMessage: "",
@@ -35,25 +46,30 @@ export const DEFAULT_CONFIG: Config = {
 
 export const CONFIG_PATH = join(process.cwd(), "claude-task-worker.json");
 
+function defaultsFor(name: string): WorkerRuntimeConfig {
+  return WORKER_DEFAULTS[name] ?? DEFAULT_WORKER_CONFIG;
+}
+
 function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | null {
+  const base = defaultsFor(name);
   if (typeof val !== "object" || val === null || Array.isArray(val)) {
     console.warn(`[config] invalid workers.${name}: expected object, using defaults`);
     return null;
   }
   const entry = val as Record<string, unknown>;
-  const result: WorkerRuntimeConfig = { ...DEFAULT_WORKER_CONFIG };
+  const result: WorkerRuntimeConfig = { ...base };
   if ("model" in entry) {
     if (typeof entry.model === "string" && entry.model.length > 0) {
       result.model = entry.model;
     } else {
-      console.warn(`[config] invalid workers.${name}.model: ${String(entry.model)}, using default ${DEFAULT_WORKER_CONFIG.model}`);
+      console.warn(`[config] invalid workers.${name}.model: ${String(entry.model)}, using default ${base.model}`);
     }
   }
   if ("effort" in entry) {
     if (typeof entry.effort === "string" && entry.effort.length > 0) {
       result.effort = entry.effort;
     } else {
-      console.warn(`[config] invalid workers.${name}.effort: ${String(entry.effort)}, using default ${DEFAULT_WORKER_CONFIG.effort}`);
+      console.warn(`[config] invalid workers.${name}.effort: ${String(entry.effort)}, using default ${base.effort}`);
     }
   }
   return result;
@@ -106,5 +122,5 @@ export function loadConfig(): Config {
 
 export function getWorkerConfig(workerName: string): WorkerRuntimeConfig {
   const config = loadConfig();
-  return config.workers[workerName] ?? { ...DEFAULT_WORKER_CONFIG };
+  return config.workers[workerName] ?? { ...defaultsFor(workerName) };
 }

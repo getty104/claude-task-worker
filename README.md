@@ -167,6 +167,45 @@ claude-task-worker <command>
 |---|---|---|---|
 | `maxConcurrentTasks` | number | 4 | 同時実行可能なタスクの最大数 |
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
+| `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort` を上書きする設定（詳細は下記） |
+
+### ワーカーごとのモデル・effort 設定
+
+`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI に渡す `--model` / `--effort` を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
+
+| ワーカー名 | デフォルト `model` | デフォルト `effort` |
+|---|---|---|
+| `answer-issue-questions` | `opus` | `high` |
+| `create-issue` | `opus` | `high` |
+| `update-issue` | `sonnet` | `high` |
+| `exec-issue` | `sonnet` | `high` |
+| `fix-review-point` | `sonnet` | `high` |
+| `triage-issue` | `sonnet` | `high` |
+| `triage-pr` | `sonnet` | `high` |
+| `check-dependabot` | `sonnet` | `high` |
+
+各フィールドの値:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `model` | string | Claude CLI の `--model` に渡す値（例: `sonnet`, `opus`, `haiku`） |
+| `effort` | string | Claude CLI の `--effort` に渡す値（例: `high`, `medium`, `low`） |
+
+設定例:
+
+```json
+{
+  "maxConcurrentTasks": 2,
+  "workers": {
+    "exec-issue":        { "model": "opus",   "effort": "high" },
+    "fix-review-point":  { "model": "sonnet", "effort": "high" },
+    "triage-pr":         { "effort": "medium" },
+    "check-dependabot":  { "model": "haiku" }
+  }
+}
+```
+
+> 💡 **推奨:** 重い実装タスク（`exec-issue`, `fix-review-point`）では `/advisor` を有効にすることを推奨する。事前/事後に強力なレビューモデルへ相談することで、アプローチの誤りや見落としを早期に検出でき、完了率と品質が向上する。各ワーカーが呼び出すスキルのプロンプト内で `advisor` ツールを活用する運用を推奨。
 
 ## Slack通知
 
