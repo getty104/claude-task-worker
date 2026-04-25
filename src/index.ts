@@ -73,10 +73,15 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
+let forceKilling = false;
 process.on("SIGINT", async () => {
   if (isShuttingDown()) {
-    console.log("\n[worker] Force killing running tasks...");
+    if (forceKilling) return;
+    forceKilling = true;
+    console.log("\n[worker] Force killing running tasks... (cleaning up labels and worktrees)");
     shutdown("SIGKILL");
+    const cleanupTimeout = new Promise<void>((resolve) => setTimeout(resolve, 60_000).unref());
+    await Promise.race([waitForAllProcesses(), cleanupTimeout]);
     process.exit(1);
   }
   setShuttingDown();
