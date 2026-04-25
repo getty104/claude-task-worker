@@ -5,6 +5,8 @@ type TaskStatus = "running" | "completed" | "failed";
 
 const childProcesses = new Map<number, ChildProcess>();
 
+const TASK_TIMEOUT_MS = 60 * 60 * 1000;
+
 function getDisplayWidth(str: string): number {
   let width = 0;
   for (const char of str) {
@@ -213,9 +215,24 @@ export function run(command: string, args: string[], id: number, title: string, 
     outputChunks.push(chunk);
   });
 
+  let timedOut = false;
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    console.error(`[worker] task #${id} timed out after ${TASK_TIMEOUT_MS / 1000}s, terminating`);
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        try { child.kill("SIGTERM"); } catch {}
+      }
+    }
+  }, TASK_TIMEOUT_MS);
+  timeoutHandle.unref();
+
   child.on("close", async (code) => {
-    const output = Buffer.concat(outputChunks).toString("utf-8");
-    const finalStatus = code === 0 ? "completed" : "failed";
+    clearTimeout(timeoutHandle);
+    const output = Buffer.concat(outputChunks).toString("utf-8") + (timedOut ? `\n[worker] task timed out after ${TASK_TIMEOUT_MS / 1000}s` : "");
+    const finalStatus = !timedOut && code === 0 ? "completed" : "failed";
     try {
       await Promise.race([
         onComplete?.(finalStatus, output) ?? Promise.resolve(),
@@ -236,6 +253,7 @@ export function run(command: string, args: string[], id: number, title: string, 
   });
 
   child.on("error", async (err) => {
+    clearTimeout(timeoutHandle);
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     try {
       await Promise.race([
