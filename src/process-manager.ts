@@ -5,7 +5,7 @@ type TaskStatus = "running" | "completed" | "failed";
 
 const childProcesses = new Map<number, ChildProcess>();
 
-const TASK_TIMEOUT_MS = 60 * 60 * 1000;
+const TASK_TIMEOUT_MS = 90 * 60 * 1000;
 
 function getDisplayWidth(str: string): number {
   let width = 0;
