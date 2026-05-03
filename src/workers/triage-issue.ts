@@ -2,7 +2,7 @@ import { createIssuePollingWorker } from "./issue-worker";
 
 export const triageIssueWorker = createIssuePollingWorker({
   name: "triage-issue",
-  pollingIntervalMs: 5 * 60 * 1000,
+  pollingIntervalMs: 15 * 60 * 1000,
   triggerLabels: ["cc-triage-scope"],
   excludeLabels: ["cc-issue-created"],
   buildPrompt: (issue) => `/base-tools:triage-issue ${issue.number}`,
