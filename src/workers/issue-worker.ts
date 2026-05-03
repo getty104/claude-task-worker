@@ -21,7 +21,9 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
   return async () => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
-    console.log(`[${config.name}] Polling issues every ${Math.round(config.pollingIntervalMs / 1000)} seconds for ${owner}/${name} (assignee: ${user})`);
+    console.log(
+      `[${config.name}] Polling issues every ${Math.round(config.pollingIntervalMs / 1000)} seconds for ${owner}/${name} (assignee: ${user})`,
+    );
 
     const tick = async () => {
       if (isShuttingDown()) return;
@@ -32,7 +34,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           : issues;
 
         for (const issue of candidates) {
-          if (issue.labels.some(l => l.name === "cc-in-progress")) continue;
+          if (issue.labels.some((l) => l.name === "cc-in-progress")) continue;
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
 
@@ -54,34 +56,54 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             syncDefaultBranch(defaultBranch);
             const { model, effort } = getWorkerConfig(config.name);
             run(
-            "claude",
-            ["--dangerously-skip-permissions", "--model", model, "--effort", effort, "-p", prompt, "--worktree", worktreeId],
-            issue.number,
-            issue.title,
-            config.name,
-            worktreeId,
-            async (status, output) => {
-              for (const label of config.triggerLabels) {
-                await removeLabel("issue", issue.number, label).catch(err => console.error(`[${config.name}] removeLabel ${label} failed for #${issue.number}: ${err}`));
-              }
-              if (hadTriageScope) {
-                await addLabel("issue", issue.number, LABEL_TRIAGE_SCOPE).catch(err => console.error(`[${config.name}] addLabel ${LABEL_TRIAGE_SCOPE} failed for #${issue.number}: ${err}`));
-              }
-              try {
-                if (status === "completed") {
-                  await config.onCompleted?.(issue.number);
-                  await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
-                } else {
-                  await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+              "claude",
+              [
+                "--dangerously-skip-permissions",
+                "--model",
+                model,
+                "--effort",
+                effort,
+                "-p",
+                prompt,
+                "--worktree",
+                worktreeId,
+              ],
+              issue.number,
+              issue.title,
+              config.name,
+              worktreeId,
+              async (status, output) => {
+                for (const label of config.triggerLabels) {
+                  await removeLabel("issue", issue.number, label).catch((err) =>
+                    console.error(`[${config.name}] removeLabel ${label} failed for #${issue.number}: ${err}`),
+                  );
                 }
-              } catch (err) {
-                console.error(`[${config.name}] post-task error for #${issue.number}: ${err}`);
-              } finally {
-                await removeLabel("issue", issue.number, "cc-in-progress").catch(err => console.error(`[${config.name}] removeLabel cc-in-progress failed for #${issue.number}: ${err}`));
-                await removeWorktree(worktreeId).catch(err => console.error(`[${config.name}] removeWorktree failed for #${issue.number}: ${err}`));
-              }
-            },
-          );
+                if (hadTriageScope) {
+                  await addLabel("issue", issue.number, LABEL_TRIAGE_SCOPE).catch((err) =>
+                    console.error(
+                      `[${config.name}] addLabel ${LABEL_TRIAGE_SCOPE} failed for #${issue.number}: ${err}`,
+                    ),
+                  );
+                }
+                try {
+                  if (status === "completed") {
+                    await config.onCompleted?.(issue.number);
+                    await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
+                  } else {
+                    await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+                  }
+                } catch (err) {
+                  console.error(`[${config.name}] post-task error for #${issue.number}: ${err}`);
+                } finally {
+                  await removeLabel("issue", issue.number, "cc-in-progress").catch((err) =>
+                    console.error(`[${config.name}] removeLabel cc-in-progress failed for #${issue.number}: ${err}`),
+                  );
+                  await removeWorktree(worktreeId).catch((err) =>
+                    console.error(`[${config.name}] removeWorktree failed for #${issue.number}: ${err}`),
+                  );
+                }
+              },
+            );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
             await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});

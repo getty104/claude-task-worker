@@ -29,11 +29,11 @@ export async function removeWorktreeByBranch(branchName: string): Promise<void> 
     const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain"]);
     const entries = stdout.trim().split("\n\n").filter(Boolean);
     for (const entry of entries) {
-      const branchLine = entry.split("\n").find(l => l.startsWith("branch "));
+      const branchLine = entry.split("\n").find((l) => l.startsWith("branch "));
       if (!branchLine) continue;
       const branch = branchLine.replace("branch refs/heads/", "");
       if (branch !== branchName) continue;
-      const worktreeLine = entry.split("\n").find(l => l.startsWith("worktree "));
+      const worktreeLine = entry.split("\n").find((l) => l.startsWith("worktree "));
       if (!worktreeLine) continue;
       const worktreePath = worktreeLine.replace("worktree ", "");
       try {
@@ -57,7 +57,7 @@ export async function removeAllAgentWorktrees(): Promise<void> {
   } catch {
     return;
   }
-  const agentDirs = entries.filter(e => e.startsWith("agent-"));
+  const agentDirs = entries.filter((e) => e.startsWith("agent-"));
   for (const dir of agentDirs) {
     try {
       await execFileAsync("git", ["worktree", "remove", "--force", `${worktreesDir}/${dir}`]);

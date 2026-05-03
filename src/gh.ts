@@ -44,12 +44,17 @@ export async function getRepoInfo(): Promise<RepoInfo> {
 export async function listIssuesByLabel(assignee: string, labels: string[]): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
   const output = await execGh([
-    "issue", "list",
-    "--assignee", assignee,
+    "issue",
+    "list",
+    "--assignee",
+    assignee,
     ...labelArgs,
-    "--json", "number,title,labels",
-    "--search", "sort:created-asc",
-    "--limit", "100",
+    "--json",
+    "number,title,labels",
+    "--search",
+    "sort:created-asc",
+    "--limit",
+    "100",
   ]);
   return JSON.parse(output);
 }
@@ -65,29 +70,32 @@ export interface PullRequestWithChecks extends PullRequest {
 
 export function isCICompleted(checks: StatusCheck[]): boolean {
   if (checks.length === 0) return true;
-  if (checks.some(check => check.status === "FAILURE")) return true;
-  return checks.every(check =>
-    check.status === "COMPLETED" ||
-    check.state === "SUCCESS" ||
-    check.state === "FAILURE" ||
-    check.state === "ERROR"
-  )
+  if (checks.some((check) => check.status === "FAILURE")) return true;
+  return checks.every(
+    (check) =>
+      check.status === "COMPLETED" || check.state === "SUCCESS" || check.state === "FAILURE" || check.state === "ERROR",
+  );
 }
 
 export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
   const args = [
-    "pr", "list",
-    "--state", "open",
-    "--json", "number,title,labels,headRefName,statusCheckRollup",
-    "--search", "sort:created-asc",
-    "--limit", "100",
+    "pr",
+    "list",
+    "--state",
+    "open",
+    "--json",
+    "number,title,labels,headRefName,statusCheckRollup",
+    "--search",
+    "sort:created-asc",
+    "--limit",
+    "100",
   ];
   if (assignee) {
     args.push("--assignee", assignee);
   }
   const output = await execGh(args);
   const prs: PullRequestWithChecks[] = JSON.parse(output);
-  return prs.filter(pr => isCICompleted(pr.statusCheckRollup));
+  return prs.filter((pr) => isCICompleted(pr.statusCheckRollup));
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, baseDelayMs = 1000): Promise<T> {
@@ -98,7 +106,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, baseDelayMs = 
       if (attempt === maxRetries) throw err;
       const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
       console.error(`[gh] Attempt ${attempt}/${maxRetries} failed, retrying in ${delayMs}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
   throw new Error("unreachable");
@@ -122,7 +130,8 @@ export async function removeLabel(type: "issue" | "pr", number: number, label: s
       await execGh([type, "edit", String(number), "--remove-label", label]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("not found") || message.includes("does not exist") || message.includes("could not remove")) return;
+      if (message.includes("not found") || message.includes("does not exist") || message.includes("could not remove"))
+        return;
       throw err;
     }
   });

@@ -31,15 +31,20 @@ interface UsageInfo {
   sevenDayResetsAt: string;
 }
 
-function extractToken(credentials: any): string {
-  return credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? credentials;
+interface CredentialPayload {
+  claudeAiOauth?: { accessToken?: string };
+  oauth_token?: string;
+  access_token?: string;
+}
+
+function extractToken(credentials: CredentialPayload | string): string {
+  if (typeof credentials === "string") return credentials;
+  return credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? "";
 }
 
 async function getOAuthToken(): Promise<string> {
   try {
-    const { stdout } = await execAsync(
-      'security find-generic-password -s "Claude Code-credentials" -w'
-    );
+    const { stdout } = await execAsync('security find-generic-password -s "Claude Code-credentials" -w');
     return extractToken(JSON.parse(stdout.trim()));
   } catch {
     const raw = readFileSync(join(homedir(), ".claude", ".credentials.json"), "utf-8");
@@ -55,6 +60,7 @@ function readUsageCache(): UsageInfo | null {
       return cached.data as UsageInfo;
     }
   } catch {
+    // ignore
   }
   return null;
 }
@@ -63,6 +69,7 @@ function writeUsageCache(data: UsageInfo): void {
   try {
     writeFileSync(USAGE_CACHE_PATH, JSON.stringify({ timestamp: Date.now(), data }));
   } catch {
+    // ignore
   }
 }
 
@@ -126,7 +133,14 @@ export async function buildTokenLimitText(): Promise<string> {
   return ` | ${emoji} 5h: ${fiveH}% (reset: ${fiveHReset}) / 7d: ${sevenD}% (reset: ${sevenDReset})`;
 }
 
-export async function notifyTaskCompleted(workerName: string, repoName: string, id: number, title: string, url: string, output?: string): Promise<void> {
+export async function notifyTaskCompleted(
+  workerName: string,
+  repoName: string,
+  id: number,
+  title: string,
+  url: string,
+  output?: string,
+): Promise<void> {
   const tokenText = await buildTokenLimitText();
   const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
   const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
@@ -135,7 +149,14 @@ export async function notifyTaskCompleted(workerName: string, repoName: string, 
   });
 }
 
-export async function notifyTaskFailed(workerName: string, repoName: string, id: number, title: string, url: string, output?: string): Promise<void> {
+export async function notifyTaskFailed(
+  workerName: string,
+  repoName: string,
+  id: number,
+  title: string,
+  url: string,
+  output?: string,
+): Promise<void> {
   const tokenText = await buildTokenLimitText();
   const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
   const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";

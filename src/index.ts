@@ -57,7 +57,13 @@ if (!workerType) {
   process.exit(1);
 }
 
-if (workerType !== "all" && workerType !== "yolo" && workerType !== "init" && workerType !== "usage" && !WORKERS[workerType]) {
+if (
+  workerType !== "all" &&
+  workerType !== "yolo" &&
+  workerType !== "init" &&
+  workerType !== "usage" &&
+  !WORKERS[workerType]
+) {
   console.error(`Unknown command: ${workerType}`);
   printUsage();
   process.exit(1);
@@ -71,7 +77,9 @@ process.on("unhandledRejection", (err) => {
 process.on("SIGTERM", async () => {
   if (isShuttingDown()) return;
   setShuttingDown();
-  console.log("\n[worker] Stopping new tasks. Waiting for in-flight tasks to finish... (Send SIGTERM again to force kill)");
+  console.log(
+    "\n[worker] Stopping new tasks. Waiting for in-flight tasks to finish... (Send SIGTERM again to force kill)",
+  );
   await waitForAllProcesses();
   process.exit(0);
 });
@@ -88,7 +96,9 @@ process.on("SIGINT", async () => {
     process.exit(1);
   }
   setShuttingDown();
-  console.log("\n[worker] Stopping new tasks. Waiting for in-flight tasks to finish... (Press Ctrl-C again to force kill)");
+  console.log(
+    "\n[worker] Stopping new tasks. Waiting for in-flight tasks to finish... (Press Ctrl-C again to force kill)",
+  );
   await waitForAllProcesses();
   process.exit(0);
 });
@@ -106,10 +116,26 @@ if (workerType === "init") {
     await send({ text: `📊 Usage${text}` });
   })();
 } else if (workerType === "all") {
-  Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker()]);
+  Promise.all([
+    execIssueWorker(),
+    fixReviewPointWorker(),
+    createIssueWorker(),
+    updateIssueWorker(),
+    answerIssueQuestionsWorker(),
+  ]);
 } else if (workerType === "yolo") {
   (async () => {
-    await Promise.all([execIssueWorker(), fixReviewPointWorker(), createIssueWorker(), updateIssueWorker(), answerIssueQuestionsWorker(), triageIssueWorker(), triageCreatedIssueWorker(), checkDependabotWorker(), triagePrWorker()]);
+    await Promise.all([
+      execIssueWorker(),
+      fixReviewPointWorker(),
+      createIssueWorker(),
+      updateIssueWorker(),
+      answerIssueQuestionsWorker(),
+      triageIssueWorker(),
+      triageCreatedIssueWorker(),
+      checkDependabotWorker(),
+      triagePrWorker(),
+    ]);
   })();
 } else {
   WORKERS[workerType]();

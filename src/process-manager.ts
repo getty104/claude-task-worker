@@ -1,4 +1,5 @@
-import { spawn, ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { loadConfig } from "./config.js";
 
 type TaskStatus = "running" | "completed" | "failed";
@@ -81,7 +82,6 @@ export function isRunning(id: number): boolean {
   return task?.status === "running";
 }
 
-
 export function isWorkerAtCapacity(workerName: string): boolean {
   let count = 0;
   for (const task of tasks.values()) {
@@ -153,12 +153,27 @@ function renderTable(): void {
   const pad = (s: string, w: number, useDisplayWidth = false) =>
     useDisplayWidth ? padToWidth(s, w) : s + " ".repeat(w - s.length);
   const cols = hasPath
-    ? [colWidths.id, colWidths.title, colWidths.worker, colWidths.path!, colWidths.status, colWidths.time, colWidths.duration]
+    ? [
+        colWidths.id,
+        colWidths.title,
+        colWidths.worker,
+        colWidths.path!,
+        colWidths.status,
+        colWidths.time,
+        colWidths.duration,
+      ]
     : [colWidths.id, colWidths.title, colWidths.worker, colWidths.status, colWidths.time, colWidths.duration];
-  const line = (l: string, m: string, r: string, f: string) =>
-    `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
+  const line = (l: string, m: string, r: string, f: string) => `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
 
-  const row = (id: string, title: string, worker: string, path: string, status: string, time: string, duration: string) =>
+  const row = (
+    id: string,
+    title: string,
+    worker: string,
+    path: string,
+    status: string,
+    time: string,
+    duration: string,
+  ) =>
     hasPath
       ? `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(path, colWidths.path!)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`
       : `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`;
@@ -194,7 +209,15 @@ function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-export function run(command: string, args: string[], id: number, title: string, workerName: string, path?: string, onComplete?: (status: "completed" | "failed", output: string) => Promise<void>): void {
+export function run(
+  command: string,
+  args: string[],
+  id: number,
+  title: string,
+  workerName: string,
+  path?: string,
+  onComplete?: (status: "completed" | "failed", output: string) => Promise<void>,
+): void {
   tasks.set(id, {
     id,
     title,
@@ -223,7 +246,11 @@ export function run(command: string, args: string[], id: number, title: string, 
       try {
         process.kill(-child.pid, "SIGTERM");
       } catch {
-        try { child.kill("SIGTERM"); } catch {}
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // ignore
+        }
       }
     }
   }, TASK_TIMEOUT_MS);
@@ -231,7 +258,9 @@ export function run(command: string, args: string[], id: number, title: string, 
 
   child.on("close", async (code) => {
     clearTimeout(timeoutHandle);
-    const output = Buffer.concat(outputChunks).toString("utf-8") + (timedOut ? `\n[worker] task timed out after ${TASK_TIMEOUT_MS / 1000}s` : "");
+    const output =
+      Buffer.concat(outputChunks).toString("utf-8") +
+      (timedOut ? `\n[worker] task timed out after ${TASK_TIMEOUT_MS / 1000}s` : "");
     const finalStatus = !timedOut && code === 0 ? "completed" : "failed";
     try {
       await Promise.race([
@@ -296,7 +325,9 @@ export function shutdown(signal: NodeJS.Signals = "SIGTERM"): void {
     } catch {
       try {
         child.kill(signal);
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
   }
 }
