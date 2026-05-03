@@ -7,6 +7,7 @@ export type WorkerName =
   | "create-issue"
   | "update-issue"
   | "triage-issue"
+  | "triage-created-issue"
   | "fix-review-point"
   | "check-dependabot"
   | "triage-pr";
@@ -34,6 +35,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "exec-issue": { model: "sonnet", effort: "high" },
   "fix-review-point": { model: "sonnet", effort: "high" },
   "triage-issue": { model: "sonnet", effort: "high" },
+  "triage-created-issue": { model: "sonnet", effort: "high" },
   "triage-pr": { model: "sonnet", effort: "high" },
   "check-dependabot": { model: "sonnet", effort: "high" },
 };

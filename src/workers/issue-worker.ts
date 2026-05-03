@@ -11,7 +11,7 @@ const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 interface IssueWorkerConfig {
   name: string;
   pollingIntervalMs: number;
-  triggerLabel: string;
+  triggerLabels: string[];
   excludeLabels?: string[];
   buildPrompt: (issue: Issue) => Promise<string | null> | string | null;
   onCompleted?: (issueNumber: number) => Promise<void>;
@@ -26,7 +26,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
     const tick = async () => {
       if (isShuttingDown()) return;
       try {
-        const issues = await listIssuesByLabel(user, config.triggerLabel);
+        const issues = await listIssuesByLabel(user, config.triggerLabels);
         const candidates = config.excludeLabels?.length
           ? issues.filter((issue) => !issue.labels.some((l) => config.excludeLabels!.includes(l.name)))
           : issues;
@@ -42,7 +42,9 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           try {
             const prompt = await config.buildPrompt(issue);
             if (prompt === null) {
-              await removeLabel("issue", issue.number, config.triggerLabel).catch(() => {});
+              for (const label of config.triggerLabels) {
+                await removeLabel("issue", issue.number, label).catch(() => {});
+              }
               await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
               continue;
             }
@@ -69,7 +71,9 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               } catch (err) {
                 console.error(`[${config.name}] post-task error for #${issue.number}: ${err}`);
               } finally {
-                await removeLabel("issue", issue.number, config.triggerLabel).catch(err => console.error(`[${config.name}] removeLabel ${config.triggerLabel} failed for #${issue.number}: ${err}`));
+                for (const label of config.triggerLabels) {
+                  await removeLabel("issue", issue.number, label).catch(err => console.error(`[${config.name}] removeLabel ${label} failed for #${issue.number}: ${err}`));
+                }
                 if (hadTriageScope) {
                   await addLabel("issue", issue.number, LABEL_TRIAGE_SCOPE).catch(err => console.error(`[${config.name}] addLabel ${LABEL_TRIAGE_SCOPE} failed for #${issue.number}: ${err}`));
                 }

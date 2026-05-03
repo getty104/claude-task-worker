@@ -41,11 +41,12 @@ export async function getRepoInfo(): Promise<RepoInfo> {
   return { owner: parsed.owner.login, name: parsed.name, defaultBranch: parsed.defaultBranchRef.name };
 }
 
-export async function listIssuesByLabel(assignee: string, label: string): Promise<Issue[]> {
+export async function listIssuesByLabel(assignee: string, labels: string[]): Promise<Issue[]> {
+  const labelArgs = labels.flatMap((label) => ["--label", label]);
   const output = await execGh([
     "issue", "list",
     "--assignee", assignee,
-    "--label", label,
+    ...labelArgs,
     "--json", "number,title,labels",
     "--search", "sort:created-asc",
     "--limit", "100",
