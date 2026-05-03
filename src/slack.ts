@@ -1,5 +1,7 @@
 import { exec } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
@@ -29,12 +31,20 @@ interface UsageInfo {
   sevenDayResetsAt: string;
 }
 
-async function getOAuthToken(): Promise<string> {
-  const { stdout } = await execAsync(
-    'security find-generic-password -s "Claude Code-credentials" -w'
-  );
-  const credentials = JSON.parse(stdout.trim());
+function extractToken(credentials: any): string {
   return credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? credentials;
+}
+
+async function getOAuthToken(): Promise<string> {
+  try {
+    const { stdout } = await execAsync(
+      'security find-generic-password -s "Claude Code-credentials" -w'
+    );
+    return extractToken(JSON.parse(stdout.trim()));
+  } catch {
+    const raw = readFileSync(join(homedir(), ".claude", ".credentials.json"), "utf-8");
+    return extractToken(JSON.parse(raw));
+  }
 }
 
 function readUsageCache(): UsageInfo | null {
