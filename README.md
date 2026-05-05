@@ -46,7 +46,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 | `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 30秒 |
 | `triage-issue` | `cc-triage-scope` (Issue) | `/base-tools:triage-issue` | 15分 |
 | `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 30秒 |
-| `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 5分 |
+| `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 30秒 |
 | `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
 
 ## セットアップ
@@ -146,7 +146,7 @@ claude-task-worker <command>
 
 ### triage-pr
 
-`cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（5分間隔）
+`cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（30秒間隔）
 
 - `cc-fix-onetime` が付いているPRは除外
 
