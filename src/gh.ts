@@ -31,6 +31,23 @@ function execGh(args: string[]): Promise<string> {
   });
 }
 
+function execGhAllowExit(args: string[], allowedCodes: number[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("gh", args, (error, stdout, stderr) => {
+      if (error) {
+        const code = (error as NodeJS.ErrnoException & { code?: number }).code;
+        if (typeof code === "number" && allowedCodes.includes(code)) {
+          resolve(stdout.trim());
+          return;
+        }
+        reject(new Error(`gh ${args.join(" ")} failed: ${stderr || error.message}`));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
 export async function getCurrentUser(): Promise<string> {
   return execGh(["api", "user", "--jq", ".login"]);
 }
@@ -59,22 +76,37 @@ export async function listIssuesByLabel(assignee: string, labels: string[]): Pro
   return JSON.parse(output);
 }
 
-interface StatusCheck {
-  status?: string;
-  state?: string;
+export interface PRCheck {
+  state: string;
 }
 
 export interface PullRequestWithChecks extends PullRequest {
-  statusCheckRollup: StatusCheck[];
+  checks: PRCheck[];
 }
 
-export function isCICompleted(checks: StatusCheck[]): boolean {
+const COMPLETED_CHECK_STATES = new Set([
+  "SUCCESS",
+  "FAILURE",
+  "ERROR",
+  "NEUTRAL",
+  "CANCELLED",
+  "SKIPPED",
+  "TIMED_OUT",
+  "ACTION_REQUIRED",
+  "STARTUP_FAILURE",
+  "STALE",
+]);
+
+export function isCICompleted(checks: PRCheck[]): boolean {
   if (checks.length === 0) return true;
-  if (checks.some((check) => check.status === "FAILURE")) return true;
-  return checks.every(
-    (check) =>
-      check.status === "COMPLETED" || check.state === "SUCCESS" || check.state === "FAILURE" || check.state === "ERROR",
-  );
+  if (checks.some((check) => check.state === "FAILURE" || check.state === "ERROR")) return true;
+  return checks.every((check) => COMPLETED_CHECK_STATES.has(check.state));
+}
+
+async function fetchPRChecks(prNumber: number): Promise<PRCheck[]> {
+  const output = await execGhAllowExit(["pr", "checks", String(prNumber), "--json", "state"], [0, 1, 8]);
+  if (!output) return [];
+  return JSON.parse(output) as PRCheck[];
 }
 
 export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
@@ -84,18 +116,21 @@ export async function listPullRequestsWithChecks(assignee?: string): Promise<Pul
     "--state",
     "open",
     "--json",
-    "number,title,labels,headRefName,statusCheckRollup",
+    "number,title,labels,headRefName",
     "--search",
     "sort:created-asc",
     "--limit",
-    "100",
+    "50",
   ];
   if (assignee) {
     args.push("--assignee", assignee);
   }
   const output = await execGh(args);
-  const prs: PullRequestWithChecks[] = JSON.parse(output);
-  return prs.filter((pr) => isCICompleted(pr.statusCheckRollup));
+  const prs: PullRequest[] = JSON.parse(output);
+  const withChecks = await Promise.all(
+    prs.map(async (pr) => ({ ...pr, checks: await fetchPRChecks(pr.number) })),
+  );
+  return withChecks.filter((pr) => isCICompleted(pr.checks));
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, baseDelayMs = 1000): Promise<T> {
