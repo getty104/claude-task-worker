@@ -4,7 +4,7 @@ import { createPrPollingWorker } from "./pr-worker";
 
 export const fixReviewPointWorker = createPrPollingWorker({
   name: "fix-review-point",
-  pollingIntervalMs: 30 * 1000,
+  pollingIntervalMs: 60 * 1000,
   command: "/base-tools:fix-review-point",
   triggerLabel: "cc-fix-onetime",
   onCompleted: async (pr) => {

@@ -71,7 +71,7 @@ export async function listIssuesByLabel(assignee: string, labels: string[]): Pro
     "--search",
     "sort:created-asc",
     "--limit",
-    "100",
+    "20",
   ]);
   return JSON.parse(output);
 }
@@ -120,7 +120,7 @@ export async function listPullRequestsWithChecks(assignee?: string): Promise<Pul
     "--search",
     "sort:created-asc",
     "--limit",
-    "50",
+    "20",
   ];
   if (assignee) {
     args.push("--assignee", assignee);

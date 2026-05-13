@@ -39,14 +39,14 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 
 | Worker | トリガーラベル | 呼び出されるスキル | 間隔 |
 |---|---|---|---|
-| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 30秒 |
-| `create-issue` | `cc-create-issue` | `/base-tools:create-issue` | 30秒 |
-| `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 30秒 |
-| `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 30秒 |
-| `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 30秒 |
+| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 1分 |
+| `create-issue` | `cc-create-issue` | `/base-tools:create-issue` | 1分 |
+| `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 1分 |
+| `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 1分 |
+| `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 1分 |
 | `triage-issue` | `cc-triage-scope` (Issue) | `/base-tools:triage-issue` | 15分 |
-| `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 30秒 |
-| `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 30秒 |
+| `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 1分 |
+| `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 1分 |
 | `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
 
 ## セットアップ
@@ -101,7 +101,7 @@ claude-task-worker <command>
 
 ### exec-issue
 
-`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（30秒間隔）
+`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（1分間隔）
 
 - `cc-in-progress` ラベルを付与
 - `/base-tools:exec-issue <issue番号>` を非同期で実行
@@ -109,24 +109,24 @@ claude-task-worker <command>
 
 ### fix-review-point
 
-`cc-fix-onetime` ラベルが付いたPRを定期取得し、Claude Codeで修正を実行する。（30秒間隔）
+`cc-fix-onetime` ラベルが付いたPRを定期取得し、Claude Codeで修正を実行する。（1分間隔）
 
 - CI完了済みで `cc-in-progress` がないPRが対象
 - 完了後、設定ファイルに `fixReviewPointCallbackCommentMessage` が設定されていればPRにコメント投稿
 
 ### create-issue
 
-`cc-create-issue` ラベルが付いたIssueを定期取得し、Claude CodeでIssue作成を実行する。（30秒間隔）
+`cc-create-issue` ラベルが付いたIssueを定期取得し、Claude CodeでIssue作成を実行する。（1分間隔）
 
 `init` コマンドで作成されるIssueテンプレートを使えば、`cc-create-issue` ラベル付与と作成者アサインが自動で行われ、ワーカーが即座に検知・処理を開始する。
 
 ### update-issue
 
-`cc-update-issue` ラベルが付いたIssueを定期取得し、最新コメントの依頼内容に基づいてClaude CodeでIssue更新を実行する。（30秒間隔）
+`cc-update-issue` ラベルが付いたIssueを定期取得し、最新コメントの依頼内容に基づいてClaude CodeでIssue更新を実行する。（1分間隔）
 
 ### answer-issue-questions
 
-`cc-answer-issue-questions` ラベルが付いたIssueを定期取得し、Issueに記載された確認事項への回答をClaude Codeで生成する。（30秒間隔）
+`cc-answer-issue-questions` ラベルが付いたIssueを定期取得し、Issueに記載された確認事項への回答をClaude Codeで生成する。（1分間隔）
 
 - 完了後、`cc-update-issue` ラベルを付与して update-issue ワーカーに引き継ぎ
 
@@ -139,14 +139,14 @@ claude-task-worker <command>
 
 ### triage-created-issue
 
-`cc-issue-created` と `cc-triage-scope` の両方のラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（30秒間隔）
+`cc-issue-created` と `cc-triage-scope` の両方のラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
 
 - `cc-pr-created` / `cc-create-issue` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
 - 確認事項の有無に応じて `cc-answer-issue-questions` または `cc-exec-issue` ラベルを付与（または不要ならクローズ）
 
 ### triage-pr
 
-`cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（30秒間隔）
+`cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
 
 - `cc-fix-onetime` が付いているPRは除外
 
