@@ -37,11 +37,10 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
     const tick = async () => {
       if (isShuttingDown()) return;
       try {
-        const prs = await listPullRequestsWithChecks(user);
-        const candidates = prs.filter((pr) => {
-          const names = pr.labels.map((l) => l.name);
-          return names.includes(config.triggerLabel) && !config.excludeLabels?.some((label) => names.includes(label));
-        });
+        const prs = await listPullRequestsWithChecks(user, config.triggerLabel);
+        const candidates = config.excludeLabels?.length
+          ? prs.filter((pr) => !pr.labels.some((l) => config.excludeLabels!.includes(l.name)))
+          : prs;
 
         for (const pr of candidates) {
           if (pr.labels.some((l) => l.name === LABEL_IN_PROGRESS)) continue;

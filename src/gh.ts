@@ -71,7 +71,7 @@ export async function listIssuesByLabel(assignee: string, labels: string[]): Pro
     "--search",
     "sort:created-asc",
     "--limit",
-    "20",
+    "10",
   ]);
   return JSON.parse(output);
 }
@@ -109,7 +109,10 @@ async function fetchPRChecks(prNumber: number): Promise<PRCheck[]> {
   return JSON.parse(output) as PRCheck[];
 }
 
-export async function listPullRequestsWithChecks(assignee?: string): Promise<PullRequestWithChecks[]> {
+export async function listPullRequestsWithChecks(
+  assignee?: string,
+  label?: string,
+): Promise<PullRequestWithChecks[]> {
   const args = [
     "pr",
     "list",
@@ -120,10 +123,13 @@ export async function listPullRequestsWithChecks(assignee?: string): Promise<Pul
     "--search",
     "sort:created-asc",
     "--limit",
-    "20",
+    "10",
   ];
   if (assignee) {
     args.push("--assignee", assignee);
+  }
+  if (label) {
+    args.push("--label", label);
   }
   const output = await execGh(args);
   const prs: PullRequest[] = JSON.parse(output);
