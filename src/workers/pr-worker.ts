@@ -64,7 +64,6 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 model,
                 "--effort",
                 effort,
-                "-p",
                 `${config.command} ${pr.number}`,
                 "--worktree",
                 worktreeId,
