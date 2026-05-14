@@ -63,7 +63,6 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 model,
                 "--effort",
                 effort,
-                "-p",
                 prompt,
                 "--worktree",
                 worktreeId,
