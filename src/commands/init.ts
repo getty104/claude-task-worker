@@ -40,12 +40,12 @@ on:
 
 jobs:
   assign:
-    if: contains(github.event.issue.labels.*.name, 'cc-create-issue')
+    if: contains(github.event.issue.labels.*.name, 'cc-triage-scope')
     runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.addAssignees({
