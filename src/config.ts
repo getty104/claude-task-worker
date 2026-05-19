@@ -41,7 +41,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
 };
 
 export const DEFAULT_CONFIG: Config = {
-  maxConcurrentTasks: 2,
+  maxConcurrentTasks: 1,
   fixReviewPointCallbackCommentMessage: "",
   workers: {},
 };

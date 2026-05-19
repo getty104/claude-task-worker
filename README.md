@@ -175,7 +175,7 @@ claude-task-worker <command>
 
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `maxConcurrentTasks` | number | 2 | 同時実行可能なタスクの最大数 |
+| `maxConcurrentTasks` | number | 1 | 同時実行可能なタスクの最大数 |
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
 | `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort` を上書きする設定（詳細は下記） |
 
@@ -206,7 +206,7 @@ claude-task-worker <command>
 
 ```json
 {
-  "maxConcurrentTasks": 2,
+  "maxConcurrentTasks": 1,
   "workers": {
     "exec-issue":        { "model": "opus",   "effort": "high" },
     "fix-review-point":  { "model": "sonnet", "effort": "high" },

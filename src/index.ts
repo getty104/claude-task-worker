@@ -29,7 +29,7 @@ function printUsage(): void {
   console.log(`Usage: claude-task-worker <command>
 
 Commands:
-  init              Create required GitHub labels and config file
+  init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
   usage             Notify current usage to Slack
 
 Workers:
@@ -104,7 +104,8 @@ process.on("SIGINT", async () => {
 });
 
 if (workerType === "init") {
-  init();
+  const force = process.argv.slice(3).includes("--force");
+  init({ force });
 } else if (workerType === "usage") {
   (async () => {
     const text = await buildTokenLimitText();

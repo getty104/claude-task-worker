@@ -21,6 +21,7 @@ description: claude-task-workerでGitHub Issueを作成する
 title: "[claude-task-worker] Issue作成依頼"
 labels:
   - cc-create-issue
+  - cc-triage-scope
 body:
   - type: textarea
     id: request
@@ -55,24 +56,33 @@ jobs:
             });
 `;
 
-async function createFileIfNotExists(path: string, content: string): Promise<boolean> {
+async function writeFileWithMode(path: string, content: string, force: boolean): Promise<"created" | "overwritten" | "skipped"> {
   try {
     await access(path);
-    return false;
+    if (!force) return "skipped";
+    await writeFile(path, content, "utf-8");
+    return "overwritten";
   } catch {
     await writeFile(path, content, "utf-8");
-    return true;
+    return "created";
   }
 }
 
-async function createConfigIfNotExists(): Promise<void> {
-  const initialConfig = { ...DEFAULT_CONFIG, workers: { ...WORKER_DEFAULTS } };
-  const created = await createFileIfNotExists(CONFIG_PATH, JSON.stringify(initialConfig, null, 2));
-  console.log(created ? `[init] Created: ${CONFIG_PATH}` : `[init] Already exists: ${CONFIG_PATH}`);
+function logWriteResult(result: "created" | "overwritten" | "skipped", path: string): void {
+  if (result === "created") console.log(`[init] Created: ${path}`);
+  else if (result === "overwritten") console.log(`[init] Overwritten: ${path}`);
+  else console.log(`[init] Already exists: ${path}`);
 }
 
-export async function init(): Promise<void> {
-  console.log("[init] Creating labels...");
+async function createConfig(force: boolean): Promise<void> {
+  const initialConfig = { ...DEFAULT_CONFIG, workers: { ...WORKER_DEFAULTS } };
+  const result = await writeFileWithMode(CONFIG_PATH, JSON.stringify(initialConfig, null, 2), force);
+  logWriteResult(result, CONFIG_PATH);
+}
+
+export async function init(options: { force?: boolean } = {}): Promise<void> {
+  const force = options.force ?? false;
+  console.log(`[init] Creating labels...${force ? " (force mode)" : ""}`);
 
   for (const label of LABELS) {
     const ok = await createLabel(label.name, label.color, true);
@@ -86,17 +96,15 @@ export async function init(): Promise<void> {
   console.log("[init] Creating issue template...");
   await mkdir(".github/ISSUE_TEMPLATE", { recursive: true });
   const templatePath = ".github/ISSUE_TEMPLATE/cc-create-issue.yml";
-  const templateCreated = await createFileIfNotExists(templatePath, ISSUE_TEMPLATE);
-  console.log(templateCreated ? `[init] Created: ${templatePath}` : `[init] Already exists: ${templatePath}`);
+  logWriteResult(await writeFileWithMode(templatePath, ISSUE_TEMPLATE, force), templatePath);
 
   console.log("[init] Creating GitHub Actions workflow...");
   await mkdir(".github/workflows", { recursive: true });
   const workflowPath = ".github/workflows/assign-creator-on-cc-create-issue.yml";
-  const workflowCreated = await createFileIfNotExists(workflowPath, ASSIGN_CREATOR_WORKFLOW);
-  console.log(workflowCreated ? `[init] Created: ${workflowPath}` : `[init] Already exists: ${workflowPath}`);
+  logWriteResult(await writeFileWithMode(workflowPath, ASSIGN_CREATOR_WORKFLOW, force), workflowPath);
 
   console.log("[init] Creating config file...");
-  await createConfigIfNotExists();
+  await createConfig(force);
 
   console.log("[init] Done.");
 }
