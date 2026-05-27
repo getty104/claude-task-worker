@@ -39,7 +39,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 
 | Worker | トリガーラベル | 呼び出されるスキル | 間隔 |
 |---|---|---|---|
-| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 1分 |
+| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 10分 |
 | `create-issue` | `cc-create-issue` | `/base-tools:create-issue` | 1分 |
 | `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 1分 |
 | `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 1分 |
@@ -101,7 +101,7 @@ claude-task-worker <command>
 
 ### exec-issue
 
-`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（1分間隔）
+`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（10分間隔）
 
 - `cc-in-progress` ラベルを付与
 - `/base-tools:exec-issue <issue番号>` を非同期で実行

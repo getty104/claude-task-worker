@@ -32,7 +32,7 @@ claude-task-worker all             # Run all workers concurrently
 ### Worker共通ライフサイクル
 
 1. `gh api user` / `gh repo view` で現在ユーザー・リポジトリ情報取得
-2. 1分間隔でGitHub APIをポーリング
+2. 一定間隔（ワーカーごとに設定）でGitHub APIをポーリング
 3. ラベル・アサイン条件でフィルタリング
 4. `isRunning()` で重複実行防止
 5. トリガーラベル除去 → `cc-in-progress` ラベル付与
