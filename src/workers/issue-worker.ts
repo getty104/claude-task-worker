@@ -13,6 +13,7 @@ interface IssueWorkerConfig {
   pollingIntervalMs: number;
   triggerLabels: string[];
   excludeLabels?: string[];
+  cooldownAfterCompletionMs?: number;
   buildPrompt: (issue: Issue) => Promise<string | null> | string | null;
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
@@ -25,8 +26,12 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       `[${config.name}] Polling issues every ${Math.round(config.pollingIntervalMs / 1000)} seconds for ${owner}/${name} (assignee: ${user})`,
     );
 
+    const cooldownMs = config.cooldownAfterCompletionMs ?? 0;
+    let lastCompletionAt = 0;
+
     const tick = async () => {
       if (isShuttingDown()) return;
+      if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
         const issues = await listIssuesByLabel(user, config.triggerLabels);
         const candidates = config.excludeLabels?.length
@@ -72,6 +77,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               config.name,
               worktreeId,
               async (status, output) => {
+                lastCompletionAt = Date.now();
                 for (const label of config.triggerLabels) {
                   await removeLabel("issue", issue.number, label).catch((err) =>
                     console.error(`[${config.name}] removeLabel ${label} failed for #${issue.number}: ${err}`),
