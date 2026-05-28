@@ -10,10 +10,8 @@ const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 interface IssueWorkerConfig {
   name: string;
-  pollingIntervalMs: number;
   triggerLabels: string[];
   excludeLabels?: string[];
-  cooldownAfterCompletionMs?: number;
   buildPrompt: (issue: Issue) => Promise<string | null> | string | null;
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
@@ -22,11 +20,13 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
   return async () => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
+    const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
+    const pollingIntervalMs = pollingIntervalSeconds * 1000;
+    const cooldownMs = cooldownSeconds * 1000;
     console.log(
-      `[${config.name}] Polling issues every ${Math.round(config.pollingIntervalMs / 1000)} seconds for ${owner}/${name} (assignee: ${user})`,
+      `[${config.name}] Polling issues every ${pollingIntervalSeconds} seconds for ${owner}/${name} (assignee: ${user})`,
     );
 
-    const cooldownMs = config.cooldownAfterCompletionMs ?? 0;
     let lastCompletionAt = 0;
 
     const tick = async () => {
@@ -122,6 +122,6 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
     };
 
     await tick();
-    setInterval(tick, config.pollingIntervalMs);
+    setInterval(tick, pollingIntervalMs);
   };
 }

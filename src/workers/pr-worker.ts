@@ -18,7 +18,6 @@ const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 interface PrWorkerConfig {
   name: string;
-  pollingIntervalMs: number;
   command: string;
   triggerLabel: string;
   excludeLabels?: string[];
@@ -30,12 +29,18 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
   return async () => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
+    const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
+    const pollingIntervalMs = pollingIntervalSeconds * 1000;
+    const cooldownMs = cooldownSeconds * 1000;
     console.log(
-      `[${config.name}] Polling PRs every ${Math.round(config.pollingIntervalMs / 1000)} seconds for ${owner}/${name} (assignee: ${user})`,
+      `[${config.name}] Polling PRs every ${pollingIntervalSeconds} seconds for ${owner}/${name} (assignee: ${user})`,
     );
+
+    let lastCompletionAt = 0;
 
     const tick = async () => {
       if (isShuttingDown()) return;
+      if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
         const prs = await listPullRequestsWithChecks(user, config.triggerLabel);
         const candidates = config.excludeLabels?.length
@@ -73,6 +78,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               config.name,
               worktreeId,
               async (status, output) => {
+                lastCompletionAt = Date.now();
                 try {
                   if (status === "completed") {
                     await config.onCompleted?.(pr);
@@ -124,6 +130,6 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
     };
 
     await tick();
-    setInterval(tick, config.pollingIntervalMs);
+    setInterval(tick, pollingIntervalMs);
   };
 }

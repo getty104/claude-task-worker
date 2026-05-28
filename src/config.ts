@@ -15,6 +15,8 @@ export type WorkerName =
 export interface WorkerRuntimeConfig {
   model: string;
   effort: string;
+  pollingIntervalSeconds: number;
+  cooldownSeconds: number;
 }
 
 interface Config {
@@ -26,18 +28,20 @@ interface Config {
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   model: "sonnet",
   effort: "high",
+  pollingIntervalSeconds: 60,
+  cooldownSeconds: 0,
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
-  "answer-issue-questions": { model: "opus", effort: "high" },
-  "create-issue": { model: "opus", effort: "high" },
-  "update-issue": { model: "sonnet", effort: "high" },
-  "exec-issue": { model: "sonnet", effort: "high" },
-  "fix-review-point": { model: "sonnet", effort: "high" },
-  "triage-issue": { model: "sonnet", effort: "high" },
-  "triage-created-issue": { model: "sonnet", effort: "high" },
-  "triage-pr": { model: "sonnet", effort: "high" },
-  "check-dependabot": { model: "sonnet", effort: "high" },
+  "answer-issue-questions": { model: "opus", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "create-issue": { model: "opus", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 600 },
+  "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "triage-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 900, cooldownSeconds: 0 },
+  "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "check-dependabot": { model: "sonnet", effort: "high", pollingIntervalSeconds: 3600, cooldownSeconds: 0 },
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -72,6 +76,26 @@ function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | nul
       result.effort = entry.effort;
     } else {
       console.warn(`[config] invalid workers.${name}.effort: ${String(entry.effort)}, using default ${base.effort}`);
+    }
+  }
+  if ("pollingIntervalSeconds" in entry) {
+    const val = entry.pollingIntervalSeconds;
+    if (typeof val === "number" && Number.isFinite(val) && val > 0) {
+      result.pollingIntervalSeconds = val;
+    } else {
+      console.warn(
+        `[config] invalid workers.${name}.pollingIntervalSeconds: ${String(val)}, using default ${base.pollingIntervalSeconds}`,
+      );
+    }
+  }
+  if ("cooldownSeconds" in entry) {
+    const val = entry.cooldownSeconds;
+    if (typeof val === "number" && Number.isFinite(val) && val >= 0) {
+      result.cooldownSeconds = val;
+    } else {
+      console.warn(
+        `[config] invalid workers.${name}.cooldownSeconds: ${String(val)}, using default ${base.cooldownSeconds}`,
+      );
     }
   }
   return result;
