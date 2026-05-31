@@ -84,6 +84,7 @@ claude-task-worker init
 | `cc-fix-onetime` | PR修正トリガー（1回） |
 | `cc-triage-scope` | トリアージ対象マーク（Issue/PR） |
 | `cc-in-progress` | 処理中ステータス |
+| `cc-need-human-check` | 人間の確認が必要なマーク（付与中はIssueワーカーの処理対象から除外される） |
 | `cc-issue-created` | `/base-tools:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
 | `cc-pr-created` | PR作成完了マーク |
 

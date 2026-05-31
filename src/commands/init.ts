@@ -9,6 +9,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-exec-issue", color: "7057ff" },
   { name: "cc-fix-onetime", color: "d93f0b" },
   { name: "cc-in-progress", color: "0e8a16" },
+  { name: "cc-need-human-check", color: "b60205" },
   { name: "cc-issue-created", color: "f9a825" },
   { name: "cc-pr-created", color: "006b75" },
   { name: "cc-triage-scope", color: "c5def5" },

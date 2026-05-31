@@ -39,7 +39,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           : issues;
 
         for (const issue of candidates) {
-          if (issue.labels.some((l) => l.name === "cc-in-progress")) continue;
+          if (issue.labels.some((l) => l.name === "cc-in-progress" || l.name === "cc-need-human-check")) continue;
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
 
