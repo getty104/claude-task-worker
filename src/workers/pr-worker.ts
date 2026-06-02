@@ -42,13 +42,10 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
       if (isShuttingDown()) return;
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
-        const prs = await listPullRequestsWithChecks(user, config.triggerLabel);
-        const candidates = config.excludeLabels?.length
-          ? prs.filter((pr) => !pr.labels.some((l) => config.excludeLabels!.includes(l.name)))
-          : prs;
+        const excludeLabels = [LABEL_IN_PROGRESS, ...(config.excludeLabels ?? [])];
+        const candidates = await listPullRequestsWithChecks(user, config.triggerLabel, excludeLabels);
 
         for (const pr of candidates) {
-          if (pr.labels.some((l) => l.name === LABEL_IN_PROGRESS)) continue;
           if (isRunning(pr.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
 

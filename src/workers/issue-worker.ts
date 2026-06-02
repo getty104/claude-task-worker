@@ -33,13 +33,10 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       if (isShuttingDown()) return;
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
-        const issues = await listIssuesByLabel(user, config.triggerLabels);
-        const candidates = config.excludeLabels?.length
-          ? issues.filter((issue) => !issue.labels.some((l) => config.excludeLabels!.includes(l.name)))
-          : issues;
+        const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
+        const candidates = await listIssuesByLabel(user, config.triggerLabels, excludeLabels);
 
         for (const issue of candidates) {
-          if (issue.labels.some((l) => l.name === "cc-in-progress" || l.name === "cc-need-human-check")) continue;
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
 

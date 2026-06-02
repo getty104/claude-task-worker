@@ -58,8 +58,13 @@ export async function getRepoInfo(): Promise<RepoInfo> {
   return { owner: parsed.owner.login, name: parsed.name, defaultBranch: parsed.defaultBranchRef.name };
 }
 
-export async function listIssuesByLabel(assignee: string, labels: string[]): Promise<Issue[]> {
+export async function listIssuesByLabel(
+  assignee: string,
+  labels: string[],
+  excludeLabels: string[] = [],
+): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
+  const search = ["sort:created-asc", ...excludeLabels.map((label) => `-label:"${label}"`)].join(" ");
   const output = await execGh([
     "issue",
     "list",
@@ -69,7 +74,7 @@ export async function listIssuesByLabel(assignee: string, labels: string[]): Pro
     "--json",
     "number,title,labels",
     "--search",
-    "sort:created-asc",
+    search,
     "--limit",
     "10",
   ]);
@@ -112,7 +117,9 @@ async function fetchPRChecks(prNumber: number): Promise<PRCheck[]> {
 export async function listPullRequestsWithChecks(
   assignee?: string,
   label?: string,
+  excludeLabels: string[] = [],
 ): Promise<PullRequestWithChecks[]> {
+  const search = ["sort:created-asc", ...excludeLabels.map((l) => `-label:"${l}"`)].join(" ");
   const args = [
     "pr",
     "list",
@@ -121,7 +128,7 @@ export async function listPullRequestsWithChecks(
     "--json",
     "number,title,labels,headRefName",
     "--search",
-    "sort:created-asc",
+    search,
     "--limit",
     "10",
   ];
