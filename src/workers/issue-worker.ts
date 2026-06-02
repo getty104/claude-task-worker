@@ -1,5 +1,5 @@
 import { getWorkerConfig } from "../config";
-import { type Issue, getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
+import { getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
@@ -10,9 +10,9 @@ const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 interface IssueWorkerConfig {
   name: string;
+  command: string;
   triggerLabels: string[];
   excludeLabels?: string[];
-  buildPrompt: (issue: Issue) => Promise<string | null> | string | null;
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
 
@@ -47,15 +47,6 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           await addLabel("issue", issue.number, "cc-in-progress");
 
           try {
-            const prompt = await config.buildPrompt(issue);
-            if (prompt === null) {
-              for (const label of config.triggerLabels) {
-                await removeLabel("issue", issue.number, label).catch(() => {});
-              }
-              await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
-              continue;
-            }
-
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             const worktreeId = generateWorktreeName();
             syncDefaultBranch(defaultBranch);
@@ -63,7 +54,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             run(
               "claude",
               [
-                `"${prompt}"`,
+                `"${config.command} ${issue.number}"`,
                 "--dangerously-skip-permissions",
                 "--model",
                 model,

@@ -2,6 +2,7 @@ import { createIssuePollingWorker } from "./issue-worker";
 
 export const triageIssueWorker = createIssuePollingWorker({
   name: "triage-issue",
+  command: "/base-tools:triage-issue",
   triggerLabels: ["cc-triage-scope"],
   excludeLabels: [
     "cc-issue-created",
@@ -11,5 +12,4 @@ export const triageIssueWorker = createIssuePollingWorker({
     "cc-answer-issue-questions",
     "cc-exec-issue",
   ],
-  buildPrompt: (issue) => `/base-tools:triage-issue ${issue.number}`,
 });
