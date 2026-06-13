@@ -33,10 +33,10 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
-  "answer-issue-questions": { model: "opus", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "create-issue": { model: "opus", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "answer-issue-questions": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
+  "create-issue": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
   "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 600 },
+  "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
   "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
   "triage-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 900, cooldownSeconds: 0 },
   "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
