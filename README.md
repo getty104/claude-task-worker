@@ -189,7 +189,7 @@ claude-task-worker <command>
 | `create-issue` | `opus` | `high` | 60 | 0 | 1 |
 | `update-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `exec-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
+| `fix-review-point` | `sonnet` | `high` | 60 | 0 | 2 |
 | `triage-issue` | `sonnet` | `high` | 900 | 0 | 1 |
 | `triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
