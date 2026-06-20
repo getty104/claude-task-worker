@@ -176,25 +176,24 @@ claude-task-worker <command>
 
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `maxConcurrentTasks` | number | 1 | 同時実行可能なタスクの最大数 |
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
-| `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort`、ポーリング間隔、クールダウン時間を上書きする設定（詳細は下記） |
+| `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
 
 ### ワーカーごとの設定
 
-`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI に渡す `--model` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
+`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI に渡す `--model` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間、最大同時実行数を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
 
-| ワーカー名 | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` |
-|---|---|---|---|---|
-| `answer-issue-questions` | `opus` | `high` | 60 | 0 |
-| `create-issue` | `opus` | `high` | 60 | 0 |
-| `update-issue` | `sonnet` | `high` | 60 | 0 |
-| `exec-issue` | `sonnet` | `high` | 60 | 600 |
-| `fix-review-point` | `sonnet` | `high` | 60 | 0 |
-| `triage-issue` | `sonnet` | `high` | 900 | 0 |
-| `triage-created-issue` | `sonnet` | `high` | 60 | 0 |
-| `triage-pr` | `sonnet` | `high` | 60 | 0 |
-| `check-dependabot` | `sonnet` | `high` | 3600 | 0 |
+| ワーカー名 | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
+|---|---|---|---|---|---|
+| `answer-issue-questions` | `opus` | `high` | 60 | 0 | 1 |
+| `create-issue` | `opus` | `high` | 60 | 0 | 1 |
+| `update-issue` | `sonnet` | `high` | 60 | 0 | 1 |
+| `exec-issue` | `sonnet` | `high` | 60 | 0 | 1 |
+| `fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
+| `triage-issue` | `sonnet` | `high` | 900 | 0 | 1 |
+| `triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
+| `triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
+| `check-dependabot` | `sonnet` | `high` | 3600 | 0 | 1 |
 
 各フィールドの値:
 
@@ -204,15 +203,15 @@ claude-task-worker <command>
 | `effort` | string | Claude CLI の `--effort` に渡す値（例: `high`, `medium`, `low`） |
 | `pollingIntervalSeconds` | number | GitHub をポーリングする間隔（秒）。正の数を指定する |
 | `cooldownSeconds` | number | タスク完了後に次のポーリングを停止する時間（秒）。`0` でクールダウンなし |
+| `maxConcurrentTasks` | number | そのワーカーが同時に実行できるタスクの最大数。正の整数を指定する |
 
 設定例:
 
 ```json
 {
-  "maxConcurrentTasks": 1,
   "workers": {
-    "exec-issue":        { "model": "opus",   "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600 },
-    "fix-review-point":  { "model": "sonnet", "effort": "high" },
+    "exec-issue":        { "model": "opus",   "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
+    "fix-review-point":  { "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
     "triage-pr":         { "effort": "medium", "pollingIntervalSeconds": 120 },
     "check-dependabot":  { "model": "haiku", "pollingIntervalSeconds": 7200 }
   }

@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { loadConfig } from "./config.js";
+import { getWorkerConfig } from "./config.js";
 
 type TaskStatus = "running" | "completed" | "failed";
 
@@ -89,7 +89,7 @@ export function isWorkerAtCapacity(workerName: string): boolean {
       count++;
     }
   }
-  return count >= loadConfig().maxConcurrentTasks;
+  return count >= getWorkerConfig(workerName).maxConcurrentTasks;
 }
 
 function formatDuration(start: Date, end: Date = new Date()): string {

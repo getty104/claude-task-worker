@@ -17,10 +17,10 @@ export interface WorkerRuntimeConfig {
   effort: string;
   pollingIntervalSeconds: number;
   cooldownSeconds: number;
+  maxConcurrentTasks: number;
 }
 
 interface Config {
-  maxConcurrentTasks: number;
   fixReviewPointCallbackCommentMessage?: string;
   workers: Record<string, WorkerRuntimeConfig>;
 }
@@ -30,22 +30,22 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   effort: "high",
   pollingIntervalSeconds: 60,
   cooldownSeconds: 0,
+  maxConcurrentTasks: 1,
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
-  "answer-issue-questions": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "create-issue": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "triage-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 900, cooldownSeconds: 0 },
-  "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0 },
-  "check-dependabot": { model: "sonnet", effort: "high", pollingIntervalSeconds: 3600, cooldownSeconds: 0 },
+  "answer-issue-questions": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "create-issue": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 900, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "check-dependabot": { model: "sonnet", effort: "high", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
 };
 
 export const DEFAULT_CONFIG: Config = {
-  maxConcurrentTasks: 1,
   fixReviewPointCallbackCommentMessage: "",
   workers: {},
 };
@@ -98,6 +98,16 @@ function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | nul
       );
     }
   }
+  if ("maxConcurrentTasks" in entry) {
+    const val = entry.maxConcurrentTasks;
+    if (typeof val === "number" && Number.isInteger(val) && val > 0) {
+      result.maxConcurrentTasks = val;
+    } else {
+      console.warn(
+        `[config] invalid workers.${name}.maxConcurrentTasks: ${String(val)}, using default ${base.maxConcurrentTasks}`,
+      );
+    }
+  }
   return result;
 }
 
@@ -114,15 +124,6 @@ export function loadConfig(): Config {
   }
 
   const result: Config = { ...DEFAULT_CONFIG, workers: {} };
-
-  if ("maxConcurrentTasks" in raw) {
-    const val = raw["maxConcurrentTasks"];
-    if (typeof val !== "number" || !Number.isInteger(val) || val <= 0) {
-      console.warn(`[config] invalid maxConcurrentTasks: ${val}, using default ${DEFAULT_CONFIG.maxConcurrentTasks}`);
-    } else {
-      result.maxConcurrentTasks = val;
-    }
-  }
 
   if ("fixReviewPointCallbackCommentMessage" in raw) {
     const val = raw["fixReviewPointCallbackCommentMessage"];
