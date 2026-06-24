@@ -61,6 +61,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             run(
               "claude",
               [
+                "-p",
                 `"${config.command} ${pr.number}"`,
                 "--dangerously-skip-permissions",
                 "--model",

@@ -51,6 +51,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             run(
               "claude",
               [
+                "-p",
                 `"${config.command} ${issue.number}"`,
                 "--dangerously-skip-permissions",
                 "--model",

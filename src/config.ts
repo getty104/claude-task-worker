@@ -38,7 +38,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "create-issue": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 2 },
+  "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "triage-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 900, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },

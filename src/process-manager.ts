@@ -230,12 +230,8 @@ export function run(
   ensureRenderInterval();
   renderTable();
 
-  const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], detached: true });
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
   childProcesses.set(id, child);
-
-  child.stdin?.on("error", () => {});
-  child.stdin?.write("/exit\n");
-  child.stdin?.end();
 
   child.stderr?.resume();
 
