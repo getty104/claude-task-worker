@@ -162,9 +162,25 @@ claude-task-worker <command>
 
 通常ワーカー5つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions）を同時にポーリングする。
 
+`all` と `yolo` には以下のオプションを指定できる。
+
+| オプション | 説明 |
+|---|---|
+| `--project <owner/number>` | 監視対象のIssue/PRをGitHub Projectで絞り込む。`owner` はUser名またはOrganization名、`number` はProject番号（例: `myorg/3`） |
+| `--branch <branchName>` | worktreeのチェックアウト元およびPR作成先のベースブランチを指定する |
+
+オプションの挙動:
+
+- **指定なし**: 設定ファイルの `projects` ルーティングに従い、Issueが所属するプロジェクトに応じてベースブランチを切り替える（マッチしないIssueはデフォルトブランチ）
+- **`--project` のみ**: 指定プロジェクトのIssue/PRに絞る。ベースブランチは `projects[projectId]` があればそれ、なければデフォルトブランチ
+- **`--branch` のみ**: 全Issue/PRを対象に、指定されたブランチをベースとして使用する（`projects` ルーティングは適用されない）
+- **`--project` と `--branch` 両方**: 指定プロジェクトのIssue/PRに絞る。ベースブランチは `projects[projectId]` があればそれを優先し、なければ `--branch` で指定された値
+
+worktree作成時のチェックアウト元ブランチが切り替わるとともに、子プロセスには環境変数 `CC_BASE_BRANCH` が渡される。
+
 ### yolo
 
-すべてのワーカー9つ（`all` + triage-issue + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。
+すべてのワーカー9つ（`all` + triage-issue + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。`all` と同じく `--project` / `--branch` オプションをサポートする。
 
 ### usage
 
@@ -178,6 +194,7 @@ claude-task-worker <command>
 |---|---|---|---|
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
 | `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
+| `projects` | object | `{}` | GitHub Projectの識別子（`owner/number` 形式）をキー、ベースブランチ名を値に持つマップ。`all` / `yolo` 起動時に、Issueが所属するプロジェクトに応じてworktreeのチェックアウト元・PRのベースブランチを切り替える |
 
 ### ワーカーごとの設定
 
@@ -214,6 +231,10 @@ claude-task-worker <command>
     "fix-review-point":  { "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
     "triage-pr":         { "effort": "medium", "pollingIntervalSeconds": 120 },
     "check-dependabot":  { "model": "haiku", "pollingIntervalSeconds": 7200 }
+  },
+  "projects": {
+    "myorg/3": "develop",
+    "myorg/7": "release/v2"
   }
 }
 ```

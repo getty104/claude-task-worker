@@ -2,6 +2,7 @@ import { getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
   getCurrentUser,
+  getPullRequestProjectIds,
   getRepoInfo,
   listPullRequestsWithChecks,
   addLabel,
@@ -11,6 +12,7 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { type WorkerOptions } from "../worker-options";
 import { removeWorktree, removeWorktreeByBranch } from "../worktree";
 
 const LABEL_IN_PROGRESS = "cc-in-progress";
@@ -25,15 +27,18 @@ interface PrWorkerConfig {
   onFinally?: (pr: PullRequestWithChecks) => Promise<void>;
 }
 
-export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<void> {
-  return async () => {
+export function createPrPollingWorker(
+  config: PrWorkerConfig,
+): (options?: WorkerOptions) => Promise<void> {
+  return async (options: WorkerOptions = {}) => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
     const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
     const pollingIntervalMs = pollingIntervalSeconds * 1000;
     const cooldownMs = cooldownSeconds * 1000;
+    const filterLog = options.projectId ? ` project=${options.projectId}` : "";
     console.log(
-      `[${config.name}] Polling PRs every ${pollingIntervalSeconds} seconds for ${owner}/${name} (assignee: ${user})`,
+      `[${config.name}] Polling PRs every ${pollingIntervalSeconds} seconds for ${owner}/${name} (assignee: ${user})${filterLog}`,
     );
 
     let lastCompletionAt = 0;
@@ -43,7 +48,16 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
         const excludeLabels = [LABEL_IN_PROGRESS, ...(config.excludeLabels ?? [])];
-        const candidates = await listPullRequestsWithChecks(user, config.triggerLabel, excludeLabels);
+        const rawCandidates = await listPullRequestsWithChecks(user, config.triggerLabel, excludeLabels);
+
+        const candidates: PullRequestWithChecks[] = [];
+        for (const pr of rawCandidates) {
+          if (options.projectId) {
+            const projectIds = await getPullRequestProjectIds(owner, name, pr.number);
+            if (!projectIds.includes(options.projectId)) continue;
+          }
+          candidates.push(pr);
+        }
 
         for (const pr of candidates) {
           if (isRunning(pr.number)) continue;

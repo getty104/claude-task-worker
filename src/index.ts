@@ -11,9 +11,12 @@ import { triagePrWorker } from "./workers/triage-pr";
 import { checkDependabotWorker } from "./workers/check-dependabot";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
 import { init } from "./commands/init";
+import { loadConfig } from "./config";
+import { resolveProjectNodeId } from "./gh";
 import { buildTokenLimitText, send } from "./slack";
+import type { WorkerOptions } from "./worker-options";
 
-const WORKERS: Record<string, () => Promise<void>> = {
+const WORKERS: Record<string, (options?: WorkerOptions) => Promise<void>> = {
   "exec-issue": execIssueWorker,
   "fix-review-point": fixReviewPointWorker,
   "create-issue": createIssueWorker,
@@ -26,7 +29,7 @@ const WORKERS: Record<string, () => Promise<void>> = {
 };
 
 function printUsage(): void {
-  console.log(`Usage: claude-task-worker <command>
+  console.log(`Usage: claude-task-worker <command> [options]
 
 Commands:
   init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
@@ -45,9 +48,86 @@ Workers:
   all               Poll all workers except triage-issue, triage-created-issue, triage-pr, check-dependabot
   yolo              Poll all workers including triage-issue, triage-created-issue, triage-pr, check-dependabot
 
+Options for all/yolo:
+  --project <owner/number>  Filter target issues/PRs by GitHub Project (e.g. myorg/3)
+  --branch <name>           Base branch for worktree checkout and PR creation
+
 Example:
   claude-task-worker init
-  claude-task-worker exec-issue`);
+  claude-task-worker exec-issue
+  claude-task-worker yolo --project myorg/3 --branch develop`);
+}
+
+function parseFlags(args: string[]): { project?: string; branch?: string } {
+  let project: string | undefined;
+  let branch: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--project" && args[i + 1]) {
+      project = args[i + 1];
+      i++;
+    } else if (a === "--branch" && args[i + 1]) {
+      branch = args[i + 1];
+      i++;
+    }
+  }
+  return { project, branch };
+}
+
+function parseProjectKey(key: string): { owner: string; number: number } | null {
+  const match = key.match(/^([^/\s]+)\/(\d+)$/);
+  if (!match) return null;
+  return { owner: match[1], number: Number(match[2]) };
+}
+
+async function resolveProjectKey(key: string): Promise<string | null> {
+  const parsed = parseProjectKey(key);
+  if (!parsed) {
+    console.error(`[worker] invalid project key: ${key} (expected "owner/number")`);
+    return null;
+  }
+  const nodeId = await resolveProjectNodeId(parsed.owner, parsed.number);
+  if (!nodeId) {
+    console.error(`[worker] could not resolve project ${key} to a node ID`);
+  }
+  return nodeId;
+}
+
+async function resolveProjectsMap(input: Record<string, string>): Promise<Record<string, string>> {
+  const entries = await Promise.all(
+    Object.entries(input).map(async ([key, branch]) => {
+      const nodeId = await resolveProjectKey(key);
+      return nodeId ? ([nodeId, branch] as const) : null;
+    }),
+  );
+  const result: Record<string, string> = {};
+  for (const e of entries) {
+    if (e) result[e[0]] = e[1];
+  }
+  return result;
+}
+
+async function buildWorkerOptions(args: string[]): Promise<WorkerOptions> {
+  const { project, branch } = parseFlags(args);
+  const config = loadConfig();
+  const configProjects = config.projects ?? {};
+
+  if (!project && !branch) {
+    return { projects: await resolveProjectsMap(configProjects) };
+  }
+  if (!project && branch) {
+    return { branch };
+  }
+  const projectNodeId = project ? await resolveProjectKey(project) : undefined;
+  if (project && !projectNodeId) {
+    console.error(`[worker] aborting: --project ${project} could not be resolved`);
+    process.exit(1);
+  }
+  return {
+    projectId: projectNodeId ?? undefined,
+    branch,
+    projects: await resolveProjectsMap(configProjects),
+  };
 }
 
 const workerType = process.argv[2];
@@ -117,25 +197,29 @@ if (workerType === "init") {
     await send({ text: `📊 Usage${text}` });
   })();
 } else if (workerType === "all") {
-  Promise.all([
-    execIssueWorker(),
-    fixReviewPointWorker(),
-    createIssueWorker(),
-    updateIssueWorker(),
-    answerIssueQuestionsWorker(),
-  ]);
+  (async () => {
+    const options = await buildWorkerOptions(process.argv.slice(3));
+    await Promise.all([
+      execIssueWorker(options),
+      fixReviewPointWorker(options),
+      createIssueWorker(options),
+      updateIssueWorker(options),
+      answerIssueQuestionsWorker(options),
+    ]);
+  })();
 } else if (workerType === "yolo") {
   (async () => {
+    const options = await buildWorkerOptions(process.argv.slice(3));
     await Promise.all([
-      execIssueWorker(),
-      fixReviewPointWorker(),
-      createIssueWorker(),
-      updateIssueWorker(),
-      answerIssueQuestionsWorker(),
-      triageIssueWorker(),
-      triageCreatedIssueWorker(),
-      checkDependabotWorker(),
-      triagePrWorker(),
+      execIssueWorker(options),
+      fixReviewPointWorker(options),
+      createIssueWorker(options),
+      updateIssueWorker(options),
+      answerIssueQuestionsWorker(options),
+      triageIssueWorker(options),
+      triageCreatedIssueWorker(options),
+      checkDependabotWorker(options),
+      triagePrWorker(options),
     ]);
   })();
 } else {

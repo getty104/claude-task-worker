@@ -198,6 +198,76 @@ export async function commentOnPR(prNumber: number, body: string): Promise<void>
   await execGh(["pr", "comment", String(prNumber), "--body", body]);
 }
 
+async function fetchProjectIds(
+  resource: "issue" | "pullRequest",
+  owner: string,
+  name: string,
+  number: number,
+): Promise<string[]> {
+  const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){${resource}(number:$number){projectItems(first:20){nodes{project{id}}}}}}`;
+  try {
+    const output = await execGh([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `number=${number}`,
+    ]);
+    const parsed = JSON.parse(output);
+    const nodes = parsed?.data?.repository?.[resource]?.projectItems?.nodes ?? [];
+    return nodes
+      .map((n: { project?: { id?: string } }) => n?.project?.id)
+      .filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
+  } catch (err) {
+    console.error(`[gh] failed to fetch projectIds for ${resource} #${number}: ${err}`);
+    return [];
+  }
+}
+
+export function getIssueProjectIds(owner: string, name: string, issueNumber: number): Promise<string[]> {
+  return fetchProjectIds("issue", owner, name, issueNumber);
+}
+
+export function getPullRequestProjectIds(owner: string, name: string, prNumber: number): Promise<string[]> {
+  return fetchProjectIds("pullRequest", owner, name, prNumber);
+}
+
+async function tryResolveProjectAsOwner(
+  ownerType: "user" | "organization",
+  owner: string,
+  number: number,
+): Promise<string | null> {
+  const query = `query($owner:String!,$number:Int!){${ownerType}(login:$owner){projectV2(number:$number){id}}}`;
+  try {
+    const output = await execGh([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `number=${number}`,
+    ]);
+    const parsed = JSON.parse(output);
+    const id = parsed?.data?.[ownerType]?.projectV2?.id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveProjectNodeId(owner: string, number: number): Promise<string | null> {
+  const asUser = await tryResolveProjectAsOwner("user", owner, number);
+  if (asUser) return asUser;
+  return tryResolveProjectAsOwner("organization", owner, number);
+}
+
 export async function createLabel(name: string, color?: string, force?: boolean): Promise<boolean> {
   try {
     const args = ["label", "create", name];

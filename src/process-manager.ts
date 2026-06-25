@@ -217,6 +217,7 @@ export function run(
   workerName: string,
   path?: string,
   onComplete?: (status: "completed" | "failed", output: string) => Promise<void>,
+  envOverrides?: Record<string, string>,
 ): void {
   tasks.set(id, {
     id,
@@ -230,7 +231,11 @@ export function run(
   ensureRenderInterval();
   renderTable();
 
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+    env: envOverrides ? { ...process.env, ...envOverrides } : undefined,
+  });
   childProcesses.set(id, child);
 
   child.stderr?.resume();

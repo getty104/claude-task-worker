@@ -23,6 +23,7 @@ export interface WorkerRuntimeConfig {
 interface Config {
   fixReviewPointCallbackCommentMessage?: string;
   workers: Record<string, WorkerRuntimeConfig>;
+  projects: Record<string, string>;
 }
 
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
@@ -48,6 +49,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   workers: {},
+  projects: {},
 };
 
 export const CONFIG_PATH = join(process.cwd(), "claude-task-worker.json");
@@ -118,17 +120,32 @@ export function loadConfig(): Config {
     raw = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ...DEFAULT_CONFIG, workers: {} };
+      return { ...DEFAULT_CONFIG, workers: {}, projects: {} };
     }
     throw err;
   }
 
-  const result: Config = { ...DEFAULT_CONFIG, workers: {} };
+  const result: Config = { ...DEFAULT_CONFIG, workers: {}, projects: {} };
 
   if ("fixReviewPointCallbackCommentMessage" in raw) {
     const val = raw["fixReviewPointCallbackCommentMessage"];
     if (typeof val === "string") {
       result.fixReviewPointCallbackCommentMessage = val;
+    }
+  }
+
+  if ("projects" in raw) {
+    const projects = raw["projects"];
+    if (typeof projects !== "object" || projects === null || Array.isArray(projects)) {
+      console.warn(`[config] invalid projects: expected object, ignoring`);
+    } else {
+      for (const [projectId, branch] of Object.entries(projects as Record<string, unknown>)) {
+        if (typeof branch === "string" && branch.length > 0) {
+          result.projects[projectId] = branch;
+        } else {
+          console.warn(`[config] invalid projects.${projectId}: expected string, ignoring`);
+        }
+      }
     }
   }
 

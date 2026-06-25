@@ -1,9 +1,17 @@
 import { getWorkerConfig } from "../config";
-import { getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
+import {
+  getCurrentUser,
+  getIssueProjectIds,
+  getRepoInfo,
+  listIssuesByLabel,
+  removeLabel,
+  addLabel,
+} from "../gh";
 import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { needsProjectLookup, resolveBranch, type WorkerOptions } from "../worker-options";
 import { removeWorktree } from "../worktree";
 
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
@@ -16,15 +24,19 @@ interface IssueWorkerConfig {
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
 
-export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promise<void> {
-  return async () => {
+export function createIssuePollingWorker(
+  config: IssueWorkerConfig,
+): (options?: WorkerOptions) => Promise<void> {
+  return async (options: WorkerOptions = {}) => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
     const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
     const pollingIntervalMs = pollingIntervalSeconds * 1000;
     const cooldownMs = cooldownSeconds * 1000;
+    const filterLog = options.projectId ? ` project=${options.projectId}` : "";
+    const branchLog = options.branch ? ` branch=${options.branch}` : "";
     console.log(
-      `[${config.name}] Polling issues every ${pollingIntervalSeconds} seconds for ${owner}/${name} (assignee: ${user})`,
+      `[${config.name}] Polling issues every ${pollingIntervalSeconds} seconds for ${owner}/${name} (assignee: ${user})${filterLog}${branchLog}`,
     );
 
     let lastCompletionAt = 0;
@@ -34,9 +46,17 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
         const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
-        const candidates = await listIssuesByLabel(user, config.triggerLabels, excludeLabels);
+        const rawCandidates = await listIssuesByLabel(user, config.triggerLabels, excludeLabels);
 
-        for (const issue of candidates) {
+        const lookupRequired = needsProjectLookup(options);
+        const candidates: { issue: (typeof rawCandidates)[number]; projectIds: string[] }[] = [];
+        for (const issue of rawCandidates) {
+          const projectIds = lookupRequired ? await getIssueProjectIds(owner, name, issue.number) : [];
+          if (options.projectId && !projectIds.includes(options.projectId)) continue;
+          candidates.push({ issue, projectIds });
+        }
+
+        for (const { issue, projectIds } of candidates) {
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
 
@@ -46,7 +66,8 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             const worktreeId = generateWorktreeName();
-            syncDefaultBranch(defaultBranch);
+            const resolvedBranch = resolveBranch(projectIds, options.projects, options.branch, defaultBranch);
+            syncDefaultBranch(resolvedBranch);
             const { model, effort } = getWorkerConfig(config.name);
             run(
               "claude",
@@ -97,6 +118,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                   );
                 }
               },
+              { CC_BASE_BRANCH: resolvedBranch },
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
