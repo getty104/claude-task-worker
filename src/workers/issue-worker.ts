@@ -1,11 +1,11 @@
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
-import { syncDefaultBranch } from "../git";
+import { syncDefaultBranch, ensureEpicBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { removeWorktree } from "../worktree";
+import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../worktree";
 
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
@@ -39,13 +39,13 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
         const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
-        const candidates = await listIssuesByLabel(user, config.triggerLabels, excludeLabels);
-        const filtered =
+        const epicFilter =
           config.epicFilter !== undefined
-            ? candidates.filter((c) => c.parent?.number === config.epicFilter)
-            : candidates;
+            ? { owner, repo: name, number: config.epicFilter }
+            : undefined;
+        const candidates = await listIssuesByLabel(user, config.triggerLabels, excludeLabels, epicFilter);
 
-        for (const issue of filtered) {
+        for (const issue of candidates) {
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
 
@@ -63,24 +63,39 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           const hadTriageScope = issue.labels.some((l) => l.name === LABEL_TRIAGE_SCOPE);
           await addLabel("issue", issue.number, "cc-in-progress");
 
+          const worktreeId = generateWorktreeName();
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
-            const worktreeId = generateWorktreeName();
             syncDefaultBranch(defaultBranch);
             const { model, effort } = getWorkerConfig(config.name);
+
+            const parentNumber = issue.parent?.number;
+            let cwd: string | undefined;
+            const claudeArgs: string[] = [
+              "-p",
+              `"${config.command} ${issue.number}"`,
+              "--dangerously-skip-permissions",
+              "--model",
+              model,
+              "--effort",
+              effort,
+            ];
+
+            if (parentNumber !== undefined) {
+              const epicBranch = `cc-epic-${parentNumber}`;
+              await ensureEpicBranch(epicBranch, defaultBranch);
+              await createWorktreeFromBranch(worktreeId, epicBranch);
+              cwd = getWorktreePath(worktreeId);
+              console.log(
+                `[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${epicBranch} (parent #${parentNumber})`,
+              );
+            } else {
+              claudeArgs.push("--worktree", worktreeId);
+            }
+
             run(
               "claude",
-              [
-                "-p",
-                `"${config.command} ${issue.number}"`,
-                "--dangerously-skip-permissions",
-                "--model",
-                model,
-                "--effort",
-                effort,
-                "--worktree",
-                worktreeId,
-              ],
+              claudeArgs,
               issue.number,
               issue.title,
               config.name,
@@ -117,10 +132,12 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                   );
                 }
               },
+              cwd,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
             await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
+            await removeWorktree(worktreeId).catch(() => {});
             await notifyError(config.name, name, err);
           }
         }

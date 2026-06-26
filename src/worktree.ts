@@ -25,6 +25,21 @@ async function forceRemoveIfExists(path: string): Promise<void> {
   console.log(`[worktree] Force removed remaining directory: ${path}`);
 }
 
+export function getWorktreePath(worktreeId: string): string {
+  return `${WORKTREES_DIR}/${worktreeId}`;
+}
+
+export async function createWorktreeFromBranch(worktreeId: string, baseBranch: string): Promise<void> {
+  const worktreePath = `${WORKTREES_DIR}/${worktreeId}`;
+  await execFileAsync("git", [
+    "worktree",
+    "add",
+    "--detach",
+    worktreePath,
+    `origin/${baseBranch}`,
+  ]);
+}
+
 export async function removeWorktree(worktreeId: string): Promise<void> {
   const worktreePath = `${WORKTREES_DIR}/${worktreeId}`;
   try {
