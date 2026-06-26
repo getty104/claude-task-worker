@@ -10,7 +10,8 @@ export type WorkerName =
   | "triage-created-issue"
   | "fix-review-point"
   | "check-dependabot"
-  | "triage-pr";
+  | "triage-pr"
+  | "epic-issue";
 
 export interface WorkerRuntimeConfig {
   model: string;
@@ -43,6 +44,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "check-dependabot": { model: "sonnet", effort: "high", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "epic-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 300, cooldownSeconds: 0, maxConcurrentTasks: 1 },
 };
 
 export const DEFAULT_CONFIG: Config = {

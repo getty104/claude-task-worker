@@ -9,11 +9,12 @@ import { triageIssueWorker } from "./workers/triage-issue";
 import { triageCreatedIssueWorker } from "./workers/triage-created-issue";
 import { triagePrWorker } from "./workers/triage-pr";
 import { checkDependabotWorker } from "./workers/check-dependabot";
+import { epicIssueWorker } from "./workers/epic-issue";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
 import { init } from "./commands/init";
 import { buildTokenLimitText, send } from "./slack";
 
-const WORKERS: Record<string, () => Promise<void>> = {
+const WORKERS: Record<string, (opts?: { epicFilter?: number }) => Promise<void>> = {
   "exec-issue": execIssueWorker,
   "fix-review-point": fixReviewPointWorker,
   "create-issue": createIssueWorker,
@@ -23,10 +24,11 @@ const WORKERS: Record<string, () => Promise<void>> = {
   "triage-created-issue": triageCreatedIssueWorker,
   "triage-pr": triagePrWorker,
   "check-dependabot": checkDependabotWorker,
+  "epic-issue": epicIssueWorker,
 };
 
 function printUsage(): void {
-  console.log(`Usage: claude-task-worker <command>
+  console.log(`Usage: claude-task-worker <command> [--epic <issue-number>]
 
 Commands:
   init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
@@ -42,12 +44,17 @@ Workers:
   triage-created-issue  Poll cc-created-issue + cc-triage-issue issues and run /triage-created-issue
   triage-pr         Poll and triage PRs every 5 minutes
   check-dependabot  Poll dependabot PRs every 1 hour
+  epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
   all               Poll all workers except triage-issue, triage-created-issue, triage-pr, check-dependabot
   yolo              Poll all workers including triage-issue, triage-created-issue, triage-pr, check-dependabot
 
+Options:
+  --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue (for 'all' and 'yolo')
+
 Example:
   claude-task-worker init
-  claude-task-worker exec-issue`);
+  claude-task-worker exec-issue
+  claude-task-worker all --epic 100`);
 }
 
 const workerType = process.argv[2];
@@ -67,6 +74,22 @@ if (
   console.error(`Unknown command: ${workerType}`);
   printUsage();
   process.exit(1);
+}
+
+function parseEpicFilter(): number | undefined {
+  const idx = process.argv.indexOf("--epic");
+  if (idx === -1) return undefined;
+  const raw = process.argv[idx + 1];
+  if (!raw) {
+    console.error("--epic requires a numeric issue number");
+    process.exit(1);
+  }
+  const num = Number(raw);
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+    console.error(`--epic requires a positive integer issue number, got: ${raw}`);
+    process.exit(1);
+  }
+  return num;
 }
 
 process.on("unhandledRejection", (err) => {
@@ -117,25 +140,29 @@ if (workerType === "init") {
     await send({ text: `📊 Usage${text}` });
   })();
 } else if (workerType === "all") {
+  const epicFilter = parseEpicFilter();
   Promise.all([
-    execIssueWorker(),
+    execIssueWorker({ epicFilter }),
     fixReviewPointWorker(),
-    createIssueWorker(),
-    updateIssueWorker(),
-    answerIssueQuestionsWorker(),
+    createIssueWorker({ epicFilter }),
+    updateIssueWorker({ epicFilter }),
+    answerIssueQuestionsWorker({ epicFilter }),
+    epicIssueWorker(),
   ]);
 } else if (workerType === "yolo") {
+  const epicFilter = parseEpicFilter();
   (async () => {
     await Promise.all([
-      execIssueWorker(),
+      execIssueWorker({ epicFilter }),
       fixReviewPointWorker(),
-      createIssueWorker(),
-      updateIssueWorker(),
-      answerIssueQuestionsWorker(),
-      triageIssueWorker(),
-      triageCreatedIssueWorker(),
+      createIssueWorker({ epicFilter }),
+      updateIssueWorker({ epicFilter }),
+      answerIssueQuestionsWorker({ epicFilter }),
+      triageIssueWorker({ epicFilter }),
+      triageCreatedIssueWorker({ epicFilter }),
       checkDependabotWorker(),
       triagePrWorker(),
+      epicIssueWorker(),
     ]);
   })();
 } else {
