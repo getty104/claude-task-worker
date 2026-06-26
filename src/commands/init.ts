@@ -15,6 +15,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-triage-scope", color: "c5def5" },
   { name: "cc-triage-issue", color: "bfdadc" },
   { name: "cc-created-issue", color: "fbca04" },
+  { name: "cc-epic-issue", color: "8b5cf6" },
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"

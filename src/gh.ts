@@ -4,6 +4,13 @@ export interface Issue {
   number: number;
   title: string;
   labels: { name: string }[];
+  parent: { number: number } | null;
+}
+
+export interface SubIssuesSummary {
+  total: number;
+  completed: number;
+  percentCompleted: number;
 }
 
 interface PullRequest {
@@ -72,13 +79,32 @@ export async function listIssuesByLabel(
     assignee,
     ...labelArgs,
     "--json",
-    "number,title,labels",
+    "number,title,labels,parent",
     "--search",
     search,
     "--limit",
     "10",
   ]);
   return JSON.parse(output);
+}
+
+export async function getIssueSubIssuesSummary(issueNumber: number): Promise<SubIssuesSummary> {
+  const output = await execGh(["issue", "view", String(issueNumber), "--json", "subIssuesSummary"]);
+  const parsed = JSON.parse(output);
+  const summary = parsed?.subIssuesSummary;
+  if (
+    !summary ||
+    typeof summary.total !== "number" ||
+    typeof summary.completed !== "number" ||
+    typeof summary.percentCompleted !== "number"
+  ) {
+    return { total: 0, completed: 0, percentCompleted: 0 };
+  }
+  return {
+    total: summary.total,
+    completed: summary.completed,
+    percentCompleted: summary.percentCompleted,
+  };
 }
 
 export interface PRCheck {
