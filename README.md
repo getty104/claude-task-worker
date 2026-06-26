@@ -13,10 +13,9 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 │                         GitHub                         │
 │                                                        │
 │  Issue (cc-exec-issue)                            ──┐  │
-│  Issue (cc-create-issue)                          ──┤  │
+│  Issue (cc-triage-scope, blockedBy all closed)    ──┤  │
 │  Issue (cc-update-issue)                          ──┤  │
 │  Issue (cc-answer-issue-questions)                ──┤  │
-│  Issue (cc-triage-scope)                          ──┤  │
 │  Issue (cc-issue-created + cc-triage-scope)       ──┤  │
 │  PR    (cc-fix-onetime)                           ──┤  │
 │  PR    (cc-triage-scope)                          ──┤  │
@@ -40,14 +39,15 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 | Worker | トリガーラベル | 呼び出されるスキル | 間隔 |
 |---|---|---|---|
 | `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 1分（完了後10分クールダウン） |
-| `create-issue` | `cc-create-issue` | `/base-tools:create-issue` | 1分 |
+| `create-issue` | `cc-triage-scope` (Issue, blockedBy が全て Close) | `/base-tools:create-issue-from-issue-number` | 1分 |
 | `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 1分 |
 | `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 1分 |
 | `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 1分 |
-| `triage-issue` | `cc-triage-scope` (Issue) | `/base-tools:triage-issue` | 15分 |
 | `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 1分 |
 | `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 1分 |
 | `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
+
+> ℹ️ Issue 系ワーカーはすべて GitHub Issue Dependencies の `-is:blocked` 検索 qualifier でサーバ側絞り込みを行うため、未解決の blockedBy Issue を持つ Issue は対象外となる。
 
 ## セットアップ
 
@@ -77,7 +77,6 @@ claude-task-worker init
 
 | ラベル名 | 用途 |
 |---------|------|
-| `cc-create-issue` | Issue作成トリガー |
 | `cc-update-issue` | Issue更新トリガー |
 | `cc-answer-issue-questions` | Issue確認事項への回答トリガー |
 | `cc-exec-issue` | Issue実行トリガー |
@@ -90,8 +89,8 @@ claude-task-worker init
 
 作成されるファイル:
 
-- `.github/ISSUE_TEMPLATE/cc-create-issue.yml` — `cc-create-issue` ラベル付きIssue作成用テンプレート
-- `.github/workflows/assign-creator-on-cc-create-issue.yml` — Issue作成者を自動アサインするワークフロー
+- `.github/ISSUE_TEMPLATE/cc-triage-scope.yml` — `cc-triage-scope` ラベル付きIssue作成用テンプレート
+- `.github/workflows/assign-creator-on-cc-triage-scope.yml` — Issue作成者を自動アサインするワークフロー
 - `claude-task-worker.json` — 設定ファイル（コマンド実行ディレクトリ直下）
 
 ## コマンド
@@ -117,9 +116,11 @@ claude-task-worker <command>
 
 ### create-issue
 
-`cc-create-issue` ラベルが付いたIssueを定期取得し、Claude CodeでIssue作成を実行する。（1分間隔）
+`cc-triage-scope` ラベルが付いており、かつ Open な blockedBy Issue を持たないIssueを定期取得し、Claude CodeでIssue作成を実行する。（1分間隔）
 
-`init` コマンドで作成されるIssueテンプレートを使えば、`cc-create-issue` ラベル付与と作成者アサインが自動で行われ、ワーカーが即座に検知・処理を開始する。
+`init` コマンドで作成されるIssueテンプレートを使えば、`cc-triage-scope` ラベル付与と作成者アサインが自動で行われる。ブロック中の依存 Issue が残っている間はワーカーが拾わず、依存がすべて Close された時点で処理が開始される。
+
+除外ラベル: `cc-issue-created` / `cc-pr-created` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いている Issue は対象外。
 
 ### update-issue
 
@@ -131,18 +132,11 @@ claude-task-worker <command>
 
 - 完了後、`cc-update-issue` ラベルを付与して update-issue ワーカーに引き継ぎ
 
-### triage-issue
-
-`cc-triage-scope` ラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（15分間隔）
-
-- `cc-issue-created` が付いているIssueは除外（`triage-created-issue` ワーカーで処理する）
-- 依存関係を確認し、必要に応じて `cc-create-issue` ラベルを付与またはクローズ判断
-
 ### triage-created-issue
 
 `cc-issue-created` と `cc-triage-scope` の両方のラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
 
-- `cc-pr-created` / `cc-create-issue` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
+- `cc-pr-created` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
 - 確認事項の有無に応じて `cc-answer-issue-questions` または `cc-exec-issue` ラベルを付与（または不要ならクローズ）
 
 ### triage-pr
@@ -164,7 +158,7 @@ claude-task-worker <command>
 
 ### yolo
 
-すべてのワーカー9つ（`all` + triage-issue + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。
+すべてのワーカー（`all` + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。
 
 ### usage
 
@@ -190,7 +184,6 @@ claude-task-worker <command>
 | `update-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `exec-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
-| `triage-issue` | `sonnet` | `high` | 900 | 0 | 1 |
 | `triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
 | `check-dependabot` | `sonnet` | `high` | 3600 | 0 | 1 |

@@ -12,7 +12,7 @@ npm link               # Make CLI globally available
 claude-task-worker init            # Create required GitHub labels
 claude-task-worker exec-issue      # Poll dev-ready issues
 claude-task-worker fix-review-point # Poll PRs with review feedback
-claude-task-worker create-issue    # Poll create-issue labeled issues
+claude-task-worker create-issue    # Poll cc-triage-scope issues whose blockedBy are all closed
 claude-task-worker update-issue    # Poll update-issue labeled issues
 claude-task-worker all             # Run all workers concurrently
 ```
@@ -45,7 +45,7 @@ claude-task-worker all             # Run all workers concurrently
 |--------|-------------|--------|
 | exec-issue | `cc-exec-issue` | `cc-in-progress` 除去 |
 | fix-review-point | `cc-fix-onetime` or `cc-fix-repeat` | `cc-in-progress` 除去、`cc-fix-onetime` は除去・`cc-fix-repeat` は維持 |
-| create-issue | `cc-create-issue` | Issue クローズ |
+| create-issue | `cc-triage-scope`（Open な blockedBy を持たない場合のみ） | Issue クローズ |
 | update-issue | `cc-update-issue` | `@author Updated` コメント投稿 |
 
 ## Conventions

@@ -3,7 +3,6 @@ import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, CONFIG_PATH, WORKER_DEFAULTS } from "../config.js";
 
 const LABELS: { name: string; color: string }[] = [
-  { name: "cc-create-issue", color: "0075ca" },
   { name: "cc-update-issue", color: "e4e669" },
   { name: "cc-answer-issue-questions", color: "5319e7" },
   { name: "cc-exec-issue", color: "7057ff" },
@@ -13,7 +12,6 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-issue-created", color: "f9a825" },
   { name: "cc-pr-created", color: "006b75" },
   { name: "cc-triage-scope", color: "c5def5" },
-  { name: "cc-triage-issue", color: "bfdadc" },
   { name: "cc-created-issue", color: "fbca04" },
   { name: "cc-epic-issue", color: "8b5cf6" },
 ];
@@ -22,7 +20,6 @@ const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
 description: claude-task-workerでGitHub Issueを作成する
 title: "[claude-task-worker] Issue作成依頼"
 labels:
-  - cc-create-issue
   - cc-triage-scope
 body:
   - type: textarea
@@ -34,7 +31,7 @@ body:
       required: true
 `;
 
-const ASSIGN_CREATOR_WORKFLOW = `name: Assign creator on cc-create-issue
+const ASSIGN_CREATOR_WORKFLOW = `name: Assign creator on cc-triage-scope
 
 on:
   issues:
@@ -97,12 +94,12 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
 
   console.log("[init] Creating issue template...");
   await mkdir(".github/ISSUE_TEMPLATE", { recursive: true });
-  const templatePath = ".github/ISSUE_TEMPLATE/cc-create-issue.yml";
+  const templatePath = ".github/ISSUE_TEMPLATE/cc-triage-scope.yml";
   logWriteResult(await writeFileWithMode(templatePath, ISSUE_TEMPLATE, force), templatePath);
 
   console.log("[init] Creating GitHub Actions workflow...");
   await mkdir(".github/workflows", { recursive: true });
-  const workflowPath = ".github/workflows/assign-creator-on-cc-create-issue.yml";
+  const workflowPath = ".github/workflows/assign-creator-on-cc-triage-scope.yml";
   logWriteResult(await writeFileWithMode(workflowPath, ASSIGN_CREATOR_WORKFLOW, force), workflowPath);
 
   console.log("[init] Creating config file...");

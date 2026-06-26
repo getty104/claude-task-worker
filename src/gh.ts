@@ -72,7 +72,11 @@ export async function listIssuesByLabel(
   epicFilter?: { owner: string; repo: string; number: number },
 ): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
-  const searchTerms = ["sort:created-asc", ...excludeLabels.map((label) => `-label:"${label}"`)];
+  const searchTerms = [
+    "sort:created-asc",
+    "-is:blocked",
+    ...excludeLabels.map((label) => `-label:"${label}"`),
+  ];
   if (epicFilter) {
     searchTerms.push(`parent-issue:${epicFilter.owner}/${epicFilter.repo}#${epicFilter.number}`);
   }
