@@ -1,4 +1,4 @@
-name: Assign creator on cc-create-issue
+name: Assign creator on cc-triage-scope
 
 on:
   issues:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   assign:
-    if: contains(github.event.issue.labels.*.name, 'cc-create-issue')
+    if: contains(github.event.issue.labels.*.name, 'cc-triage-scope')
     runs-on: ubuntu-latest
     permissions:
       issues: write

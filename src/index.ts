@@ -5,7 +5,6 @@ import { fixReviewPointWorker } from "./workers/fix-review-point";
 import { createIssueWorker } from "./workers/create-issue";
 import { updateIssueWorker } from "./workers/update-issue";
 import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
-import { triageIssueWorker } from "./workers/triage-issue";
 import { triageCreatedIssueWorker } from "./workers/triage-created-issue";
 import { triagePrWorker } from "./workers/triage-pr";
 import { checkDependabotWorker } from "./workers/check-dependabot";
@@ -20,7 +19,6 @@ const WORKERS: Record<string, (opts?: { epicFilter?: number }) => Promise<void>>
   "create-issue": createIssueWorker,
   "update-issue": updateIssueWorker,
   "answer-issue-questions": answerIssueQuestionsWorker,
-  "triage-issue": triageIssueWorker,
   "triage-created-issue": triageCreatedIssueWorker,
   "triage-pr": triagePrWorker,
   "check-dependabot": checkDependabotWorker,
@@ -40,13 +38,12 @@ Workers:
   create-issue      Poll issues and run /create-issue
   update-issue      Poll issues and run update command
   answer-issue-questions  Poll issues and run /answer-issue-questions
-  triage-issue      Poll cc-triage-scope issues and run /triage-issues per issue
-  triage-created-issue  Poll cc-created-issue + cc-triage-issue issues and run /triage-created-issue
+  triage-created-issue  Poll cc-issue-created + cc-triage-scope issues and run /triage-created-issue
   triage-pr         Poll and triage PRs every 5 minutes
   check-dependabot  Poll dependabot PRs every 1 hour
   epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
-  all               Poll all workers except triage-issue, triage-created-issue, triage-pr, check-dependabot
-  yolo              Poll all workers including triage-issue, triage-created-issue, triage-pr, check-dependabot
+  all               Poll all workers except triage-created-issue, triage-pr, check-dependabot
+  yolo              Poll all workers including triage-created-issue, triage-pr, check-dependabot
 
 Options:
   --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue (for 'all' and 'yolo')
@@ -158,7 +155,6 @@ if (workerType === "init") {
       createIssueWorker({ epicFilter }),
       updateIssueWorker({ epicFilter }),
       answerIssueQuestionsWorker({ epicFilter }),
-      triageIssueWorker({ epicFilter }),
       triageCreatedIssueWorker({ epicFilter }),
       checkDependabotWorker(),
       triagePrWorker(),

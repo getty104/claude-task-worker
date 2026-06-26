@@ -6,7 +6,6 @@ export type WorkerName =
   | "answer-issue-questions"
   | "create-issue"
   | "update-issue"
-  | "triage-issue"
   | "triage-created-issue"
   | "fix-review-point"
   | "check-dependabot"
@@ -40,7 +39,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "triage-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 900, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "check-dependabot": { model: "sonnet", effort: "high", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
