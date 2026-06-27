@@ -12,6 +12,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-issue-created", color: "f9a825" },
   { name: "cc-pr-created", color: "006b75" },
   { name: "cc-triage-scope", color: "c5def5" },
+  { name: "cc-resolve-conflict", color: "fbca04" },
   { name: "cc-epic-issue", color: "8b5cf6" },
 ];
 
