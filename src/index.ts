@@ -7,6 +7,7 @@ import { updateIssueWorker } from "./workers/update-issue";
 import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
 import { triageCreatedIssueWorker } from "./workers/triage-created-issue";
 import { triagePrWorker } from "./workers/triage-pr";
+import { resolveConflictWorker } from "./workers/resolve-conflict";
 import { checkDependabotWorker } from "./workers/check-dependabot";
 import { epicIssueWorker } from "./workers/epic-issue";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
@@ -21,6 +22,7 @@ const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: s
   "answer-issue-questions": answerIssueQuestionsWorker,
   "triage-created-issue": triageCreatedIssueWorker,
   "triage-pr": triagePrWorker,
+  "resolve-conflict": resolveConflictWorker,
   "check-dependabot": checkDependabotWorker,
   "epic-issue": epicIssueWorker,
 };
@@ -40,6 +42,7 @@ Workers:
   answer-issue-questions  Poll issues and run /answer-issue-questions
   triage-created-issue  Poll cc-issue-created + cc-triage-scope issues and run /triage-created-issue
   triage-pr         Poll and triage PRs every 5 minutes
+  resolve-conflict  Poll cc-resolve-conflict PRs and run /resolve-conflict
   check-dependabot  Poll dependabot PRs every 1 hour
   epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
   all               Poll all workers except triage-created-issue, triage-pr, check-dependabot
@@ -164,6 +167,7 @@ if (workerType === "init") {
     createIssueWorker({ epicFilters, labelFilters }),
     updateIssueWorker({ epicFilters, labelFilters }),
     answerIssueQuestionsWorker({ epicFilters, labelFilters }),
+    resolveConflictWorker(),
     epicIssueWorker({ labelFilters }),
   ]);
 } else if (workerType === "yolo") {
@@ -179,6 +183,7 @@ if (workerType === "init") {
       triageCreatedIssueWorker({ epicFilters, labelFilters }),
       checkDependabotWorker(),
       triagePrWorker(),
+      resolveConflictWorker(),
       epicIssueWorker({ labelFilters }),
     ]);
   })();

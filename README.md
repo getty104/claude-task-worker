@@ -20,6 +20,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 │  Issue (cc-epic-issue, all sub-issues closed)     ──┤  │
 │  PR    (cc-fix-onetime)                           ──┤  │
 │  PR    (cc-triage-scope)                          ──┤  │
+│  PR    (cc-resolve-conflict)                      ──┤  │
 │  PR    (dependencies, Dependabot)                 ──┤  │
 └─────────────────────────────────────────────────────┼──┘
                                                       │
@@ -46,6 +47,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 | `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 1分 |
 | `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 1分 |
 | `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 1分 |
+| `resolve-conflict` | `cc-resolve-conflict` (PR) | `/base-tools:resolve-conflict` | 1分 |
 | `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
 | `epic-issue` | `cc-epic-issue` (Issue, sub-issues が全て Close) | `/base-tools:create-epic-pr` | 5分 |
 
@@ -91,6 +93,7 @@ claude-task-worker init --force   # 既存ファイルを強制上書き
 | `cc-exec-issue` | Issue実行トリガー |
 | `cc-fix-onetime` | PR修正トリガー（1回） |
 | `cc-triage-scope` | トリアージ対象マーク（Issue/PR） |
+| `cc-resolve-conflict` | PRコンフリクト解消トリガー |
 | `cc-in-progress` | 処理中ステータス |
 | `cc-need-human-check` | 人間の確認が必要なマーク（付与中はIssueワーカーの処理対象から除外される） |
 | `cc-issue-created` | `/base-tools:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
@@ -180,6 +183,13 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 `cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
 
 - `cc-fix-onetime` が付いているPRは除外
+- `cc-resolve-conflict` が付いているPRは除外
+
+### resolve-conflict
+
+`cc-resolve-conflict` ラベルが付いたPRを定期取得し、`/base-tools:resolve-conflict` を実行してコンフリクト解消を行う。（1分間隔）
+
+- 完了後、`cc-resolve-conflict` ラベルを除去
 
 ### check-dependabot
 
@@ -198,7 +208,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 ### all
 
-通常ワーカー6つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, epic-issue）を同時にポーリングする。`--epic` / `--label` オプションでIssue系ワーカーの処理対象を絞り込み可能（どちらも複数指定可）。
+通常ワーカー7つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, resolve-conflict, epic-issue）を同時にポーリングする。`--epic` / `--label` オプションでIssue系ワーカーの処理対象を絞り込み可能（どちらも複数指定可）。
 
 ### yolo
 
@@ -230,6 +240,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 | `fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
 | `triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
+| `resolve-conflict` | `sonnet` | `high` | 60 | 0 | 1 |
 | `check-dependabot` | `sonnet` | `high` | 3600 | 0 | 1 |
 | `epic-issue` | `sonnet` | `high` | 300 | 0 | 1 |
 
