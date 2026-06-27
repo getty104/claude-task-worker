@@ -106,16 +106,33 @@ claude-task-worker init --force   # 既存ファイルを強制上書き
 ## コマンド
 
 ```bash
-claude-task-worker <command> [--epic <issue-number>]
+claude-task-worker <command> [--epic <issue-number>]... [--label <label-name>]...
 ```
 
 ### `--epic <issue-number>` オプション
 
-`all` / `yolo` および Issue 系の各ワーカー（`exec-issue` / `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue`）で、指定したエピックIssueのサブIssueのみを処理対象に絞り込む。エピック単位でロールアウトしたいときに使用する。
+`all` / `yolo` および Issue 系の各ワーカー（`exec-issue` / `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` / `epic-issue`）で、指定したエピックIssueのサブIssueのみを処理対象に絞り込む。エピック単位でロールアウトしたいときに使用する。
+
+複数指定可能で、複数指定した場合はいずれかのエピックを親に持つサブIssueが対象になる（OR）。
 
 ```bash
 claude-task-worker all --epic 100
+claude-task-worker all --epic 100 --epic 200    # #100 または #200 の sub-issue
 ```
+
+### `--label <label-name>` オプション
+
+`all` / `yolo` および Issue 系の各ワーカーで、トリガーラベルに加えて指定したラベルが付いているIssueのみを処理対象に絞り込む。優先度・スプリント・スコープ等で対象を限定したいときに使用する。
+
+複数指定可能で、複数指定した場合は指定したすべてのラベルが付いているIssueが対象になる（AND）。`--epic` と併用すれば両条件のANDで絞り込まれる。
+
+```bash
+claude-task-worker all --label priority-high
+claude-task-worker all --label priority-high --label needs-design   # 両方付いている Issue のみ
+claude-task-worker yolo --epic 100 --epic 200 --label priority-high
+```
+
+> ℹ️ `--label` で指定したラベルはユーザーのスコープ指定なので、タスク完了時にワーカー側で除去されることはない（トリガーラベルだけが除去される）。
 
 ### exec-issue
 
@@ -181,11 +198,11 @@ claude-task-worker all --epic 100
 
 ### all
 
-通常ワーカー6つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, epic-issue）を同時にポーリングする。`--epic` オプションでIssue系ワーカーをサブIssueに絞り込み可能。
+通常ワーカー6つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, epic-issue）を同時にポーリングする。`--epic` / `--label` オプションでIssue系ワーカーの処理対象を絞り込み可能（どちらも複数指定可）。
 
 ### yolo
 
-すべてのワーカー（`all` + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。`--epic` オプションでIssue系ワーカーをサブIssueに絞り込み可能。
+すべてのワーカー（`all` + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。`--epic` / `--label` オプションでIssue系ワーカーの処理対象を絞り込み可能（どちらも複数指定可）。
 
 ### usage
 

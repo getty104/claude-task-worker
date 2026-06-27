@@ -1,9 +1,10 @@
 import { createIssuePollingWorker } from "./issue-worker";
 
-export const updateIssueWorker = (opts: { epicFilter?: number } = {}) =>
+export const updateIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
     name: "update-issue",
     command: "/base-tools:update-issue",
     triggerLabels: ["cc-update-issue"],
-    epicFilter: opts.epicFilter,
+    epicFilters: opts.epicFilters,
+    labelFilters: opts.labelFilters,
   })();

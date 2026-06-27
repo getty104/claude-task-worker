@@ -1,7 +1,7 @@
 import { createIssuePollingWorker } from "./issue-worker";
 import { addLabel } from "../gh";
 
-export const createIssueWorker = (opts: { epicFilter?: number } = {}) =>
+export const createIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
     name: "create-issue",
     command: "/base-tools:create-issue-from-issue-number",
@@ -13,7 +13,8 @@ export const createIssueWorker = (opts: { epicFilter?: number } = {}) =>
       "cc-answer-issue-questions",
       "cc-exec-issue",
     ],
-    epicFilter: opts.epicFilter,
+    epicFilters: opts.epicFilters,
+    labelFilters: opts.labelFilters,
     onCompleted: async (issueNumber) => {
       await addLabel("issue", issueNumber, "cc-issue-created");
     },

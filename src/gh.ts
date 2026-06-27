@@ -69,7 +69,7 @@ export async function listIssuesByLabel(
   assignee: string,
   labels: string[],
   excludeLabels: string[] = [],
-  epicFilter?: { owner: string; repo: string; number: number },
+  epicFilter?: { owner: string; repo: string; numbers: number[] },
 ): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
   const searchTerms = [
@@ -77,8 +77,10 @@ export async function listIssuesByLabel(
     "-is:blocked",
     ...excludeLabels.map((label) => `-label:"${label}"`),
   ];
-  if (epicFilter) {
-    searchTerms.push(`parent-issue:${epicFilter.owner}/${epicFilter.repo}#${epicFilter.number}`);
+  if (epicFilter && epicFilter.numbers.length > 0) {
+    for (const number of epicFilter.numbers) {
+      searchTerms.push(`parent-issue:${epicFilter.owner}/${epicFilter.repo}#${number}`);
+    }
   }
   const search = searchTerms.join(" ");
   const output = await execGh([
