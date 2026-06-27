@@ -16,7 +16,8 @@ interface IssueWorkerConfig {
   command: string;
   triggerLabels: string[];
   excludeLabels?: string[];
-  epicFilter?: number;
+  epicFilters?: number[];
+  labelFilters?: string[];
   preflight?: (issue: Issue) => Promise<PreflightResult>;
   onCompleted?: (issueNumber: number) => Promise<void>;
 }
@@ -40,10 +41,14 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       try {
         const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
         const epicFilter =
-          config.epicFilter !== undefined
-            ? { owner, repo: name, number: config.epicFilter }
+          config.epicFilters && config.epicFilters.length > 0
+            ? { owner, repo: name, numbers: config.epicFilters }
             : undefined;
-        const candidates = await listIssuesByLabel(user, config.triggerLabels, excludeLabels, epicFilter);
+        const labels =
+          config.labelFilters && config.labelFilters.length > 0
+            ? [...config.triggerLabels, ...config.labelFilters]
+            : config.triggerLabels;
+        const candidates = await listIssuesByLabel(user, labels, excludeLabels, epicFilter);
 
         for (const issue of candidates) {
           if (isRunning(issue.number)) continue;

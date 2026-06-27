@@ -1,12 +1,13 @@
 import { addLabel } from "../gh";
 import { createIssuePollingWorker } from "./issue-worker";
 
-export const answerIssueQuestionsWorker = (opts: { epicFilter?: number } = {}) =>
+export const answerIssueQuestionsWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
     name: "answer-issue-questions",
     command: "/base-tools:answer-issue-questions",
     triggerLabels: ["cc-answer-issue-questions"],
-    epicFilter: opts.epicFilter,
+    epicFilters: opts.epicFilters,
+    labelFilters: opts.labelFilters,
     onCompleted: async (issueNumber) => {
       await addLabel("issue", issueNumber, "cc-update-issue");
     },

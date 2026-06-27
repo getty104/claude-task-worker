@@ -13,7 +13,7 @@ import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "
 import { init } from "./commands/init";
 import { buildTokenLimitText, send } from "./slack";
 
-const WORKERS: Record<string, (opts?: { epicFilter?: number }) => Promise<void>> = {
+const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: string[] }) => Promise<void>> = {
   "exec-issue": execIssueWorker,
   "fix-review-point": fixReviewPointWorker,
   "create-issue": createIssueWorker,
@@ -26,7 +26,7 @@ const WORKERS: Record<string, (opts?: { epicFilter?: number }) => Promise<void>>
 };
 
 function printUsage(): void {
-  console.log(`Usage: claude-task-worker <command> [--epic <issue-number>]
+  console.log(`Usage: claude-task-worker <command> [--epic <issue-number>] [--label <label-name>]
 
 Commands:
   init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
@@ -46,12 +46,17 @@ Workers:
   yolo              Poll all workers including triage-created-issue, triage-pr, check-dependabot
 
 Options:
-  --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue (for 'all' and 'yolo')
+  --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue. Repeatable: any matching parent (OR).
+  --label <name>    Limit issue-based workers to issues that also carry the specified label. Repeatable: all must be present (AND).
 
 Example:
   claude-task-worker init
   claude-task-worker exec-issue
-  claude-task-worker all --epic 100`);
+  claude-task-worker all --epic 100
+  claude-task-worker all --epic 100 --epic 200
+  claude-task-worker all --label priority-high
+  claude-task-worker all --label priority-high --label needs-design
+  claude-task-worker yolo --epic 100 --epic 200 --label priority-high`);
 }
 
 const workerType = process.argv[2];
@@ -73,20 +78,34 @@ if (
   process.exit(1);
 }
 
-function parseEpicFilter(): number | undefined {
-  const idx = process.argv.indexOf("--epic");
-  if (idx === -1) return undefined;
-  const raw = process.argv[idx + 1];
-  if (!raw) {
-    console.error("--epic requires a numeric issue number");
-    process.exit(1);
+function collectFlagValues(flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] !== flag) continue;
+    const raw = process.argv[i + 1];
+    if (!raw || raw.startsWith("--")) {
+      console.error(`${flag} requires a value`);
+      process.exit(1);
+    }
+    values.push(raw);
   }
-  const num = Number(raw);
-  if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
-    console.error(`--epic requires a positive integer issue number, got: ${raw}`);
-    process.exit(1);
-  }
-  return num;
+  return values;
+}
+
+function parseEpicFilters(): number[] {
+  const raws = collectFlagValues("--epic");
+  return raws.map((raw) => {
+    const num = Number(raw);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+      console.error(`--epic requires a positive integer issue number, got: ${raw}`);
+      process.exit(1);
+    }
+    return num;
+  });
+}
+
+function parseLabelFilters(): string[] {
+  return collectFlagValues("--label");
 }
 
 process.on("unhandledRejection", (err) => {
@@ -137,30 +156,34 @@ if (workerType === "init") {
     await send({ text: `📊 Usage${text}` });
   })();
 } else if (workerType === "all") {
-  const epicFilter = parseEpicFilter();
+  const epicFilters = parseEpicFilters();
+  const labelFilters = parseLabelFilters();
   Promise.all([
-    execIssueWorker({ epicFilter }),
+    execIssueWorker({ epicFilters, labelFilters }),
     fixReviewPointWorker(),
-    createIssueWorker({ epicFilter }),
-    updateIssueWorker({ epicFilter }),
-    answerIssueQuestionsWorker({ epicFilter }),
-    epicIssueWorker(),
+    createIssueWorker({ epicFilters, labelFilters }),
+    updateIssueWorker({ epicFilters, labelFilters }),
+    answerIssueQuestionsWorker({ epicFilters, labelFilters }),
+    epicIssueWorker({ labelFilters }),
   ]);
 } else if (workerType === "yolo") {
-  const epicFilter = parseEpicFilter();
+  const epicFilters = parseEpicFilters();
+  const labelFilters = parseLabelFilters();
   (async () => {
     await Promise.all([
-      execIssueWorker({ epicFilter }),
+      execIssueWorker({ epicFilters, labelFilters }),
       fixReviewPointWorker(),
-      createIssueWorker({ epicFilter }),
-      updateIssueWorker({ epicFilter }),
-      answerIssueQuestionsWorker({ epicFilter }),
-      triageCreatedIssueWorker({ epicFilter }),
+      createIssueWorker({ epicFilters, labelFilters }),
+      updateIssueWorker({ epicFilters, labelFilters }),
+      answerIssueQuestionsWorker({ epicFilters, labelFilters }),
+      triageCreatedIssueWorker({ epicFilters, labelFilters }),
       checkDependabotWorker(),
       triagePrWorker(),
-      epicIssueWorker(),
+      epicIssueWorker({ labelFilters }),
     ]);
   })();
 } else {
-  WORKERS[workerType]();
+  const epicFilters = parseEpicFilters();
+  const labelFilters = parseLabelFilters();
+  WORKERS[workerType]({ epicFilters, labelFilters });
 }
