@@ -17,6 +17,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 │  Issue (cc-update-issue)                          ──┤  │
 │  Issue (cc-answer-issue-questions)                ──┤  │
 │  Issue (cc-issue-created + cc-triage-scope)       ──┤  │
+│  Issue (cc-epic-issue, all sub-issues closed)     ──┤  │
 │  PR    (cc-fix-onetime)                           ──┤  │
 │  PR    (cc-triage-scope)                          ──┤  │
 │  PR    (dependencies, Dependabot)                 ──┤  │
@@ -36,9 +37,9 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 
 ### Worker と base-tools スキルの対応
 
-| Worker | トリガーラベル | 呼び出されるスキル | 間隔 |
+| Worker | トリガーラベル | 呼び出されるスキル | デフォルト間隔 |
 |---|---|---|---|
-| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 1分（完了後10分クールダウン） |
+| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 1分 |
 | `create-issue` | `cc-triage-scope` (Issue, blockedBy が全て Close) | `/base-tools:create-issue-from-issue-number` | 1分 |
 | `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 1分 |
 | `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 1分 |
@@ -46,8 +47,15 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 | `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 1分 |
 | `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 1分 |
 | `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
+| `epic-issue` | `cc-epic-issue` (Issue, sub-issues が全て Close) | `/base-tools:create-epic-pr` | 5分 |
 
 > ℹ️ Issue 系ワーカーはすべて GitHub Issue Dependencies の `-is:blocked` 検索 qualifier でサーバ側絞り込みを行うため、未解決の blockedBy Issue を持つ Issue は対象外となる。
+
+### Epic（親Issue）連携
+
+親Issue (Issue Dependencies の Parent) を持つサブIssueを処理する場合、ワーカーはデフォルトブランチではなく `cc-epic-<親Issue番号>` ブランチから worktree を作成する。エピック単位でブランチをまとめることで、サブIssueごとのPRを単一の統合ブランチに集約しやすくなる。エピックブランチが remote に無い場合はデフォルトブランチから自動派生して push される。
+
+`epic-issue` ワーカーは、`cc-epic-issue` ラベル付きの親Issueに紐づくサブIssueがすべて Close されたタイミングで `/base-tools:create-epic-pr` を起動し、エピックブランチからまとめてPRを作成する。
 
 ## セットアップ
 
@@ -67,10 +75,11 @@ npm link
 
 ### 初期化
 
-対象リポジトリで実行すると、必要なGitHubラベル・Issueテンプレート・GitHub Actionsワークフロー・設定ファイルが作成される。
+対象リポジトリで実行すると、必要なGitHubラベル・Issueテンプレート・GitHub Actionsワークフロー・設定ファイルが作成される。既存ファイルは保護され、`--force` を指定すると上書きされる。
 
 ```bash
-claude-task-worker init
+claude-task-worker init           # 既存ファイルは保護
+claude-task-worker init --force   # 既存ファイルを強制上書き
 ```
 
 作成されるラベル:
@@ -86,6 +95,7 @@ claude-task-worker init
 | `cc-need-human-check` | 人間の確認が必要なマーク（付与中はIssueワーカーの処理対象から除外される） |
 | `cc-issue-created` | `/base-tools:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
 | `cc-pr-created` | PR作成完了マーク |
+| `cc-epic-issue` | エピックIssueマーク（サブIssueが全Closeで `epic-issue` ワーカーが起動） |
 
 作成されるファイル:
 
@@ -96,15 +106,24 @@ claude-task-worker init
 ## コマンド
 
 ```bash
-claude-task-worker <command>
+claude-task-worker <command> [--epic <issue-number>]
+```
+
+### `--epic <issue-number>` オプション
+
+`all` / `yolo` および Issue 系の各ワーカー（`exec-issue` / `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue`）で、指定したエピックIssueのサブIssueのみを処理対象に絞り込む。エピック単位でロールアウトしたいときに使用する。
+
+```bash
+claude-task-worker all --epic 100
 ```
 
 ### exec-issue
 
-`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（1分間隔、タスク完了後は10分間クールダウン）
+`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（デフォルト1分間隔）
 
 - `cc-in-progress` ラベルを付与
 - `/base-tools:exec-issue <issue番号>` を非同期で実行
+- 親Issueがある場合は `cc-epic-<親Issue番号>` ブランチから worktree を切って実行
 - 完了後、`cc-exec-issue` ラベルを除去し、`cc-pr-created` ラベルを付与
 
 ### fix-review-point
@@ -152,13 +171,21 @@ claude-task-worker <command>
 - `cc-triage-scope` が付いているPRは除外
 - 完了後、`cc-triage-scope` ラベルを付与して triage-pr ワーカーに引き継ぎ
 
+### epic-issue
+
+`cc-epic-issue` ラベルが付いた親Issueを定期取得し、紐づくサブIssueがすべて Close されたタイミングで `/base-tools:create-epic-pr` を起動してエピックPRを作成する。（デフォルト5分間隔）
+
+- `cc-pr-created` が付いているIssueは除外
+- サブIssueが存在しない、または1つでも未Closeのものがあればスキップ
+- 完了後、`cc-pr-created` ラベルを付与
+
 ### all
 
-通常ワーカー5つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions）を同時にポーリングする。
+通常ワーカー6つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, epic-issue）を同時にポーリングする。`--epic` オプションでIssue系ワーカーをサブIssueに絞り込み可能。
 
 ### yolo
 
-すべてのワーカー（`all` + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。
+すべてのワーカー（`all` + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。`--epic` オプションでIssue系ワーカーをサブIssueに絞り込み可能。
 
 ### usage
 
@@ -179,14 +206,15 @@ claude-task-worker <command>
 
 | ワーカー名 | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
 |---|---|---|---|---|---|
-| `answer-issue-questions` | `opus` | `high` | 60 | 0 | 1 |
-| `create-issue` | `opus` | `high` | 60 | 0 | 1 |
+| `answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `create-issue` | `opus` | `xhigh` | 60 | 0 | 1 |
 | `update-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `exec-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
 | `triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
 | `triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
 | `check-dependabot` | `sonnet` | `high` | 3600 | 0 | 1 |
+| `epic-issue` | `sonnet` | `high` | 300 | 0 | 1 |
 
 各フィールドの値:
 
