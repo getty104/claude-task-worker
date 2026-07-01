@@ -225,29 +225,30 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
-| `workers` | object | `{}` | ワーカーごとに Claude CLI の `--model` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
+| `workers` | object | `{}` | ワーカーごとに Claude CLI に渡すスキル、`--model` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
 
 ### ワーカーごとの設定
 
-`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI に渡す `--model` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間、最大同時実行数を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
+`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI の `-p` に渡すスキル（スラッシュコマンド）、`--model` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間、最大同時実行数を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
 
-| ワーカー名 | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
-|---|---|---|---|---|---|
-| `answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
-| `create-issue` | `opus` | `xhigh` | 60 | 0 | 1 |
-| `update-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `exec-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `fix-review-point` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `triage-created-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `triage-pr` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `resolve-conflict` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `check-dependabot` | `sonnet` | `xhigh` | 3600 | 0 | 1 |
-| `epic-issue` | `sonnet` | `xhigh` | 300 | 0 | 1 |
+| ワーカー名 | デフォルト `skill` | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
+|---|---|---|---|---|---|---|
+| `answer-issue-questions` | `/base-tools:answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `create-issue` | `/base-tools:create-issue-from-issue-number` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `update-issue` | `/base-tools:update-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `exec-issue` | `/base-tools:exec-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `fix-review-point` | `/base-tools:fix-review-point` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `triage-created-issue` | `/base-tools:triage-created-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `triage-pr` | `/base-tools:triage-pr` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `resolve-conflict` | `/base-tools:resolve-pr-conflict` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `check-dependabot` | `/base-tools:check-dependabot` | `sonnet` | `xhigh` | 3600 | 0 | 1 |
+| `epic-issue` | `/base-tools:create-epic-pr` | `sonnet` | `xhigh` | 300 | 0 | 1 |
 
 各フィールドの値:
 
 | フィールド | 型 | 説明 |
 |---|---|---|
+| `skill` | string | Claude CLI の `-p` に渡すスラッシュコマンド（例: `/base-tools:exec-issue`, `/my-plugin:my-skill`）。ワーカーは `"<skill> <issue-or-pr-number>"` の形で Claude を起動する |
 | `model` | string | Claude CLI の `--model` に渡す値（例: `sonnet`, `opus`, `haiku`） |
 | `effort` | string | Claude CLI の `--effort` に渡す値（例: `high`, `medium`, `low`） |
 | `pollingIntervalSeconds` | number | GitHub をポーリングする間隔（秒）。正の数を指定する |
@@ -259,8 +260,8 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 ```json
 {
   "workers": {
-    "exec-issue":        { "model": "opus",   "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
-    "fix-review-point":  { "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
+    "exec-issue":        { "skill": "/my-plugin:exec-issue", "model": "opus", "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
+    "fix-review-point":  { "skill": "/base-tools:fix-review-point", "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
     "triage-pr":         { "effort": "medium", "pollingIntervalSeconds": 120 },
     "check-dependabot":  { "model": "haiku", "pollingIntervalSeconds": 7200 }
   }
