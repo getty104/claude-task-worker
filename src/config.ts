@@ -28,7 +28,7 @@ interface Config {
 
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   model: "sonnet",
-  effort: "high",
+  effort: "xhigh",
   pollingIntervalSeconds: 60,
   cooldownSeconds: 0,
   maxConcurrentTasks: 1,
@@ -37,14 +37,14 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "answer-issue-questions": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
   "create-issue": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "update-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "exec-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "fix-review-point": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "triage-created-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "triage-pr": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "resolve-conflict": { model: "sonnet", effort: "high", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "check-dependabot": { model: "sonnet", effort: "high", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "epic-issue": { model: "sonnet", effort: "high", pollingIntervalSeconds: 300, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "update-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "exec-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "fix-review-point": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-created-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-pr": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "resolve-conflict": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "check-dependabot": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "epic-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 300, cooldownSeconds: 0, maxConcurrentTasks: 1 },
 };
 
 export const DEFAULT_CONFIG: Config = {

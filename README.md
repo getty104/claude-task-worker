@@ -235,14 +235,14 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 |---|---|---|---|---|---|
 | `answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
 | `create-issue` | `opus` | `xhigh` | 60 | 0 | 1 |
-| `update-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `exec-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
-| `triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
-| `resolve-conflict` | `sonnet` | `high` | 60 | 0 | 1 |
-| `check-dependabot` | `sonnet` | `high` | 3600 | 0 | 1 |
-| `epic-issue` | `sonnet` | `high` | 300 | 0 | 1 |
+| `update-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `exec-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `fix-review-point` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `triage-created-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `triage-pr` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `resolve-conflict` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `check-dependabot` | `sonnet` | `xhigh` | 3600 | 0 | 1 |
+| `epic-issue` | `sonnet` | `xhigh` | 300 | 0 | 1 |
 
 各フィールドの値:
 
