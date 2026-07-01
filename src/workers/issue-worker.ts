@@ -72,13 +72,14 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             syncDefaultBranch(defaultBranch);
-            const { model, effort } = getWorkerConfig(config.name);
+            const { model, effort, skill } = getWorkerConfig(config.name);
+            const command = skill || config.command;
 
             const parentNumber = issue.parent?.number;
             let cwd: string | undefined;
             const claudeArgs: string[] = [
               "-p",
-              `"${config.command} ${issue.number}"`,
+              `"${command} ${issue.number}"`,
               "--dangerously-skip-permissions",
               "--model",
               model,

@@ -14,6 +14,7 @@ export type WorkerName =
   | "epic-issue";
 
 export interface WorkerRuntimeConfig {
+  skill: string;
   model: string;
   effort: string;
   pollingIntervalSeconds: number;
@@ -27,6 +28,7 @@ interface Config {
 }
 
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
+  skill: "",
   model: "sonnet",
   effort: "xhigh",
   pollingIntervalSeconds: 60,
@@ -35,16 +37,16 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
-  "answer-issue-questions": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "create-issue": { model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "update-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "exec-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "fix-review-point": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "triage-created-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "triage-pr": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "resolve-conflict": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "check-dependabot": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
-  "epic-issue": { model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 300, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "answer-issue-questions": { skill: "/base-tools:answer-issue-questions", model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "create-issue": { skill: "/base-tools:create-issue-from-issue-number", model: "opus", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "update-issue": { skill: "/base-tools:update-issue", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "exec-issue": { skill: "/base-tools:exec-issue", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "fix-review-point": { skill: "/base-tools:fix-review-point", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-created-issue": { skill: "/base-tools:triage-created-issue", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "triage-pr": { skill: "/base-tools:triage-pr", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "resolve-conflict": { skill: "/base-tools:resolve-pr-conflict", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 60, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "check-dependabot": { skill: "/base-tools:check-dependabot", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 3600, cooldownSeconds: 0, maxConcurrentTasks: 1 },
+  "epic-issue": { skill: "/base-tools:create-epic-pr", model: "sonnet", effort: "xhigh", pollingIntervalSeconds: 300, cooldownSeconds: 0, maxConcurrentTasks: 1 },
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -66,6 +68,13 @@ function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | nul
   }
   const entry = val as Record<string, unknown>;
   const result: WorkerRuntimeConfig = { ...base };
+  if ("skill" in entry) {
+    if (typeof entry.skill === "string" && entry.skill.length > 0) {
+      result.skill = entry.skill;
+    } else {
+      console.warn(`[config] invalid workers.${name}.skill: ${String(entry.skill)}, using default ${base.skill}`);
+    }
+  }
   if ("model" in entry) {
     if (typeof entry.model === "string" && entry.model.length > 0) {
       result.model = entry.model;

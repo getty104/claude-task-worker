@@ -57,12 +57,13 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             await removeWorktreeByBranch(pr.headRefName);
             const worktreeId = generateWorktreeName();
             syncDefaultBranch(defaultBranch);
-            const { model, effort } = getWorkerConfig(config.name);
+            const { model, effort, skill } = getWorkerConfig(config.name);
+            const command = skill || config.command;
             run(
               "claude",
               [
                 "-p",
-                `"${config.command} ${pr.number}"`,
+                `"${command} ${pr.number}"`,
                 "--dangerously-skip-permissions",
                 "--model",
                 model,
