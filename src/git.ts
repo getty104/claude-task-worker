@@ -41,24 +41,21 @@ export async function ensureEpicBranch(epicBranch: string, defaultBranch: string
   // FETCH_HEAD のような共有スロットを避けることで、並行実行時に別 fetch が
   // source を上書きして誤コミットを push してしまう競合を防ぐ。
   await fetchRemoteTracking(defaultBranch);
-  await execFileAsync("git", [
-    "push",
-    "origin",
-    `refs/remotes/origin/${defaultBranch}:refs/heads/${epicBranch}`,
-  ]);
+  await execFileAsync("git", ["push", "origin", `refs/remotes/origin/${defaultBranch}:refs/heads/${epicBranch}`]);
   await fetchRemoteTracking(epicBranch);
 
   // ここまで来ても remote-tracking ref が無ければ worktree add に進ませない。
   await assertRemoteTrackingExists(epicBranch);
 }
 
-/** origin/<branch> を refs/remotes/origin/<branch> に force で取り込む（標準の remote-tracking と同じ挙動）。 */
+/**
+ * origin/<branch> を refs/remotes/origin/<branch> に force で取り込む（標準の remote-tracking と同じ挙動）。
+ * fetch.prune=true 環境で短縮形 src はリモート広告 ref（完全名）とリテラル比較され
+ * 「消えたブランチ」と誤判定されて dst が prune 削除されるため、
+ * src は refs/heads/ で完全修飾し、さらに --no-prune で prune 自体を無効化する。
+ */
 async function fetchRemoteTracking(branch: string): Promise<void> {
-  await execFileAsync("git", [
-    "fetch",
-    "origin",
-    `+${branch}:refs/remotes/origin/${branch}`,
-  ]);
+  await execFileAsync("git", ["fetch", "--no-prune", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`]);
 }
 
 /** fetch エラーが「remote に該当 ref が無い」ことによるものかを判定する。 */
@@ -69,10 +66,5 @@ function isMissingRemoteRefError(error: unknown): boolean {
 
 /** refs/remotes/origin/<epicBranch> がローカルに存在することを保証する（無ければ throw）。 */
 async function assertRemoteTrackingExists(epicBranch: string): Promise<void> {
-  await execFileAsync("git", [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    `refs/remotes/origin/${epicBranch}`,
-  ]);
+  await execFileAsync("git", ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${epicBranch}`]);
 }
