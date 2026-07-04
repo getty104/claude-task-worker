@@ -31,10 +31,14 @@ export function getWorktreePath(worktreeId: string): string {
 
 export async function createWorktreeFromBranch(worktreeId: string, baseBranch: string): Promise<void> {
   const worktreePath = `${WORKTREES_DIR}/${worktreeId}`;
+  // detached HEAD だと後段の commit-push スキルの `git push origin HEAD` が
+  // refspec を解決できず失敗するため、worktreeId と同名のブランチを切って checkout する。
+  // -B を使うことで孤児ブランチが残っていても origin/${baseBranch} から強制再作成して安全に回復できる。
   await execFileAsync("git", [
     "worktree",
     "add",
-    "--detach",
+    "-B",
+    worktreeId,
     worktreePath,
     `origin/${baseBranch}`,
   ]);
