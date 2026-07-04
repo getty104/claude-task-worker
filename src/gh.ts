@@ -99,6 +99,43 @@ export async function listIssuesByLabel(
   return JSON.parse(output);
 }
 
+export async function listIssuesByNumbers(
+  assignee: string,
+  labels: string[],
+  excludeLabels: string[],
+  numbers: number[],
+): Promise<Issue[]> {
+  const results: Issue[] = [];
+  for (const number of numbers) {
+    try {
+      const output = await execGh([
+        "issue",
+        "view",
+        String(number),
+        "--json",
+        "number,title,labels,parent,assignees,state",
+      ]);
+      const parsed = JSON.parse(output);
+      // -is:blocked は listIssuesByLabel の search 由来の絞り込みだが、
+      // エピックIssue自体はサブIssueにブロックされる対象ではないため再現しない。
+      if (parsed.state !== "OPEN") continue;
+      if (!parsed.assignees.some((a: { login: string }) => a.login === assignee)) continue;
+      const labelNames = new Set(parsed.labels.map((l: { name: string }) => l.name));
+      if (!labels.every((label) => labelNames.has(label))) continue;
+      if (excludeLabels.some((label) => labelNames.has(label))) continue;
+      results.push({
+        number: parsed.number,
+        title: parsed.title,
+        labels: parsed.labels,
+        parent: parsed.parent,
+      });
+    } catch (err) {
+      console.error(`[gh] listIssuesByNumbers failed for #${number}: ${err}`);
+    }
+  }
+  return results;
+}
+
 export async function getIssueSubIssuesSummary(issueNumber: number): Promise<SubIssuesSummary> {
   const output = await execGh(["issue", "view", String(issueNumber), "--json", "subIssuesSummary"]);
   const parsed = JSON.parse(output);

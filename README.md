@@ -118,6 +118,8 @@ claude-task-worker <command> [--epic <issue-number>]... [--label <label-name>]..
 
 複数指定可能で、複数指定した場合はいずれかのエピックを親に持つサブIssueが対象になる（OR）。
 
+> ℹ️ `epic-issue` ワーカーはエピックIssue自体を処理対象とするため、`--epic` で指定した番号は「サブIssueの親」ではなく「エピックIssue自身の番号」として照合される。`--epic 100` を指定した場合、Epic PR が作成されるのは #100 のみになる。
+
 ```bash
 claude-task-worker all --epic 100
 claude-task-worker all --epic 100 --epic 200    # #100 または #200 の sub-issue
