@@ -1,5 +1,5 @@
 import { getWorkerConfig } from "../config";
-import { getCurrentUser, getRepoInfo, listIssuesByLabel, removeLabel, addLabel } from "../gh";
+import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
 import { syncDefaultBranch, ensureEpicBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
@@ -17,6 +17,7 @@ interface IssueWorkerConfig {
   triggerLabels: string[];
   excludeLabels?: string[];
   epicFilters?: number[];
+  ownNumberFilters?: number[];
   labelFilters?: string[];
   preflight?: (issue: Issue) => Promise<PreflightResult>;
   onCompleted?: (issueNumber: number) => Promise<void>;
@@ -48,7 +49,10 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           config.labelFilters && config.labelFilters.length > 0
             ? [...config.triggerLabels, ...config.labelFilters]
             : config.triggerLabels;
-        const candidates = await listIssuesByLabel(user, labels, excludeLabels, epicFilter);
+        const candidates =
+          config.ownNumberFilters && config.ownNumberFilters.length > 0
+            ? await listIssuesByNumbers(user, labels, excludeLabels, config.ownNumberFilters)
+            : await listIssuesByLabel(user, labels, excludeLabels, epicFilter);
 
         for (const issue of candidates) {
           if (isRunning(issue.number)) continue;

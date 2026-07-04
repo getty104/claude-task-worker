@@ -168,7 +168,7 @@ if (workerType === "init") {
     updateIssueWorker({ epicFilters, labelFilters }),
     answerIssueQuestionsWorker({ epicFilters, labelFilters }),
     resolveConflictWorker(),
-    epicIssueWorker({ labelFilters }),
+    epicIssueWorker({ epicFilters, labelFilters }),
   ]);
 } else if (workerType === "yolo") {
   const epicFilters = parseEpicFilters();
@@ -184,7 +184,7 @@ if (workerType === "init") {
       checkDependabotWorker(),
       triagePrWorker(),
       resolveConflictWorker(),
-      epicIssueWorker({ labelFilters }),
+      epicIssueWorker({ epicFilters, labelFilters }),
     ]);
   })();
 } else {
