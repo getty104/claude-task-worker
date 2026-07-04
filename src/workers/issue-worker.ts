@@ -79,7 +79,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             let cwd: string | undefined;
             const claudeArgs: string[] = [
               "-p",
-              `"${command} ${issue.number}"`,
+              `${command} ${issue.number}`,
               "--dangerously-skip-permissions",
               "--model",
               model,
