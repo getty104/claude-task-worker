@@ -14,6 +14,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-triage-scope", color: "c5def5" },
   { name: "cc-resolve-conflict", color: "fbca04" },
   { name: "cc-epic-issue", color: "8b5cf6" },
+  { name: "cc-release-ready", color: "2da44e" },
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"

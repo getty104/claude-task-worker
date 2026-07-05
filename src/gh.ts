@@ -132,6 +132,23 @@ export async function listIssuesByNumbers(
   return results;
 }
 
+export async function findOpenPrNumberByHeadRef(headRefName: string): Promise<number | null> {
+  const output = await execGh([
+    "pr",
+    "list",
+    "--state",
+    "open",
+    "--head",
+    headRefName,
+    "--json",
+    "number",
+    "--limit",
+    "1",
+  ]);
+  const prs: { number: number }[] = JSON.parse(output);
+  return prs.length > 0 ? prs[0].number : null;
+}
+
 export async function getIssueSubIssuesSummary(issueNumber: number): Promise<SubIssuesSummary> {
   const output = await execGh(["issue", "view", String(issueNumber), "--json", "subIssuesSummary"]);
   const parsed = JSON.parse(output);

@@ -146,7 +146,8 @@ claude-task-worker init --force   # 既存ファイルを強制上書き
 | `cc-need-human-check` | 人間の確認が必要なマーク（付与中はIssueワーカーの処理対象から除外される） |
 | `cc-issue-created` | `/claude-task-worker:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
 | `cc-pr-created` | PR作成完了マーク |
-| `cc-epic-issue` | エピックIssueマーク（サブIssueが全Closeで `epic-issue` ワーカーが起動） |
+| `cc-epic-issue` | エピックマーク（Issueではサブ全Closeで `epic-issue` ワーカー起動、PRではリリースゲート対象を示すマーク） |
+| `cc-release-ready` | エピックPRがリリース可能（マージ問題なし）と判定されたマーク。実際のマージ（リリース）は人間が実施 |
 
 作成されるファイル:
 
@@ -234,6 +235,8 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 - `cc-fix-onetime` が付いているPRは除外
 - `cc-resolve-conflict` が付いているPRは除外
+- `cc-release-ready` が付いているPRは除外（リリースゲート判定済みのため再トリアージしない）
+- マージ可能と判定した際、`cc-epic-issue` が付いたエピックPRはマージせず `cc-release-ready` ラベルを付与する（リリースのためのマージは人間の判断に委ねる）。通常PRは従来どおりマージする
 
 ### resolve-conflict
 
@@ -254,7 +257,8 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 - `cc-pr-created` が付いているIssueは除外
 - サブIssueが存在しない、または1つでも未Closeのものがあればスキップ
-- 完了後、`cc-pr-created` ラベルを付与
+- 完了後、親Issueに `cc-pr-created` ラベルを付与
+- 完了後、作成されたエピックPR（`cc-epic-<親Issue番号>` ブランチ）に `cc-epic-issue` と `cc-triage-scope` ラベルを付与し、triage-pr のリリースゲート判定に引き継ぐ
 
 ### all
 

@@ -1,6 +1,6 @@
 ---
 name: triage-pr
-description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), generate and evaluate a fix plan via create-review-fix-plan, then take action (add cc-fix-onetime label if fixes are needed, or merge the PR if it's ready).
+description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), generate and evaluate a fix plan via create-review-fix-plan, then take action (add cc-fix-onetime label if fixes are needed; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
 argument-hint: "[pr-number]"
 hooks:
   Stop:
@@ -19,7 +19,7 @@ hooks:
 **やること**:
 - ステップ1のコンフリクト検知（`gh pr status`で確認し、コンフリクトがあれば`cc-resolve-conflict`ラベル付与のみで終了）
 - ステップ2の修正プラン生成と評価（プランの分析・判定のみ）
-- ステップ3のラベル付与（`cc-fix-onetime`）またはマージ
+- ステップ3のアクション: 修正が必要なら`cc-fix-onetime`ラベル付与 / マージ可能な場合は、Epic PR（`cc-epic-issue`付き）なら`cc-release-ready`ラベル付与（マージはしない）、通常PRならマージ
 
 **絶対にやらないこと**:
 - **PRのコード修正・実装**: 修正プランで「対応すべき」と判定された項目があっても、このスキル内では一切コードを変更しない。修正の実行は`cc-fix-onetime`ラベル付与後に別スキル（`fix-review-point`など）の責務
@@ -112,7 +112,21 @@ gh pr edit $ARGUMENTS --add-label "cc-fix-onetime"
 
 #### パターンB: マージ可能な場合
 
-すべての項目が「対応不要」、または修正プランに項目がない場合、以下の手順でマージし、**必要に応じて関連Issueを明示的にクローズする。判定だけで終了しないこと。**
+すべての項目が「対応不要」、または修正プランに項目がない場合、マージ可能（リリース問題なし）と判定する。
+
+**まず対象PRが Epic PR（`cc-epic-issue` ラベル付き）かどうかを確認する。**
+
+```bash
+gh pr view $ARGUMENTS --json labels -q '.labels[].name'
+```
+
+- **Epic PR の場合（出力に `cc-epic-issue` を含む）**: このPRをマージするとデフォルトブランチへの集約反映（＝リリース）になるため、**このスキルではマージせず** `cc-release-ready` ラベルのみを付与して終了する。実際のリリース（マージ）は人間の判断に委ねるゲートとして扱う。以降のマージ手順・関連Issueクローズには進まない。
+
+  ```bash
+  gh pr edit $ARGUMENTS --add-label "cc-release-ready"
+  ```
+
+- **通常のPRの場合（`cc-epic-issue` を含まない）**: 以下の手順でマージし、**必要に応じて関連Issueを明示的にクローズする。判定だけで終了しないこと。**
 
 1. マージ前に、PRのbaseブランチとデフォルトブランチ名を取得する。
 
@@ -191,5 +205,5 @@ gh issue close <issue番号> --reason "not planned"
 
 処理結果として以下を報告する：
 
-- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正が必要・`cc-fix-onetime`ラベル付与） / パターンB（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / PRクローズ（関連IssueもClose） / エラー
-- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目の要約、マージ可能と判断した理由、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、またはクローズ理由と連動Closeした関連Issue番号）
+- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正が必要・`cc-fix-onetime`ラベル付与） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / PRクローズ（関連IssueもClose） / エラー
+- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目の要約、マージ可能と判断した理由、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、またはクローズ理由と連動Closeした関連Issue番号）
