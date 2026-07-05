@@ -1,22 +1,28 @@
 name: Publish to npm
 
 on:
-  push:
-    tags:
-      - "v*"
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      semver:
+        description: "Version increment level"
+        type: choice
+        required: true
+        default: minor
+        options:
+          - major
+          - minor
+          - patch
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v5
         with:
-          persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -29,6 +35,31 @@ jobs:
 
       - name: Ensure npm supports trusted publishing (OIDC)
         run: npm install -g npm@latest
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: version
+        run: |
+          new_version=$(npm version "${{ inputs.semver }}" --no-git-tag-version)
+          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        run: |
+          git commit -am "chore: release ${{ steps.version.outputs.version }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" \
+            --target "${{ github.ref_name }}" \
+            --latest \
+            --generate-notes
 
       - name: Build
         run: npm run build
