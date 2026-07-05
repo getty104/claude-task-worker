@@ -24,6 +24,6 @@ GitHubのプルリクエスト（PR）における未解決のレビューコメ
 
 以下のコマンドでResolveしていないレビューコメントをResolveします。
 
-```
+```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/resolve-pr-comments.sh
 ```

@@ -17,7 +17,7 @@ context: fork
 
 ### 1. Next.js関連の場合 → next-devtools MCP
 
-```
+```bash
 # 最初に初期化（セッション開始時に1回のみ）
 mcp__plugin_getty104_next-devtools__init
 
@@ -34,14 +34,14 @@ mcp__plugin_getty104_next-devtools__nextjs_docs
 
 ### 2. shadcn関連の場合 → shadcn MCP
 
-```
+```bash
 # shadcn MCPツールを使用
 # 利用可能なツールはListMcpResourcesToolで確認可能
 ```
 
 ### 3. その他のライブラリの場合 → context7 MCP
 
-```
+```bash
 # ライブラリIDの解決
 mcp__plugin_getty104_context7__resolve-library-id
   libraryName: "<ライブラリ名>"

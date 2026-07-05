@@ -48,13 +48,21 @@ GitHubでPull Request（PR）を作成するスキルです。呼び出された
 git fetch origin --prune
 
 BASE_BRANCH=""
-PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty' 2>/dev/null)
-if [ -n "${PARENT}" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
-  BASE_BRANCH="cc-epic-${PARENT}"
+
+# Issue 番号が指定されている場合のみ実行
+if [ -n "$0" ]; then
+  # gh issue view が失敗した場合はエラーを報告して中断
+  PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty') || {
+    echo "Error: Failed to retrieve Issue #$0" >&2
+    exit 1
+  }
+  if [ -n "${PARENT}" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
+    BASE_BRANCH="cc-epic-${PARENT}"
+  fi
 fi
 ```
 
-引数のIssue番号が渡されていない場合は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。
+引数のIssue番号が渡されていない場合（`$0`が空）は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。Issue番号が指定されているが `gh issue view` の実行に失敗した場合（ネットワークエラー・権限不足等）はエラーメッセージを出力して処理を中断する。
 
 ### 2. 分岐元ブランチの推定（fallback）
 

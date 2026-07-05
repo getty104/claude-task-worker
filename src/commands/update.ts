@@ -1,58 +1,51 @@
-import { spawn } from "node:child_process";
+import { runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
 const MARKETPLACE_NAME = "claude-task-worker";
 
-function runCommand(command: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit" });
-    child.on("error", (err) => {
-      reject(err);
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${command} ${args.join(" ")} exited with code ${code}`));
-      }
-    });
-  });
-}
-
-async function updateMarketplace(): Promise<void> {
+async function updateMarketplace(): Promise<boolean> {
   console.log(`[update] Updating marketplace: ${MARKETPLACE_NAME}...`);
   try {
     await runCommand("claude", ["plugin", "marketplace", "update", MARKETPLACE_NAME]);
     console.log("[update] Marketplace updated.");
+    return true;
   } catch (err) {
     console.error(`[update] Failed to update marketplace: ${(err as Error).message}`);
+    return false;
   }
 }
 
-async function updatePlugin(): Promise<void> {
+async function updatePlugin(): Promise<boolean> {
   console.log(`[update] Updating plugin: ${PLUGIN_NAME}@${MARKETPLACE_NAME}...`);
   try {
     await runCommand("claude", ["plugin", "update", `${PLUGIN_NAME}@${MARKETPLACE_NAME}`]);
     console.log("[update] Plugin updated. Restart your Claude Code session to apply the update.");
+    return true;
   } catch (err) {
     console.error(`[update] Failed to update plugin: ${(err as Error).message}`);
+    return false;
   }
 }
 
-async function updateCli(): Promise<void> {
+async function updateCli(): Promise<boolean> {
   console.log("[update] Updating claude-task-worker CLI (npm install -g claude-task-worker@latest)...");
   try {
     await runCommand("npm", ["install", "-g", "claude-task-worker@latest"]);
     console.log("[update] claude-task-worker CLI updated.");
+    return true;
   } catch (err) {
     console.error(`[update] Failed to update claude-task-worker CLI: ${(err as Error).message}`);
+    return false;
   }
 }
 
 export async function update(): Promise<void> {
   console.log("[update] Starting update...");
-  await updateMarketplace();
-  await updatePlugin();
-  await updateCli();
+  const marketplaceOk = await updateMarketplace();
+  const pluginOk = await updatePlugin();
+  const cliOk = await updateCli();
+  if (!marketplaceOk || !pluginOk || !cliOk) {
+    process.exitCode = 1;
+  }
   console.log("[update] Done.");
 }

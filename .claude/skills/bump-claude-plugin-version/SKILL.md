@@ -1,9 +1,9 @@
 ---
-name: bump-version
+name: bump-claude-plugin-version
 description: claude-task-workerプラグインのバージョン（patchバージョン）をインクリメントし、commit-pushでコミット・プッシュしたうえでPRを作成する。「バージョンを上げて」「バージョンアップ」「bump version」などのリクエストで使用する。
 ---
 
-# Bump Version
+# Bump Claude Plugin Version
 
 `plugin/.claude-plugin/plugin.json` のpatchバージョンをインクリメントし、変更をコミット・プッシュしたうえでPRを作成するスキルです。
 

@@ -2,12 +2,6 @@
 name: update-issue
 description: Update an existing GitHub Issue's description based on the issue number. Reads all issue comments and reflects any items not yet captured in the description. After refreshing the description, reviews it for remaining ambiguities or unclear requirements and posts any open questions as a follow-up 確認事項 comment.
 argument-hint: "[Issue番号]"
-hooks:
-  Stop:
-    - matcher: ""
-      hooks:
-        - type: command
-          command: docker compose down --volumes --remove-orphans
 ---
 
 # Update Issue
@@ -50,7 +44,7 @@ git fetch --prune || true
 
 引数から先頭のIssue番号を取り出し、そのIssueを取得して現在の内容を確認する。
 
-```
+```bash
 gh issue view <Issue番号> --json number,title,state,labels,body,url
 ```
 
@@ -60,13 +54,13 @@ gh issue view <Issue番号> --json number,title,state,labels,body,url
 
 コメント全件が更新の唯一の入力になるため、必ず併せて取得する。
 
-```
+```bash
 gh issue view <Issue番号> --comments
 ```
 
 本文・コメントに画像URLがある場合、`gh-asset` でダウンロードして内容を読む。テキストだけでは伝わらない仕様（UIの見た目・エラー画面・図など）がdescription更新の判断に必要なことがあるため、URLを見て終わりにせず、ダウンロードした画像を実際に Read で確認する。
 
-```
+```bash
 gh-asset download <asset_id> ~/Downloads/
 ```
 

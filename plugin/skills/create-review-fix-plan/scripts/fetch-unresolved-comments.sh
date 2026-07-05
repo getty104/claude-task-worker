@@ -3,6 +3,11 @@ OWNER="$(echo $OWNER_REPO | cut -d'/' -f1)"
 REPO="$(echo $OWNER_REPO | cut -d'/' -f2)"
 PR_NUMBER="$(gh pr view --json number --jq '.number')"
 
+if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+  echo "Error: Could not determine PR number. Make sure the current branch has an open PR." >&2
+  exit 1
+fi
+
 fetch_all_review_threads() {
   local cursor=""
   local has_next_page=true

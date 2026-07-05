@@ -19,7 +19,7 @@ git commit
 
 gitコミットメッセージ例:
 
-```
+```text
 feat: add user profile editing feature
 
 Implement profile editing functionality:
@@ -94,7 +94,7 @@ git rebase -i "origin/$(gh repo view --json defaultBranchRef -q .defaultBranchRe
 
 エディタでの編集:
 
-```
+```text
 pick v6w7x8y feat: add user model
 squash s3t4u5v fix: import statement
 drop y9z0a1b WIP: experiment with layout

@@ -53,10 +53,14 @@ pwd
 git status
 DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git log --oneline --graph "origin/${DEFAULT_BRANCH}..HEAD"
+
+# DEFAULT_BRANCH が正常に取得できた場合のみ git log を実行
+if [ -n "${DEFAULT_BRANCH}" ]; then
+  git log --oneline --graph "origin/${DEFAULT_BRANCH}..HEAD"
+fi
 ```
 
-確認事項: 現在のブランチ名／デフォルトブランチから何gitコミット進んでいるか／各gitコミットの内容と粒度
+確認事項: 現在のブランチ名／デフォルトブランチから何gitコミット進んでいるか（DEFAULT_BRANCH取得成功時）／各gitコミットの内容と粒度
 
 取得した `CURRENT_BRANCH` と `DEFAULT_BRANCH` から、以降のモードを決める:
 

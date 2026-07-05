@@ -32,6 +32,7 @@ hooks:
 ## 注意事項
 
 - Issueに付いているラベルは**絶対に外さないこと**。`gh issue edit`で`--remove-label`は使用を禁止する
+- トリガーラベルの除去（`cc-issue-created`・`cc-triage-scope`）はワーカー基盤側が本スキル完了時に行う設計である。本スキルは遷移ラベル（`cc-need-human-check`・`cc-answer-issue-questions`・`cc-update-issue`・`cc-exec-issue`）を付与するのみで、既存ラベルの除去は行わない
 
 ## 実行モードの制約: サブエージェント・サブスキル・Bashをバックグラウンド実行しないこと
 
@@ -53,7 +54,7 @@ hooks:
 
 対象Issueのdescription・ラベル・コメント履歴全体を取得する。
 
-```
+```bash
 gh issue view $0 --json body,labels,comments
 ```
 
@@ -66,7 +67,7 @@ gh issue view $0 --json body,labels,comments
 
 最後のコメントの確認事項本文の中で、他のIssueやPRが参照されている場合（Issue番号・PR番号・URLでの言及、「依存Issue」「関連PR」といった表現を含む）、その参照先の**現在の状態**を`gh`コマンドで検証する。本文やコメントの記述はスナップショット時点のものであり、その後クローズ・マージされている可能性があるため、鵜呑みにせず必ず最新状態を取得する。
 
-```
+```bash
 gh issue view <参照先のIssue番号> --json state,title
 gh pr view <参照先のPR番号> --json state,title,mergedAt
 ```
@@ -124,12 +125,12 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
 経路1・経路2のいずれかに該当する場合、以下を実行してこのIssueの処理を終了する。**他のラベル（クローズ・`cc-answer-issue-questions`・`cc-update-issue`・`cc-exec-issue`）は付与しない。**
 
 1. 人の確認が必要と判断した理由を、根拠となるコメントを引用しつつ簡潔にコメントする
-   ```
+   ```bash
    gh issue comment $0 --body "<人の確認が必要と判断した理由>"
    ```
 
 2. `cc-need-human-check`ラベルを付与する
-   ```
+   ```bash
    gh issue edit $0 --add-label "cc-need-human-check"
    ```
 
@@ -145,12 +146,12 @@ Issueの内容を精査した結果、以下のいずれかに該当する場合
 以下を実行する：
 
 1. Issueにクローズ理由をコメントで記載する
-   ```
+   ```bash
    gh issue comment $0 --body "<クローズ理由の説明>"
    ```
 
 2. Issueをcloseする
-   ```
+   ```bash
    gh issue close $0
    ```
 
@@ -158,7 +159,7 @@ Issueの内容を精査した結果、以下のいずれかに該当する場合
 
 最後のコメントに確認事項が存在し、まだ回答が記載されていない項目がある場合（パターンAの経路2で全項目が人間判断必要と判断されたケースを除く。一部の項目のみ事実確認で自動回答可能な場合と、全項目が自動回答可能な場合の両方を含む）：
 
-```
+```bash
 gh issue edit $0 --add-label "cc-answer-issue-questions"
 ```
 
@@ -177,12 +178,12 @@ gh issue edit $0 --add-label "cc-answer-issue-questions"
 上記を除いた確定内容のうち、descriptionに書かれていない、または古いまま食い違っている項目が一つでもある場合は、descriptionが陳腐化しているとみなす。この場合は着手（パターンE）に進めず、以下を実行してこのIssueの処理を終了する。**他のラベル（`cc-exec-issue`など）は付与しない。**
 
 1. descriptionに未反映と判断した内容を、根拠となるコメントを引用しつつ簡潔にコメントする
-   ```
+   ```bash
    gh issue comment $0 --body "<descriptionに未反映と判断した内容の説明>"
    ```
 
 2. `cc-update-issue`ラベルを付与する
-   ```
+   ```bash
    gh issue edit $0 --add-label "cc-update-issue"
    ```
 
@@ -192,6 +193,6 @@ gh issue edit $0 --add-label "cc-answer-issue-questions"
 
 確認事項がない、または全ての確認事項に回答済みであり、かつパターンDでコメント履歴の確定内容がdescriptionに反映済みと確認できた場合、実行可能と判断して`cc-exec-issue`ラベルを付与する：
 
-```
+```bash
 gh issue edit $0 --add-label "cc-exec-issue"
 ```
