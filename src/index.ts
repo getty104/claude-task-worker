@@ -12,6 +12,7 @@ import { checkDependabotWorker } from "./workers/check-dependabot";
 import { epicIssueWorker } from "./workers/epic-issue";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
 import { init } from "./commands/init";
+import { install } from "./commands/install";
 import { update } from "./commands/update";
 import { buildTokenLimitText, send } from "./slack";
 
@@ -33,6 +34,7 @@ function printUsage(): void {
 
 Commands:
   init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
+  install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   usage             Notify current usage to Slack
 
@@ -75,6 +77,7 @@ if (
   workerType !== "all" &&
   workerType !== "yolo" &&
   workerType !== "init" &&
+  workerType !== "install" &&
   workerType !== "update" &&
   workerType !== "usage" &&
   !WORKERS[workerType]
@@ -151,6 +154,10 @@ process.on("SIGINT", async () => {
 if (workerType === "init") {
   const force = process.argv.slice(3).includes("--force");
   init({ force });
+} else if (workerType === "install") {
+  (async () => {
+    await install();
+  })();
 } else if (workerType === "update") {
   (async () => {
     await update();
