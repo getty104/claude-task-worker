@@ -375,6 +375,12 @@ npm run build    # TypeScript → dist/
 npm run dev      # Watch mode (auto-rebuild)
 ```
 
+コントリビューションを歓迎します。開発環境のセットアップ・PRの出し方は [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。バグ報告・機能要望は [Issue テンプレート](https://github.com/getty104/claude-task-worker/issues/new/choose) から作成してください。
+
+セキュリティ上の脆弱性は公開Issueではなく [SECURITY.md](./SECURITY.md) の手順で報告してください。
+
+本プロジェクトへの参加にあたっては [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)（Contributor Covenant）を遵守してください。
+
 ## ライセンス
 
-MIT
+MIT License. 詳細は [LICENSE](./LICENSE) を参照してください。

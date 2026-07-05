@@ -1,0 +1,50 @@
+name: "バグ報告 (Bug Report)"
+description: 動作の不具合を報告する
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 概要
+      description: どのような不具合が発生しているか記述してください
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 再現手順
+      description: 再現可能な手順を順番に記述してください
+      placeholder: |
+        1. `claude-task-worker ...` を実行
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する挙動
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の挙動
+      description: エラーメッセージやログがあれば貼り付けてください
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: claude-task-worker のバージョン
+      description: "`npm ls -g claude-task-worker` または `package.json` のバージョン"
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: OS、Node.jsバージョン、`gh`/`claude` CLIのバージョンなど
+    validations:
+      required: false
