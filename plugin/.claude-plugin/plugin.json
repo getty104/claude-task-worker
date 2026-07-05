@@ -1,0 +1,8 @@
+{
+  "name": "claude-task-worker",
+  "version": "0.1.0",
+  "description": "claude-task-worker と組み合わせて使う getty104's base tool set (skills/agents/hooks)",
+  "author": {
+    "name": "getty104"
+  }
+}
