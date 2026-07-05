@@ -1,0 +1,17 @@
+{
+  "name": "claude-task-worker",
+  "metadata": {
+    "description": "claude-task-worker's Claude Code plugin marketplace",
+    "version": "0.1.0"
+  },
+  "owner": {
+    "name": "getty104"
+  },
+  "plugins": [
+    {
+      "name": "claude-task-worker",
+      "source": "./plugin",
+      "description": "claude-task-worker と組み合わせて使う getty104's base tool set (skills/agents/hooks)"
+    }
+  ]
+}

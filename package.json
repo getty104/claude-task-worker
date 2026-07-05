@@ -13,12 +13,34 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "prepublishOnly": "npm run build"
   },
   "files": [
     "dist"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getty104/claude-task-worker.git"
+  },
+  "homepage": "https://github.com/getty104/claude-task-worker#readme",
+  "bugs": {
+    "url": "https://github.com/getty104/claude-task-worker/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "github",
+    "cli",
+    "automation",
+    "issues",
+    "pull-requests"
+  ],
+  "author": "getty104",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",

@@ -4,7 +4,7 @@ import { createIssuePollingWorker } from "./issue-worker";
 export const epicIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
     name: "epic-issue",
-    command: "/base-tools:create-epic-pr",
+    command: "/claude-task-worker:create-epic-pr",
     triggerLabels: ["cc-epic-issue"],
     excludeLabels: ["cc-pr-created"],
     ownNumberFilters: opts.epicFilters,

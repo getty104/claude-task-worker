@@ -72,11 +72,7 @@ export async function listIssuesByLabel(
   epicFilter?: { owner: string; repo: string; numbers: number[] },
 ): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
-  const searchTerms = [
-    "sort:created-asc",
-    "-is:blocked",
-    ...excludeLabels.map((label) => `-label:"${label}"`),
-  ];
+  const searchTerms = ["sort:created-asc", "-is:blocked", ...excludeLabels.map((label) => `-label:"${label}"`)];
   if (epicFilter && epicFilter.numbers.length > 0) {
     for (const number of epicFilter.numbers) {
       searchTerms.push(`parent-issue:${epicFilter.owner}/${epicFilter.repo}#${number}`);
@@ -214,9 +210,7 @@ export async function listPullRequestsWithChecks(
   }
   const output = await execGh(args);
   const prs: PullRequest[] = JSON.parse(output);
-  const withChecks = await Promise.all(
-    prs.map(async (pr) => ({ ...pr, checks: await fetchPRChecks(pr.number) })),
-  );
+  const withChecks = await Promise.all(prs.map(async (pr) => ({ ...pr, checks: await fetchPRChecks(pr.number) })));
   return withChecks.filter((pr) => isCICompleted(pr.checks));
 }
 

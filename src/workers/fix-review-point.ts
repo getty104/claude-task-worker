@@ -4,7 +4,7 @@ import { createPrPollingWorker } from "./pr-worker";
 
 export const fixReviewPointWorker = createPrPollingWorker({
   name: "fix-review-point",
-  command: "/base-tools:fix-review-point",
+  command: "/claude-task-worker:fix-review-point",
   triggerLabel: "cc-fix-onetime",
   onCompleted: async (pr) => {
     const config = loadConfig();
