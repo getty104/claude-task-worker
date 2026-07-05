@@ -300,6 +300,18 @@ claude-task-worker update
 
 いずれかのステップが失敗しても処理は継続し、`[update]` プレフィックス付きでエラー内容がログ出力される。
 
+### version
+
+インストールされている `claude-task-worker` CLI のバージョンを表示する。
+
+```bash
+claude-task-worker version
+claude-task-worker --version
+claude-task-worker -v
+```
+
+`package.json` の `version` を出力する（例: `0.2.0`）。
+
 ## 設定ファイル
 
 コマンドを実行したディレクトリ直下の `claude-task-worker.json` を読み込む。

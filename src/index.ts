@@ -14,6 +14,7 @@ import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "
 import { init } from "./commands/init";
 import { install } from "./commands/install";
 import { update } from "./commands/update";
+import { version } from "./commands/version";
 import { buildTokenLimitText, send } from "./slack";
 
 const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: string[] }) => Promise<void>> = {
@@ -37,6 +38,7 @@ Commands:
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   usage             Notify current usage to Slack
+  version           Print the installed claude-task-worker CLI version (aliases: --version, -v)
 
 Workers:
   exec-issue        Poll issues and run /exec-issue
@@ -67,6 +69,11 @@ Example:
 }
 
 const workerType = process.argv[2];
+
+if (workerType === "version" || workerType === "--version" || workerType === "-v") {
+  version();
+  process.exit(process.exitCode ?? 0);
+}
 
 if (!workerType) {
   printUsage();
