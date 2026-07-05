@@ -2,11 +2,11 @@
 
 GitHub Issues/PRを定期ポーリングし、Claude Codeに処理を委譲するCLIツール。
 
-[base-tools](https://github.com/getty104/claude-code-marketplace) プラグインと組み合わせることで、GitHub Issue の実装からPRのレビュー対応、Dependabot PRの対応までを自動化する。
+本リポジトリに同梱されている `claude-task-worker` Claude Code プラグイン（`plugin/` ディレクトリ）と組み合わせることで、GitHub Issue の実装からPRのレビュー対応、Dependabot PRの対応までを自動化する。CLI 本体（npm パッケージ）とプラグイン（Claude Code マーケットプレイス）は同じリポジトリ・同じ名前で提供される。
 
 ## アーキテクチャ
 
-claude-task-worker がGitHubラベルを検知してタスクを起動し、base-tools プラグインのスキルが実際の処理を担う。
+`claude-task-worker` CLI がGitHubラベルを検知してタスクを起動し、`claude-task-worker` プラグインのスキルが実際の処理を担う。
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -32,24 +32,25 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
                                                    ▼
                                        ┌────────────────────────┐
                                        │    Claude Code CLI     │
-                                       │  + base-tools plugin   │
+                                       │  + claude-task-worker  │
+                                       │       plugin           │
                                        └────────────────────────┘
 ```
 
-### Worker と base-tools スキルの対応
+### Worker と claude-task-worker プラグインのスキル対応
 
 | Worker | トリガーラベル | 呼び出されるスキル | デフォルト間隔 |
 |---|---|---|---|
-| `exec-issue` | `cc-exec-issue` | `/base-tools:exec-issue` | 1分 |
-| `create-issue` | `cc-triage-scope` (Issue, blockedBy が全て Close) | `/base-tools:create-issue-from-issue-number` | 1分 |
-| `update-issue` | `cc-update-issue` | `/base-tools:update-issue` | 1分 |
-| `answer-issue-questions` | `cc-answer-issue-questions` | `/base-tools:answer-issue-questions` | 1分 |
-| `fix-review-point` | `cc-fix-onetime` | `/base-tools:fix-review-point` | 1分 |
-| `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/base-tools:triage-created-issue` | 1分 |
-| `triage-pr` | `cc-triage-scope` (PR) | `/base-tools:triage-pr` | 1分 |
-| `resolve-conflict` | `cc-resolve-conflict` (PR) | `/base-tools:resolve-conflict` | 1分 |
-| `check-dependabot` | `dependencies` (PR) | `/base-tools:check-dependabot` | 1時間 |
-| `epic-issue` | `cc-epic-issue` (Issue, sub-issues が全て Close) | `/base-tools:create-epic-pr` | 5分 |
+| `exec-issue` | `cc-exec-issue` | `/claude-task-worker:exec-issue` | 1分 |
+| `create-issue` | `cc-triage-scope` (Issue, blockedBy が全て Close) | `/claude-task-worker:create-issue-from-issue-number` | 1分 |
+| `update-issue` | `cc-update-issue` | `/claude-task-worker:update-issue` | 1分 |
+| `answer-issue-questions` | `cc-answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | 1分 |
+| `fix-review-point` | `cc-fix-onetime` | `/claude-task-worker:fix-review-point` | 1分 |
+| `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/claude-task-worker:triage-created-issue` | 1分 |
+| `triage-pr` | `cc-triage-scope` (PR) | `/claude-task-worker:triage-pr` | 1分 |
+| `resolve-conflict` | `cc-resolve-conflict` (PR) | `/claude-task-worker:resolve-conflict` | 1分 |
+| `check-dependabot` | `dependencies` (PR) | `/claude-task-worker:check-dependabot` | 1時間 |
+| `epic-issue` | `cc-epic-issue` (Issue, sub-issues が全て Close) | `/claude-task-worker:create-epic-pr` | 5分 |
 
 > ℹ️ Issue 系ワーカーはすべて GitHub Issue Dependencies の `-is:blocked` 検索 qualifier でサーバ側絞り込みを行うため、未解決の blockedBy Issue を持つ Issue は対象外となる。
 
@@ -57,7 +58,7 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 
 親Issue (Issue Dependencies の Parent) を持つサブIssueを処理する場合、ワーカーはデフォルトブランチではなく `cc-epic-<親Issue番号>` ブランチから worktree を作成する。エピック単位でブランチをまとめることで、サブIssueごとのPRを単一の統合ブランチに集約しやすくなる。エピックブランチが remote に無い場合はデフォルトブランチから自動派生して push される。
 
-`epic-issue` ワーカーは、`cc-epic-issue` ラベル付きの親Issueに紐づくサブIssueがすべて Close されたタイミングで `/base-tools:create-epic-pr` を起動し、エピックブランチからまとめてPRを作成する。
+`epic-issue` ワーカーは、`cc-epic-issue` ラベル付きの親Issueに紐づくサブIssueがすべて Close されたタイミングで `/claude-task-worker:create-epic-pr` を起動し、エピックブランチからまとめてPRを作成する。
 
 ## セットアップ
 
@@ -65,15 +66,46 @@ claude-task-worker がGitHubラベルを検知してタスクを起動し、base
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) がインストール・認証済みであること
 - [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) がインストール済みであること
-- [base-tools](https://github.com/getty104/claude-code-marketplace) プラグインがインストール済みであること
+- `claude-task-worker` プラグインがインストール済みであること（下記インストール手順を参照）
 
 ### インストール
+
+#### CLI（npm パッケージ）
+
+```bash
+npm install -g claude-task-worker
+```
+
+開発版をローカルから使う場合:
 
 ```bash
 npm install
 npm run build
 npm link
 ```
+
+#### Claude Code プラグイン
+
+このリポジトリを Claude Code マーケットプレイスとして追加し、プラグインをインストールする。
+
+```bash
+claude plugin marketplace add getty104/claude-task-worker
+claude plugin install claude-task-worker@claude-task-worker
+```
+
+インストール後、Claude Code のセッションを再起動するとプラグインが有効化される。
+
+#### 更新
+
+CLI とプラグイン（マーケットプレイス）をまとめて更新する。
+
+```bash
+claude-task-worker update
+```
+
+- `claude plugin marketplace update claude-task-worker` — マーケットプレイスの更新
+- `claude plugin update claude-task-worker@claude-task-worker` — プラグインの更新（反映にはセッション再起動が必要）
+- `npm install -g claude-task-worker@latest` — CLI 本体の更新
 
 ### 初期化
 
@@ -96,7 +128,7 @@ claude-task-worker init --force   # 既存ファイルを強制上書き
 | `cc-resolve-conflict` | PRコンフリクト解消トリガー |
 | `cc-in-progress` | 処理中ステータス |
 | `cc-need-human-check` | 人間の確認が必要なマーク（付与中はIssueワーカーの処理対象から除外される） |
-| `cc-issue-created` | `/base-tools:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
+| `cc-issue-created` | `/claude-task-worker:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
 | `cc-pr-created` | PR作成完了マーク |
 | `cc-epic-issue` | エピックIssueマーク（サブIssueが全Closeで `epic-issue` ワーカーが起動） |
 
@@ -144,7 +176,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 `cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（デフォルト1分間隔）
 
 - `cc-in-progress` ラベルを付与
-- `/base-tools:exec-issue <issue番号>` を非同期で実行
+- `/claude-task-worker:exec-issue <issue番号>` を非同期で実行
 - 親Issueがある場合は `cc-epic-<親Issue番号>` ブランチから worktree を切って実行
 - 完了後、`cc-exec-issue` ラベルを除去し、`cc-pr-created` ラベルを付与
 
@@ -189,7 +221,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 ### resolve-conflict
 
-`cc-resolve-conflict` ラベルが付いたPRを定期取得し、`/base-tools:resolve-conflict` を実行してコンフリクト解消を行う。（1分間隔）
+`cc-resolve-conflict` ラベルが付いたPRを定期取得し、`/claude-task-worker:resolve-conflict` を実行してコンフリクト解消を行う。（1分間隔）
 
 - 完了後、`cc-resolve-conflict` ラベルを除去
 
@@ -202,7 +234,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 ### epic-issue
 
-`cc-epic-issue` ラベルが付いた親Issueを定期取得し、紐づくサブIssueがすべて Close されたタイミングで `/base-tools:create-epic-pr` を起動してエピックPRを作成する。（デフォルト5分間隔）
+`cc-epic-issue` ラベルが付いた親Issueを定期取得し、紐づくサブIssueがすべて Close されたタイミングで `/claude-task-worker:create-epic-pr` を起動してエピックPRを作成する。（デフォルト5分間隔）
 
 - `cc-pr-created` が付いているIssueは除外
 - サブIssueが存在しない、または1つでも未Closeのものがあればスキップ
@@ -220,6 +252,20 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 現在のClaude API使用状況をSlackに通知する。
 
+### update
+
+`claude-task-worker` プラグイン/マーケットプレイスとCLI本体を更新する。
+
+```bash
+claude-task-worker update
+```
+
+- `claude plugin marketplace update claude-task-worker` — マーケットプレイスの更新
+- `claude plugin update claude-task-worker@claude-task-worker` — プラグインの更新（反映にはセッション再起動が必要）
+- `npm install -g claude-task-worker@latest` — CLI 本体の更新
+
+いずれかのステップが失敗しても処理は継続し、`[update]` プレフィックス付きでエラー内容がログ出力される。
+
 ## 設定ファイル
 
 コマンドを実行したディレクトリ直下の `claude-task-worker.json` を読み込む。
@@ -235,22 +281,22 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 | ワーカー名 | デフォルト `skill` | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
 |---|---|---|---|---|---|---|
-| `answer-issue-questions` | `/base-tools:answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
-| `create-issue` | `/base-tools:create-issue-from-issue-number` | `opus` | `xhigh` | 60 | 0 | 1 |
-| `update-issue` | `/base-tools:update-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `exec-issue` | `/base-tools:exec-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `fix-review-point` | `/base-tools:fix-review-point` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `triage-created-issue` | `/base-tools:triage-created-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `triage-pr` | `/base-tools:triage-pr` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `resolve-conflict` | `/base-tools:resolve-pr-conflict` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `check-dependabot` | `/base-tools:check-dependabot` | `sonnet` | `xhigh` | 3600 | 0 | 1 |
-| `epic-issue` | `/base-tools:create-epic-pr` | `sonnet` | `xhigh` | 300 | 0 | 1 |
+| `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `update-issue` | `/claude-task-worker:update-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `exec-issue` | `/claude-task-worker:exec-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `fix-review-point` | `/claude-task-worker:fix-review-point` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `triage-created-issue` | `/claude-task-worker:triage-created-issue` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `triage-pr` | `/claude-task-worker:triage-pr` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `sonnet` | `xhigh` | 60 | 0 | 1 |
+| `check-dependabot` | `/claude-task-worker:check-dependabot` | `sonnet` | `xhigh` | 3600 | 0 | 1 |
+| `epic-issue` | `/claude-task-worker:create-epic-pr` | `sonnet` | `xhigh` | 300 | 0 | 1 |
 
 各フィールドの値:
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `skill` | string | Claude CLI の `-p` に渡すスラッシュコマンド（例: `/base-tools:exec-issue`, `/my-plugin:my-skill`）。ワーカーは `"<skill> <issue-or-pr-number>"` の形で Claude を起動する |
+| `skill` | string | Claude CLI の `-p` に渡すスラッシュコマンド（例: `/claude-task-worker:exec-issue`, `/my-plugin:my-skill`）。ワーカーは `"<skill> <issue-or-pr-number>"` の形で Claude を起動する |
 | `model` | string | Claude CLI の `--model` に渡す値（例: `sonnet`, `opus`, `haiku`） |
 | `effort` | string | Claude CLI の `--effort` に渡す値（例: `high`, `medium`, `low`） |
 | `pollingIntervalSeconds` | number | GitHub をポーリングする間隔（秒）。正の数を指定する |
@@ -263,7 +309,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 {
   "workers": {
     "exec-issue":        { "skill": "/my-plugin:exec-issue", "model": "opus", "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
-    "fix-review-point":  { "skill": "/base-tools:fix-review-point", "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
+    "fix-review-point":  { "skill": "/claude-task-worker:fix-review-point", "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
     "triage-pr":         { "effort": "medium", "pollingIntervalSeconds": 120 },
     "check-dependabot":  { "model": "haiku", "pollingIntervalSeconds": 7200 }
   }

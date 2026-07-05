@@ -14,6 +14,7 @@ claude-task-worker exec-issue      # Poll dev-ready issues
 claude-task-worker fix-review-point # Poll PRs with review feedback
 claude-task-worker create-issue    # Poll cc-triage-scope issues whose blockedBy are all closed
 claude-task-worker update-issue    # Poll update-issue labeled issues
+claude-task-worker update          # Update the claude-task-worker plugin/marketplace and the CLI itself
 claude-task-worker all             # Run all workers concurrently
 ```
 
@@ -27,7 +28,10 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/gh.ts`** - GitHub CLI (`gh`) ラッパー。全GitHub操作を集約
 - **`src/process-manager.ts`** - 子プロセス管理。リアルタイムステータステーブル表示、プロセスライフサイクル管理
 - **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド
+- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体の更新コマンド
 - **`src/workers/`** - 各ワーカー実装
+- **`plugin/`** - Claude Code プラグイン本体（`.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `scripts/`, `.mcp.json`）
+- **`.claude-plugin/marketplace.json`** - このリポジトリを Claude Code マーケットプレイスとして公開するための定義
 
 ### Worker共通ライフサイクル
 
@@ -59,4 +63,6 @@ claude-task-worker all             # Run all workers concurrently
 
 - GitHub CLI (`gh`) がインストール・認証済み
 - Claude Code (`claude`) がインストール済み
-- [base-tools](https://github.com/getty104/claude-code-marketplace) がインストール済み
+- `claude-task-worker` プラグイン（本リポジトリの `plugin/`）がインストール済み
+  - `claude plugin marketplace add getty104/claude-task-worker`
+  - `claude plugin install claude-task-worker@claude-task-worker`
