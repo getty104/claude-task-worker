@@ -3,7 +3,7 @@ import { createPrPollingWorker } from "./pr-worker";
 
 export const checkDependabotWorker = createPrPollingWorker({
   name: "check-dependabot",
-  command: "/base-tools:check-dependabot",
+  command: "/claude-task-worker:check-dependabot",
   triggerLabel: "dependencies",
   excludeLabels: ["cc-triage-scope"],
   onCompleted: async (pr) => {

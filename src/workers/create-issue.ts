@@ -4,7 +4,7 @@ import { addLabel } from "../gh";
 export const createIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
     name: "create-issue",
-    command: "/base-tools:create-issue-from-issue-number",
+    command: "/claude-task-worker:create-issue-from-issue-number",
     triggerLabels: ["cc-triage-scope"],
     excludeLabels: [
       "cc-issue-created",
