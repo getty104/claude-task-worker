@@ -55,7 +55,11 @@ jobs:
             });
 `;
 
-async function writeFileWithMode(path: string, content: string, force: boolean): Promise<"created" | "overwritten" | "skipped"> {
+async function writeFileWithMode(
+  path: string,
+  content: string,
+  force: boolean,
+): Promise<"created" | "overwritten" | "skipped"> {
   try {
     await access(path);
     if (!force) return "skipped";
