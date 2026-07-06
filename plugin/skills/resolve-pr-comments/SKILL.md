@@ -1,7 +1,8 @@
 ---
 name: resolve-pr-comments
 description: GitHub PRの未解決Review threadsを一括Resolveします。
-model: haiku
+model: sonnet
+effort: low
 context: fork
 ---
 
