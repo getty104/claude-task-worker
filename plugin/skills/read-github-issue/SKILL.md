@@ -73,7 +73,7 @@ Issue本文だけでは「どのファイルを触るか」「タスク間でフ
 
 ### E2Eテストの考慮
 
-Explore への調査観点に「E2Eテスト基盤の有無と所在」を必ず含める。判定基準は、E2Eフレームワークの設定ファイル（`playwright.config.*` / `cypress.config.*` / `wdio.conf.*` など）、`e2e/` / `tests/e2e/` / `cypress/` 等のE2Eテスト用ディレクトリ、`package.json` の `scripts` にある `test:e2e` / `e2e` 系コマンドのいずれかが存在すること。
+Explore への調査観点に「E2Eテスト基盤の有無と所在」を必ず含める。判定基準は、E2Eフレームワークの設定ファイル（`playwright.config.*` / `cypress.config.*` / `wdio.conf.*` / `nightwatch.conf.*` など）、`e2e/` / `tests/e2e/` / `cypress/` 等のE2Eテスト用ディレクトリ、`package.json` の `scripts` にある `test:e2e` / `e2e` 系コマンドのいずれかが存在すること。
 
 E2Eテストが存在するプロジェクトでは、ユーザー操作フロー（画面遷移・フォーム入力・API連携・CLIの入出力など）に影響するタスクについて、**完了条件に「該当フローのE2Eテストの追加・更新」を含め、対象範囲に該当E2Eテストのパスを含める**。E2Eテストが存在しない場合は、Issueが明示的に要求しない限りE2Eテスト基盤の新規導入をタスク化しない（スコープ外）。
 
