@@ -42,8 +42,10 @@ claude-task-worker all             # Run all workers concurrently
 3. ラベル・アサイン条件でフィルタリング
 4. `isRunning()` で重複実行防止
 5. トリガーラベル除去 → `cc-in-progress` ラベル付与
-6. Claude CLIプロセスを非同期spawn
-7. 完了時コールバックでラベルクリーンアップ
+6. `.claude/worktrees/<worktreeId>` にワーカー自身がworktreeを生成し（`claude --worktree` は locked worktree の残骸問題があるため不使用）、Claude CLIプロセスをcwd指定で非同期spawn
+7. 完了時コールバックでラベル・worktree・ローカルブランチをクリーンアップ
+
+ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
 
 ### ラベルフロー
 

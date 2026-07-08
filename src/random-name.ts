@@ -244,3 +244,9 @@ export function generateWorktreeName(): string {
   const suffix = String(randomInt(10000)).padStart(4, "0");
   return `${pick(ADJECTIVES)}-${pick(NOUNS)}-${suffix}`;
 }
+
+// generateWorktreeName() が生成する adj-noun-4桁 形式のみに一致させる。
+// claude CLI の対話セッションが作る worktree（3単語形式など）を巻き込まないためのガード。
+export function isGeneratedWorktreeName(name: string): boolean {
+  return /^[a-z]+-[a-z]+-\d{4}$/.test(name);
+}

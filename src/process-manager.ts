@@ -82,6 +82,15 @@ export function isRunning(id: number): boolean {
   return task?.status === "running";
 }
 
+export function isWorktreeInUse(worktreeId: string): boolean {
+  for (const task of tasks.values()) {
+    if (task.status === "running" && task.path === worktreeId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function isWorkerAtCapacity(workerName: string): boolean {
   let count = 0;
   for (const task of tasks.values()) {

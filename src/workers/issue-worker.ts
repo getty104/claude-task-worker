@@ -80,7 +80,6 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             const command = skill || config.command;
 
             const parentNumber = issue.parent?.number;
-            let cwd: string | undefined;
             const claudeArgs: string[] = [
               "-p",
               `${command} ${issue.number}`,
@@ -91,17 +90,17 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               effort,
             ];
 
+            // claude CLI の --worktree は locked な worktree を作り、異常終了時に
+            // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
+            // epic の有無に関わらずワーカー自身が worktree を生成して cwd として渡す。
+            let baseBranch = defaultBranch;
             if (parentNumber !== undefined) {
-              const epicBranch = `cc-epic-${parentNumber}`;
-              await ensureEpicBranch(epicBranch, defaultBranch);
-              await createWorktreeFromBranch(worktreeId, epicBranch);
-              cwd = getWorktreePath(worktreeId);
-              console.log(
-                `[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${epicBranch} (parent #${parentNumber})`,
-              );
-            } else {
-              claudeArgs.push("--worktree", worktreeId);
+              baseBranch = `cc-epic-${parentNumber}`;
+              await ensureEpicBranch(baseBranch, defaultBranch);
             }
+            await createWorktreeFromBranch(worktreeId, baseBranch);
+            const cwd = getWorktreePath(worktreeId);
+            console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
 
             run(
               "claude",

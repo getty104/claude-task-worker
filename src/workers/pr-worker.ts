@@ -11,7 +11,13 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { removeWorktree, removeWorktreeByBranch } from "../worktree";
+import {
+  createWorktreeFromBranch,
+  deleteLocalBranch,
+  getWorktreePath,
+  removeWorktree,
+  removeWorktreeByBranch,
+} from "../worktree";
 
 const LABEL_IN_PROGRESS = "cc-in-progress";
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
@@ -53,25 +59,23 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
           const hadTriageScope = pr.labels.some((l) => l.name === LABEL_TRIAGE_SCOPE);
 
           await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
+          const worktreeId = generateWorktreeName();
           try {
+            // PRブランチを掴んでいる過去の worktree と、残留しているローカルブランチを掃除する。
+            // ローカルブランチが古いまま残っているとスキル内の `gh pr checkout` が
+            // fast-forward できずに失敗するため、リモートを正として作り直させる。
             await removeWorktreeByBranch(pr.headRefName);
-            const worktreeId = generateWorktreeName();
+            await deleteLocalBranch(pr.headRefName);
             syncDefaultBranch(defaultBranch);
+            // claude CLI の --worktree は locked な worktree を作り、異常終了時に
+            // 削除不能な残骸を残すため使わない。ワーカー自身が worktree を生成して cwd として渡す。
+            await createWorktreeFromBranch(worktreeId, defaultBranch);
+            const cwd = getWorktreePath(worktreeId);
             const { model, effort, skill } = getWorkerConfig(config.name);
             const command = skill || config.command;
             run(
               "claude",
-              [
-                "-p",
-                `${command} ${pr.number}`,
-                "--dangerously-skip-permissions",
-                "--model",
-                model,
-                "--effort",
-                effort,
-                "--worktree",
-                worktreeId,
-              ],
+              ["-p", `${command} ${pr.number}`, "--dangerously-skip-permissions", "--model", model, "--effort", effort],
               pr.number,
               `PR #${pr.number} (${pr.headRefName})`,
               config.name,
@@ -115,10 +119,12 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                   );
                 }
               },
+              cwd,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);
             await removeLabel("pr", pr.number, LABEL_IN_PROGRESS).catch(() => {});
+            await removeWorktree(worktreeId).catch(() => {});
             await notifyError(config.name, name, err);
           }
         }
