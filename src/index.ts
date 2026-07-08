@@ -11,6 +11,7 @@ import { resolveConflictWorker } from "./workers/resolve-conflict";
 import { checkDependabotWorker } from "./workers/check-dependabot";
 import { epicIssueWorker } from "./workers/epic-issue";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
+import { removeStaleWorktrees } from "./worktree";
 import { init } from "./commands/init";
 import { install } from "./commands/install";
 import { update } from "./commands/update";
@@ -182,19 +183,24 @@ if (workerType === "init") {
 } else if (workerType === "all") {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
-  Promise.all([
-    execIssueWorker({ epicFilters, labelFilters }),
-    fixReviewPointWorker(),
-    createIssueWorker({ epicFilters, labelFilters }),
-    updateIssueWorker({ epicFilters, labelFilters }),
-    answerIssueQuestionsWorker({ epicFilters, labelFilters }),
-    resolveConflictWorker(),
-    epicIssueWorker({ epicFilters, labelFilters }),
-  ]);
+  (async () => {
+    // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
+    await removeStaleWorktrees();
+    await Promise.all([
+      execIssueWorker({ epicFilters, labelFilters }),
+      fixReviewPointWorker(),
+      createIssueWorker({ epicFilters, labelFilters }),
+      updateIssueWorker({ epicFilters, labelFilters }),
+      answerIssueQuestionsWorker({ epicFilters, labelFilters }),
+      resolveConflictWorker(),
+      epicIssueWorker({ epicFilters, labelFilters }),
+    ]);
+  })();
 } else if (workerType === "yolo") {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
+    await removeStaleWorktrees();
     await Promise.all([
       execIssueWorker({ epicFilters, labelFilters }),
       fixReviewPointWorker(),
@@ -211,5 +217,8 @@ if (workerType === "init") {
 } else {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
-  WORKERS[workerType]({ epicFilters, labelFilters });
+  (async () => {
+    await removeStaleWorktrees();
+    await WORKERS[workerType]({ epicFilters, labelFilters });
+  })();
 }
