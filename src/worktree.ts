@@ -34,13 +34,18 @@ async function forceRemoveIfExists(path: string): Promise<void> {
     return;
   }
   if (!(await pathExists(path))) return;
-  await rm(path, { recursive: true, force: true });
-  console.log(`[worktree] Force removed remaining directory: ${path}`);
+  try {
+    await rm(path, { recursive: true, force: true });
+    console.log(`[worktree] Force removed remaining directory: ${path}`);
+  } catch (error) {
+    console.error(`[worktree] Failed to remove directory ${path}:`, error);
+  }
 }
 
 async function listWorktreeEntries(): Promise<WorktreeEntry[]> {
   const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain"]);
   return stdout
+    .replace(/\r\n/g, "\n")
     .trim()
     .split("\n\n")
     .filter(Boolean)
@@ -71,11 +76,28 @@ async function removeRegisteredWorktree(worktreePath: string): Promise<void> {
   await forceRemoveIfExists(worktreePath);
 }
 
+const PROTECTED_BRANCHES = new Set(["main", "master", "develop"]);
+
+/** origin/HEAD からデフォルトブランチ名を取得する（未設定などで取得できない場合は undefined）。 */
+async function getDefaultBranchName(): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+    return stdout.trim().replace(/^origin\//, "");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * ローカルブランチを削除する。worktree 削除後のブランチ残留（リーク）防止用。
  * 存在しないブランチは黙って無視し、他の worktree で checkout 中などの失敗のみログする。
  */
 export async function deleteLocalBranch(branchName: string): Promise<void> {
+  const defaultBranch = await getDefaultBranchName();
+  if (PROTECTED_BRANCHES.has(branchName) || branchName === defaultBranch) {
+    console.log(`[worktree] Skipping deletion of protected branch: ${branchName}`);
+    return;
+  }
   try {
     await execFileAsync("git", ["branch", "-D", branchName]);
     console.log(`[worktree] Deleted local branch: ${branchName}`);
