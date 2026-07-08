@@ -39,7 +39,7 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "answer-issue-questions": {
     skill: "/claude-task-worker:answer-issue-questions",
-    model: "sonnet",
+    model: "opus",
     effort: "xhigh",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
