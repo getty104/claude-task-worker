@@ -1,11 +1,11 @@
 ---
 name: edit-pencil-design
-description: Pencil CLI（`pencil`コマンド）だけを使って既存の.penファイル（Pencilで作成されたデザインファイル）をAIプロンプトで修正・更新するスキル。ユーザーが.penファイルの編集、ボタン追加、レイアウト変更、UIデザインの調整、Pencilデザインの更新などを依頼した場合に必ずこのスキルを使用する。エージェントモード（`pencil --in --out --prompt`）で同一パスを指定して既存ファイルを上書き編集し、編集後はインタラクティブモード（`pencil interactive`）でNodeツリーから「**編集したコンポーネントのNodeだけ**」を特定して`get_screenshot` / `export_nodes` でPNG出力し、`.pen`と同階層の`snapshots/`ディレクトリに保存する。Pencil MCPには依存せず、`pencil` コマンドのみで完結する。
+description: Pencil CLI（`pencil`コマンド）だけを使って.penファイル（Pencilで作成されたデザインファイル）をAIプロンプトで修正・更新・新規作成するスキル。ユーザーが.penファイルの編集、ボタン追加、レイアウト変更、UIデザインの調整、Pencilデザインの更新、新しい.penデザインの作成などを依頼した場合に必ずこのスキルを使用する。既存ファイルの編集はエージェントモード（`pencil --in --out --prompt`）で同一パスを指定して上書きし、新規作成は`--in`を省略して`--out`に新しいパスを指定する。編集・作成後はインタラクティブモード（`pencil interactive`）でNodeツリーから「**編集・作成したコンポーネントのNodeだけ**」を特定して`get_screenshot` / `export_nodes` でPNG出力し、`.pen`と同階層の`snapshots/`ディレクトリに保存する。Pencil MCPには依存せず、`pencil` コマンドのみで完結する。.penファイルのgitコンフリクト解消・破損復旧は本スキルではなく`resolve-pencil-conflict`スキルの担当。
 ---
 
 # Edit Pencil Design
 
-Pencil CLI（`pencil`コマンド）**のみ**で `.pen` デザインファイルをAI編集し、編集Nodeだけのスクリーンショットを残すスキル。MCPサーバーには依存しません。公式ドキュメント: [docs.pencil.dev/for-developers/pencil-cli](https://docs.pencil.dev/for-developers/pencil-cli)
+Pencil CLI（`pencil`コマンド）**のみ**で `.pen` デザインファイルをAI編集・新規作成し、編集・作成Nodeだけのスクリーンショットを残すスキル。MCPサーバーには依存しません。公式ドキュメント: [docs.pencil.dev/for-developers/pencil-cli](https://docs.pencil.dev/for-developers/pencil-cli)
 
 # 設計思想
 
@@ -13,30 +13,46 @@ Pencil CLI の2つの実行モードを使い分けます:
 
 | モード | 起動方法 | できること |
 |---|---|---|
-| **エージェントモード** | `pencil --in --out --prompt` | AIプロンプトで `.pen` を編集（プロンプト編集はこのモード**のみ**） |
-| **インタラクティブモード** | `pencil interactive -i -o` | `get_editor_state()` / `get_screenshot()` / `export_nodes()` / `save()` / `exit()` などのツール呼び出し（AIプロンプト編集は不可） |
+| **エージェントモード** | `pencil --in --out --prompt`（新規作成時は `--in` 省略） | AIプロンプトで `.pen` を編集・新規作成（プロンプトによる編集・作成はこのモード**のみ**） |
+| **インタラクティブモード** | `pencil interactive -i -o` | `get_editor_state()` / `get_screenshot()` / `export_nodes()` / `save()` / `exit()` などのツール呼び出し（AIプロンプト編集・新規作成は不可） |
 
 `.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node構造の確認・Node ID取得・Node単位スクリーンショットはすべて `pencil interactive` 経由で行います。
 
 # 重要な前提
 
-- **既存ファイルをその場で上書き更新する**（別名出力は二重管理を生むため避ける）
-- **スクリーンショットはファイル全体ではなく編集対象のNodeだけ**（差分レビューが容易になる）
+- **既存ファイルの編集はその場で上書き更新する**（別名出力は二重管理を生むため避ける）
+- **新規作成は `--in` を省略し、`--out` にまだ存在しないパスを指定する**（既存パスを `--out` に指定すると意図せぬ上書きになるため、実行前に存在チェックを必ず行う）
+- **gitコンフリクトのテキストマージは絶対禁止**（`.pen` は暗号化バイナリのため、コンフリクトマーカーの手編集や `git mergetool` はファイルを破損させる。コンフリクト解消は `resolve-pencil-conflict` スキルの担当）
+- **スクリーンショットはファイル全体ではなく編集・作成対象のNodeだけ**（差分レビューが容易になる）
 
 # 前提条件の確認
 
 1. `pencil version` — 未インストールなら `npm install -g @pencil.dev/cli` を案内（Node.js 18以上必要）
 2. `pencil status` — 未認証なら `pencil login`、または `PENCIL_CLI_KEY` 環境変数の設定を案内
-3. 対象の `.pen` ファイルが存在するか（編集対象なので先に存在している必要がある）
+3. 対象の `.pen` ファイルの存在確認 — **編集**なら先に存在している必要がある。**新規作成**なら存在していてはならない（既に存在する場合は、編集として扱うべきかユーザーに確認する）。新規作成では出力先ディレクトリを `mkdir -p` で用意する
 
 # 実行ルール
 
-## ルール1: 編集モードの選択（エージェント / `interactive` どちらも可）
+## ルール1: 操作種別（編集 / 新規作成）とモードの選択
+
+まず依頼が**既存ファイルの編集**か**新規ファイルの作成**かを判定します。
+
+### 既存ファイルの編集（エージェント / `interactive` どちらも可）
 
 - **エージェントモード** `pencil --in path/to/design.pen --out path/to/design.pen --prompt "<修正内容>"`（短縮形 `-i` / `-o` / `-p`）— 自然言語で任せたい編集。大きめのリファイン、レイアウト調整、複数Nodeにまたがる修正向き
 - **インタラクティブモードの `batch_design({...})`** — 「特定NodeのプロパティをこのJSONに置換」のような決定論的な編集向き。結果が予測可能で差分も追いやすい。ただし heredoc/シェルの改行展開を誤るとサイレントに失敗するため、**ルール2の安全規則を必ず守る**
 
-どちらのモードでも既存ファイルの更新なので、`--in` と `--out` には**同じ `.pen` パス**を指定します。新規作成を依頼された場合のみ例外で、`--in` を省略して `--out` に新しいパスを指定します。
+どちらのモードでも既存ファイルの更新なので、`--in` と `--out` には**同じ `.pen` パス**を指定します。
+
+### 新規ファイルの作成（エージェントモードのみ）
+
+```bash
+pencil --out path/to/new-design.pen --prompt "<作成したいデザインの内容>"
+```
+
+- `--in` を**省略**し、`--out` に新しい `.pen` パスを指定する
+- `pencil interactive` は既存ファイルを入力に取るため、新規作成には使えない。作成後のNode確認・スクリーンショットには使える（作成が終わればファイルは存在するため）
+- 実行前に `--out` のパスが未使用であることを確認する（`[ -e path ]` チェック）。既に存在する場合は上書きせず、編集として扱うかユーザーに確認する
 
 ## ルール2: インタラクティブモードを heredoc で非対話的に呼び出す
 
@@ -132,9 +148,11 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 `before.json` / `after.json` などの中間ファイルは**必ず `${WORK_DIR}` 配下**に置きます（`/tmp/before.json` のような固定パスは使わない）。
 
-## ルール4: 編集の前後でNodeツリーを取得し、編集されたNodeを特定する
+## ルール4: 編集の前後でNodeツリーを取得し、対象Nodeを特定する
 
-1. **編集前のスナップショット取得**
+**新規作成の場合**は編集前のツリーが存在しないため、手順1をスキップし「空のツリー」として扱います（= 作成後の `after.json` に含まれる全Nodeが新規Node）。手順5の代わりに、`--out` のファイルが実際に生成されたこと・`after.json` にNodeが含まれることを確認し、どちらかを満たさなければ作成失敗として `${WORK_DIR}/edit.log` を確認のうえ再実行します。
+
+1. **編集前のスナップショット取得**（編集のみ。新規作成ではスキップ）
    ```bash
    pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/before.json"
    get_editor_state()
@@ -155,7 +173,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
    - 双方にあるが属性差分のある `id` → 変更Node
    - 判定が難しい場合（idの再採番、大規模な再構成など）は推定できる範囲で抽出し、残りはユーザーに確認。フォールバックとして影響を受けた最上位フレーム/コンポーネントのNode IDを1つ選んでスクリーンショットを取る
 
-5. **「実質的な編集が無い」ケースの検出 → 編集失敗扱いにする**
+5. **「実質的な編集が無い」ケースの検出 → 編集失敗扱いにする**（編集のみ。新規作成では前述のファイル生成チェックで代替）
 
    差分が「Node IDの追加・削除なし、type / name / children の構造変化なし、数値フォーマットの正規化のみ（例: `13.995000000000001` → `13.995`、`100.0` → `100`）」なら、JSONパースエラーで構造変更が適用されず `save()` だけ走った可能性が極めて高い（ルール2のトラブルの典型的な観測像）。編集失敗として報告し、再実行します。チェックは `jq` で数値表現を正規化してから diff:
 
@@ -173,9 +191,11 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
    この検証は編集Node特定の直前に必ず通します。失敗が出たらルール2に戻って heredoc / echo の改行展開を確認します。
 
-## ルール5: 編集したNodeだけをスクリーンショットし `snapshots/` に保存する
+## ルール5: 編集・作成したNodeだけをスクリーンショットし `snapshots/` に保存する
 
 `.pen` と同階層の `snapshots/` にNode単位でPNG出力します。単一Nodeは `get_screenshot`、複数Nodeは `export_nodes`。引数名がエラーになったら `pencil interactive --help` で正しい名前に置き換えます。
+
+**新規作成の場合**は全Nodeが新規のため、`after.json` のトップレベルフレーム（画面・ページ単位のNode）を対象にします。トップレベルNodeが多数ある場合は主要なフレームに絞ります。
 
 ```bash
 mkdir -p "$(dirname path/to/design.pen)/snapshots"
@@ -207,25 +227,25 @@ EOF
 `.pen` の中身は直接確認できないため、最終報告に必ず含めます:
 
 - 実行したコマンド（エージェントモードのCLIと、インタラクティブモードのheredoc）
-- 編集したと判定したNode（IDと、可能なら名前・type）
-- 更新した `.pen` ファイルの絶対パス
-- 出力したNode単位スクリーンショット画像の絶対パス（編集Nodeごと）
+- 編集・作成したと判定したNode（IDと、可能なら名前・type）
+- 更新または新規作成した `.pen` ファイルの絶対パス
+- 出力したNode単位スクリーンショット画像の絶対パス（対象Nodeごと）
 
 # 標準ワークフロー
 
 1. **前提確認**: `pencil version`、`pencil status`
-2. **対象ファイル確認**: 指定された `.pen` が存在するか
+2. **操作種別の判定と対象ファイル確認**: **編集**なら指定された `.pen` が存在すること、**新規作成**なら `--out` のパスが未使用であること（出力先ディレクトリは `mkdir -p`）
 3. **作業ディレクトリ確保**: `WORK_DIR="$(mktemp -d -t pencil-edit-XXXXXX)"` と `trap 'rm -rf "$WORK_DIR"' EXIT`
 4. **`snapshots/` 準備**: `mkdir -p <.penと同じディレクトリ>/snapshots`
-5. **編集前スナップショット**: `get_editor_state()` → `${WORK_DIR}/before.json`
-6. **編集実行**: `pencil --in <path> --out <path> --prompt "<指示>" > "${WORK_DIR}/edit.log" 2>&1`（`--in`/`--out`は同一パス）
-7. **編集後スナップショット**: `get_editor_state()` → `${WORK_DIR}/after.json`
-8. **「実質的編集が無い」検出**: ルール4-5 の `jq` 正規化 diff で確認。該当すれば編集失敗としてルール2に戻る
-9. **編集Node特定**: before/after の差分から新規/変更Node IDを抽出
+5. **編集前スナップショット**（編集のみ）: `get_editor_state()` → `${WORK_DIR}/before.json`。新規作成ではスキップ
+6. **編集/作成実行**: 編集は `pencil --in <path> --out <path> --prompt "<指示>" > "${WORK_DIR}/edit.log" 2>&1`（`--in`/`--out`は同一パス）、新規作成は `pencil --out <path> --prompt "<指示>" > "${WORK_DIR}/edit.log" 2>&1`（`--in` 省略）
+7. **編集/作成後スナップショット**: `get_editor_state()` → `${WORK_DIR}/after.json`
+8. **失敗検出**: 編集はルール4-5 の `jq` 正規化 diff で「実質的編集が無い」ケースを検出（該当すれば編集失敗としてルール2に戻る）。新規作成は `--out` ファイルの存在と `after.json` にNodeが含まれることを確認
+9. **対象Node特定**: 編集は before/after の差分から新規/変更Node IDを抽出、新規作成は `after.json` のトップレベルフレームを対象にする
 10. **Node単位スクリーンショット**: `export_nodes` / `get_screenshot` で `snapshots/` にPNG出力（ファイル名はタイムスタンプ込み）
-11. **報告**: 編集Nodeと出力画像パスを提示（`${WORK_DIR}` は trap で自動削除）
+11. **報告**: 編集・作成Nodeと出力画像パスを提示（`${WORK_DIR}` は trap で自動削除）
 
-# 使用例: ログインページに「Forgot password?」リンクを追加
+# 使用例1: ログインページに「Forgot password?」リンクを追加（既存ファイルの編集）
 
 ```bash
 pencil status
@@ -264,15 +284,51 @@ exit()
 EOF
 ```
 
+# 使用例2: 404エラーページを新規作成
+
+```bash
+pencil status
+mkdir -p designs/snapshots
+
+WORK_DIR="$(mktemp -d -t pencil-edit-XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# 出力先が未使用であることを確認（既存なら上書きせず、編集として扱うか確認する）
+[ -e designs/error-404.pen ] && { echo "designs/error-404.pen は既に存在します" >&2; exit 1; }
+
+# 1) 作成（--in は省略、--out に新しいパス）
+pencil \
+  --out designs/error-404.pen \
+  --prompt "Create a 404 error page with a large '404' heading, a 'ページが見つかりません' message, and a primary button linking back to home" \
+  > "${WORK_DIR}/edit.log" 2>&1
+
+# 2) 作成結果の確認（before は無いので after のみ）
+[ -f designs/error-404.pen ] || { echo "作成失敗: ファイルが生成されていません。edit.log を確認してください" >&2; exit 1; }
+pencil interactive -i designs/error-404.pen -o designs/error-404.pen <<'EOF' > "${WORK_DIR}/after.json"
+get_editor_state()
+exit()
+EOF
+```
+
+`after.json` のトップレベルフレーム（例: `error-404-page`）をスクリーンショット:
+
+```bash
+TS="$(date +%Y%m%d-%H%M%S)"
+pencil interactive -i designs/error-404.pen -o designs/error-404.pen <<EOF
+get_screenshot({ nodeId: "error-404-page", out: "designs/snapshots/error-404-page-${TS}.png", scale: 2 })
+exit()
+EOF
+```
+
 # 主要オプション/コマンド早見表
 
-## エージェントモード（編集用）
+## エージェントモード（編集・新規作成用）
 
 | オプション | 短縮 | 用途 |
 |---|---|---|
-| `--in <path>` | `-i` | 入力 `.pen` ファイル（編集元） |
-| `--out <path>` | `-o` | 出力 `.pen` ファイル（`--in` と同じパスを指定する） |
-| `--prompt <text>` | `-p` | AIエージェントへの編集指示 |
+| `--in <path>` | `-i` | 入力 `.pen` ファイル（編集元。**新規作成時は省略**） |
+| `--out <path>` | `-o` | 出力 `.pen` ファイル（編集時は `--in` と同じパス、新規作成時は未使用の新しいパス） |
+| `--prompt <text>` | `-p` | AIエージェントへの編集・作成指示 |
 | `--model <id>` | - | 使用モデル指定（`claude-opus-4-6` / `claude-sonnet-4-6` / `claude-haiku-4-5`） |
 | `--export <path>` | - | ファイル全体の画像出力（本スキルでは原則使わない） |
 | `--export-scale <n>` | - | エクスポート時のスケール（同上） |
@@ -298,7 +354,10 @@ EOF
 - **`-o` が必須エラー**: ヘッドレス実行では `-o` 必須。`-i` と同じパスを指定し、`save()` を呼ばなければ変更は永続化されない
 - **`get_screenshot` / `export_nodes` の引数名エラー**: 出力先パラメータ名（`out` / `path` / `output` 等）や `scale` / `format` はドキュメント未記載。`pencil interactive --help` で確認して合わせる
 - **編集Nodeが特定できない**（idが再採番される/大規模変更）: 影響を受けた最上位フレーム/コンポーネントを代表として1つエクスポートし、ユーザーに確認を求める
-- **`.pen` ファイルが見つからない**: パスを再確認。新規作成希望なら `--in` を省略
+- **`.pen` ファイルが見つからない**: パスを再確認。新規作成の依頼であれば `--in` を省略して `--out` に新しいパスを指定する（ルール1の新規作成手順）
+- **新規作成したはずなのに `--out` にファイルが無い / `after.json` のNodeが空**: `${WORK_DIR}/edit.log` を確認し、`--prompt` を具体化して再実行。認証エラーやプロンプト拒否がログに残っていることが多い
+- **新規作成の `--out` に指定したパスが既に存在する**: 上書きせず中断し、既存ファイルの編集として扱うか別パスに作成するかをユーザーに確認する
+- **`.pen` がgitコンフリクト状態（`git status` で `UU` / `AA` など）、またはコンフリクトマーカー混入で破損して開けない**: 本スキルの対象外。テキストマージは絶対にせず、`resolve-pencil-conflict` スキルで解消・復旧する
 - **想定と違う編集結果**: `--prompt` をより具体的に書き直して再実行。`.pen` は上書きされるため、重要な編集前にはユーザーに git コミット等のバックアップを促す
 - **編集したはずなのに小数点正規化（例: `13.995000000000001` → `13.995`）だけが残っている**: heredoc経由の `batch_design` でJSON引数が壊れ、`save()` だけ走った典型的な事故。順にチェック:
   1. `<<EOF` で開いていないか → `<<'EOF'` に切り替える
