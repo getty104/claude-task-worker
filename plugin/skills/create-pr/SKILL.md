@@ -35,10 +35,11 @@ GitHubでPull Request（PR）を作成するスキルです。呼び出された
 
 ## ベースブランチの決定
 
-ベースブランチは以下の優先順で決定する。必ず 1 → 2 の順に試すこと。
+ベースブランチは以下の優先順で決定する。必ず 1 → 2 → 3 の順に試すこと。
 
 1. **Epicブランチの確定的導出**: Issue `$0` が parent（Epic Issue）を持つ場合、`cc-epic-<parent番号>` をベースにする
-2. **分岐元ブランチの推定（fallback）**: parentが無い場合やepicブランチがremoteに存在しない場合、merge-base距離で分岐元を推定する
+2. **upstream（追跡ブランチ）からの確定的導出**: 現在のブランチの upstream が origin の別ブランチを指している場合、それをベースにする（ワーカーが worktree 作成時に `--track` で分岐元を記録している）
+3. **分岐元ブランチの推定（fallback）**: 1・2 のいずれでも決まらない場合のみ、merge-base距離で分岐元を推定する
 
 ### 1. Epicブランチの確定的導出
 
@@ -64,12 +65,32 @@ fi
 
 引数のIssue番号が渡されていない場合（`$0`が空）は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。Issue番号が指定されているが `gh issue view` の実行に失敗した場合（ネットワークエラー・権限不足等）はエラーメッセージを出力して処理を中断する。
 
-### 2. 分岐元ブランチの推定（fallback）
+### 2. upstream（追跡ブランチ）からの確定的導出
 
-「現在のブランチの分岐元ブランチ」は、リモートトラッキングブランチ（`refs/remotes/origin/`配下）のうち、現在のブランチ自身を除き、HEADから最も近い merge-base を持つものとして推定する。Epic ブランチや任意の中間ブランチから派生した作業ブランチでも、その派生元へPRを向けられるようにするための仕組み。
+ワーカーは worktree 作成時に `git worktree add --track` で分岐元ブランチを upstream として記録している（例: デフォルトブランチ由来なら `origin/main`、epic 由来なら `origin/cc-epic-<N>`）。手動で `git checkout -b <branch> origin/<base>` した場合も既定で同じ upstream が付く。これは「どのブランチから派生したか」の確定情報なので、merge-base 推定より必ず先に使う。
 
 ```bash
 if [ -z "${BASE_BRANCH}" ]; then
+  CURRENT=$(git rev-parse --abbrev-ref HEAD)
+  UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  UPSTREAM=${UPSTREAM#origin/}
+  # upstream が未設定・自分自身（push -u した作業ブランチ）・origin に実在しない場合は採用しない
+  if [ -n "${UPSTREAM}" ] && [ "${UPSTREAM}" != "${CURRENT}" ] \
+    && git rev-parse --verify --quiet "refs/remotes/origin/${UPSTREAM}" >/dev/null; then
+    BASE_BRANCH="${UPSTREAM}"
+  fi
+fi
+```
+
+### 3. 分岐元ブランチの推定（fallback）
+
+「現在のブランチの分岐元ブランチ」は、リモートトラッキングブランチ（`refs/remotes/origin/`配下）のうち、現在のブランチ自身を除き、HEADから最も近い merge-base を持つものとして推定する。Epic ブランチや任意の中間ブランチから派生した作業ブランチでも、その派生元へPRを向けられるようにするための仕組み。
+
+**距離が同点の場合はデフォルトブランチを最優先する**こと。デフォルトブランチと同一コミットを指すブランチ（作成直後の epic ブランチや並行タスクのPRブランチ）が存在すると距離が同点になり、単純なアルファベット順タイブレークでは `origin/cc-epic-*` が `origin/main` より先に来て**無関係な epic ブランチがベースに選ばれる**ため。
+
+```bash
+if [ -z "${BASE_BRANCH}" ]; then
+  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   CURRENT=$(git rev-parse --abbrev-ref HEAD)
 
   BASE_BRANCH=$(
@@ -80,18 +101,19 @@ if [ -z "${BASE_BRANCH}" ]; then
         mb=$(git merge-base "$b" HEAD 2>/dev/null) || continue
         [ -n "$mb" ] || continue
         dist=$(git rev-list --count "${mb}..HEAD" 2>/dev/null) || continue
-        echo "$dist $b"
-      done | sort -n | head -1 | awk '{print $2}' | sed 's|^origin/||'
+        if [ "$b" = "origin/${DEFAULT_BRANCH}" ]; then pref=0; else pref=1; fi
+        echo "$dist $pref $b"
+      done | sort -k1,1n -k2,2n -k3,3 | head -1 | awk '{print $3}' | sed 's|^origin/||'
   )
-fi
 
-# 候補が見つからない場合（孤立ブランチ等）はデフォルトブランチに fallback する
-if [ -z "${BASE_BRANCH}" ]; then
-  BASE_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+  # 候補が見つからない場合（孤立ブランチ等）はデフォルトブランチに fallback する
+  if [ -z "${BASE_BRANCH}" ]; then
+    BASE_BRANCH="${DEFAULT_BRANCH}"
+  fi
 fi
 ```
 
-距離が同点の場合は `git for-each-ref` の列挙順（refname のアルファベット順）で先に出てきたものを採用する。期待しないブランチがベースに選ばれた場合は `--base` を明示的に指定して上書きする。
+距離が同点の場合はデフォルトブランチ → refname のアルファベット順の優先度で採用する。期待しないブランチがベースに選ばれた場合は `--base` を明示的に指定して上書きする。
 
 ## Command Examples
 
