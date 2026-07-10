@@ -197,13 +197,28 @@ E2Eテストが存在しない場合は、Issueが明示的に要求しない限
 まず差分の基準ブランチ（`BASE_BRANCH`）を決定する。Issue `$0` が parent（Epic Issue）を持つ場合、worktree は `cc-epic-<parent番号>` ブランチから派生しているため、epic ブランチを基準にする。デフォルトブランチを基準にすると、epic ブランチへマージ済みの**他サブIssueの差分が混ざり**、「本Issueでのコード変更の有無」を誤判定する（create-pr スキルのベースブランチ決定と同じ確定的導出を用いる）。
 
 ```bash
-BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
+BASE_BRANCH=""
 if ! PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty'); then
   echo "failed to resolve issue parent" >&2
   exit 1
 fi
 if [ -n "${PARENT}" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
   BASE_BRANCH="cc-epic-${PARENT}"
+fi
+
+# parent が無い場合は upstream（ワーカーが worktree 作成時に --track で記録した分岐元）を使う
+if [ -z "${BASE_BRANCH}" ]; then
+  CURRENT=$(git rev-parse --abbrev-ref HEAD)
+  UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  UPSTREAM=${UPSTREAM#origin/}
+  if [ -n "${UPSTREAM}" ] && [ "${UPSTREAM}" != "${CURRENT}" ] \
+    && git rev-parse --verify --quiet "refs/remotes/origin/${UPSTREAM}" >/dev/null; then
+    BASE_BRANCH="${UPSTREAM}"
+  fi
+fi
+
+if [ -z "${BASE_BRANCH}" ]; then
+  BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
 fi
 
 git status --short

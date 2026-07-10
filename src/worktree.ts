@@ -117,7 +117,10 @@ export async function createWorktreeFromBranch(worktreeId: string, baseBranch: s
   // detached HEAD だと後段の commit-push スキルの `git push origin HEAD` が
   // refspec を解決できず失敗するため、worktreeId と同名のブランチを切って checkout する。
   // -B を使うことで孤児ブランチが残っていても origin/${baseBranch} から強制再作成して安全に回復できる。
-  await execFileAsync("git", ["worktree", "add", "-B", worktreeId, worktreePath, `origin/${baseBranch}`]);
+  // --track で upstream に origin/${baseBranch} を明示記録する（branch.autoSetupMerge=false 環境でも保証）。
+  // create-pr スキルはこの upstream をPRベースブランチの確定的導出に使うため、省略すると
+  // merge-base 距離推定に落ちて無関係な cc-epic-* ブランチをベースに選ぶことがある。
+  await execFileAsync("git", ["worktree", "add", "--track", "-B", worktreeId, worktreePath, `origin/${baseBranch}`]);
 }
 
 export async function removeWorktree(worktreeId: string): Promise<void> {
