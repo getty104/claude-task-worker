@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as TableModule from "./table";
 
+// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
+// tsc --noEmit（npm run build）は allowImportingTsExtensions が無効なため
+// 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
+// TSの静的解析対象にならない動的文字列結合でパスを構築している。
 const tableModulePath = ["./table", "ts"].join(".");
 const { getDisplayWidth, truncateToWidth, padToWidth } = (await import(tableModulePath)) as typeof TableModule;
 
