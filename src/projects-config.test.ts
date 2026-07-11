@@ -8,6 +8,10 @@ import type * as ProjectsConfigModule from "./projects-config";
 const configHome = mkdtempSync(join(tmpdir(), "ptw-config-"));
 process.env.XDG_CONFIG_HOME = configHome;
 
+// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
+// tsc --noEmit（npm run build）は allowImportingTsExtensions が無効なため
+// 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
+// TSの静的解析対象にならない動的文字列結合でパスを構築している。
 const projectsConfigModulePath = ["./projects-config", "ts"].join(".");
 const { loadProjectsConfig, resolveTargetProjects, ProjectsConfigError, PROJECTS_CONFIG_PATH } = (await import(
   projectsConfigModulePath
