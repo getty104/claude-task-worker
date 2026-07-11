@@ -114,7 +114,17 @@ parent: <EPIC_ISSUE_NUMBER>
 blocked_by: [<先行TODOで確定済みのIssue番号>, ...]
 ```
 
-Skill tool 呼び出しは `Skill(skill='post-scope-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-scope-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。完了後、作成された Issue URL と Issue 番号が返ってくるので、番号は次以降のTODOの `blocked_by:` に入れる用途で保持する。
+起動の**直前に毎回**（TODOごとのループ2回目以降・再試行時も含む）、同じ YAML を argsファイルにも書き込む。Claude Code の既知バグ（anthropics/claude-code#34164）で `context: fork` スキルへ Skill tool 経由の args が届かないことがあり、`post-scope-issue-body` は args が未置換のときこのファイルへフォールバックする規約のため（ファイルは `post-scope-issue-body` 側が読み取り後に削除する）。
+
+```bash
+ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/post-scope-issue-body.args.yaml"
+mkdir -p "$(dirname "$ARGS_FILE")"
+cat > "$ARGS_FILE" <<'ARGS_EOF'
+<上記YAMLをそのまま>
+ARGS_EOF
+```
+
+そのうえで Skill tool 呼び出しは `Skill(skill='post-scope-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-scope-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。完了後、作成された Issue URL と Issue 番号が返ってくるので、番号は次以降のTODOの `blocked_by:` に入れる用途で保持する。
 
 `post-scope-issue-body` の失敗（gh コマンド失敗・本文チェック不通過・`--parent`/`--blocked-by` の検証エラー等）はそのまま本ステップの中断条件となる。エラーメッセージを最終報告に含め、既に作成済みのIssue（親Issueと作成済みの子Issue）は残したまま中断する。
 

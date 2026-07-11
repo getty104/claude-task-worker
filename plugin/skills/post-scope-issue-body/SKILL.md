@@ -16,7 +16,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 2. 投稿前チェックの実施
 3. `gh issue create` の実行
 
-ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args に無い場合は、親スキル（breakdown-issues / answer-issue-questions）の使用を促して終了する。
+ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args にも argsファイルにも無い場合は、親スキル（breakdown-issues / answer-issue-questions）の使用を促して終了する。
 
 **親Project紐付けや複数Issueの作成順序・依存関係Issue番号の確定は呼び出し側の責務**。本スキルは1回の呼び出しで1つのIssueを作成して URL を返すのみ。複数作成したい場合は呼び出し側がループする。
 
@@ -36,11 +36,11 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 **理由**: 本スキルは「作成された Issue の URL」を同期返却する契約であり、バックグラウンド化すると呼び出し元が依存関係 Issue 番号を確定できないまま次のスコープ Issue 作成に進み、Issue の依存グラフが壊れて `claude-task-worker` の `create-issue` ワーカーが正しい順序で処理できなくなる。
 
-## 入力（args 経由の YAML ブロック）
+## 入力（args + argsファイル経由の YAML ブロック）
 
 ### 呼び出し規約
 
-呼び出し元の親スキル（`answer-issue-questions` / `breakdown-issues`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡す**こと。本スキルは `$ARGUMENTS` を YAML として機械的にパースして入力として扱う。
+呼び出し元の親スキル（`answer-issue-questions` / `breakdown-issues`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡し、かつ起動直前に同じ YAML を argsファイル（後述）にも書き込む**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
 
 ```yaml
 mode: create  # 現状 create のみサポート
@@ -65,16 +65,30 @@ blocking: [<Issue番号>, ...]     # 省略可。指定時は --blocking で blo
 
 args に渡す YAML は上記の通り**トップレベルから直接書く**（ラッパキーなし）。
 
-### args の渡し方
+### 入力の渡し方（args + argsファイルの二重チャネル）
 
-`Skill(skill='post-scope-issue-body', args=<上記YAML文字列>)` の形で起動する。args は改行を含む複数行文字列として渡せる。
+Claude Code には既知バグ（[anthropics/claude-code#34164](https://github.com/anthropics/claude-code/issues/34164)）があり、`context: fork` のスキルを Skill tool 経由でプログラム的に起動すると args のプレースホルダ置換が行われず、fork 先に引数が届かないことがある。このため入力 YAML は **args と argsファイルの二重チャネル**で受け渡す。
+
+呼び出し元は、本スキルを起動する**直前に毎回**（複数Issueを順に作成するループの2回目以降・再試行時も含む）、同じ YAML を argsファイルにも書き込むこと:
+
+```bash
+ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/post-scope-issue-body.args.yaml"
+mkdir -p "$(dirname "$ARGS_FILE")"
+cat > "$ARGS_FILE" <<'ARGS_EOF'
+<上記YAMLをそのまま>
+ARGS_EOF
+```
+
+そのうえで `Skill(skill='post-scope-issue-body', args=<同じYAML文字列>)` の形で起動する。args は改行を含む複数行文字列として渡せる（バグ修正後は args がそのまま届くため、両チャネルに同一内容を流しておく）。
+
+パスを `git rev-parse --git-dir` 起点にするのは、fork 先が呼び出し元と cwd を共有するため双方が同じパスを決定的に導出でき、`.git` 配下なのでコミット対象にならず、worktree ごとに管理ディレクトリが分かれるため並行タスク間で衝突しないため。
 
 ### 取り扱い規約
 
 - 空セクションを省略しない。「なし」で埋める（後続スキルが「未記入」と区別できなくなるため）。
 - `parent` / `blocked_by` / `blocking` の Issue 番号は**呼び出し側で確定済みのもの**が前提。本スキルは渡された値をそのまま `gh issue create` のオプションに渡す。先行Issueの番号確定を待つ順序制御は呼び出し側の責務。
-- args の YAML が壊れていたり項目が欠けている場合は、`mode` 以外であれば最低限の推定で埋める（例: 優先度・見積もり規模が空なら `Medium` / `M`）。`mode` だけは推定不可なので欠けていたら中断する。
-- args が空、もしくは YAML として解釈できない場合（直接ユーザー起動など）は、親スキル（`breakdown-issues` / `answer-issue-questions`）の使用を促して中断する。
+- 入力の YAML が壊れていたり項目が欠けている場合は、`mode` 以外であれば最低限の推定で埋める（例: 優先度・見積もり規模が空なら `Medium` / `M`）。`mode` だけは推定不可なので欠けていたら中断する。
+- args と argsファイルのどちらからも入力 YAML を取得できない場合（直接ユーザー起動など）は、親スキル（`breakdown-issues` / `answer-issue-questions`）の使用を促して中断する。
 
 ## Issueフォーマット（厳守）
 
@@ -114,9 +128,22 @@ S / M / L / XL のいずれか1つ
 
 ## 実行ステップ
 
-### 1. args の YAML パース
+### 1. 入力 YAML の取得とパース
 
-`$ARGUMENTS` を YAML として解釈し、`mode` / `title` / `sections` / `parent` / `blocked_by` / `blocking` を取り出す。`mode` が読み取れない、もしくは args が空ならば中断条件に従って終了する。
+入力 YAML を次の優先順で確定する。
+
+1. **args**: 下記の args 入力スロットに呼び出し時の args が展開される。中身が YAML として解釈できればそれを入力とする。
+2. **argsファイル**: args 入力スロットが空・未置換プレースホルダのまま（ドル記号に `ARGUMENTS` が続く文字列がそのまま残っている状態。既知バグ anthropics/claude-code#34164 により fork へ args が届かなかったケース）・YAML として解釈不能、のいずれかの場合は、`"$(git rev-parse --git-dir)/claude-task-worker/post-scope-issue-body.args.yaml"` を読み、その内容を入力とする。
+
+どちらのチャネルを採用したかに関わらず、入力の確定後は argsファイルを `rm -f` で**必ず削除**する（consume-once。複数Issueを順に作成するループで前回の入力が紛れ込むのを防ぐ）。
+
+args 入力スロット:
+
+<args-input>
+$ARGUMENTS
+</args-input>
+
+確定した入力 YAML から `mode` / `title` / `sections` / `parent` / `blocked_by` / `blocking` を取り出す。`mode` が読み取れない、もしくは両チャネルとも入力が得られないならば中断条件に従って終了する。
 
 ### 2. 本文の組み立てと投稿前チェック
 
@@ -179,7 +206,7 @@ EOF
 以下のいずれかに該当する場合のみ、理由を1-2行で出力して**即中断**する。
 
 - `mode` が `create` 以外（現状 edit はサポートしない）
-- args が空、もしくは YAML として解釈できない
+- args と argsファイルのどちらからも入力 YAML を取得できない（空・未置換プレースホルダ・YAML 解釈不能）
 - `gh issue create` が失敗し、再試行しても解消しない
 
 ## 注意事項
