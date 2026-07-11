@@ -1,6 +1,7 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
 import type * as ChildProcess from "node:child_process";
 import type * as DispatcherModule from "./dispatcher";
 import type * as HerdrModule from "./herdr";
@@ -8,16 +9,12 @@ import type { ResolvedProject } from "./projects-config";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
-// tsc --noEmit（npm run build）は allowImportingTsExtensions が無効なため
-// 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
-// TSの静的解析対象にならない動的文字列結合でパスを構築している。
-const dispatcherModulePath = ["./dispatcher", "ts"].join(".");
-const { runDispatcher, pollOnce, monitorSessions, shutdownDispatcher } = (await import(
-  dispatcherModulePath
-)) as typeof DispatcherModule;
-const herdrModulePath = ["./herdr", "ts"].join(".");
-const { HerdrError } = (await import(herdrModulePath)) as typeof HerdrModule;
+// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
+// .ts 拡張子付きのリテラル文字列で動的importする。
+// allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
+const { runDispatcher, pollOnce, monitorSessions, shutdownDispatcher } =
+  (await import("./dispatcher.ts")) as typeof DispatcherModule;
+const { HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -28,60 +25,68 @@ interface HerdrScenario {
 }
 
 function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: string[]): void {
-  t.mock.method(childProcess, "execFile", (_command: string, args: string[], callback: ExecFileCallback) => {
-    if (args[0] === "tab" && args[1] === "list") {
-      const tabs = (scenario.existingLabels ?? []).map((label, index) => ({
-        tab_id: `w1:t${index}`,
-        label,
-        workspace_id: "w1",
-      }));
-      callback(null, JSON.stringify({ result: { tabs } }), "");
-      return;
-    }
-    if (args[0] === "tab" && args[1] === "create") {
-      const labelIndex = args.indexOf("--label");
-      const label = args[labelIndex + 1];
-      if (scenario.brokenCreateLabels?.includes(label)) {
-        callback(null, JSON.stringify({ error: { code: "internal", message: "boom" } }), "");
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      if (args[0] === "tab" && args[1] === "list") {
+        const tabs = (scenario.existingLabels ?? []).map((label, index) => ({
+          tab_id: `w1:t${index}`,
+          label,
+          workspace_id: "w1",
+        }));
+        callback(null, JSON.stringify({ result: { tabs } }), "");
         return;
       }
-      callback(
-        null,
-        JSON.stringify({
-          result: {
-            root_pane: { pane_id: `pane-${label}` },
-            tab: { tab_id: `tab-${label}` },
-          },
-        }),
-        "",
-      );
-      return;
-    }
-    if (args[0] === "tab" && args[1] === "close") {
-      const tabId = args[2];
-      closedTabIds?.push(tabId);
-      callback(null, JSON.stringify({ result: null }), "");
-      return;
-    }
-    if (args[0] === "pane" && (args[1] === "send-text" || args[1] === "send-keys")) {
-      const label = args[2]?.startsWith("pane-") ? args[2].slice("pane-".length) : undefined;
-      if (label && scenario.brokenPaneLabels?.includes(label)) {
-        callback(null, JSON.stringify({ error: { code: "internal", message: "pane boom" } }), "");
+      if (args[0] === "tab" && args[1] === "create") {
+        const labelIndex = args.indexOf("--label");
+        const label = args[labelIndex + 1];
+        if (scenario.brokenCreateLabels?.includes(label)) {
+          callback(null, JSON.stringify({ error: { code: "internal", message: "boom" } }), "");
+          return;
+        }
+        callback(
+          null,
+          JSON.stringify({
+            result: {
+              root_pane: { pane_id: `pane-${label}` },
+              tab: { tab_id: `tab-${label}` },
+            },
+          }),
+          "",
+        );
         return;
       }
-      callback(null, JSON.stringify({ result: null }), "");
-      return;
-    }
-    callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
-  });
+      if (args[0] === "tab" && args[1] === "close") {
+        const tabId = args[2];
+        closedTabIds?.push(tabId);
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "pane" && (args[1] === "send-text" || args[1] === "send-keys")) {
+        const label = args[2]?.startsWith("pane-") ? args[2].slice("pane-".length) : undefined;
+        if (label && scenario.brokenPaneLabels?.includes(label)) {
+          callback(null, JSON.stringify({ error: { code: "internal", message: "pane boom" } }), "");
+          return;
+        }
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
+    },
+  );
 }
 
 function mockHerdrUnavailable(t: TestContext): void {
-  t.mock.method(childProcess, "execFile", (_command: string, _args: string[], callback: ExecFileCallback) => {
-    const error = new Error("spawn herdr ENOENT") as NodeJS.ErrnoException;
-    error.code = "ENOENT";
-    callback(error, "", "");
-  });
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, _args: string[], _options: unknown, callback: ExecFileCallback) => {
+      const error = new Error("spawn herdr ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      callback(error, "", "");
+    },
+  );
 }
 
 test("re-throws and logs when herdr is unavailable", async (t) => {
@@ -178,15 +183,85 @@ test("closes the dangling tab when sending the command to a created tab fails", 
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "broken-app"')));
 });
 
-function mockTabClose(t: TestContext, closedTabIds: string[]): void {
-  t.mock.method(childProcess, "execFile", (_command: string, args: string[], callback: ExecFileCallback) => {
-    if (args[0] === "tab" && args[1] === "close") {
-      closedTabIds.push(args[2]);
-      callback(null, JSON.stringify({ result: null }), "");
-      return;
-    }
-    callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
+test("registers the session immediately after tabCreate, before awaiting paneSendText/paneSendKeys (regression guard against tab leak on shutdown)", async () => {
+  const source = await readFile(new URL("./dispatcher.ts", import.meta.url), "utf8");
+  const tabCreateIndex = source.indexOf("await tabCreate(");
+  const sessionsSetIndex = source.indexOf("sessions.set(", tabCreateIndex);
+  const paneSendTextIndex = source.indexOf("await paneSendText(", tabCreateIndex);
+  assert.ok(tabCreateIndex !== -1 && sessionsSetIndex !== -1 && paneSendTextIndex !== -1);
+  assert.ok(
+    sessionsSetIndex < paneSendTextIndex,
+    "sessions.set() must run right after tabCreate() resolves, before the paneSendText/paneSendKeys awaits, so a SIGINT/SIGTERM arriving during those awaits still sees the tab in the SessionRegistry",
+  );
+});
+
+test("closes the dangling tab and removes the leaked session when paneSendKeys (the second await) fails after paneSendText already succeeded", async (t) => {
+  const closedTabIds: string[] = [];
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      if (args[0] === "tab" && args[1] === "list") {
+        callback(null, JSON.stringify({ result: { tabs: [] } }), "");
+        return;
+      }
+      if (args[0] === "tab" && args[1] === "create") {
+        const labelIndex = args.indexOf("--label");
+        const label = args[labelIndex + 1];
+        callback(
+          null,
+          JSON.stringify({
+            result: {
+              root_pane: { pane_id: `pane-${label}` },
+              tab: { tab_id: `tab-${label}` },
+            },
+          }),
+          "",
+        );
+        return;
+      }
+      if (args[0] === "tab" && args[1] === "close") {
+        closedTabIds.push(args[2]);
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "send-text") {
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "send-keys") {
+        callback(null, JSON.stringify({ error: { code: "internal", message: "send-keys boom" } }), "");
+        return;
+      }
+      callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
+    },
+  );
+  const errorLogs: string[] = [];
+  t.mock.method(console, "error", (message: string) => {
+    errorLogs.push(message);
   });
+
+  const projects: ResolvedProject[] = [{ name: "my-app", path: "/tmp/my-app" }];
+  const sessions = await runDispatcher(projects, "claude-task-worker all");
+
+  assert.equal(sessions.size, 0);
+  assert.deepEqual(closedTabIds, ["tab-my-app"]);
+  assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "my-app"')));
+});
+
+function mockTabClose(t: TestContext, closedTabIds: string[]): void {
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      if (args[0] === "tab" && args[1] === "close") {
+        closedTabIds.push(args[2]);
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
+    },
+  );
 }
 
 function makeSession(overrides: Partial<DispatcherModule.WorkerSession> = {}): DispatcherModule.WorkerSession {
@@ -214,6 +289,29 @@ test("pollOnce keeps a session that still has a claude-task-worker foreground pr
 
   assert.equal(sessions.size, 1);
   assert.ok(sessions.has("my-app"));
+});
+
+test("pollOnce treats a foreground process with a missing cmdline as not alive instead of throwing", async (t) => {
+  const closedTabIds: string[] = [];
+  mockTabClose(t, closedTabIds);
+  const errorLogs: string[] = [];
+  t.mock.method(console, "error", (message: string) => {
+    errorLogs.push(message);
+  });
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "node", argv: [], cmdline: undefined as unknown as string, pid: 123 }],
+    }),
+  } as unknown as typeof HerdrModule;
+
+  await assert.doesNotReject(pollOnce(sessions, fakeHerdr));
+
+  assert.equal(sessions.size, 0);
+  assert.deepEqual(closedTabIds, ["tab-my-app"]);
+  assert.equal(errorLogs.length, 0);
 });
 
 test("pollOnce removes a session and closes the tab when the pane returned to the shell", async (t) => {
@@ -506,5 +604,78 @@ test("shutdownDispatcher: 残っている全タブがtabCloseで閉じられ、�
 
   assert.deepEqual(closedTabIds, ["tab-b"]);
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to close tab "tab-a"')));
-  assert.deepEqual(exitCodes, [0]);
+  assert.deepEqual(exitCodes, [1]);
+});
+
+test("shutdownDispatcher: 全タブのcloseに成功してもセッションが最終的に終了しなければexit(1)する", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  const closedTabIds: string[] = [];
+  const ctrlCCounts: Record<string, number> = {};
+  const fakeHerdr = {
+    HerdrError,
+    paneSendKeys: async (paneId: string) => {
+      ctrlCCounts[paneId] = (ctrlCCounts[paneId] ?? 0) + 1;
+    },
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
+    }),
+    tabClose: async (tabId: string) => {
+      closedTabIds.push(tabId);
+    },
+  } as unknown as typeof HerdrModule;
+
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+
+  await shutdownDispatcher(sessions, undefined, {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 20,
+    retryTimeoutMs: 20,
+    tabCloseTimeoutMs: 50,
+  });
+
+  assert.deepEqual(closedTabIds, [session.tabId]);
+  assert.deepEqual(exitCodes, [1]);
+});
+
+test("shutdownDispatcher: forceKill:true を指定した2回目の呼び出しは1回目の完了を待たず強制的にctrl-c再送・tabClose・exit(1)を行う", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  const ctrlCCounts: Record<string, number> = {};
+  const closedTabIds: string[] = [];
+  const fakeHerdr = {
+    HerdrError,
+    paneSendKeys: async (paneId: string) => {
+      ctrlCCounts[paneId] = (ctrlCCounts[paneId] ?? 0) + 1;
+    },
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
+    }),
+    tabClose: async (tabId: string) => {
+      closedTabIds.push(tabId);
+    },
+  } as unknown as typeof HerdrModule;
+
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+
+  const firstShutdown = shutdownDispatcher(sessions, undefined, {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 50,
+    retryTimeoutMs: 50,
+    tabCloseTimeoutMs: 50,
+  });
+
+  await shutdownDispatcher(sessions, undefined, {
+    herdr: fakeHerdr,
+    tabCloseTimeoutMs: 50,
+    forceKill: true,
+  });
+
+  assert.ok((ctrlCCounts[session.paneId] ?? 0) >= 1);
+  assert.ok(closedTabIds.includes(session.tabId));
+  assert.ok(exitCodes.includes(1));
+
+  await firstShutdown;
 });

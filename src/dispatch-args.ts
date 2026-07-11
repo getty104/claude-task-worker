@@ -6,7 +6,7 @@ function collectFlagValues(argv: string[], flag: string): string[] {
     if (argv[i] !== flag) continue;
     const raw = argv[i + 1];
     if (!raw || raw.startsWith("--")) {
-      console.error(`${flag} requires a value`);
+      console.error(`[dispatcher] ${flag} requires a value`);
       process.exit(1);
     }
     values.push(raw);
@@ -24,7 +24,7 @@ export function hasProjectFilter(): boolean {
 
 export function assertProjectCompatibleCommand(command: string): void {
   if (PROJECT_INCOMPATIBLE_COMMANDS.includes(command)) {
-    console.error(`--project cannot be used with the "${command}" command`);
+    console.error(`[dispatcher] --project cannot be used with the "${command}" command`);
     process.exit(1);
   }
 }

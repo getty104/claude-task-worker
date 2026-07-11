@@ -27,6 +27,7 @@ import { loadProjectsConfig, resolveTargetProjects, ProjectsConfigError } from "
 // dispatcher.ts / herdr.ts はワーカー起動には不要な --project 専用モジュールで、
 // dispatcher.ts のトップレベル await が即時実行されるのを避けるため、
 // 静的importではなく --project 使用時にのみ実行される動的importで遅延読込する。
+// esbuild の単一ファイルバンドルにインライン化されるよう、指定子は .ts 拡張子付きのリテラル文字列にする。
 import type * as DispatcherModule from "./dispatcher";
 import type { SessionRegistry, MonitorHandle } from "./dispatcher";
 import type * as HerdrModule from "./herdr";
@@ -192,24 +193,21 @@ if (hasProjectFilter()) {
     // 起動処理（runDispatcher/monitorSessions）が完了する前にシグナルを受けても
     // タブ・セッションが放置されないよう、動的import・起動処理より前にハンドラを登録する。
     const handleShutdown = async () => {
-      const dispatcherModulePath = ["./dispatcher", "ts"].join(".");
-      const { shutdownDispatcher } = (await import(dispatcherModulePath)) as typeof DispatcherModule;
+      const { shutdownDispatcher } = (await import("./dispatcher.ts")) as typeof DispatcherModule;
       await shutdownDispatcher(sessions, monitorHandle);
     };
     process.on("SIGTERM", handleShutdown);
     process.on("SIGINT", handleShutdown);
 
-    // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
-    // tsc --noEmit は静的import文中の .ts 拡張子指定子を許容しないため、
-    // TSの静的解析対象にならない動的文字列結合でパスを構築している（dispatcher.ts と同様）。
-    const herdrModulePath = ["./herdr", "ts"].join(".");
-    const herdr = (await import(herdrModulePath)) as typeof HerdrModule;
+    // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
+    // .ts 拡張子付きのリテラル文字列で動的importする（dispatcher.ts と同様）。
+    // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
+    const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
     try {
       const config = loadProjectsConfig();
       const projects = resolveTargetProjects(parseProjectFilters(), config);
       const forwardedCommand = buildForwardedCommand(process.argv.slice(2));
-      const dispatcherModulePath = ["./dispatcher", "ts"].join(".");
-      const { runDispatcher, monitorSessions } = (await import(dispatcherModulePath)) as typeof DispatcherModule;
+      const { runDispatcher, monitorSessions } = (await import("./dispatcher.ts")) as typeof DispatcherModule;
       sessions = await runDispatcher(projects, forwardedCommand);
       monitorHandle = monitorSessions(sessions, herdr);
     } catch (err) {

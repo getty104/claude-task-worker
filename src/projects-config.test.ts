@@ -8,14 +8,11 @@ import type * as ProjectsConfigModule from "./projects-config";
 const configHome = mkdtempSync(join(tmpdir(), "ptw-config-"));
 process.env.XDG_CONFIG_HOME = configHome;
 
-// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
-// tsc --noEmit（npm run build）は allowImportingTsExtensions が無効なため
-// 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
-// TSの静的解析対象にならない動的文字列結合でパスを構築している。
-const projectsConfigModulePath = ["./projects-config", "ts"].join(".");
-const { loadProjectsConfig, resolveTargetProjects, ProjectsConfigError, PROJECTS_CONFIG_PATH } = (await import(
-  projectsConfigModulePath
-)) as typeof ProjectsConfigModule;
+// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
+// .ts 拡張子付きのリテラル文字列で動的importする。
+// allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
+const { loadProjectsConfig, resolveTargetProjects, ProjectsConfigError, PROJECTS_CONFIG_PATH } =
+  (await import("./projects-config.ts")) as typeof ProjectsConfigModule;
 
 const configDir = join(configHome, "claude-task-worker");
 
@@ -92,6 +89,49 @@ test("resolveTargetProjects resolves known projects and groups normally", () => 
   };
   const resolved = resolveTargetProjects(["mygroup"], config);
   assert.deepEqual(resolved.map((r) => r.name).sort(), ["alpha", "beta"]);
+});
+
+test("loadProjectsConfig throws ProjectsConfigError when projects is an array", () => {
+  writeConfigFile(
+    JSON.stringify({
+      projects: [],
+    }),
+  );
+  assert.throws(() => loadProjectsConfig(), ProjectsConfigError);
+});
+
+test("loadProjectsConfig throws ProjectsConfigError when projects is an array with entries", () => {
+  writeConfigFile(
+    JSON.stringify({
+      projects: ["/tmp/app"],
+    }),
+  );
+  assert.throws(() => loadProjectsConfig(), ProjectsConfigError);
+});
+
+test("loadProjectsConfig throws ProjectsConfigError when projectGroups is an array", () => {
+  writeConfigFile(
+    JSON.stringify({
+      projects: {
+        alpha: process.cwd(),
+      },
+      projectGroups: [["alpha"]],
+    }),
+  );
+  assert.throws(() => loadProjectsConfig(), ProjectsConfigError);
+});
+
+test("loadProjectsConfig throws ProjectsConfigError when projects contains a __proto__ key", () => {
+  writeConfigFile('{"projects": {"__proto__": ' + JSON.stringify(process.cwd()) + "}}");
+  assert.throws(() => loadProjectsConfig(), ProjectsConfigError);
+});
+
+test("resolveTargetProjects throws ProjectsConfigError when resolution yields no projects", () => {
+  const config = {
+    projects: {},
+    projectGroups: { empty: [] },
+  };
+  assert.throws(() => resolveTargetProjects(["empty"], config), ProjectsConfigError);
 });
 
 test("cleanup temp config dir", () => {

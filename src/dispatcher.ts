@@ -2,18 +2,17 @@ import type * as HerdrModule from "./herdr";
 import type * as TableModule from "./table";
 import type { ResolvedProject } from "./projects-config";
 
-// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
-// tsc --noEmit（npm run build）は allowImportingTsExtensions が無効なため
-// 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
-// TSの静的解析対象にならない動的文字列結合でパスを構築している。
+// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
+// .ts 拡張子付きのリテラル文字列で動的importする。動的importのままにすることで、
+// --project 使用時にのみ必要なトップレベル処理（loadTable の呼び出し等）の実行タイミングを保つ。
+// allowImportingTsExtensions により tsc --noEmit もこの指定子を許容し、
+// リテラル文字列のため esbuild も単一ファイルバンドルにインライン化できる。
 async function loadHerdr(): Promise<typeof HerdrModule> {
-  const herdrModulePath = ["./herdr", "ts"].join(".");
-  return (await import(herdrModulePath)) as typeof HerdrModule;
+  return (await import("./herdr.ts")) as typeof HerdrModule;
 }
 
 async function loadTable(): Promise<typeof TableModule> {
-  const tableModulePath = ["./table", "ts"].join(".");
-  return (await import(tableModulePath)) as typeof TableModule;
+  return (await import("./table.ts")) as typeof TableModule;
 }
 
 const { getDisplayWidth, truncateToWidth, padToWidth } = await loadTable();
@@ -59,8 +58,6 @@ export async function runDispatcher(projects: ResolvedProject[], forwardedComman
     try {
       const { paneId, tabId } = await tabCreate({ label: project.name, cwd: project.path });
       createdTabId = tabId;
-      await paneSendText(paneId, forwardedCommand);
-      await paneSendKeys(paneId, "enter");
       sessions.set(project.name, {
         name: project.name,
         tabId,
@@ -68,8 +65,11 @@ export async function runDispatcher(projects: ResolvedProject[], forwardedComman
         startedAt: new Date(),
         status: "running",
       });
+      await paneSendText(paneId, forwardedCommand);
+      await paneSendKeys(paneId, "enter");
     } catch (error) {
       console.error(`[dispatcher] failed to dispatch project "${project.name}": ${error}`);
+      sessions.delete(project.name);
       if (createdTabId !== undefined) {
         try {
           await tabClose(createdTabId);
@@ -106,7 +106,7 @@ export async function pollOnce(sessions: SessionRegistry, herdr: typeof HerdrMod
   for (const [name, session] of [...sessions.entries()]) {
     try {
       const { foregroundProcesses } = await herdr.paneProcessInfo(session.paneId);
-      const isAlive = foregroundProcesses.some((process) => process.cmdline.includes("claude-task-worker"));
+      const isAlive = foregroundProcesses.some((process) => process.cmdline?.includes("claude-task-worker"));
       if (!isAlive) {
         await removeSession(sessions, name, { closeTab: true });
       }
@@ -222,6 +222,7 @@ export interface ShutdownOptions {
   shutdownTimeoutMs?: number;
   retryTimeoutMs?: number;
   tabCloseTimeoutMs?: number;
+  forceKill?: boolean;
 }
 
 async function sendCtrlCToAllSessions(sessions: SessionRegistry, herdr: typeof HerdrModule): Promise<void> {
@@ -256,8 +257,8 @@ async function closeRemainingTabs(
   sessions: SessionRegistry,
   herdr: typeof HerdrModule,
   timeoutMs: number,
-): Promise<void> {
-  await Promise.all(
+): Promise<boolean> {
+  const results = await Promise.all(
     [...sessions.values()].map(async (session) => {
       try {
         await Promise.race([
@@ -266,13 +267,16 @@ async function closeRemainingTabs(
             setTimeout(() => reject(new Error("tabClose timed out")), timeoutMs).unref();
           }),
         ]);
+        return true;
       } catch (error) {
         console.error(
           `[dispatcher] failed to close tab "${session.tabId}" for session "${session.name}" during shutdown: ${error}`,
         );
+        return false;
       }
     }),
   );
+  return results.every((closed) => closed);
 }
 
 // index.ts の isShuttingDown/forceKilling（ワーカープロセス側のCtrl-C 2段階ガード）とは
@@ -282,12 +286,29 @@ async function closeRemainingTabs(
 // テストなど同一プロセス内での再実行にも対応できるようにしている。
 let shutdownPromise: Promise<void> | undefined;
 
+async function forceKillAllSessions(
+  sessions: SessionRegistry,
+  herdr: typeof HerdrModule,
+  tabCloseTimeoutMs: number,
+): Promise<void> {
+  console.log(`[dispatcher] force-kill requested, sending ctrl-c and closing ${sessions.size} session(s) immediately`);
+  await sendCtrlCToAllSessions(sessions, herdr);
+  await closeRemainingTabs(sessions, herdr, tabCloseTimeoutMs);
+  process.exit(1);
+}
+
 export async function shutdownDispatcher(
   sessions: SessionRegistry,
   monitorHandle?: MonitorHandle,
   options?: ShutdownOptions,
 ): Promise<void> {
   if (shutdownPromise) {
+    if (options?.forceKill) {
+      const herdr = options.herdr ?? (await loadHerdr());
+      const tabCloseTimeoutMs = options.tabCloseTimeoutMs ?? 5000;
+      await forceKillAllSessions(sessions, herdr, tabCloseTimeoutMs);
+      return;
+    }
     console.log("[dispatcher] shutdown already in progress, ignoring duplicate request");
     return shutdownPromise;
   }
@@ -307,19 +328,19 @@ export async function shutdownDispatcher(
     console.log(`[dispatcher] shutting down, sending ctrl-c to ${sessions.size} session(s)`);
     await sendCtrlCToAllSessions(sessions, herdr);
 
-    const finishedInTime = await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, shutdownTimeoutMs);
+    let finishedInTime = await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, shutdownTimeoutMs);
 
     if (!finishedInTime) {
       console.log(
         `[dispatcher] ${sessions.size} session(s) still alive after ${shutdownTimeoutMs}ms, resending ctrl-c once`,
       );
       await sendCtrlCToAllSessions(sessions, herdr);
-      await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, retryTimeoutMs);
+      finishedInTime = await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, retryTimeoutMs);
     }
 
-    await closeRemainingTabs(sessions, herdr, tabCloseTimeoutMs);
+    const allTabsClosed = await closeRemainingTabs(sessions, herdr, tabCloseTimeoutMs);
 
-    process.exit(0);
+    process.exit(finishedInTime && allTabsClosed ? 0 : 1);
   })();
 
   try {

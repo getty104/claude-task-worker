@@ -6,15 +6,28 @@ import type * as HerdrModule from "./herdr";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const herdrModulePath = ["./herdr", "ts"].join(".");
-const { tabCreate, tabList, paneProcessInfo, HerdrError } = (await import(herdrModulePath)) as typeof HerdrModule;
+const { tabCreate, tabList, paneProcessInfo, HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
 function mockExecFile(t: TestContext, stdout: string, stderr: string): void {
-  t.mock.method(childProcess, "execFile", (_command: string, _args: string[], callback: ExecFileCallback) => {
-    callback(null, stdout, stderr);
-  });
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, _args: string[], _options: unknown, callback: ExecFileCallback) => {
+      callback(null, stdout, stderr);
+    },
+  );
+}
+
+function mockExecFileError(t: TestContext, error: NodeJS.ErrnoException): void {
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, _args: string[], _options: unknown, callback: ExecFileCallback) => {
+      callback(error, "", "");
+    },
+  );
 }
 
 test("execHerdr includes stderr content in the error message when stdout is invalid JSON", async (t) => {
@@ -72,6 +85,15 @@ test("throws a HerdrError carrying the error code when herdr responds with an er
     assert.ok(error instanceof HerdrError);
     assert.equal(error.code, "pane_not_found");
     assert.match(error.message, /^herdr pane process-info --pane pane-1 failed: \[pane_not_found\] no such pane$/);
+    return true;
+  });
+});
+
+test("propagates a timeout error via execError when herdr hangs", async (t) => {
+  const timeoutError = Object.assign(new Error("Command timed out"), { killed: true, signal: "SIGKILL" });
+  mockExecFileError(t, timeoutError as NodeJS.ErrnoException);
+  await assert.rejects(tabList(), (error: Error) => {
+    assert.match(error.message, /Command timed out/);
     return true;
   });
 });

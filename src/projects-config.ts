@@ -56,15 +56,24 @@ export function loadProjectsConfig(): ProjectsConfig {
     throw new ProjectsConfigError(`projects.json must contain a JSON object: ${configPath}`);
   }
 
-  if (!("projects" in raw) || typeof raw["projects"] !== "object" || raw["projects"] === null) {
-    throw new ProjectsConfigError(`projects.json must contain a "projects" section: ${configPath}`);
+  if (
+    !("projects" in raw) ||
+    typeof raw["projects"] !== "object" ||
+    raw["projects"] === null ||
+    Array.isArray(raw["projects"])
+  ) {
+    throw new ProjectsConfigError(`projects.json must contain a "projects" section as an object: ${configPath}`);
+  }
+
+  if (
+    "projectGroups" in raw &&
+    (typeof raw["projectGroups"] !== "object" || raw["projectGroups"] === null || Array.isArray(raw["projectGroups"]))
+  ) {
+    throw new ProjectsConfigError(`projects.json "projectGroups" must be an object: ${configPath}`);
   }
 
   const rawProjects = raw["projects"] as Record<string, unknown>;
-  const rawProjectGroups =
-    "projectGroups" in raw && typeof raw["projectGroups"] === "object" && raw["projectGroups"] !== null
-      ? (raw["projectGroups"] as Record<string, unknown>)
-      : {};
+  const rawProjectGroups = ("projectGroups" in raw ? raw["projectGroups"] : {}) as Record<string, unknown>;
 
   const projectKeys = Object.keys(rawProjects);
   const groupKeys = Object.keys(rawProjectGroups);
@@ -85,6 +94,9 @@ export function loadProjectsConfig(): ProjectsConfig {
 
   const projects: Record<string, string> = {};
   for (const [name, value] of Object.entries(rawProjects)) {
+    if (name === "__proto__") {
+      throw new ProjectsConfigError(`"__proto__" cannot be used as a key in "projects": ${configPath}`);
+    }
     if (typeof value !== "string" || !isAbsolute(value)) {
       console.warn(`[projects-config] invalid projects.${name}: expected an absolute path, skipping`);
       continue;
@@ -98,6 +110,9 @@ export function loadProjectsConfig(): ProjectsConfig {
 
   const projectGroups: Record<string, string[]> = {};
   for (const [groupName, value] of Object.entries(rawProjectGroups)) {
+    if (groupName === "__proto__") {
+      throw new ProjectsConfigError(`"__proto__" cannot be used as a key in "projectGroups": ${configPath}`);
+    }
     if (!Array.isArray(value)) {
       console.warn(`[projects-config] invalid projectGroups.${groupName}: expected an array, skipping`);
       continue;
@@ -150,5 +165,10 @@ export function resolveTargetProjects(requested: string[], config: ProjectsConfi
     );
   }
 
-  return Array.from(resolved.values());
+  const resolvedProjects = Array.from(resolved.values());
+  if (resolvedProjects.length === 0) {
+    throw new ProjectsConfigError(`No projects resolved from requested targets: ${requested.join(", ")}`);
+  }
+
+  return resolvedProjects;
 }

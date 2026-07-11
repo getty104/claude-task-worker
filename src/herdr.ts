@@ -54,19 +54,26 @@ interface HerdrRawResult {
   stderr: string;
 }
 
+export const HERDR_TIMEOUT_MS = 15 * 1000;
+
 // herdr は error 発生時も終了コード0を返すため、execFile の成否ではなく
 // stdout の JSON パース結果（parsed）と error.code の両方を呼び出し側で判定させる。
 function runHerdr(args: string[]): Promise<HerdrRawResult> {
   return new Promise((resolve) => {
-    childProcess.execFile("herdr", args, (error, stdout, stderr) => {
-      let parsed: HerdrResponse | undefined;
-      try {
-        parsed = JSON.parse(stdout) as HerdrResponse;
-      } catch {
-        parsed = undefined;
-      }
-      resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stderr });
-    });
+    childProcess.execFile(
+      "herdr",
+      args,
+      { timeout: HERDR_TIMEOUT_MS, killSignal: "SIGKILL" },
+      (error, stdout, stderr) => {
+        let parsed: HerdrResponse | undefined;
+        try {
+          parsed = JSON.parse(stdout) as HerdrResponse;
+        } catch {
+          parsed = undefined;
+        }
+        resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stderr });
+      },
+    );
   });
 }
 

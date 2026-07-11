@@ -2,12 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as DispatchArgsModule from "./dispatch-args";
 
-// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する一方、
-// tsc --noEmit（npm run build）は allowImportingTsExtensions が無効なため
-// 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
-// TSの静的解析対象にならない動的文字列結合でパスを構築している。
-const dispatchArgsModulePath = ["./dispatch-args", "ts"].join(".");
-const { buildForwardedCommand, shellQuote } = (await import(dispatchArgsModulePath)) as typeof DispatchArgsModule;
+// node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
+// .ts 拡張子付きのリテラル文字列で動的importする。
+// allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
+const { buildForwardedCommand, shellQuote } = (await import("./dispatch-args.ts")) as typeof DispatchArgsModule;
 
 test("buildForwardedCommand strips --project and its value from argv.slice(2)-shaped input", () => {
   const argv = ["all", "--project", "foo"];

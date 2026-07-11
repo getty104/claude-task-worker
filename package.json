@@ -40,7 +40,7 @@
   "author": "getty104",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
