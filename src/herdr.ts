@@ -38,6 +38,16 @@ export class HerdrUnavailableError extends Error {
   }
 }
 
+export class HerdrError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "HerdrError";
+    this.code = code;
+  }
+}
+
 interface HerdrRawResult {
   execError: NodeJS.ErrnoException | null;
   parsed: HerdrResponse | undefined;
@@ -65,7 +75,10 @@ async function execHerdr(args: string[]): Promise<unknown> {
   const stderrSuffix = stderr.trim() ? `: ${stderr.trim()}` : "";
   // stdout に有効な error JSON が乗っているケースは execFile の失敗より優先して扱う。
   if (parsed?.error) {
-    throw new Error(`herdr ${args.join(" ")} failed: [${parsed.error.code}] ${parsed.error.message}`);
+    throw new HerdrError(
+      `herdr ${args.join(" ")} failed: [${parsed.error.code}] ${parsed.error.message}`,
+      parsed.error.code,
+    );
   }
   if (execError) {
     throw new Error(`herdr ${args.join(" ")} failed: ${execError.message}${stderrSuffix}`);

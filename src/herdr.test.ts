@@ -7,7 +7,7 @@ import type * as HerdrModule from "./herdr";
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
 const herdrModulePath = ["./herdr", "ts"].join(".");
-const { tabCreate, tabList, paneProcessInfo } = (await import(herdrModulePath)) as typeof HerdrModule;
+const { tabCreate, tabList, paneProcessInfo, HerdrError } = (await import(herdrModulePath)) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -64,4 +64,14 @@ test("paneProcessInfo returns an empty foregroundProcesses array when foreground
   mockExecFile(t, JSON.stringify({ result: { process_info: {} } }), "");
   const result = await paneProcessInfo("pane-1");
   assert.deepEqual(result, { foregroundProcesses: [] });
+});
+
+test("throws a HerdrError carrying the error code when herdr responds with an error payload", async (t) => {
+  mockExecFile(t, JSON.stringify({ error: { code: "pane_not_found", message: "no such pane" } }), "");
+  await assert.rejects(paneProcessInfo("pane-1"), (error: unknown) => {
+    assert.ok(error instanceof HerdrError);
+    assert.equal(error.code, "pane_not_found");
+    assert.match(error.message, /^herdr pane process-info --pane pane-1 failed: \[pane_not_found\] no such pane$/);
+    return true;
+  });
 });
