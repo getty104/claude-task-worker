@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import type * as ChildProcess from "node:child_process";
 import type * as DispatcherModule from "./dispatcher";
+import type * as HerdrModule from "./herdr";
 import type { ResolvedProject } from "./projects-config";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
@@ -12,7 +13,9 @@ const childProcess = createRequire(import.meta.url)("node:child_process") as typ
 // 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
 // TSの静的解析対象にならない動的文字列結合でパスを構築している。
 const dispatcherModulePath = ["./dispatcher", "ts"].join(".");
-const { runDispatcher } = (await import(dispatcherModulePath)) as typeof DispatcherModule;
+const { runDispatcher, pollOnce, monitorSessions } = (await import(dispatcherModulePath)) as typeof DispatcherModule;
+const herdrModulePath = ["./herdr", "ts"].join(".");
+const { HerdrError } = (await import(herdrModulePath)) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -171,4 +174,136 @@ test("closes the dangling tab when sending the command to a created tab fails", 
   assert.ok(!sessions.has("broken-app"));
   assert.deepEqual(closedTabIds, ["tab-broken-app"]);
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "broken-app"')));
+});
+
+function mockTabClose(t: TestContext, closedTabIds: string[]): void {
+  t.mock.method(childProcess, "execFile", (_command: string, args: string[], callback: ExecFileCallback) => {
+    if (args[0] === "tab" && args[1] === "close") {
+      closedTabIds.push(args[2]);
+      callback(null, JSON.stringify({ result: null }), "");
+      return;
+    }
+    callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
+  });
+}
+
+function makeSession(overrides: Partial<DispatcherModule.WorkerSession> = {}): DispatcherModule.WorkerSession {
+  return {
+    name: "my-app",
+    tabId: "tab-my-app",
+    paneId: "pane-my-app",
+    startedAt: new Date(),
+    status: "running",
+    ...overrides,
+  };
+}
+
+test("pollOnce keeps a session that still has a claude-task-worker foreground process", async () => {
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
+    }),
+  } as unknown as typeof HerdrModule;
+
+  await pollOnce(sessions, fakeHerdr);
+
+  assert.equal(sessions.size, 1);
+  assert.ok(sessions.has("my-app"));
+});
+
+test("pollOnce removes a session and closes the tab when the pane returned to the shell", async (t) => {
+  const closedTabIds: string[] = [];
+  mockTabClose(t, closedTabIds);
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "zsh", argv: [], cmdline: "zsh", pid: 123 }],
+    }),
+  } as unknown as typeof HerdrModule;
+
+  await pollOnce(sessions, fakeHerdr);
+
+  assert.equal(sessions.size, 0);
+  assert.deepEqual(closedTabIds, ["tab-my-app"]);
+});
+
+test("pollOnce removes a session without closing the tab when the pane is gone", async (t) => {
+  const closedTabIds: string[] = [];
+  mockTabClose(t, closedTabIds);
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => {
+      throw new HerdrError("herdr pane process-info failed: [pane_not_found] no such pane", "pane_not_found");
+    },
+  } as unknown as typeof HerdrModule;
+
+  await pollOnce(sessions, fakeHerdr);
+
+  assert.equal(sessions.size, 0);
+  assert.deepEqual(closedTabIds, []);
+});
+
+test("pollOnce keeps a session and logs on a transient error other than pane_not_found", async (t) => {
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const errorLogs: string[] = [];
+  t.mock.method(console, "error", (message: string) => {
+    errorLogs.push(message);
+  });
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => {
+      throw new HerdrError("herdr pane process-info failed: [internal] boom", "internal");
+    },
+  } as unknown as typeof HerdrModule;
+
+  await pollOnce(sessions, fakeHerdr);
+
+  assert.equal(sessions.size, 1);
+  assert.ok(sessions.has("my-app"));
+  assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to poll session "my-app"')));
+});
+
+test("monitorSessions resolves done once all sessions disappear", async (t) => {
+  const closedTabIds: string[] = [];
+  mockTabClose(t, closedTabIds);
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "zsh", argv: [], cmdline: "zsh", pid: 123 }],
+    }),
+  } as unknown as typeof HerdrModule;
+
+  const handle = monitorSessions(sessions, fakeHerdr, { pollIntervalMs: 5, renderIntervalMs: 1000 });
+
+  await handle.done;
+
+  assert.equal(sessions.size, 0);
+});
+
+test("monitorSessions stop() clears intervals and resolves done", async () => {
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const fakeHerdr = {
+    HerdrError,
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
+    }),
+  } as unknown as typeof HerdrModule;
+
+  const handle = monitorSessions(sessions, fakeHerdr, { pollIntervalMs: 1000, renderIntervalMs: 1000 });
+  handle.stop();
+
+  await handle.done;
+
+  assert.equal(sessions.size, 1);
 });
