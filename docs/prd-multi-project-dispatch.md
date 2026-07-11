@@ -42,8 +42,8 @@
 ```json
 {
   "projects": {
-    "my-app": "/Users/getty104/programming/my-app",
-    "time-card": "/Users/getty104/programming/IGSA/time-card"
+    "my-app": "/absolute/path/to/my-app",
+    "time-card": "/absolute/path/to/time-card"
   },
   "projectGroups": {
     "igsa": ["time-card"],
