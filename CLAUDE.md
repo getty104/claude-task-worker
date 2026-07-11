@@ -34,6 +34,10 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/workers/`** - 各ワーカー実装
 - **`plugin/`** - Claude Code プラグイン本体（`.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `scripts/`, `.mcp.json`）
 - **`.claude-plugin/marketplace.json`** - このリポジトリを Claude Code マーケットプレイスとして公開するための定義
+- **`src/dispatcher.ts`** - ディスパッチャー本体。`runDispatcher()`（herdr疎通確認 → プロジェクトごとにタブ作成しコマンド送信）、`monitorSessions()`（セッション生存監視＋ステータステーブル描画ループの起動）、`renderSessionTable()`（稼働セッション一覧のテーブル描画）、`shutdownDispatcher()`（SIGINT/SIGTERM時、各セッションへctrl-c送信 → 終了待機 → タブクローズのグレースフルシャットダウン）
+- **`src/herdr.ts`** - herdr CLIラッパー。`tabCreate`/`tabClose`/`tabList`（タブ管理）、`paneSendText`/`paneSendKeys`（ペインへの入力送信）、`paneProcessInfo`（フォアグラウンドプロセス確認）、`checkHerdrAvailable`（herdr導入・疎通確認）
+- **`src/projects-config.ts`** - `projects.json`（`~/.config/claude-task-worker/projects.json` または `$XDG_CONFIG_HOME` 配下）のロード・検証・対象プロジェクト解決。`ProjectsConfig`（`projects`/`projectGroups` のネスト構造）、`loadProjectsConfig()`（読み込み・検証）、`resolveTargetProjects()`（プロジェクト名/グループ名/予約語 `all` の展開）
+- **`src/dispatch-args.ts`** - `--project` ディスパッチ用CLI引数ヘルパー。`PROJECT_INCOMPATIBLE_COMMANDS`（`--project` と併用不可なコマンド一覧: `init`/`install`/`update`/`usage`/`version`）、`parseProjectFilters()`/`hasProjectFilter()`（`--project` の抽出・検出）、`buildForwardedCommand()`（`--project` とその値を除去し他プロジェクトへ転送するコマンド文字列を構築）
 
 ### Worker共通ライフサイクル
 
@@ -46,6 +50,17 @@ claude-task-worker all             # Run all workers concurrently
 7. 完了時コールバックでラベル・worktree・ローカルブランチをクリーンアップ
 
 ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
+
+### `--project` ディスパッチ
+
+`src/index.ts` は起動時に `hasProjectFilter()` で `--project` フラグの有無を判定し、指定されている場合はワーカー起動の代わりにディスパッチャーを起動する（複数プロジェクトへ同一コマンドを一括転送する仕組み）。
+
+1. `loadProjectsConfig()` で `projects.json` を読み込み・検証
+2. `resolveTargetProjects()` で `--project` に渡されたプロジェクト名・グループ名・`all` を実プロジェクト一覧へ解決
+3. `buildForwardedCommand()` で `--project` とその値を取り除いた転送用コマンド文字列を構築
+4. `runDispatcher()` が各プロジェクトのディレクトリでherdrタブを作成し、転送コマンドを送信してセッションを起動
+5. `monitorSessions()` がセッションの生存監視とステータステーブル描画ループを開始
+6. SIGINT/SIGTERM受信時は `shutdownDispatcher()` が全セッションへctrl-cを送信し、終了を待ってからタブをクローズする
 
 ### ラベルフロー
 
