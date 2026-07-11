@@ -1,6 +1,6 @@
 # PRD: マルチプロジェクトディスパッチ機能（`--project` オプション）
 
-- ステータス: Draft
+- ステータス: Implemented（実装完了、PR #58, #70, #71, #73, #75, #77, #78, #79, #80）
 - 作成日: 2026-07-11
 - 対象リポジトリ: getty104/claude-task-worker
 
@@ -8,7 +8,7 @@
 
 `claude-task-worker` は現在、カレントディレクトリのリポジトリを対象に GitHub Issues/PR をポーリングしてタスクを実行する。複数リポジトリでワーカーを動かしたい場合、ユーザーはリポジトリごとにターミナルを開き、各ディレクトリで個別にコマンドを起動する必要がある。
 
-本機能は、ターミナルワークスペースマネージャー [herdr](https://github.com/) を利用して、**1コマンドで複数リポジトリの claude-task-worker を一斉起動・一元管理**できるようにする。
+本機能は、ターミナルワークスペースマネージャー [herdr](https://herdr.dev)（[GitHub](https://github.com/ogulcancelik/herdr)）を利用して、**1コマンドで複数リポジトリの claude-task-worker を一斉起動・一元管理**できるようにする。
 
 ### 解決する課題
 
@@ -213,9 +213,13 @@ claude-task-worker all --project all
 ## 8. 確認事項
 
 1. **ワーカー自然終了時のタブの扱い**: Pane 内でワーカーが終了した場合、本 PRD ではタブも自動 close する案としたが、終了時のログを Pane に残したい場合はタブを残す（一覧からの削除のみ行う）方が良いか？
+   → 実装は自動close案を採用（`src/dispatcher.ts` の `pollOnce()` / `removeSession()`）。`pane_not_found` エラー時（Pane/タブがユーザー操作で閉じられた場合）はタブcloseをスキップし一覧削除のみ行う。
 2. **残存タブの回収**: ディスパッチャーが SIGKILL で即死した場合に残るタブを、次回起動時に自動 close して作り直すか、重複警告としてスキップに留めるか？（本 PRD は後者=スキップを既定とする）
+   → 実装はスキップ案（本PRD既定案）を採用。`src/dispatcher.ts` の `runDispatcher()` 起動時に `tabList()` で既存タブのラベルを確認し、重複があれば警告してそのプロジェクトの起動をスキップする。自動close・作り直しは実装しない。
 3. **`herdr pane run` の利用**: `herdr pane run <pane_id> <command>` が存在するため、`send-text` + `send-keys enter` の代替となり得る。挙動差（シェル履歴・プロンプト経由か否か）を実装時に検証し、適した方を採用する。
+   → 不採用。`src/herdr.ts` の `paneSendText()` + `paneSendKeys(pane_id, "enter")` の組み合わせを採用した。`herdr pane run` 相当のラッパー関数は実装していない。
 4. **一覧表示と既存ステータステーブルの共存**: ディスパッチャーは自身ではワーカーを実行しないため既存テーブルとは競合しない想定だが、表示実装は `process-manager.ts` のテーブル描画を共通化するか個別実装にするかを実装時に判断する。
+   → 個別実装を採用。`src/dispatcher.ts` の `renderSessionTable()` は `src/process-manager.ts` のテーブル描画ロジック（`renderTable()`）とは独立した専用実装。ただし `src/table.ts` の幅計算ユーティリティ（`getDisplayWidth`/`truncateToWidth`/`padToWidth`）は両ファイルで共有している。
 
 ## 9. 受け入れ基準
 
