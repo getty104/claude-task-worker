@@ -37,19 +37,31 @@
 ### 4.1 設定ファイル: projects.json
 
 - パス: `$XDG_CONFIG_HOME/claude-task-worker/projects.json`（`XDG_CONFIG_HOME` 未設定時は `~/.config/claude-task-worker/projects.json`）
-- 形式: プロジェクト名をキー、リポジトリの絶対パスを値とするフラットな JSON オブジェクト
+- 形式: `projects`（プロジェクト名 → リポジトリ絶対パス）と `projectGroups`（グループ名 → プロジェクト名の配列）の2セクションを持つ JSON オブジェクト
 
 ```json
 {
-  "my-app": "/Users/getty104/programming/my-app",
-  "time-card": "/Users/getty104/programming/IGSA/time-card"
+  "projects": {
+    "my-app": "/absolute/path/to/my-app",
+    "time-card": "/absolute/path/to/time-card"
+  },
+  "projectGroups": {
+    "igsa": ["time-card"],
+    "all-mine": ["my-app", "time-card"]
+  }
 }
 ```
 
+- `projects`: プロジェクト名をキー、リポジトリの絶対パスを値とするフラットなオブジェクト（必須）
+- `projectGroups`: グループ名をキー、そのグループに含める**プロジェクト名の配列**を値とするオブジェクト（任意。省略・空でも可）
+
 バリデーション:
 
-- 値が絶対パスでない、またはディレクトリとして存在しない場合はエラーメッセージを出して該当エントリの起動をスキップする（他のプロジェクトの起動は継続する）
-- ファイルが存在しない・JSON として不正な場合、`--project` 指定時はエラー終了する（`--project` 未指定の従来動作には一切影響しない）
+- `projects` の値が絶対パスでない、またはディレクトリとして存在しない場合はエラーメッセージを出して該当エントリの起動をスキップする（他のプロジェクトの起動は継続する）
+- `projectGroups` の配列要素が `projects` に存在しないプロジェクト名を参照している場合はエラーメッセージを出し、その参照をスキップする（他は継続する）
+- **名前空間の一意性**: `projects` のキーと `projectGroups` のキーは同一の名前空間として扱い、両者にまたがって重複するキーがあってはならない。重複がある場合はエラー終了する
+- **予約語 `all`**: `projects` / `projectGroups` のいずれのキーにも `all` を定義できない。定義されている場合は起動時にエラー終了する
+- ファイルが存在しない・JSON として不正な場合・`projects` セクションを欠く場合、`--project` 指定時はエラー終了する（`--project` 未指定の従来動作には一切影響しない）
 - 既存の `claude-task-worker.json`（cwd 直下・ワーカー設定）とは独立したファイルとする。ワーカーごとの設定は従来どおり各リポジトリ側の `claude-task-worker.json` が使われる
 
 ### 4.2 CLI インターフェース: `--project` オプション
@@ -58,10 +70,12 @@
 claude-task-worker <command> [--project <projectName>] [既存オプション...]
 ```
 
-- `--project <projectName>`: projects.json に定義されたプロジェクト名を指定する
-  - 繰り返し指定可能（`--epic` / `--label` と同じ collectFlagValues パターン）。複数指定時は指定された全プロジェクトを対象とする
-  - `--project all` を指定した場合、projects.json に定義された**全プロジェクト**を対象とする（`all` は予約語とし、projects.json のキーに `all` を定義した場合は起動時にエラーとする）
-- 未定義のプロジェクト名が指定された場合は、利用可能なプロジェクト名の一覧を表示してエラー終了する
+- `--project <name>`: projects.json の `projects` に定義された**プロジェクト名**、または `projectGroups` に定義された**グループ名**を指定する
+  - **グループ名を指定した場合**、そのグループに含まれる全プロジェクトを対象に展開する
+  - 繰り返し指定可能（`--epic` / `--label` と同じ collectFlagValues パターン）。複数指定時は指定された全プロジェクト／グループを対象とする（プロジェクト名とグループ名は混在指定できる）
+  - 複数の指定によって同一プロジェクトが重複した場合は一意化する（同じプロジェクトを二重起動しない）
+  - `--project all` を指定した場合、`projects` に定義された**全プロジェクト**を対象とする（`all` は予約語。projects.json のいずれのキーにも `all` を定義できず、定義時は起動時にエラーとする）
+- 未定義の名前（`projects` にも `projectGroups` にも一致しない）が指定された場合は、利用可能なプロジェクト名・グループ名の一覧を表示してエラー終了する
 - `--project` と組み合わせ可能なコマンドはワーカー系コマンドのみ（`exec-issue` / `fix-review-point` / `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` / `triage-pr` / `resolve-conflict` / `check-dependabot` / `epic-issue` / `all` / `yolo`）。`init` / `install` / `update` / `usage` / `version` と組み合わせた場合はエラー終了する
 - `--epic` / `--label` は `--project` と併用可能とし、各ワーカーセッションへそのまま引き継ぐ
 
@@ -70,6 +84,7 @@ claude-task-worker <command> [--project <projectName>] [既存オプション...
 ```bash
 claude-task-worker all --project all
 claude-task-worker all --project my-app --project time-card
+claude-task-worker all --project igsa            # グループ igsa に含まれる全プロジェクト
 claude-task-worker exec-issue --project my-app --epic 100
 ```
 
@@ -161,7 +176,7 @@ herdr pane process-info [--pane ID]
 | ファイル | 役割 |
 |----------|------|
 | `src/herdr.ts` | herdr CLI ラッパー（`gh.ts` と同パターン）。`tabCreate` / `tabClose` / `tabList` / `paneSendText` / `paneSendKeys` / `paneProcessInfo` を提供し、JSON パース・エラー判定を集約 |
-| `src/projects-config.ts` | `projects.json` のロード・バリデーション（`config.ts` の loadConfig と同パターン） |
+| `src/projects-config.ts` | `projects.json`（`projects` / `projectGroups`）のロード・バリデーション・対象プロジェクト解決（グループ展開・`all` 展開）。`config.ts` の loadConfig と同パターン |
 | `src/dispatcher.ts` | ディスパッチ本体。タブ作成→コマンド送信→生存監視→一覧表示→シャットダウンのライフサイクル管理 |
 | `src/index.ts` | `--project` フラグのパース。指定時はワーカー起動の代わりに dispatcher を起動する分岐を追加 |
 
@@ -206,6 +221,7 @@ claude-task-worker all --project all
 
 - [ ] `~/.config/claude-task-worker/projects.json` に定義した複数プロジェクトが `--project all` で一斉起動される
 - [ ] `--project <name>` で指定プロジェクトのみ起動される（複数指定可）
+- [ ] `--project <groupName>` で `projectGroups` に定義したグループに含まれる全プロジェクトが起動される（プロジェクト名との混在指定・重複の一意化を含む）
 - [ ] 各プロジェクトの herdr タブが「label=プロジェクト名 / cwd=リポジトリパス」で作成される
 - [ ] タブ作成レスポンスの `pane_id` に対して claude-task-worker コマンドが送信・実行される
 - [ ] `--epic` / `--label` オプションがワーカーセッションへ引き継がれる
