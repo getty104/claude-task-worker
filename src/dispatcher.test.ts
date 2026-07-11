@@ -13,7 +13,9 @@ const childProcess = createRequire(import.meta.url)("node:child_process") as typ
 // 静的import文中の .ts 拡張子指定子を許容せず失敗する。両立のため、
 // TSの静的解析対象にならない動的文字列結合でパスを構築している。
 const dispatcherModulePath = ["./dispatcher", "ts"].join(".");
-const { runDispatcher, pollOnce, monitorSessions } = (await import(dispatcherModulePath)) as typeof DispatcherModule;
+const { runDispatcher, pollOnce, monitorSessions, shutdownDispatcher } = (await import(
+  dispatcherModulePath
+)) as typeof DispatcherModule;
 const herdrModulePath = ["./herdr", "ts"].join(".");
 const { HerdrError } = (await import(herdrModulePath)) as typeof HerdrModule;
 
@@ -306,4 +308,203 @@ test("monitorSessions stop() clears intervals and resolves done", async () => {
   await handle.done;
 
   assert.equal(sessions.size, 1);
+});
+
+function mockProcessExit(t: TestContext): number[] {
+  const exitCodes: number[] = [];
+  t.mock.method(process, "exit", ((code?: number) => {
+    exitCodes.push(code ?? 0);
+    return undefined as never;
+  }) as typeof process.exit);
+  return exitCodes;
+}
+
+function makeShutdownFakeHerdr(options: {
+  ctrlCThreshold?: Record<string, number>;
+  ctrlCCounts: Record<string, number>;
+  closedTabIds: string[];
+}): typeof HerdrModule {
+  const { ctrlCThreshold = {}, ctrlCCounts, closedTabIds } = options;
+  return {
+    HerdrError,
+    paneSendKeys: async (paneId: string) => {
+      ctrlCCounts[paneId] = (ctrlCCounts[paneId] ?? 0) + 1;
+    },
+    paneProcessInfo: async (paneId: string) => {
+      const threshold = ctrlCThreshold[paneId] ?? 1;
+      const isAlive = (ctrlCCounts[paneId] ?? 0) < threshold;
+      return {
+        foregroundProcesses: isAlive
+          ? [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }]
+          : [{ name: "zsh", argv: [], cmdline: "zsh", pid: 123 }],
+      };
+    },
+    tabClose: async (tabId: string) => {
+      closedTabIds.push(tabId);
+    },
+  } as unknown as typeof HerdrModule;
+}
+
+test("shutdownDispatcher: 全セッションが1回目のctrl-c送信後にタイムアウト前に終了する", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  // pollOnce の removeSession は herdr パラメータを無視して実際の herdr バイナリを
+  // 呼び出すため、テストでは実プロセス起動を避けるべく execFile をモックする。
+  mockTabClose(t, []);
+  const ctrlCCounts: Record<string, number> = {};
+  const closedTabIds: string[] = [];
+  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds });
+
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+
+  await shutdownDispatcher(sessions, undefined, {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 200,
+    retryTimeoutMs: 200,
+    tabCloseTimeoutMs: 50,
+  });
+
+  assert.equal(ctrlCCounts[session.paneId], 1);
+  assert.equal(sessions.size, 0);
+  assert.deepEqual(exitCodes, [0]);
+});
+
+test("shutdownDispatcher: 1回目タイムアウト後、生存paneにのみ再送1回して短縮タイムアウトで再待機する", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  mockTabClose(t, []);
+  const ctrlCCounts: Record<string, number> = {};
+  const closedTabIds: string[] = [];
+  const fakeHerdr = makeShutdownFakeHerdr({
+    ctrlCCounts,
+    closedTabIds,
+    ctrlCThreshold: { "pane-my-app": 2 },
+  });
+
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+
+  await shutdownDispatcher(sessions, undefined, {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 20,
+    retryTimeoutMs: 200,
+    tabCloseTimeoutMs: 50,
+  });
+
+  assert.equal(ctrlCCounts[session.paneId], 2);
+  assert.equal(sessions.size, 0);
+  assert.deepEqual(exitCodes, [0]);
+});
+
+test("shutdownDispatcher: 同時に2回呼んでも二重送信・二重待機・二重tabCloseが起きない", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  mockTabClose(t, []);
+  const ctrlCCounts: Record<string, number> = {};
+  const closedTabIds: string[] = [];
+  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds });
+
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+  const shutdownOptions = {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 200,
+    retryTimeoutMs: 200,
+    tabCloseTimeoutMs: 50,
+  };
+
+  const p1 = shutdownDispatcher(sessions, undefined, shutdownOptions);
+  const p2 = shutdownDispatcher(sessions, undefined, shutdownOptions);
+  await Promise.all([p1, p2]);
+
+  assert.equal(ctrlCCounts[session.paneId], 1);
+  assert.deepEqual(closedTabIds, []);
+  assert.deepEqual(exitCodes, [0]);
+});
+
+test("shutdownDispatcher: monitorHandleが渡された場合stop()/done経由で先に停止してから待機に切り替わる", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  mockTabClose(t, []);
+  const order: string[] = [];
+  let resolveDone: () => void;
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  const monitorHandle: DispatcherModule.MonitorHandle = {
+    stop: () => {
+      order.push("stop");
+      setTimeout(() => {
+        order.push("done-resolved");
+        resolveDone();
+      }, 5);
+    },
+    done,
+  };
+
+  const ctrlCCounts: Record<string, number> = {};
+  const closedTabIds: string[] = [];
+  const fakeHerdr = {
+    ...makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds }),
+    paneSendKeys: async (paneId: string) => {
+      order.push("sendCtrlC");
+      ctrlCCounts[paneId] = (ctrlCCounts[paneId] ?? 0) + 1;
+    },
+  } as unknown as typeof HerdrModule;
+
+  const session = makeSession();
+  const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
+
+  await shutdownDispatcher(sessions, monitorHandle, {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 200,
+    retryTimeoutMs: 200,
+    tabCloseTimeoutMs: 50,
+  });
+
+  assert.deepEqual(order, ["stop", "done-resolved", "sendCtrlC"]);
+  assert.deepEqual(exitCodes, [0]);
+});
+
+test("shutdownDispatcher: 残っている全タブがtabCloseで閉じられ、失敗しても他のcloseとプロセス終了がブロックされない", async (t) => {
+  const exitCodes = mockProcessExit(t);
+  const errorLogs: string[] = [];
+  t.mock.method(console, "error", (message: string) => {
+    errorLogs.push(message);
+  });
+
+  const closedTabIds: string[] = [];
+  const sessionA = makeSession({ name: "app-a", tabId: "tab-a", paneId: "pane-a" });
+  const sessionB = makeSession({ name: "app-b", tabId: "tab-b", paneId: "pane-b" });
+  const sessions: DispatcherModule.SessionRegistry = new Map([
+    [sessionA.name, sessionA],
+    [sessionB.name, sessionB],
+  ]);
+
+  const fakeHerdr = {
+    HerdrError,
+    paneSendKeys: async () => {},
+    paneProcessInfo: async () => ({
+      foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
+    }),
+    tabClose: async (tabId: string) => {
+      if (tabId === "tab-a") {
+        throw new Error("tabClose boom");
+      }
+      closedTabIds.push(tabId);
+    },
+  } as unknown as typeof HerdrModule;
+
+  await shutdownDispatcher(sessions, undefined, {
+    herdr: fakeHerdr,
+    pollIntervalMs: 5,
+    shutdownTimeoutMs: 20,
+    retryTimeoutMs: 20,
+    tabCloseTimeoutMs: 50,
+  });
+
+  assert.deepEqual(closedTabIds, ["tab-b"]);
+  assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to close tab "tab-a"')));
+  assert.deepEqual(exitCodes, [0]);
 });

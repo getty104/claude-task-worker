@@ -211,3 +211,120 @@ export function monitorSessions(
     done,
   };
 }
+
+// process-manager.ts の SIGINT 2段階目 force-kill 待機(60s, process-manager.ts:150)を
+// 上回るよう、再送後は余裕を持たせた90秒の短縮タイムアウトで再待機する。
+export const SHUTDOWN_RETRY_TIMEOUT_MS = 90 * 1000;
+
+export interface ShutdownOptions {
+  herdr?: typeof HerdrModule;
+  pollIntervalMs?: number;
+  shutdownTimeoutMs?: number;
+  retryTimeoutMs?: number;
+  tabCloseTimeoutMs?: number;
+}
+
+async function sendCtrlCToAllSessions(sessions: SessionRegistry, herdr: typeof HerdrModule): Promise<void> {
+  await Promise.all(
+    [...sessions.values()].map(async (session) => {
+      try {
+        await herdr.paneSendKeys(session.paneId, "ctrl-c");
+      } catch (error) {
+        console.error(`[dispatcher] failed to send ctrl-c to session "${session.name}": ${error}`);
+      }
+    }),
+  );
+}
+
+async function waitUntilSessionsEmpty(
+  sessions: SessionRegistry,
+  herdr: typeof HerdrModule,
+  pollIntervalMs: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (sessions.size > 0) {
+    await pollOnce(sessions, herdr);
+    if (sessions.size === 0) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  return true;
+}
+
+async function closeRemainingTabs(
+  sessions: SessionRegistry,
+  herdr: typeof HerdrModule,
+  timeoutMs: number,
+): Promise<void> {
+  await Promise.all(
+    [...sessions.values()].map(async (session) => {
+      try {
+        await Promise.race([
+          herdr.tabClose(session.tabId),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("tabClose timed out")), timeoutMs).unref();
+          }),
+        ]);
+      } catch (error) {
+        console.error(
+          `[dispatcher] failed to close tab "${session.tabId}" for session "${session.name}" during shutdown: ${error}`,
+        );
+      }
+    }),
+  );
+}
+
+// index.ts の isShuttingDown/forceKilling（ワーカープロセス側のCtrl-C 2段階ガード）とは
+// 別系統。dispatcher自身のshutdown多重実行のみを防ぐための専用ガード。
+// in-flightのPromiseそのものをガードに使うことで、同時呼び出しは同じ結果を共有し、
+// 完了後はガードを解放して（実運用ではprocess.exit(0)でプロセスごと終わるため無関係だが）
+// テストなど同一プロセス内での再実行にも対応できるようにしている。
+let shutdownPromise: Promise<void> | undefined;
+
+export async function shutdownDispatcher(
+  sessions: SessionRegistry,
+  monitorHandle?: MonitorHandle,
+  options?: ShutdownOptions,
+): Promise<void> {
+  if (shutdownPromise) {
+    console.log("[dispatcher] shutdown already in progress, ignoring duplicate request");
+    return shutdownPromise;
+  }
+
+  shutdownPromise = (async () => {
+    const herdr = options?.herdr ?? (await loadHerdr());
+    const pollIntervalMs = options?.pollIntervalMs ?? POLL_INTERVAL_MS;
+    const shutdownTimeoutMs = options?.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS;
+    const retryTimeoutMs = options?.retryTimeoutMs ?? SHUTDOWN_RETRY_TIMEOUT_MS;
+    const tabCloseTimeoutMs = options?.tabCloseTimeoutMs ?? 5000;
+
+    if (monitorHandle) {
+      monitorHandle.stop();
+      await monitorHandle.done;
+    }
+
+    console.log(`[dispatcher] shutting down, sending ctrl-c to ${sessions.size} session(s)`);
+    await sendCtrlCToAllSessions(sessions, herdr);
+
+    const finishedInTime = await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, shutdownTimeoutMs);
+
+    if (!finishedInTime) {
+      console.log(
+        `[dispatcher] ${sessions.size} session(s) still alive after ${shutdownTimeoutMs}ms, resending ctrl-c once`,
+      );
+      await sendCtrlCToAllSessions(sessions, herdr);
+      await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, retryTimeoutMs);
+    }
+
+    await closeRemainingTabs(sessions, herdr, tabCloseTimeoutMs);
+
+    process.exit(0);
+  })();
+
+  try {
+    await shutdownPromise;
+  } finally {
+    shutdownPromise = undefined;
+  }
+}
