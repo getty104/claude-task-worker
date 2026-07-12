@@ -12,6 +12,7 @@
     "dev": "tsc --noEmit --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run build"
@@ -39,7 +40,7 @@
   "author": "getty104",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
