@@ -435,12 +435,14 @@ function makeShutdownFakeHerdr(options: {
   ctrlCThreshold?: Record<string, number>;
   ctrlCCounts: Record<string, number>;
   closedTabIds: string[];
+  sentKeys?: string[];
 }): typeof HerdrModule {
-  const { ctrlCThreshold = {}, ctrlCCounts, closedTabIds } = options;
+  const { ctrlCThreshold = {}, ctrlCCounts, closedTabIds, sentKeys } = options;
   return {
     HerdrError,
-    paneSendKeys: async (paneId: string) => {
+    paneSendKeys: async (paneId: string, ...keys: string[]) => {
       ctrlCCounts[paneId] = (ctrlCCounts[paneId] ?? 0) + 1;
+      sentKeys?.push(...keys);
     },
     paneProcessInfo: async (paneId: string) => {
       const threshold = ctrlCThreshold[paneId] ?? 1;
@@ -464,7 +466,8 @@ test("shutdownDispatcher: 全セッションが1回目のctrl-c送信後にタ�
   mockTabClose(t, []);
   const ctrlCCounts: Record<string, number> = {};
   const closedTabIds: string[] = [];
-  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds });
+  const sentKeys: string[] = [];
+  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds, sentKeys });
 
   const session = makeSession();
   const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
@@ -478,6 +481,9 @@ test("shutdownDispatcher: 全セッションが1回目のctrl-c送信後にタ�
   });
 
   assert.equal(ctrlCCounts[session.paneId], 1);
+  // herdr は `+` 区切りのキーコンボ文字列のみ受理する。`ctrl-c`（ハイフン）は
+  // invalid_key で拒否されるため、送信キーが `ctrl+c` であることを固定する。
+  assert.deepEqual(sentKeys, ["ctrl+c"]);
   assert.equal(sessions.size, 0);
   assert.deepEqual(exitCodes, [0]);
 });
