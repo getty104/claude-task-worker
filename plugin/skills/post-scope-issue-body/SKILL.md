@@ -1,6 +1,6 @@
 ---
 name: post-scope-issue-body
-description: "INTERNAL/HELPER skill — do NOT invoke directly from a user query. This is the shared formatter/poster used by answer-issue-questions and breakdown-issues. It formats a scope GitHub Issue body (label cc-triage-scope, used before code analysis), runs the pre-posting checklist, and executes `gh issue create`. Invoke this skill ONLY from one of the parent skills via the Skill tool, after the parent has finalized the task breakdown. If a user asks to 'create a scope issue' or similar, route them to the appropriate parent skill (/breakdown-issues for fresh breakdowns, /answer-issue-questions for derived sub-tasks) rather than invoking this one directly."
+description: "INTERNAL/HELPER skill — do NOT invoke directly from a user query. This is the shared formatter/poster used by breakdown-issues. It formats a scope GitHub Issue body (label cc-triage-scope, used before code analysis), runs the pre-posting checklist, and executes `gh issue create`. Invoke this skill ONLY from one of the parent skills via the Skill tool, after the parent has finalized the task breakdown. If a user asks to 'create a scope issue' or similar, route them to the parent skill (/breakdown-issues) rather than invoking this one directly."
 user-invocable: false
 context: fork
 model: sonnet
@@ -10,17 +10,17 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 # Post Scope Issue Body
 
-呼び出し元スキル（`answer-issue-questions` / `breakdown-issues`）から委譲され、スコープIssue本文の整形と投稿を担う共有スキル。親スキルのタスク分解結果を受け取り、以下を一括実行する。
+呼び出し元スキル（`breakdown-issues`）から委譲され、スコープIssue本文の整形と投稿を担う共有スキル。親スキルのタスク分解結果を受け取り、以下を一括実行する。
 
 1. 「スコープIssue」の正規フォーマットに整形
 2. 投稿前チェックの実施
 3. `gh issue create` の実行
 
-ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args にも argsファイルにも無い場合は、親スキル（breakdown-issues / answer-issue-questions）の使用を促して終了する。
+ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args にも argsファイルにも無い場合は、親スキル（breakdown-issues）の使用を促して終了する。
 
 **親Project紐付けや複数Issueの作成順序・依存関係Issue番号の確定は呼び出し側の責務**。本スキルは1回の呼び出しで1つのIssueを作成して URL を返すのみ。複数作成したい場合は呼び出し側がループする。
 
-> **呼び出し側への必須ルール**: 本スキルを**絶対にバックグラウンド実行しないこと**。`Agent` ツール経由で呼び出す場合は **既定が `run_in_background: true`（バックグラウンド）** のため、**必ず `run_in_background: false` を明示指定** すること。`Skill` ツール経由の場合も `run_in_background: true` を指定してはならない（既定は同期）。呼び出し元（`answer-issue-questions` / `breakdown-issues` — いずれも `claude-task-worker` から自動起動される可能性がある）は、本スキルが同期的に `gh issue create` を完了し Issue URL を返したことを確認してから次のIssue作成ループや後続ラベル遷移に進む設計であり、バックグラウンド化すると依存関係Issue番号が確定しないまま次のIssue作成に突入して破綻する。
+> **呼び出し側への必須ルール**: 本スキルを**絶対にバックグラウンド実行しないこと**。`Agent` ツール経由で呼び出す場合は **既定が `run_in_background: true`（バックグラウンド）** のため、**必ず `run_in_background: false` を明示指定** すること。`Skill` ツール経由の場合も `run_in_background: true` を指定してはならない（既定は同期）。呼び出し元（`breakdown-issues` — `claude-task-worker` から自動起動される可能性がある）は、本スキルが同期的に `gh issue create` を完了し Issue URL を返したことを確認してから次のIssue作成ループや後続ラベル遷移に進む設計であり、バックグラウンド化すると依存関係Issue番号が確定しないまま次のIssue作成に突入して破綻する。
 
 # Instructions
 
@@ -40,7 +40,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 ### 呼び出し規約
 
-呼び出し元の親スキル（`answer-issue-questions` / `breakdown-issues`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡し、かつ起動直前に同じ YAML を argsファイル（後述）にも書き込む**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
+呼び出し元の親スキル（`breakdown-issues`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡し、かつ起動直前に同じ YAML を argsファイル（後述）にも書き込む**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
 
 ```yaml
 mode: create  # 現状 create のみサポート
@@ -88,7 +88,7 @@ ARGS_EOF
 - 空セクションを省略しない。「なし」で埋める（後続スキルが「未記入」と区別できなくなるため）。
 - `parent` / `blocked_by` / `blocking` の Issue 番号は**呼び出し側で確定済みのもの**が前提。本スキルは渡された値をそのまま `gh issue create` のオプションに渡す。先行Issueの番号確定を待つ順序制御は呼び出し側の責務。
 - 入力の YAML が壊れていたり項目が欠けている場合は、`mode` 以外であれば最低限の推定で埋める（例: 優先度・見積もり規模が空なら `Medium` / `M`）。`mode` だけは推定不可なので欠けていたら中断する。
-- args と argsファイルのどちらからも入力 YAML を取得できない場合（直接ユーザー起動など）は、親スキル（`breakdown-issues` / `answer-issue-questions`）の使用を促して中断する。
+- args と argsファイルのどちらからも入力 YAML を取得できない場合（直接ユーザー起動など）は、親スキル（`breakdown-issues`）の使用を促して中断する。
 
 ## Issueフォーマット（厳守）
 
@@ -192,7 +192,7 @@ EOF
 
 成功時、コマンドが標準出力に返す Issue URL を保持する。
 
-`--parent` / `--blocked-by` / `--blocking` の検証エラー（存在しない Issue 番号、権限不足、`gh` バージョン未達 等）は `gh issue create` 自体を失敗させ、その場合 Issue も作成されない（「relationship が貼れないなら作るな」という fail-fast の意図的な挙動）。失敗を呼び出し元に伝えて中断する（後追いの best-effort リンクが必要な場合は、呼び出し元側で `parent` を渡さず作成し、別途 `gh issue edit --add-sub-issue` 等でリンクするフローを使うこと。例: `answer-issue-questions`）。
+`--parent` / `--blocked-by` / `--blocking` の検証エラー（存在しない Issue 番号、権限不足、`gh` バージョン未達 等）は `gh issue create` 自体を失敗させ、その場合 Issue も作成されない（「relationship が貼れないなら作るな」という fail-fast の意図的な挙動）。失敗を呼び出し元に伝えて中断する（後追いの best-effort リンクが必要な場合は、呼び出し元側で `parent` を渡さず作成し、別途 `gh issue edit --add-sub-issue` 等でリンクするフローを使うこと）。
 
 ### 4. 呼び出し元への返却
 
@@ -215,4 +215,4 @@ EOF
 - `gh issue create` の本文渡しは**必ず `--body-file -` + heredoc**（`<<'EOF' ... EOF`）を使う
 - 本文のセクションが空でも省略せず「なし」で埋める
 - `cc-triage-scope` ラベルは Issue ライフサイクル上の重要ラベル。本スキルは付与のみ行い、削除は一切行わない（呼び出し側でも `gh issue edit --remove-label` の対象に含めてはならない）
-- このスキルを編集する際は、フォーマットの変更が `answer-issue-questions` / `breakdown-issues` の両スキルに効くことを意識する（このスキルが2スキル共通の唯一の format source）
+- このスキルを編集する際は、フォーマットの変更が `breakdown-issues` に効くことを意識する（このスキルが `breakdown-issues` の唯一の format source）
