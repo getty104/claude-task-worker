@@ -190,26 +190,44 @@ if (hasProjectFilter()) {
     let sessions: SessionRegistry = new Map();
     let monitorHandle: MonitorHandle | undefined;
 
-    // 起動処理（runDispatcher/monitorSessions）が完了する前にシグナルを受けても
-    // タブ・セッションが放置されないよう、動的import・起動処理より前にハンドラを登録する。
-    const handleShutdown = async () => {
-      const { shutdownDispatcher } = (await import("./dispatcher.ts")) as typeof DispatcherModule;
-      await shutdownDispatcher(sessions, monitorHandle);
-    };
-    process.on("SIGTERM", handleShutdown);
-    process.on("SIGINT", handleShutdown);
-
     // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
     // .ts 拡張子付きのリテラル文字列で動的importする（dispatcher.ts と同様）。
     // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
+    // dispatcher.ts / herdr.ts は --project 使用時にのみ必要なモジュールで、この分岐内で読込む。
     const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+    const dispatcher = (await import("./dispatcher.ts")) as typeof DispatcherModule;
+
+    // 起動処理（runDispatcher/monitorSessions）が完了する前にシグナルを受けても
+    // タブ・セッションが放置されないよう、起動処理より前にハンドラを登録する。
+    // 1回目のシグナルで graceful shutdown、2回目のシグナルで force-kill する2段階ハンドラ。
+    // 非 --project ワーカー側の forceKilling ガードと同等の保護を --project 側にも提供する。
+    // isShuttingDown() で「シャットダウン中か」を判定し、下の await monitorHandle.done 後の
+    // 自然終了 exit と shutdownDispatcher 側の exit が二重に発火しないようにする。
+    const shutdownController = dispatcher.createDispatcherShutdownHandler((options) =>
+      dispatcher.shutdownDispatcher(sessions, monitorHandle, options),
+    );
+    process.on("SIGTERM", shutdownController.handle);
+    process.on("SIGINT", shutdownController.handle);
+
     try {
       const config = loadProjectsConfig();
       const projects = resolveTargetProjects(parseProjectFilters(), config);
       const forwardedCommand = buildForwardedCommand(process.argv.slice(2));
-      const { runDispatcher, monitorSessions } = (await import("./dispatcher.ts")) as typeof DispatcherModule;
-      sessions = await runDispatcher(projects, forwardedCommand);
-      monitorHandle = monitorSessions(sessions, herdr);
+      sessions = await dispatcher.runDispatcher(projects, forwardedCommand);
+      if (sessions.size === 0) {
+        console.log("[dispatcher] no sessions were dispatched, exiting");
+        process.exit(0);
+      }
+      monitorHandle = dispatcher.monitorSessions(sessions, herdr);
+      // 稼働セッションが残る限りここで待機し、ステータステーブルを表示し続ける。
+      // done は全セッション終了(finish)またはシャットダウン(stop)で解決する。
+      await monitorHandle.done;
+      // シャットダウン経由の解決時は shutdownDispatcher 側が graceful に終了して exit するため、
+      // ここでの exit はセッションが自然に全終了したケースに限定する。
+      if (!shutdownController.isShuttingDown()) {
+        console.log("[dispatcher] all sessions finished, exiting");
+        process.exit(0);
+      }
     } catch (err) {
       if (err instanceof ProjectsConfigError || err instanceof herdr.HerdrUnavailableError) {
         console.error(`[dispatcher] ${err.message}`);
