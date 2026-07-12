@@ -3,6 +3,11 @@ name: triage-pr
 description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), generate and evaluate a fix plan via create-review-fix-plan, then take action (add cc-fix-onetime label if fixes are needed; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
 argument-hint: "[pr-number]"
 hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:

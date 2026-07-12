@@ -2,6 +2,12 @@
 name: resolve-pr-conflict
 description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。PRをマージ可能な状態に整えたいときに使用してください。
 argument-hint: "[pr-number]"
+hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
 ---
 
 # Resolve PR Conflict

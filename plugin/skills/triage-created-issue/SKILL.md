@@ -3,6 +3,11 @@ name: triage-created-issue
 description: Triage a GitHub issue that already has the cc-issue-created label and is assumed to be ready to start. First inspect the comment history to decide whether human confirmation is needed (cc-need-human-check, highest priority); otherwise decide whether the issue should be closed as not needed, unanswered confirmation items remain (cc-answer-issue-questions), the description is stale relative to settled comment-history content and must be refreshed before execution (cc-update-issue), or it can move to execution (cc-exec-issue). Dependency checks are out of scope.
 argument-hint: "[Issue number]"
 hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:

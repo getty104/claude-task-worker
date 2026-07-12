@@ -12,7 +12,7 @@
     "dev": "tsc --noEmit --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts plugin/scripts/**/*.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run build"

@@ -3,6 +3,11 @@ name: answer-issue-questions
 description: "GitHub Issueの確認事項に対して、コードベースやドキュメントを徹底的に調査し、根拠に基づいた回答を提供するスキル。Issueの最後のコメントに含まれる確認事項を調査・回答し、コメントに追記する。"
 argument-hint: "[issue-number]"
 hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:

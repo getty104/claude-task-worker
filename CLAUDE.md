@@ -51,6 +51,12 @@ claude-task-worker all             # Run all workers concurrently
 
 ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
 
+### 同期実行ガード（`claude -p` セッションの早期終了防止）
+
+ワーカーは各スキルを `claude -p "<skill> <n>"` の非対話（print）モードで起動する。print モードには再起動ループが無いため、スキル内でエージェントが処理をバックグラウンド化（`Bash(run_in_background:true)` / バックグラウンド `Agent` / `Monitor` / `ScheduleWakeup`）してターンを終えると、後続処理（E2E・テスト・commit/push・PR作成）の完了前にプロセスが exit 0 で終了してしまい、ワーカーが「正常完了」と誤認してラベル遷移（`cc-pr-created` 付与や `cc-fix-onetime` 除去）に進み、Issue/PR の状態が壊れる。
+
+これを防ぐため、ワーカーが起動する全エントリスキルのフロントマターに `PreToolUse` フック（`plugin/scripts/block-async-execution.mjs`, matcher `Bash|Agent|Monitor|ScheduleWakeup`）を追加し、上記のバックグラウンド化・遅延ツール呼び出しを deny する。deny 理由でフォアグラウンド同期実行への切り替えを促すため、時間のかかる E2E テスト等も待ってから次に進む挙動が強制される。スキル本文の「バックグラウンド実行禁止」プロンプトを補完するハードガード。対象スキル: `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr`。
+
 ### `--project` ディスパッチ
 
 `src/index.ts` は起動時に `hasProjectFilter()` で `--project` フラグの有無を判定し、指定されている場合はワーカー起動の代わりにディスパッチャーを起動する（複数プロジェクトへ同一コマンドを一括転送する仕組み）。

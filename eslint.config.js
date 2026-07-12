@@ -19,4 +19,11 @@ export default [
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
     },
   },
+  {
+    // Plugin runtime scripts run under Node (hook commands), not part of the TS build.
+    files: ["plugin/scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { process: "readonly", console: "readonly" },
+    },
+  },
 ];

@@ -2,6 +2,12 @@
 name: create-issue-from-issue-number
 description: Re-analyze an existing GitHub Issue using its current title and body as input, refresh the implementation plan against the latest code state, and update the Issue in place. Use this when the user provides an Issue number (numeric, `#`-prefixed, or Issue URL) and wants to regenerate the Explore-based analysis. For reflecting comment-driven updates instead, use update-issue. For creating a brand-new Issue from a natural-language task description, use create-issue.
 argument-hint: "[Issue番号]"
+hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
 ---
 
 # Create Issue From Issue Number
