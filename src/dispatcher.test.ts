@@ -24,7 +24,7 @@ interface HerdrScenario {
   brokenPaneLabels?: string[];
 }
 
-function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: string[]): void {
+function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: string[], createdLabels?: string[]): void {
   t.mock.method(
     childProcess,
     "execFile",
@@ -40,7 +40,11 @@ function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: strin
       }
       if (args[0] === "tab" && args[1] === "create") {
         const labelIndex = args.indexOf("--label");
-        const label = args[labelIndex + 1];
+        const rawLabel = args[labelIndex + 1];
+        createdLabels?.push(rawLabel);
+        // ラベルには "ctw:" プレフィックスが付与されるため、id導出・シナリオ判定は
+        // プレフィックスを剥がしたプロジェクト名ベースで行う。
+        const label = rawLabel.startsWith("ctw:") ? rawLabel.slice("ctw:".length) : rawLabel;
         if (scenario.brokenCreateLabels?.includes(label)) {
           callback(null, JSON.stringify({ error: { code: "internal", message: "boom" } }), "");
           return;
@@ -114,7 +118,7 @@ test("logs a non-Error thrown value via String(error) when herdr availability ch
 });
 
 test("skips a project whose label already has a tab and does not create a new one", async (t) => {
-  mockHerdr(t, { existingLabels: ["my-app"] });
+  mockHerdr(t, { existingLabels: ["ctw:my-app"] });
   const warnLogs: string[] = [];
   t.mock.method(console, "warn", (message: string) => {
     warnLogs.push(message);
@@ -125,6 +129,19 @@ test("skips a project whose label already has a tab and does not create a new on
 
   assert.equal(sessions.size, 0);
   assert.ok(warnLogs.some((line) => line.includes("my-app")));
+});
+
+test("creates tabs with a 'ctw:' prefixed label", async (t) => {
+  const createdLabels: string[] = [];
+  mockHerdr(t, {}, undefined, createdLabels);
+
+  const projects: ResolvedProject[] = [
+    { name: "my-app", path: "/tmp/my-app" },
+    { name: "other-app", path: "/tmp/other-app" },
+  ];
+  await runDispatcher(projects, "claude-task-worker all");
+
+  assert.deepEqual(createdLabels, ["ctw:my-app", "ctw:other-app"]);
 });
 
 test("registers a WorkerSession in the SessionRegistry on success", async (t) => {
@@ -207,7 +224,8 @@ test("closes the dangling tab and removes the leaked session when paneSendKeys (
       }
       if (args[0] === "tab" && args[1] === "create") {
         const labelIndex = args.indexOf("--label");
-        const label = args[labelIndex + 1];
+        const rawLabel = args[labelIndex + 1];
+        const label = rawLabel.startsWith("ctw:") ? rawLabel.slice("ctw:".length) : rawLabel;
         callback(
           null,
           JSON.stringify({

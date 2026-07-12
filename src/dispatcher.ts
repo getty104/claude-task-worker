@@ -20,6 +20,14 @@ const { getDisplayWidth, truncateToWidth, padToWidth } = await loadTable();
 export const POLL_INTERVAL_MS = 7 * 1000;
 export const SHUTDOWN_TIMEOUT_MS = 10 * 60 * 1000;
 
+// ディスパッチャーが作成するherdrタブのラベルに付与するプレフィックス。
+// claude-task-worker が起動したタブを他のタブと区別できるようにする。
+export const TAB_LABEL_PREFIX = "ctw:";
+
+export function tabLabelFor(projectName: string): string {
+  return `${TAB_LABEL_PREFIX}${projectName}`;
+}
+
 export type WorkerSessionStatus = "running";
 
 export interface WorkerSession {
@@ -49,14 +57,14 @@ export async function runDispatcher(projects: ResolvedProject[], forwardedComman
   const sessions: SessionRegistry = new Map();
 
   for (const project of projects) {
-    if (existingLabels.has(project.name)) {
+    if (existingLabels.has(tabLabelFor(project.name))) {
       console.warn(`[dispatcher] project "${project.name}" already has a running tab, skipping`);
       continue;
     }
 
     let createdTabId: string | undefined;
     try {
-      const { paneId, tabId } = await tabCreate({ label: project.name, cwd: project.path });
+      const { paneId, tabId } = await tabCreate({ label: tabLabelFor(project.name), cwd: project.path });
       createdTabId = tabId;
       sessions.set(project.name, {
         name: project.name,
