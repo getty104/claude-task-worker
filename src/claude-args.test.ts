@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DISALLOWED_TOOLS, DISALLOWED_TOOLS_ARG } from "./claude-args.ts";
+import type * as ClaudeArgsModule from "./claude-args";
+
+const { DISALLOWED_TOOLS, DISALLOWED_TOOLS_ARG } = (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
   assert.deepEqual(

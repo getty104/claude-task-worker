@@ -1,4 +1,4 @@
-import { DISALLOWED_TOOLS_ARG } from "../claude-args";
+import { DISALLOWED_TOOLS_ARG } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
