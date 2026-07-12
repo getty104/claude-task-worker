@@ -192,6 +192,10 @@ export function monitorSessions(
     resolveDone();
   };
 
+  // ポーリング／描画インターバルは unref しない。稼働セッションが残る限りイベントループを
+  // 生かし続けることで、--project ディスパッチ後もステータステーブルを表示し続け、
+  // 全セッションが終了する(finish)までプロセスが即終了しないようにする。
+  // 停止時は finish()/stop() が両インターバルを clearInterval するため、ループは放置されない。
   const pollInterval = setInterval(() => {
     void pollOnce(sessions, herdr).then(() => {
       if (sessions.size === 0) {
@@ -199,12 +203,10 @@ export function monitorSessions(
       }
     });
   }, pollIntervalMs);
-  pollInterval.unref();
 
   const renderInterval = setInterval(() => {
     renderSessionTable(sessions);
   }, renderIntervalMs);
-  renderInterval.unref();
 
   return {
     stop: finish,
@@ -348,4 +350,52 @@ export async function shutdownDispatcher(
   } finally {
     shutdownPromise = undefined;
   }
+}
+
+export interface DispatcherShutdownController {
+  handle: () => Promise<void>;
+  isShuttingDown: () => boolean;
+}
+
+// SIGINT/SIGTERM を process.on（.once ではない）で受ける --project ディスパッチャー向けの
+// 2段階シャットダウンハンドラを生成する。1回目のシグナルで graceful shutdown を開始し、
+// 2回目のシグナルで shutdownDispatcher の { forceKill: true } パスに入りセッションを強制終了する。
+// 非 --project ワーカー側（index.ts の forceKilling ガード）と同等の保護を --project 側にも提供する。
+// shutdown コールバックには sessions/monitorHandle を束ねた shutdownDispatcher 呼び出しを渡す。
+// isShuttingDown() は「シャットダウン中か」を返し、呼び出し側が自然終了 exit と
+// shutdownDispatcher 側の exit の二重発火を避ける判定に使う。
+export function createDispatcherShutdownHandler(
+  shutdown: (options?: ShutdownOptions) => Promise<void>,
+): DispatcherShutdownController {
+  let shuttingDown = false;
+  let forceKilling = false;
+
+  // handle は process.on("SIGINT"/"SIGTERM", handle) の await されないリスナーとして登録される。
+  // shutdown（= shutdownDispatcher）は正常時は自身で process.exit するため解決しないが、
+  // 途中で reject するとリスナーが未処理rejectionになりグローバルハンドラ任せの終了になる。
+  // 意図した終了ログを残しつつ確実にプロセスを終わらせるため、両パスとも reject を捕捉して exit(1) する。
+  const handle = async () => {
+    if (shuttingDown) {
+      if (forceKilling) return;
+      forceKilling = true;
+      console.log("\n[dispatcher] Force killing sessions immediately...");
+      try {
+        await shutdown({ forceKill: true });
+      } catch (error) {
+        console.error(`[dispatcher] force-kill shutdown failed: ${error}`);
+        process.exit(1);
+      }
+      return;
+    }
+    shuttingDown = true;
+    console.log("\n[dispatcher] Stopping sessions. Waiting for them to finish... (Press Ctrl-C again to force kill)");
+    try {
+      await shutdown();
+    } catch (error) {
+      console.error(`[dispatcher] shutdown failed: ${error}`);
+      process.exit(1);
+    }
+  };
+
+  return { handle, isShuttingDown: () => shuttingDown };
 }
