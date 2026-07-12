@@ -227,11 +227,15 @@ export interface ShutdownOptions {
   forceKill?: boolean;
 }
 
+// herdr のキー名は `+` 区切りのキーコンボ文字列（例: `ctrl+c`）。
+// `ctrl-c` のようなハイフン区切りは `invalid_key` エラーになり送信されない。
+const CTRL_C_KEY = "ctrl+c";
+
 async function sendCtrlCToAllSessions(sessions: SessionRegistry, herdr: typeof HerdrModule): Promise<void> {
   await Promise.all(
     [...sessions.values()].map(async (session) => {
       try {
-        await herdr.paneSendKeys(session.paneId, "ctrl-c");
+        await herdr.paneSendKeys(session.paneId, CTRL_C_KEY);
       } catch (error) {
         console.error(`[dispatcher] failed to send ctrl-c to session "${session.name}": ${error}`);
       }
