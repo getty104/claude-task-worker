@@ -73,6 +73,7 @@ export async function listIssuesByLabel(
   labels: string[],
   excludeLabels: string[] = [],
   epicFilter?: { owner: string; repo: string; numbers: number[] },
+  limit = 10,
 ): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
   const searchTerms = ["sort:created-asc", "-is:blocked", ...excludeLabels.map((label) => `-label:"${label}"`)];
@@ -93,7 +94,7 @@ export async function listIssuesByLabel(
     "--search",
     search,
     "--limit",
-    "10",
+    String(limit),
   ]);
   return JSON.parse(output);
 }
@@ -204,10 +205,14 @@ async function fetchPRChecks(prNumber: number): Promise<PRCheck[]> {
   return JSON.parse(output) as PRCheck[];
 }
 
+// CI 未完了の PR が古い順の先頭を占めると isCICompleted フィルタで除外され、
+// 後続の完了済み PR が取得枠から溢れて飢餓する。取得件数は同時実行数とは
+// 切り離し、フィルタ前に十分な件数を確保するため既定値を 5 とする。
 export async function listPullRequestsWithChecks(
   assignee?: string,
   label?: string,
   excludeLabels: string[] = [],
+  limit = 5,
 ): Promise<PullRequestWithChecks[]> {
   const search = ["sort:created-asc", ...excludeLabels.map((l) => `-label:"${l}"`)].join(" ");
   const args = [
@@ -220,7 +225,7 @@ export async function listPullRequestsWithChecks(
     "--search",
     search,
     "--limit",
-    "10",
+    String(limit),
   ];
   if (assignee) {
     args.push("--assignee", assignee);

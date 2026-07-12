@@ -9,6 +9,11 @@ import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../wo
 
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
+// preflight を持つワーカー（現状は epic-issue）は、古い順の先頭候補が preflight で
+// skip され続けると後続の実行可能 Issue が取得枠から溢れて飢餓する。取得件数を
+// 同時実行数と切り離し、固定バッファ件数を取得するための上限。
+const PREFLIGHT_SEARCH_LIMIT = 5;
+
 export type PreflightResult = "proceed" | "skip" | "mark-pr-created";
 
 interface IssueWorkerConfig {
@@ -49,10 +54,12 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           config.labelFilters && config.labelFilters.length > 0
             ? [...config.triggerLabels, ...config.labelFilters]
             : config.triggerLabels;
+        const { maxConcurrentTasks } = getWorkerConfig(config.name);
+        const searchLimit = config.preflight ? PREFLIGHT_SEARCH_LIMIT : maxConcurrentTasks;
         const candidates =
           config.ownNumberFilters && config.ownNumberFilters.length > 0
             ? await listIssuesByNumbers(user, labels, excludeLabels, config.ownNumberFilters)
-            : await listIssuesByLabel(user, labels, excludeLabels, epicFilter);
+            : await listIssuesByLabel(user, labels, excludeLabels, epicFilter, searchLimit);
 
         for (const issue of candidates) {
           if (isRunning(issue.number)) continue;
