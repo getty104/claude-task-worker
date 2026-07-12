@@ -1,4 +1,7 @@
-import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
+import type * as ChildProcess from "node:child_process";
+
+const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
 export interface Issue {
   number: number;
@@ -28,7 +31,7 @@ interface RepoInfo {
 
 function execGh(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, (error, stdout, stderr) => {
+    childProcess.execFile("gh", args, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`gh ${args.join(" ")} failed: ${stderr || error.message}`));
         return;
@@ -40,7 +43,7 @@ function execGh(args: string[]): Promise<string> {
 
 function execGhAllowExit(args: string[], allowedCodes: number[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, (error, stdout, stderr) => {
+    childProcess.execFile("gh", args, (error, stdout, stderr) => {
       if (error) {
         const code = (error as NodeJS.ErrnoException & { code?: number }).code;
         if (typeof code === "number" && allowedCodes.includes(code)) {
@@ -258,10 +261,12 @@ export async function addLabel(type: "issue" | "pr", number: number, label: stri
 }
 
 export async function hasLabel(type: "issue" | "pr", number: number, label: string): Promise<boolean> {
-  const output = await execGh([type, "view", String(number), "--json", "labels"]);
-  const parsed = JSON.parse(output);
-  const labels: { name: string }[] = parsed.labels ?? [];
-  return labels.some((l) => l.name === label);
+  return withRetry(async () => {
+    const output = await execGh([type, "view", String(number), "--json", "labels"]);
+    const parsed = JSON.parse(output);
+    const labels: { name: string }[] = parsed?.labels ?? [];
+    return labels.some((l) => l.name === label);
+  });
 }
 
 export async function removeLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
