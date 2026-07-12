@@ -1,3 +1,4 @@
+import { DISALLOWED_TOOLS_ARG } from "../claude-args";
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
@@ -91,6 +92,8 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               "-p",
               `${command} ${issue.number}`,
               "--dangerously-skip-permissions",
+              "--disallowedTools",
+              DISALLOWED_TOOLS_ARG,
               "--model",
               model,
               "--effort",
