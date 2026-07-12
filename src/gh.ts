@@ -73,6 +73,7 @@ export async function listIssuesByLabel(
   labels: string[],
   excludeLabels: string[] = [],
   epicFilter?: { owner: string; repo: string; numbers: number[] },
+  limit = 10,
 ): Promise<Issue[]> {
   const labelArgs = labels.flatMap((label) => ["--label", label]);
   const searchTerms = ["sort:created-asc", "-is:blocked", ...excludeLabels.map((label) => `-label:"${label}"`)];
@@ -93,7 +94,7 @@ export async function listIssuesByLabel(
     "--search",
     search,
     "--limit",
-    "10",
+    String(limit),
   ]);
   return JSON.parse(output);
 }
@@ -208,6 +209,7 @@ export async function listPullRequestsWithChecks(
   assignee?: string,
   label?: string,
   excludeLabels: string[] = [],
+  limit = 10,
 ): Promise<PullRequestWithChecks[]> {
   const search = ["sort:created-asc", ...excludeLabels.map((l) => `-label:"${l}"`)].join(" ");
   const args = [
@@ -220,7 +222,7 @@ export async function listPullRequestsWithChecks(
     "--search",
     search,
     "--limit",
-    "10",
+    String(limit),
   ];
   if (assignee) {
     args.push("--assignee", assignee);

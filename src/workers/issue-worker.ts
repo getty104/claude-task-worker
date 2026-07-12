@@ -49,10 +49,11 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           config.labelFilters && config.labelFilters.length > 0
             ? [...config.triggerLabels, ...config.labelFilters]
             : config.triggerLabels;
+        const { maxConcurrentTasks } = getWorkerConfig(config.name);
         const candidates =
           config.ownNumberFilters && config.ownNumberFilters.length > 0
             ? await listIssuesByNumbers(user, labels, excludeLabels, config.ownNumberFilters)
-            : await listIssuesByLabel(user, labels, excludeLabels, epicFilter);
+            : await listIssuesByLabel(user, labels, excludeLabels, epicFilter, maxConcurrentTasks);
 
         for (const issue of candidates) {
           if (isRunning(issue.number)) continue;
