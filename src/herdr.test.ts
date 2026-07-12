@@ -6,7 +6,8 @@ import type * as HerdrModule from "./herdr";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { tabCreate, tabList, paneProcessInfo, HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
+const { tabCreate, tabList, paneProcessInfo, paneSendText, paneSendKeys, HerdrError } =
+  (await import("./herdr.ts")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -37,6 +38,39 @@ test("execHerdr includes stderr content in the error message when stdout is inva
     assert.match(error.message, /herdr: connection refused/);
     return true;
   });
+});
+
+test("paneSendText resolves without throwing when herdr returns empty stdout and stderr on success", async (t) => {
+  // herdr の `pane send-text` は成功時に空stdout・空stderr・終了コード0を返すため、
+  // invalid JSON 扱いにせず正常完了させる。
+  mockExecFile(t, "", "");
+  await assert.doesNotReject(paneSendText("w3:pB", "claude-task-worker 'yolo'"));
+});
+
+test("paneSendKeys resolves without throwing when herdr returns empty stdout and stderr on success", async (t) => {
+  mockExecFile(t, "", "");
+  await assert.doesNotReject(paneSendKeys("w3:pB", "enter"));
+});
+
+test("paneSendText still throws invalid JSON when stdout is non-empty but not JSON", async (t) => {
+  mockExecFile(t, "not json", "");
+  await assert.rejects(paneSendText("w3:pB", "hello"), /invalid JSON output/);
+});
+
+test("paneSendText throws when stdout is empty but stderr is non-empty", async (t) => {
+  // exit 0 でも stderr に出力があれば、失敗を握りつぶさずエラーにする。
+  mockExecFile(t, "", "herdr: pane busy");
+  await assert.rejects(paneSendText("w3:pB", "hello"), (error: Error) => {
+    assert.match(error.message, /invalid JSON output/);
+    assert.match(error.message, /herdr: pane busy/);
+    return true;
+  });
+});
+
+test("tabList rejects an empty stdout response because it must return JSON", async (t) => {
+  // allowEmptyResult を指定しないコマンドでは、空stdoutを正常応答として扱わない。
+  mockExecFile(t, "", "");
+  await assert.rejects(tabList(), /invalid JSON output/);
 });
 
 test("tabCreate throws an explicit error when root_pane is missing from the response", async (t) => {

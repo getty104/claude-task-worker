@@ -51,6 +51,7 @@ export class HerdrError extends Error {
 interface HerdrRawResult {
   execError: NodeJS.ErrnoException | null;
   parsed: HerdrResponse | undefined;
+  stdout: string;
   stderr: string;
 }
 
@@ -71,14 +72,17 @@ function runHerdr(args: string[]): Promise<HerdrRawResult> {
         } catch {
           parsed = undefined;
         }
-        resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stderr });
+        resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stdout, stderr });
       },
     );
   });
 }
 
-async function execHerdr(args: string[]): Promise<unknown> {
-  const { execError, parsed, stderr } = await runHerdr(args);
+// allowEmptyResult: `pane send-text` / `pane send-keys` など結果を返さない
+// fire-and-forget 系コマンド専用のフラグ。これらは成功時に空stdout・空stderr・
+// 終了コード0を返すため、空応答を正常完了として扱えるようにする。
+async function execHerdr(args: string[], options?: { allowEmptyResult?: boolean }): Promise<unknown> {
+  const { execError, parsed, stdout, stderr } = await runHerdr(args);
   const stderrSuffix = stderr.trim() ? `: ${stderr.trim()}` : "";
   // stdout に有効な error JSON が乗っているケースは execFile の失敗より優先して扱う。
   if (parsed?.error) {
@@ -91,6 +95,13 @@ async function execHerdr(args: string[]): Promise<unknown> {
     throw new Error(`herdr ${args.join(" ")} failed: ${execError.message}${stderrSuffix}`);
   }
   if (!parsed) {
+    // fire-and-forget 系コマンド（allowEmptyResult 指定時）に限り、stdout も stderr も
+    // 空なら「結果なしの正常応答」とみなす。stderr に出力がある場合は exit 0 でも
+    // 失敗を握りつぶさないようエラーにする。JSONを返すべき他コマンド（tab list/create 等）
+    // では空stdoutを従来どおり invalid JSON 扱いにする。
+    if (options?.allowEmptyResult && stdout.trim() === "" && stderr.trim() === "") {
+      return undefined;
+    }
     throw new Error(`herdr ${args.join(" ")} failed: invalid JSON output${stderrSuffix}`);
   }
   return parsed.result;
@@ -132,11 +143,11 @@ export async function tabList(): Promise<TabInfo[]> {
 }
 
 export async function paneSendText(paneId: string, text: string): Promise<void> {
-  await execHerdr(["pane", "send-text", paneId, text]);
+  await execHerdr(["pane", "send-text", paneId, text], { allowEmptyResult: true });
 }
 
 export async function paneSendKeys(paneId: string, ...keys: string[]): Promise<void> {
-  await execHerdr(["pane", "send-keys", paneId, ...keys]);
+  await execHerdr(["pane", "send-keys", paneId, ...keys], { allowEmptyResult: true });
 }
 
 export async function paneProcessInfo(paneId: string): Promise<PaneProcessInfo> {
