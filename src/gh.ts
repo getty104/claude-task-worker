@@ -257,6 +257,13 @@ export async function addLabel(type: "issue" | "pr", number: number, label: stri
   });
 }
 
+export async function hasLabel(type: "issue" | "pr", number: number, label: string): Promise<boolean> {
+  const output = await execGh([type, "view", String(number), "--json", "labels"]);
+  const parsed = JSON.parse(output);
+  const labels: { name: string }[] = parsed.labels ?? [];
+  return labels.some((l) => l.name === label);
+}
+
 export async function removeLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
   await withRetry(async () => {
     try {
