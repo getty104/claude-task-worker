@@ -34,7 +34,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/workers/`** - 各ワーカー実装
 - **`plugin/`** - Claude Code プラグイン本体（`.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `scripts/`, `.mcp.json`）
 - **`.claude-plugin/marketplace.json`** - このリポジトリを Claude Code マーケットプレイスとして公開するための定義
-- **`src/dispatcher.ts`** - ディスパッチャー本体。`runDispatcher()`（herdr疎通確認 → プロジェクトごとにタブ作成しコマンド送信）、`monitorSessions()`（セッション生存監視＋ステータステーブル描画ループの起動）、`renderSessionTable()`（稼働セッション一覧のテーブル描画）、`shutdownDispatcher()`（SIGINT/SIGTERM時、各セッションへctrl-c送信 → 終了待機 → タブクローズのグレースフルシャットダウン）
+- **`src/dispatcher.ts`** - ディスパッチャー本体。`runDispatcher()`（herdr疎通確認 → プロジェクトごとにタブ作成しコマンド送信。作成タブのラベルは `tabLabelFor()` で `ctw:` プレフィックス付き（`TAB_LABEL_PREFIX`）にし、既存タブの重複判定も同プレフィックスで行う）、`monitorSessions()`（セッション生存監視＋ステータステーブル描画ループの起動）、`renderSessionTable()`（稼働セッション一覧のテーブル描画）、`shutdownDispatcher()`（SIGINT/SIGTERM時、各セッションへctrl-c送信 → 終了待機 → タブクローズのグレースフルシャットダウン）
 - **`src/herdr.ts`** - herdr CLIラッパー。`tabCreate`/`tabClose`/`tabList`（タブ管理）、`paneSendText`/`paneSendKeys`（ペインへの入力送信）、`paneProcessInfo`（フォアグラウンドプロセス確認）、`checkHerdrAvailable`（herdr導入・疎通確認）
 - **`src/projects-config.ts`** - `projects.json`（`~/.config/claude-task-worker/projects.json` または `$XDG_CONFIG_HOME` 配下）のロード・検証・対象プロジェクト解決。`ProjectsConfig`（`projects`/`projectGroups` のネスト構造）、`loadProjectsConfig()`（読み込み・検証）、`resolveTargetProjects()`（プロジェクト名/グループ名/予約語 `all` の展開）
 - **`src/dispatch-args.ts`** - `--project` ディスパッチ用CLI引数ヘルパー。`PROJECT_INCOMPATIBLE_COMMANDS`（`--project` と併用不可なコマンド一覧: `init`/`install`/`update`/`usage`/`version`）、`parseProjectFilters()`/`hasProjectFilter()`（`--project` の抽出・検出）、`buildForwardedCommand()`（`--project` とその値を除去し他プロジェクトへ転送するコマンド文字列を構築）
