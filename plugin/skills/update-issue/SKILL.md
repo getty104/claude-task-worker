@@ -14,7 +14,7 @@ hooks:
 
 引数で受け取ったIssue番号をもとに、Issueのコメントを全件読み取って文脈を把握し、まだdescriptionに反映されていない事項を反映するスキル。Instructionsに従い、Issueの内容とコメントの確認、コードの分析、descriptionの更新を行う。
 
-**責務の分担**: 本スキルは「既存Issueとコメント取得・未反映事項の抽出・コード分析・既存『依頼内容』ブロックが保持されたことの事後確認」までを担い、「本文整形・投稿前チェック・既存変更ログの verbatim 再掲・既存依頼内容ブロックの verbatim 再掲・`gh issue edit` 実行」は `post-issue-body` スキルへ委譲する。本文テンプレート・変更ログ追記ルール・投稿前チェックリスト・heredoc 投稿コマンドはすべて `post-issue-body` 側に集約されているため、本スキル内では再記述しない。
+**責務の分担**: 本スキルは「既存Issueとコメント取得・未反映事項の抽出・コード分析・コメント/分析で判明した依存関係の既存Issueへの relationships 反映・既存『依頼内容』ブロックが保持されたことの事後確認」までを担い、「本文整形・投稿前チェック・既存変更ログの verbatim 再掲・既存依頼内容ブロックの verbatim 再掲・`gh issue edit` 実行」は `post-issue-body` スキルへ委譲する。本文テンプレート・変更ログ追記ルール・投稿前チェックリスト・heredoc 投稿コマンドはすべて `post-issue-body` 側に集約されているため、本スキル内では再記述しない。
 
 **「依頼内容」の扱い**: 本スキルの役割は「コメントから拾った未反映事項の反映」であり、**依頼内容ブロック（`<details><summary>依頼内容</summary>`）を新規作成しない**。既存bodyを丸ごと依頼内容として複写すると、更新後 description で元本文と反映後本文が二重に残るため。「人が最初に書いた原文」を残す用途は `create-issue-from-issue-number` の責務であり、本スキルはそこに触れない。ただし、すでに依頼内容ブロックが存在する Issue（旧フォーマットの裸の `## 依頼内容` 見出しも含む）に対しては、その中身を verbatim で再掲して失わないよう引き継ぐ（旧フォーマットは `post-issue-body` 側が折りたたみブロックへ詰め替える）。コメントで依頼内容そのものの書き換え要望が来ても依頼内容ブロックは書き換えず、コメント由来の変更は `概要` `要件` `実装プラン` 側で反映する。
 
@@ -197,6 +197,32 @@ ARGS_EOF
 
 **完了条件**: 実行前bodyに依頼内容があった場合は更新後bodyでもその中身が `<details><summary>依頼内容</summary>` ブロックとして保持されていること（または未反映事項0件・依頼内容無しで本ステップをスキップした状態）。
 
+### 5.6. 依存関係の反映（blockedBy / blocking）
+
+コメント履歴やコード分析で、この Issue が他の Open な Issue と依存関係を持つことが判明した場合、それを GitHub ネイティブ relationships（blocked-by / blocking）として**既存Issueに反映**する。本スキルは新規Issueを作らないため、`gh issue edit --add-blocked-by` / `--add-blocking` で追加する（本文の `## 依存関係` セクションには書かない）。
+
+以下を機械的に実行する（ユーザーへの確認は不要）。依存関係の言及・示唆が無ければ本ステップはスキップする。未反映事項0件で `post-issue-body` の起動をスキップした場合でも、コメントで依存関係が判明していれば本ステップは実行してよい（relationship の付与は description 更新とは独立のため）。
+
+1. **依存関係の抽出**: ステップ2〜4で読んだコメント・本文・コード分析から、この Issue の依存関係への言及（`#123`・Issue URL・「〇〇 が終わってから」「〇〇 が前提」「〇〇 をブロックする」等）を洗い出す。推測で無関係な Issue を紐付けないよう、**根拠が明確なものだけ**を対象にする。
+2. **方向の確定**:
+   - **blockedBy**（この Issue をブロックする＝先に片付けるべき Issue）: この Issue に着手する前に完了している必要がある Open Issue の番号。
+   - **blocking**（この Issue がブロックする＝後続で待たせる Issue）: この Issue が完了しないと進められない Open Issue の番号。
+3. **現在状態の検証**: 対象 Issue 番号は `gh issue view <番号> --json number,state,title` で **Open であること**を確認する。CLOSED の Issue は含めない。
+4. **既存relationshipとの差分**: 現在の relationship を取得し、**まだ貼られていない依存だけ**を追加する（既存relationshipは剥がさない。`--remove-blocked-by` / `--remove-blocking` は使わない）。
+
+   ```bash
+   gh issue view <このIssue番号> --json blockedBy,blocking
+   ```
+
+5. **付与（best-effort）**: 差分の番号だけを渡す。`--add-blocked-by` / `--add-blocking` はカンマ区切りで複数番号を1フラグにまとめてよい。追加が無い側のフラグは省略する。
+
+   ```bash
+   gh issue edit <このIssue番号> --add-blocked-by <番号,番号,...>
+   gh issue edit <このIssue番号> --add-blocking <番号,番号,...>
+   ```
+
+   `gh issue edit --add-blocked-by` / `--add-blocking` が失敗しても（権限不足・`gh` バージョン未達・存在しない番号等）、description 更新はすでに完了しているため、エラーを最終報告に残したうえで処理を続行する（ロールバックしない）。付与・スキップの結果は最終報告に1行で記録する。
+
 ## 中断条件
 
 - 引数が空、または Issue 番号として解釈できない
@@ -209,6 +235,7 @@ ARGS_EOF
 - このスキルは**コードを一切変更しない**。Issue の更新・コメントは原則 `post-issue-body` 経由で行う（本スキル内で直接 `gh issue edit` を呼ぶのはステップ5.5のフォールバック用途に限る）
 - 途中でユーザーに質問しない。確認したいことは `post-issue-body` へ「確認事項」として渡し、コメントとして残す
 - description を反映しただけで終わらせず、ステップ4.5で「反映後もなお残る不明点・曖昧な要件」を見直し、あればステップ4の未確認事項とマージして `confirmation_items` として渡す（`## 確認事項` コメントに一本化する。曖昧点が無ければ無理に作らない）
+- コメント/分析で依存関係が判明したら、ステップ5.6で `gh issue edit --add-blocked-by` / `--add-blocking` により既存Issueへ GitHub ネイティブ relationships として反映する（本文に `## 依存関係` は書かない）。既存relationshipは剥がさず、まだ貼られていない依存だけを best-effort で追加する。根拠が明確な依存のみを対象にし、無ければスキップする
 - **依頼内容ブロック（`<details><summary>依頼内容</summary>`）を新規追加しない**（理由は冒頭「『依頼内容』の扱い」を参照）
 - 既存bodyに依頼内容ブロックがあった場合、その保持は `post-issue-body` の verbatim 再掲規約に委ねる。args の `sections.依頼内容` は本スキルからは渡さない（渡すと原文とのズレを生む可能性がある）。ステップ5.5で実際に保持されかつ折りたたみで書き出されたかを検証する
 - Pencil ファイル（`.pen`）の読み込みは `inspect-pencil-node` スキル経由でのみ行う（暗号化バイナリのため `Read`/`Grep` は使えない）
