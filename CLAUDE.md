@@ -51,6 +51,22 @@ claude-task-worker all             # Run all workers concurrently
 
 ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
 
+### 同期実行ガード（`claude -p` セッションの早期終了防止）
+
+ワーカーは各スキルを `claude -p "<skill> <n>"` の非対話（print）モードで起動する。print モードには再起動ループが無いため、スキル内でエージェントが処理をバックグラウンド化（`Bash(run_in_background:true)` / バックグラウンド `Agent` / `Monitor` / `ScheduleWakeup`）してターンを終えると、後続処理（E2E・テスト・commit/push・PR作成）の完了前にプロセスが exit 0 で終了してしまい、ワーカーが「正常完了」と誤認してラベル遷移（`cc-pr-created` 付与や `cc-fix-onetime` 除去）に進み、Issue/PR の状態が壊れる。
+
+これを防ぐため、2層のガードを設ける。
+
+1. **CLI レベルの `--disallowedTools`**（`src/claude-args.ts` の `DISALLOWED_TOOLS`）: ワーカーが `claude -p` を起動する際（`issue-worker.ts` / `pr-worker.ts`）、自律非対話実行では原理的に使い道がない（または有害な）ツールを完全無効化する。全ワーカー起動に一律適用される。対象カテゴリ:
+   - 遅延/yield: `Monitor` / `ScheduleWakeup`（後続ウェイクアップ前提でプロセスが早期終了する）
+   - 対話/承認: `AskUserQuestion` / `EnterPlanMode`（回答・承認するユーザーが存在しない）
+   - スコープ外の副作用: `CronCreate` / `CronDelete` / `CronList` / `RemoteTrigger`（クラウド routine・リモート環境への副作用）
+   - 環境管理の競合: `EnterWorktree`（ワーカー自前の worktree 管理と競合する）
+   - `Exit*`（`ExitPlanMode` / `ExitWorktree`）は「万一その状態で開始した場合の脱出口」として残す。`Bash`/`Agent`（フォアグラウンドなら正当）や `TaskCreate` 等の進捗管理・`WebFetch`/`LSP`/各種 MCP（正当な用途あり）は無効化しない。
+2. **スキルフロントマターの `PreToolUse` フック**（`plugin/scripts/block-async-execution.mjs`, matcher `Bash|Agent|Monitor|ScheduleWakeup`）: フォアグラウンドなら正当だがバックグラウンド実行が問題になる `Bash`（`run_in_background:true` / `&` 制御演算子 / `nohup`・`disown`・`setsid`）と `Agent`（`run_in_background:false` を明示しない呼び出し）を条件付きで deny し、フォアグラウンド同期実行への切り替えを促す。時間のかかる E2E テスト等も待ってから次に進む挙動が強制される。対象スキル: `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr`。
+
+いずれもスキル本文の「バックグラウンド実行禁止」プロンプトを補完するハードガード。
+
 ### `--project` ディスパッチ
 
 `src/index.ts` は起動時に `hasProjectFilter()` で `--project` フラグの有無を判定し、指定されている場合はワーカー起動の代わりにディスパッチャーを起動する（複数プロジェクトへ同一コマンドを一括転送する仕組み）。

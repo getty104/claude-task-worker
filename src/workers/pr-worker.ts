@@ -1,3 +1,4 @@
+import { DISALLOWED_TOOLS_ARG } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
@@ -75,7 +76,17 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             const command = skill || config.command;
             run(
               "claude",
-              ["-p", `${command} ${pr.number}`, "--dangerously-skip-permissions", "--model", model, "--effort", effort],
+              [
+                "-p",
+                `${command} ${pr.number}`,
+                "--dangerously-skip-permissions",
+                "--disallowedTools",
+                DISALLOWED_TOOLS_ARG,
+                "--model",
+                model,
+                "--effort",
+                effort,
+              ],
               pr.number,
               `PR #${pr.number} (${pr.headRefName})`,
               config.name,

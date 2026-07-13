@@ -2,6 +2,12 @@
 name: update-issue
 description: Update an existing GitHub Issue's description based on the issue number. Reads all issue comments and reflects any items not yet captured in the description. After refreshing the description, reviews it for remaining ambiguities or unclear requirements and posts any open questions as a follow-up 確認事項 comment.
 argument-hint: "[Issue番号]"
+hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
 ---
 
 # Update Issue

@@ -3,6 +3,12 @@ name: create-epic-pr
 description: "Create an aggregated Epic PR from a `cc-epic-<Issue number>` branch to the default branch. Takes the Epic Issue number as argument, assumes sub-PRs have already been merged into the epic branch, and automatically generates the PR title and description from the commit log against the base branch (including sub-PR / sub-Issue references). The PR is posted via `gh pr create` with no label and `Closes #<Epic Issue>`."
 argument-hint: "[issue-number]"
 disable-model-invocation: true
+hooks:
+  PreToolUse:
+    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
+      hooks:
+        - type: command
+          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
 ---
 
 # Create Epic Pull Request
