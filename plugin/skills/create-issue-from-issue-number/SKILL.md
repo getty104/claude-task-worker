@@ -8,6 +8,11 @@ hooks:
       hooks:
         - type: command
           command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
+  Stop:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Create Issue From Issue Number

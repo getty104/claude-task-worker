@@ -12,7 +12,7 @@ hooks:
     - matcher: ""
       hooks:
         - type: command
-          command: docker compose down --volumes --remove-orphans
+          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Triage Created Issue
