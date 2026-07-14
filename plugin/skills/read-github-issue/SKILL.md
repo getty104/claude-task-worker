@@ -2,9 +2,6 @@
 name: read-github-issue
 description: GitHub Issueの内容を取得し、並列実行可能な単位に分解します。
 argument-hint: "[issue-number]"
-model: sonnet
-effort: high
-context: fork
 ---
 
 # Read GitHub Issue
@@ -18,7 +15,7 @@ context: fork
 
 ## 実行モードの制約
 
-本スキルは `context: fork` のサブエージェントとして起動されるが、**内部で呼び出す Bash・Skill・Agent も絶対にバックグラウンド実行しないこと**。
+本スキルは呼び出し元スキルから `Skill` tool 経由で起動されるが、**内部で呼び出す Bash・Skill・Agent も絶対にバックグラウンド実行しないこと**。
 
 - Bash に `run_in_background: true` を指定しない。既定の同期実行（フォアグラウンド）でstdoutを受け取ってから次の処理に進む
 - コマンド末尾に `&` を付けない。`nohup` / `disown` / `setsid` 等でのデタッチも禁止
@@ -28,14 +25,9 @@ context: fork
 
 **理由**: 本スキルは「Issueを分解した構造化サマリ」を同期返却する契約であり、バックグラウンド化するとサマリ生成前に制御が戻り、後続のタスク実行が空振りするため。
 
-## 0. 入力の確定（args + argsファイルの二重チャネル）
+## 0. 入力の確定
 
-本スキルの入力は対象 Issue の番号1つ。Claude Code には既知バグ（[anthropics/claude-code#34164](https://github.com/anthropics/claude-code/issues/34164)）があり、`context: fork` のスキルを Skill tool 経由でプログラム的に起動すると args のプレースホルダ置換が行われず、fork 先に引数が届かないことがある。このため Issue 番号を次の優先順で確定する。
-
-1. **args**: 下記の args 入力スロットに呼び出し時の args が展開される。Issue 番号（数字。`#123` 形式や Issue URL でもよい）として解釈できればそれを採用する。
-2. **argsファイル**: args 入力スロットが空・未置換プレースホルダのまま（ドル記号に `ARGUMENTS` が続く文字列がそのまま残っている状態）・番号として解釈不能、のいずれかの場合は、`"$(git rev-parse --git-dir)/claude-task-worker/read-github-issue.args.txt"` を読み、その内容（1行の Issue 番号）を採用する。
-
-どちらのチャネルを採用したかに関わらず、番号の確定後は argsファイルを `rm -f` で**必ず削除**する（consume-once。前回の入力が次回の呼び出しに紛れ込むのを防ぐ）。両チャネルとも番号を得られない場合は、推測で番号を選ばず、理由を1-2行で出力して**即中断**する。
+本スキルの入力は対象 Issue の番号1つ。下記の args 入力スロットに呼び出し時の args が展開される。Issue 番号（数字。`#123` 形式や Issue URL でもよい）として解釈できればそれを採用する。番号を得られない場合は、推測で番号を選ばず、理由を1-2行で出力して**即中断**する。
 
 args 入力スロット:
 
@@ -45,15 +37,7 @@ $ARGUMENTS
 
 以降の手順では、確定した番号を `<issue番号>` と表記する。
 
-**呼び出し側への必須ルール**: 呼び出し元（`exec-issue` 等）は、本スキルを起動する**直前に毎回**（再試行時も含む）、Issue 番号を argsファイルにも書き込んだうえで、`Skill(skill='read-github-issue', args=<issue番号>)` で起動すること（バグ修正後は args がそのまま届くため、両チャネルに同一の番号を流しておく）。
-
-```bash
-ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/read-github-issue.args.txt"
-mkdir -p "$(dirname "$ARGS_FILE")"
-printf '%s\n' "<issue番号>" > "$ARGS_FILE"
-```
-
-パスを `git rev-parse --git-dir` 起点にするのは、fork 先が呼び出し元と cwd を共有するため双方が同じパスを決定的に導出でき、`.git` 配下なのでコミット対象にならず、worktree ごとに管理ディレクトリが分かれるため並行タスク間で衝突しないため。
+**呼び出し側への必須ルール**: 呼び出し元（`exec-issue` 等）は、本スキルを `Skill(skill='read-github-issue', args=<issue番号>)` で起動すること。
 
 ## 1. Issueと付随情報の取得
 

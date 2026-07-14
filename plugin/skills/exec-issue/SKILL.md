@@ -83,15 +83,9 @@ E2Eテストが存在しない場合は、Issueが明示的に要求しない限
 
 ## フェーズ1: Issue読み込みとタスク分解
 
-`read-github-issue` skill を `$0` で呼び出し、タスク分解結果を取得する。起動の**直前に毎回**（再試行時も含む）、Issue 番号を argsファイルにも書き込むこと。Claude Code の既知バグ（anthropics/claude-code#34164）で `context: fork` スキルへ Skill tool 経由の args が届かないことがあり、`read-github-issue` は args が未置換のときこのファイルへフォールバックする規約のため（ファイルは `read-github-issue` 側が読み取り後に削除する）。
+`read-github-issue` skill を `$0` で呼び出し、タスク分解結果を取得する。
 
-```bash
-ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/read-github-issue.args.txt"
-mkdir -p "$(dirname "$ARGS_FILE")"
-printf '%s\n' "$0" > "$ARGS_FILE"
-```
-
-そのうえで `Skill(skill='read-github-issue', args=<Issue番号>)`（必要なら plugin namespace 付きで `claude-task-worker:read-github-issue`）で起動し、以下を取得する：
+`Skill(skill='read-github-issue', args=<Issue番号>)`（必要なら plugin namespace 付きで `claude-task-worker:read-github-issue`）で起動し、以下を取得する：
 - Issue概要（タイトル・目的・背景）
 - 分解されたタスク一覧（目的・対象範囲・完了条件付き）
 - タスク間の依存関係

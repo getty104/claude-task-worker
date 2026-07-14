@@ -195,17 +195,7 @@ confirmation_items:  # 0件ならキーごと省略
 
 `sections.依頼内容` にはステップ1.5で抽出した文字列をそのまま渡す。改行やインデントを含む場合は YAML の `|` ブロックスカラーで表現し、勝手に整形・要約しないこと（原文の verbatim 保持が目的）。
 
-起動の**直前に毎回**（再試行時も含む）、同じ YAML を argsファイルにも書き込む。Claude Code の既知バグ（anthropics/claude-code#34164）で `context: fork` スキルへ Skill tool 経由の args が届かないことがあり、`post-issue-body` は args が未置換のときこのファイルへフォールバックする規約のため（ファイルは `post-issue-body` 側が読み取り後に削除する）。
-
-```bash
-ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/post-issue-body.args.yaml"
-mkdir -p "$(dirname "$ARGS_FILE")"
-cat > "$ARGS_FILE" <<'ARGS_EOF'
-<上記YAMLをそのまま>
-ARGS_EOF
-```
-
-そのうえで Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。`post-issue-body` の責務範囲は以下のとおりで、本スキルから重複して実行しない。
+Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。`post-issue-body` の責務範囲は以下のとおりで、本スキルから重複して実行しない。
 
 - `gh issue view --json body` で既存本文を再取得して変更ログを verbatim で再掲
 - 本文テンプレート・投稿前チェックリストに従って本文を組み立て・検証
@@ -227,7 +217,7 @@ ARGS_EOF
    - **ステップ1.5で「依頼内容」が非空だった場合** — 抽出した中身が、渡した文字列と**改行・空白まで含めて完全一致**すること。前後の空行1つ程度の差は許容してよいが、内容の欠落・改変は不可。特に初回実行時は `**元のタイトル**: <原文タイトル>` の1行、空行、body本体がそのまま並んでいることを確認する（title 行の脱落は「原文が失われた」に相当する重大な逸脱なので必ず検出する）。
    - **書き出しが折りたたみブロックになっていること** — 更新後bodyが旧フォーマットの裸の `## 依頼内容` 見出しのままなら逸脱として扱う（`post-issue-body` は必ず折りたたみで書き出す規約）。
 4. 一致しない場合は次の順で復旧を試みる:
-   - argsファイル（ステップ4と同じパス・同じ YAML）を書き直したうえで、もう一度 `post-issue-body` を同じ args で呼び直す（一過性の投稿エラーの可能性。argsファイルは前回呼び出しで消費済みのため再書き込みが必須）。
+   - もう一度 `post-issue-body` を同じ args で呼び直す（一過性の投稿エラーの可能性）。
    - 再実行後も一致しない場合は、`gh issue view --json body` で取得した現在の body に対して「`## 概要` の直前に `<details>\n<summary>依頼内容</summary>\n\n<抽出した原文>\n\n</details>\n\n` を差し込んだ本文」を組み立て、`gh issue edit <issue_number> --body-file - <<'EOF' ... EOF` で直接上書きする。既存bodyに旧フォーマットの `## 依頼内容` 見出しや別の依頼内容ブロックが残っていれば、その部分は取り除いてから差し込む。
    - どちらでも解消しなければ、Issue URL と失敗理由を最終報告に含めて終了する（サイレント失敗させない）。
 5. 検証が通れば、次のステップに進む。

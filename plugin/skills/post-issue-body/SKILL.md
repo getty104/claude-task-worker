@@ -2,9 +2,6 @@
 name: post-issue-body
 description: "INTERNAL/HELPER skill — do NOT invoke directly from a user query. This is the shared formatter/poster used by create-issue, create-issue-from-issue-number, and update-issue. It formats an implementation-ready GitHub Issue body, runs the pre-posting checklist, executes `gh issue create` or `gh issue edit`, and optionally posts a 確認事項 follow-up comment. Invoke this skill ONLY from one of the three parent skills via the Skill tool, after the parent has completed analysis. If a user asks to 'format an issue body' or similar, route them to the appropriate parent skill (/create-issue, /create-issue-from-issue-number, or /update-issue) rather than invoking this one directly."
 user-invocable: false
-context: fork
-model: sonnet
-effort: high
 argument-hint: "<YAML input — see SKILL.md>"
 ---
 
@@ -17,7 +14,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 3. `gh issue create` または `gh issue edit` の実行
 4. 確認事項が渡されていればコメントとして投稿
 
-ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args にも argsファイルにも無い場合は、親スキル（create-issue 等）の使用を促して終了する。
+ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args に無い場合は、親スキル（create-issue 等）の使用を促して終了する。
 
 > **呼び出し側への必須ルール**: 本スキルを**絶対にバックグラウンド実行しないこと**。`Agent` ツール経由で呼び出す場合は **既定が `run_in_background: true`（バックグラウンド）** のため、**必ず `run_in_background: false` を明示指定** すること。`Skill` ツール経由の場合も `run_in_background: true` を指定してはならない（既定は同期）。呼び出し元（いずれも `claude-task-worker` から自動起動される可能性がある）は、本スキルが同期的に `gh issue create/edit` を完了し Issue URL を返したことを確認してからラベル遷移や後続の確認事項コメント投稿に進む設計であり、バックグラウンド化すると本文更新前に制御が戻り、後続処理が古い状態を前提に走って破綻する。
 
@@ -25,7 +22,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 ## 実行モードの制約: サブエージェント・サブスキル・Bashをバックグラウンド実行しないこと
 
-本スキルは `context: fork` のサブエージェントとして起動されるが、**内部で呼び出す `Bash` / `Skill` / `Agent` も絶対にバックグラウンド実行しない**。
+本スキルは呼び出し元スキルから `Skill` tool 経由で起動されるが、**内部で呼び出す `Bash` / `Skill` / `Agent` も絶対にバックグラウンド実行しない**。
 
 - `Bash` に `run_in_background: true` を指定しない。特に `gh issue create` / `gh issue edit` / `gh issue comment` は同期実行し、返却された Issue URL や成功ステータスを確認してから完了報告する
 - コマンド末尾に `&` を付けたり、`nohup` / `disown` / `setsid` でデタッチしたりしない
@@ -35,11 +32,11 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 **理由**: 本スキルは呼び出し元へ「Issue URL と投稿完了ステータス」を同期返却する契約であり、バックグラウンド化すると `gh` 完了前に制御が戻り、URL 未取得のまま報告される・本文未反映のまま `cc-issue-created` が付与される、といった状態壊れが起きる。
 
-## 入力（args + argsファイル経由の YAML ブロック）
+## 入力（args 経由の YAML ブロック）
 
 ### 呼び出し規約
 
-呼び出し元の親スキル（`create-issue` / `create-issue-from-issue-number` / `update-issue`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡し、かつ起動直前に同じ YAML を argsファイル（後述）にも書き込む**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
+呼び出し元の親スキル（`create-issue` / `create-issue-from-issue-number` / `update-issue`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡す**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
 
 ```yaml
 mode: create  # create または edit
@@ -81,30 +78,12 @@ assignee は呼び出し元から指定不要。本スキルが `gh api user --j
 
 args に渡す YAML は上記の通り**トップレベルから直接書く**（ラッパキーなし）。
 
-### 入力の渡し方（args + argsファイルの二重チャネル）
-
-Claude Code には既知バグ（[anthropics/claude-code#34164](https://github.com/anthropics/claude-code/issues/34164)）があり、`context: fork` のスキルを Skill tool 経由でプログラム的に起動すると args のプレースホルダ置換が行われず、fork 先に引数が届かないことがある。このため入力 YAML は **args と argsファイルの二重チャネル**で受け渡す。
-
-呼び出し元は、本スキルを起動する**直前に毎回**（再試行時も含む）、同じ YAML を argsファイルにも書き込むこと:
-
-```bash
-ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/post-issue-body.args.yaml"
-mkdir -p "$(dirname "$ARGS_FILE")"
-cat > "$ARGS_FILE" <<'ARGS_EOF'
-<上記YAMLをそのまま>
-ARGS_EOF
-```
-
-そのうえで `Skill(skill='post-issue-body', args=<同じYAML文字列>)` の形で起動する。args は改行を含む複数行文字列として渡せる（バグ修正後は args がそのまま届くため、両チャネルに同一内容を流しておく）。
-
-パスを `git rev-parse --git-dir` 起点にするのは、fork 先が呼び出し元と cwd を共有するため双方が同じパスを決定的に導出でき、`.git` 配下なのでコミット対象にならず、worktree ごとに管理ディレクトリが分かれるため並行タスク間で衝突しないため。
-
 ### 取り扱い規約
 
 - 空セクションを省略しない。「なし」「該当なし」で埋める（後続スキルが「未記入」と区別できなくなるため）。
 - 入力の YAML が壊れていたり項目が欠けている場合は、最低限の推定で埋める。`mode` と（edit時の）`issue_number` だけは推定不可なので欠けていたら中断する。
 - `blocked_by` / `blocking` の Issue 番号は**呼び出し側で確定済み・Open な既存Issue**が前提。本スキルは渡された値をそのまま `gh issue create` の `--blocked-by` / `--blocking` に渡す。これらは `mode=create` でのみ有効で、`mode=edit` では無視する（既存Issueへの relationship 追加は呼び出し元が `gh issue edit --add-blocked-by` / `--add-blocking` で明示的に行う方針）。依存関係は本文の `## 依存関係` セクションには書かず、GitHub ネイティブ relationships で表現する。
-- args と argsファイルのどちらからも入力 YAML を取得できない場合（直接ユーザー起動など）は、親スキル（`create-issue` / `create-issue-from-issue-number` / `update-issue`）の使用を促して中断する。
+- args から入力 YAML を取得できない場合（直接ユーザー起動など）は、親スキル（`create-issue` / `create-issue-from-issue-number` / `update-issue`）の使用を促して中断する。
 
 ## Issueフォーマット（厳守）
 
@@ -190,12 +169,7 @@ ARGS_EOF
 
 ### 1. 入力 YAML の取得とパース
 
-入力 YAML を次の優先順で確定する。
-
-1. **args**: 下記の args 入力スロットに呼び出し時の args が展開される。中身が YAML として解釈できればそれを入力とする。
-2. **argsファイル**: args 入力スロットが空・未置換プレースホルダのまま（ドル記号に `ARGUMENTS` が続く文字列がそのまま残っている状態。既知バグ anthropics/claude-code#34164 により fork へ args が届かなかったケース）・YAML として解釈不能、のいずれかの場合は、`"$(git rev-parse --git-dir)/claude-task-worker/post-issue-body.args.yaml"` を読み、その内容を入力とする。
-
-どちらのチャネルを採用したかに関わらず、入力の確定後は argsファイルを `rm -f` で**必ず削除**する（consume-once。前回の入力が次回の呼び出しに紛れ込むのを防ぐ）。
+下記の args 入力スロットに呼び出し時の args が展開される。中身を YAML として解釈し、入力とする。
 
 args 入力スロット:
 
@@ -203,7 +177,7 @@ args 入力スロット:
 $ARGUMENTS
 </args-input>
 
-確定した入力 YAML から `mode` / `issue_number` / `title` / `sections` / `new_changelog_entry` / `labels` / `confirmation_items` / `blocked_by` / `blocking` を取り出す。`mode` が読み取れない、`mode=edit` で `issue_number` が読み取れない、または両チャネルとも入力が得られないならば中断条件に従って終了する。
+確定した入力 YAML から `mode` / `issue_number` / `title` / `sections` / `new_changelog_entry` / `labels` / `confirmation_items` / `blocked_by` / `blocking` を取り出す。`mode` が読み取れない、`mode=edit` で `issue_number` が読み取れない、または args から入力が得られないならば中断条件に従って終了する。
 
 `labels` は配列。空 / 未指定なら `--label` フラグを一切付けない（空文字を渡すと `gh` が引数エラーで落ちる）。`mode=edit` ではラベル指定を**無視する**（既存ラベルの剥がし合いを避けるため。ラベル付け替えは呼び出し元が `gh issue edit --add-label` / `--remove-label` で明示的に行う方針）。
 
@@ -353,7 +327,7 @@ EOF
 
 以下のいずれかに該当する場合のみ、理由を1-2行で出力して**即中断**する。
 
-- args と argsファイルのどちらからも入力 YAML を取得できない（空・未置換プレースホルダ・YAML 解釈不能）
+- args から入力 YAML を取得できない（空・YAML 解釈不能）
 - `mode` が `create` でも `edit` でもない
 - `mode=edit` で `issue_number` が解釈できない
 - `mode=edit` で `gh issue view` が失敗、または対象 Issue が `CLOSED`
