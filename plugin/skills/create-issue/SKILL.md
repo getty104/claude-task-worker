@@ -150,17 +150,7 @@ blocking: [<この新Issueがブロックする＝後続で待たせる既存Iss
 
 `labels` には `cc-triage-scope` と `cc-issue-created` の2つを必ず入れる（このスキルで作成する Issue は「Explore 分析済み（`cc-issue-created`）」かつ「人間の triage 待ち（`cc-triage-scope`）」の両方の性質を持つため、後続スキルが両方のラベルで拾えるようにする）。assignee は `post-issue-body` が `gh api user --jq '.login'` で取得した gh ログインユーザーを自動で紐づけるため、本スキルから渡す必要はない。
 
-起動の**直前に毎回**（再試行時も含む）、同じ YAML を argsファイルにも書き込む。Claude Code の既知バグ（anthropics/claude-code#34164）で `context: fork` スキルへ Skill tool 経由の args が届かないことがあり、`post-issue-body` は args が未置換のときこのファイルへフォールバックする規約のため（ファイルは `post-issue-body` 側が読み取り後に削除する）。
-
-```bash
-ARGS_FILE="$(git rev-parse --git-dir)/claude-task-worker/post-issue-body.args.yaml"
-mkdir -p "$(dirname "$ARGS_FILE")"
-cat > "$ARGS_FILE" <<'ARGS_EOF'
-<上記YAMLをそのまま>
-ARGS_EOF
-```
-
-そのうえで Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。本文整形・投稿前チェック・`gh issue create`（`--label cc-triage-scope --label cc-issue-created --assignee <gh ログインユーザー>` 付き）の実行、確認事項があればコメント投稿までを `post-issue-body` が担う。完了後、Issue URL と確認事項コメントの有無が返ってくる。
+Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。本文整形・投稿前チェック・`gh issue create`（`--label cc-triage-scope --label cc-issue-created --assignee <gh ログインユーザー>` 付き）の実行、確認事項があればコメント投稿までを `post-issue-body` が担う。完了後、Issue URL と確認事項コメントの有無が返ってくる。
 
 `post-issue-body` の失敗（gh コマンド失敗・本文チェック不通過の解消不能等）はそのまま本スキルの中断条件となる。エラーメッセージを最終報告に含めて中断する。
 
