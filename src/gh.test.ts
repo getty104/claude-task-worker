@@ -6,7 +6,25 @@ import type * as GhModule from "./gh";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { hasLabel } = (await import("./gh.ts")) as typeof GhModule;
+const { hasLabel, findPrNumberClosingIssue } = (await import("./gh.ts")) as typeof GhModule;
+
+const REPO_INFO_STDOUT = JSON.stringify({
+  owner: { login: "getty104" },
+  name: "claude-task-worker",
+  defaultBranchRef: { name: "main" },
+});
+
+// findPrNumberClosingIssue は getRepoInfo（repo view）→ GraphQL の順に execFile を呼ぶため、
+// args に "graphql" を含むかどうかで返すstdoutを切り替える。
+function mockRepoInfoThenGraphql(t: TestContext, graphqlStdout: string): void {
+  t.mock.method(childProcess, "execFile", (_command: string, args: string[], callback: ExecFileCallback) => {
+    if (args.includes("graphql")) {
+      callback(null, graphqlStdout, "");
+      return;
+    }
+    callback(null, REPO_INFO_STDOUT, "");
+  });
+}
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -48,4 +66,74 @@ test("hasLabel retries on a transient gh failure and eventually succeeds", async
   });
   assert.equal(await hasLabel("issue", 89, "cc-need-human-check"), true);
   assert.equal(calls, 2);
+});
+
+test("findPrNumberClosingIssue returns null when the only referencing PR is CLOSED (unmerged)", async (t) => {
+  // 無関係な却下済み（未マージでクローズ）のPRを誤検出してはいけない。
+  mockRepoInfoThenGraphql(
+    t,
+    JSON.stringify({
+      data: {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: { nodes: [{ number: 42, state: "CLOSED" }] },
+          },
+        },
+      },
+    }),
+  );
+  assert.equal(await findPrNumberClosingIssue(1), null);
+});
+
+test("findPrNumberClosingIssue returns the number of a MERGED referencing PR", async (t) => {
+  mockRepoInfoThenGraphql(
+    t,
+    JSON.stringify({
+      data: {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: { nodes: [{ number: 7, state: "MERGED" }] },
+          },
+        },
+      },
+    }),
+  );
+  assert.equal(await findPrNumberClosingIssue(1), 7);
+});
+
+test("findPrNumberClosingIssue returns the number of an OPEN referencing PR", async (t) => {
+  mockRepoInfoThenGraphql(
+    t,
+    JSON.stringify({
+      data: {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: { nodes: [{ number: 9, state: "OPEN" }] },
+          },
+        },
+      },
+    }),
+  );
+  assert.equal(await findPrNumberClosingIssue(1), 9);
+});
+
+test("findPrNumberClosingIssue skips a leading CLOSED node and returns the following MERGED one", async (t) => {
+  mockRepoInfoThenGraphql(
+    t,
+    JSON.stringify({
+      data: {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: {
+              nodes: [
+                { number: 42, state: "CLOSED" },
+                { number: 7, state: "MERGED" },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  );
+  assert.equal(await findPrNumberClosingIssue(1), 7);
 });

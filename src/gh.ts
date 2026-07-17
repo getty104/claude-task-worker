@@ -137,11 +137,18 @@ export async function listIssuesByNumbers(
 }
 
 export async function findOpenPrNumberByHeadRef(headRefName: string): Promise<number | null> {
+  return findPrNumberByHeadRef(headRefName, "open");
+}
+
+export async function findPrNumberByHeadRef(
+  headRefName: string,
+  state: "open" | "all" = "open",
+): Promise<number | null> {
   const output = await execGh([
     "pr",
     "list",
     "--state",
-    "open",
+    state,
     "--head",
     headRefName,
     "--json",
@@ -151,6 +158,42 @@ export async function findOpenPrNumberByHeadRef(headRefName: string): Promise<nu
   ]);
   const prs: { number: number }[] = JSON.parse(output);
   return prs.length > 0 ? prs[0].number : null;
+}
+
+export async function getIssueState(issueNumber: number): Promise<string> {
+  const output = await execGh(["issue", "view", String(issueNumber), "--json", "state"]);
+  const parsed = JSON.parse(output);
+  return parsed.state;
+}
+
+// Issue を closing keyword（Closes #N 等）で参照する PR を探す。マージ済み・オープン中のPRのみを対象とし、
+// 無関係な却下済み（未マージでクローズ）のPRを誤検出しないよう除外する。
+export async function findPrNumberClosingIssue(issueNumber: number): Promise<number | null> {
+  const { owner, name } = await getRepoInfo();
+  const query = `query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      issue(number: $number) {
+        closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number state } }
+      }
+    }
+  }`;
+  const output = await execGh([
+    "api",
+    "graphql",
+    "-f",
+    `query=${query}`,
+    "-F",
+    `owner=${owner}`,
+    "-F",
+    `name=${name}`,
+    "-F",
+    `number=${issueNumber}`,
+  ]);
+  const parsed = JSON.parse(output);
+  const nodes: { number: number; state?: string }[] =
+    parsed?.data?.repository?.issue?.closedByPullRequestsReferences?.nodes ?? [];
+  const validPr = nodes.find((node) => node.state === "MERGED" || node.state === "OPEN");
+  return validPr ? validPr.number : null;
 }
 
 export async function getIssueSubIssuesSummary(issueNumber: number): Promise<SubIssuesSummary> {
@@ -298,6 +341,10 @@ export async function getLastIssueComment(issueNumber: number): Promise<{ author
 
 export async function commentOnPR(prNumber: number, body: string): Promise<void> {
   await execGh(["pr", "comment", String(prNumber), "--body", body]);
+}
+
+export async function commentOnIssue(issueNumber: number, body: string): Promise<void> {
+  await execGh(["issue", "comment", String(issueNumber), "--body", body]);
 }
 
 export async function createLabel(name: string, color?: string, force?: boolean): Promise<boolean> {
