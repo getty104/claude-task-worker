@@ -2,6 +2,8 @@
 name: triage-created-issue
 description: Triage a GitHub issue that already has the cc-issue-created label and is assumed to be ready to start. First inspect the comment history to decide whether human confirmation is needed (cc-need-human-check, highest priority); otherwise decide whether the issue should be closed as not needed, unanswered confirmation items remain (cc-answer-issue-questions), the description is stale relative to settled comment-history content and must be refreshed before execution (cc-update-issue), or it can move to execution (cc-exec-issue). Dependency checks are out of scope.
 argument-hint: "[Issue number]"
+context: fork
+agent: claude-task-worker:worker-skill-executor
 hooks:
   PreToolUse:
     - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
@@ -39,17 +41,11 @@ hooks:
 - Issueに付いているラベルは**絶対に外さないこと**。`gh issue edit`で`--remove-label`は使用を禁止する
 - トリガーラベルの除去（`cc-issue-created`・`cc-triage-scope`）はワーカー基盤側が本スキル完了時に行う設計である。本スキルは遷移ラベル（`cc-need-human-check`・`cc-answer-issue-questions`・`cc-update-issue`・`cc-exec-issue`）を付与するのみで、既存ラベルの除去は行わない
 
-## 実行モードの制約: サブエージェント・サブスキル・Bashをバックグラウンド実行しないこと
+## 実行モードの制約
 
-本スキルは `claude-task-worker` の `triage-created-issue` ワーカー（`cc-issue-created` + `cc-triage-scope` ラベル）から自動起動される想定で、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-answer-issue-questions` / `cc-exec-issue` の付与や Issue のクローズ）を進める。**本スキル内部で呼び出す `Agent` / `Skill` / `Bash` を絶対にバックグラウンド実行しないこと**。
+本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。
 
-- **`Agent` ツールは既定が `run_in_background: true`（バックグラウンド）**。呼び出しごとに **必ず `run_in_background: false` を明示指定** し、フォアグラウンドで同期的に結果を受け取ってから次の処理に進む。指定を省略した場合はバックグラウンドで走り、本スキルが未完のまま終了する
-- `Skill` に `run_in_background: true` を指定しない。既定の同期実行（フォアグラウンド）で最終出力を受け取ってから次の処理に進む
-- 同一メッセージ内で複数の `Agent` / `Skill` を並列に投げるのは「並列実行」であって「バックグラウンド実行」ではないため許容される（各サブエージェントの完了はその場で同期的に待つ）
-- `Bash` にも `run_in_background: true` を指定しない。コマンド末尾に `&` を付けたり、`nohup` / `disown` / `setsid` でデタッチしたりしない
-- `ScheduleWakeup` などで処理を後回しにしない
-
-**理由**: バックグラウンド化すると子処理の完了前に本スキルが終了し、ワーカーが「トリアージが完了した」と誤認する。判定未確定のまま `cc-answer-issue-questions` や `cc-exec-issue` が付与されず Issue が次のワーカーに引き継がれない（あるいは判定と異なるラベルが付与される）といった状態壊れを防ぐため、内部処理はすべて同期実行で完結させる。
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `triage-created-issue` ワーカー（`cc-issue-created` + `cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-answer-issue-questions` / `cc-exec-issue` の付与や Issue のクローズ）を進める。処理が未完のままターンを終えると、判定未確定のまま `cc-answer-issue-questions` や `cc-exec-issue` が付与されず Issue が次のワーカーに引き継がれない（あるいは判定と異なるラベルが付与される）といった状態壊れが起きる。
 
 ## 実行ステップ
 
