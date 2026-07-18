@@ -20,6 +20,20 @@ const { getDisplayWidth, truncateToWidth, padToWidth } = await loadTable();
 export const POLL_INTERVAL_MS = 7 * 1000;
 export const SHUTDOWN_TIMEOUT_MS = 10 * 60 * 1000;
 
+// tabCreate 直後のペインはシェル（.zshrc / anyenv 等のプロファイル）を初期化中で、
+// プロンプト描画（zle の起動）より前に送ったテキストは端末にエコーされるだけで
+// シェルには読まれず捨てられる。その結果コマンドが実行されないままプロンプトが出て、
+// ワーカーが起動せず pollOnce が「セッション終了」と誤判定してタブを閉じてしまう。
+// これを防ぐため、ペインに最初の出力（プロンプト）が現れるまで待ってから送信する。
+export const PANE_READY_TIMEOUT_MS = 30 * 1000;
+export const PANE_READY_POLL_INTERVAL_MS = 200;
+
+// 送信後にワーカープロセスがフォアグラウンドに現れるまでの待機上限。
+// プロンプト待ちをすり抜けて入力が捨てられた場合も検知して再送できるようにする。
+export const WORKER_STARTUP_TIMEOUT_MS = 30 * 1000;
+export const WORKER_STARTUP_POLL_INTERVAL_MS = 500;
+export const SEND_MAX_ATTEMPTS = 3;
+
 // ディスパッチャーが作成するherdrタブのラベルに付与するプレフィックス。
 // claude-task-worker が起動したタブを他のタブと区別できるようにする。
 export const TAB_LABEL_PREFIX = "ctw:";
@@ -40,8 +54,120 @@ export interface WorkerSession {
 
 export type SessionRegistry = Map<string, WorkerSession>;
 
-export async function runDispatcher(projects: ResolvedProject[], forwardedCommand: string): Promise<SessionRegistry> {
-  const { checkHerdrAvailable, tabCreate, tabClose, tabList, paneSendText, paneSendKeys } = await loadHerdr();
+export interface DispatchTimingOptions {
+  paneReadyTimeoutMs?: number;
+  paneReadyPollIntervalMs?: number;
+  workerStartupTimeoutMs?: number;
+  workerStartupPollIntervalMs?: number;
+  sendMaxAttempts?: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// pollOnce（生存監視）と waitForWorkerStartup（起動確認）で同じ判定を使い、
+// 「起動したと判定した条件」と「生存していると判定する条件」を一致させる。
+export function isWorkerProcess(process: { cmdline?: string }): boolean {
+  return process.cmdline?.includes("claude-task-worker") ?? false;
+}
+
+// フォアグラウンドがまだコマンド未実行のシェルであることを判定する。ログインシェルは
+// argv[0]/cmdline の先頭に "-" が付く（例: "-zsh"）ため、素のシェル名とあわせて判定する。
+const SHELL_NAME_PATTERN = /^-?(zsh|bash|sh)$/;
+export function isShellProcess(process: { name?: string; cmdline?: string }): boolean {
+  return SHELL_NAME_PATTERN.test(process.name ?? "") || SHELL_NAME_PATTERN.test(process.cmdline ?? "");
+}
+
+// ペインに最初の出力（シェルのプロンプト）が現れるまで待つ。プロンプトの文字列は
+// ユーザーのシェル設定に依存するため内容は判定せず、「何か描画されたか」だけを見る。
+export async function waitForPaneReady(
+  paneId: string,
+  herdr: typeof HerdrModule,
+  options?: { timeoutMs?: number; pollIntervalMs?: number },
+): Promise<boolean> {
+  const timeoutMs = options?.timeoutMs ?? PANE_READY_TIMEOUT_MS;
+  const pollIntervalMs = options?.pollIntervalMs ?? PANE_READY_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const content = await herdr.paneRead(paneId, { source: "visible" });
+    if (content.trim() !== "") return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(pollIntervalMs);
+  }
+}
+
+// 送信したコマンドが実際に実行され、ワーカープロセスが立ち上がったことを確認する。
+// フォアグラウンドがシェルのままなら未実行とみなしタイムアウトまで待つ（"shell"）が、
+// シェルでもワーカーでもない無関係なプロセス（ユーザーの別コマンド等）を検出した場合は、
+// それが実行中のコマンドの標準入力である可能性があるため、待たずに区別して返す（"other"）。
+export type WorkerStartupResult = "started" | "shell" | "other";
+
+export async function waitForWorkerStartup(
+  paneId: string,
+  herdr: typeof HerdrModule,
+  options?: { timeoutMs?: number; pollIntervalMs?: number },
+): Promise<WorkerStartupResult> {
+  const timeoutMs = options?.timeoutMs ?? WORKER_STARTUP_TIMEOUT_MS;
+  const pollIntervalMs = options?.pollIntervalMs ?? WORKER_STARTUP_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { foregroundProcesses } = await herdr.paneProcessInfo(paneId);
+    if (foregroundProcesses.some(isWorkerProcess)) return "started";
+    if (foregroundProcesses.length > 0 && !foregroundProcesses.every(isShellProcess)) return "other";
+    if (Date.now() >= deadline) return "shell";
+    await sleep(pollIntervalMs);
+  }
+}
+
+// プロンプト待ち → 送信 → 起動確認を1セットとし、起動を確認できなければ再送する。
+// 再送はフォアグラウンドがシェルのまま（ワーカー未起動）と確認できた場合に限る。
+// シェルでもワーカーでもない無関係なプロセスがフォアグラウンドにいる場合は、
+// それが稼働中の別コマンドの標準入力である可能性があるため再送せず打ち切る。
+export async function startWorkerInPane(
+  paneId: string,
+  forwardedCommand: string,
+  herdr: typeof HerdrModule,
+  options?: DispatchTimingOptions,
+): Promise<boolean> {
+  const maxAttempts = options?.sendMaxAttempts ?? SEND_MAX_ATTEMPTS;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const ready = await waitForPaneReady(paneId, herdr, {
+      timeoutMs: options?.paneReadyTimeoutMs,
+      pollIntervalMs: options?.paneReadyPollIntervalMs,
+    });
+    if (!ready) {
+      console.warn(`[dispatcher] pane ${paneId} produced no prompt before the timeout, sending the command anyway`);
+    }
+    await herdr.paneSendText(paneId, forwardedCommand);
+    await herdr.paneSendKeys(paneId, "enter");
+    const result = await waitForWorkerStartup(paneId, herdr, {
+      timeoutMs: options?.workerStartupTimeoutMs,
+      pollIntervalMs: options?.workerStartupPollIntervalMs,
+    });
+    if (result === "started") return true;
+    if (result === "other") {
+      console.warn(
+        `[dispatcher] pane ${paneId} foreground is neither the shell nor the worker, giving up without resending`,
+      );
+      return false;
+    }
+    if (attempt < maxAttempts) {
+      console.warn(
+        `[dispatcher] worker did not start in pane ${paneId} (attempt ${attempt}/${maxAttempts}), resending the command`,
+      );
+    }
+  }
+  return false;
+}
+
+export async function runDispatcher(
+  projects: ResolvedProject[],
+  forwardedCommand: string,
+  timing?: DispatchTimingOptions,
+): Promise<SessionRegistry> {
+  const herdr = await loadHerdr();
+  const { checkHerdrAvailable, tabCreate, tabClose, tabList } = herdr;
 
   try {
     await checkHerdrAvailable();
@@ -73,8 +199,12 @@ export async function runDispatcher(projects: ResolvedProject[], forwardedComman
         startedAt: new Date(),
         status: "running",
       });
-      await paneSendText(paneId, forwardedCommand);
-      await paneSendKeys(paneId, "enter");
+      const started = await startWorkerInPane(paneId, forwardedCommand, herdr, timing);
+      if (!started) {
+        throw new Error(
+          `worker did not start in pane ${paneId} after ${timing?.sendMaxAttempts ?? SEND_MAX_ATTEMPTS} attempt(s)`,
+        );
+      }
     } catch (error) {
       console.error(`[dispatcher] failed to dispatch project "${project.name}": ${error}`);
       sessions.delete(project.name);
@@ -114,8 +244,7 @@ export async function pollOnce(sessions: SessionRegistry, herdr: typeof HerdrMod
   for (const [name, session] of [...sessions.entries()]) {
     try {
       const { foregroundProcesses } = await herdr.paneProcessInfo(session.paneId);
-      const isAlive = foregroundProcesses.some((process) => process.cmdline?.includes("claude-task-worker"));
-      if (!isAlive) {
+      if (!foregroundProcesses.some(isWorkerProcess)) {
         await removeSession(sessions, name, { closeTab: true });
       }
     } catch (error) {

@@ -142,6 +142,64 @@ export async function tabList(): Promise<TabInfo[]> {
   }));
 }
 
+export type PaneReadSource = "visible" | "recent" | "recent-unwrapped";
+
+const PANE_READ_ERROR_ALLOWED_KEYS = new Set(["code", "message"]);
+
+// 端末内容自体が `{code: ...}` のような任意のJSON風テキストを表示している場合に
+// 誤ってエラー扱いしないよう、キー構成・型まで herdr のエラーペイロード形状と一致する
+// 場合のみ HerdrErrorPayload とみなす。
+function isPaneReadErrorPayload(value: unknown): value is HerdrErrorPayload {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (keys.some((key) => !PANE_READ_ERROR_ALLOWED_KEYS.has(key))) {
+    return false;
+  }
+  const payload = value as { code?: unknown; message?: unknown };
+  if (typeof payload.code !== "string") {
+    return false;
+  }
+  if ("message" in payload && typeof payload.message !== "string") {
+    return false;
+  }
+  return true;
+}
+
+// `pane read` は他コマンドと異なり JSON エンベロープではなく端末内容の生テキストを
+// stdout に返す（失敗時のみ {"code","message"} 形式のJSONを返し、`error` キーでは包まない）。
+// そのため execHerdr のJSONパース経路は通さず、stdout をそのまま端末内容として扱う。
+export async function paneRead(paneId: string, options?: { source?: PaneReadSource; lines?: number }): Promise<string> {
+  const args = ["pane", "read", paneId, "--source", options?.source ?? "visible"];
+  if (options?.lines !== undefined) {
+    args.push("--lines", String(options.lines));
+  }
+  const { execError, stdout, stderr } = await runHerdr(args);
+  const trimmed = stdout.trim();
+  // 端末内容自体が `{` で始まりうるため、JSONとして解釈でき かつ herdr のエラー形状に
+  // 厳密一致する場合のみエラー扱いする。
+  if (trimmed.startsWith("{")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      parsed = undefined;
+    }
+    if (isPaneReadErrorPayload(parsed)) {
+      throw new HerdrError(
+        `herdr ${args.join(" ")} failed: [${parsed.code}] ${parsed.message ?? ""}`.trim(),
+        parsed.code,
+      );
+    }
+  }
+  if (execError) {
+    const stderrSuffix = stderr.trim() ? `: ${stderr.trim()}` : "";
+    throw new Error(`herdr ${args.join(" ")} failed: ${execError.message}${stderrSuffix}`);
+  }
+  return stdout;
+}
+
 export async function paneSendText(paneId: string, text: string): Promise<void> {
   await execHerdr(["pane", "send-text", paneId, text], { allowEmptyResult: true });
 }

@@ -6,7 +6,7 @@ import type * as HerdrModule from "./herdr";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { tabCreate, tabList, paneProcessInfo, paneSendText, paneSendKeys, HerdrError } =
+const { tabCreate, tabList, paneProcessInfo, paneSendText, paneSendKeys, paneRead, HerdrError } =
   (await import("./herdr.ts")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
@@ -121,6 +121,30 @@ test("throws a HerdrError carrying the error code when herdr responds with an er
     assert.match(error.message, /^herdr pane process-info --pane pane-1 failed: \[pane_not_found\] no such pane$/);
     return true;
   });
+});
+
+test("paneRead returns plain terminal text as-is when it is not JSON-shaped", async (t) => {
+  mockExecFile(t, "$ ls\nfoo.txt\nbar.txt\n", "");
+  const result = await paneRead("w3:pB");
+  assert.equal(result, "$ ls\nfoo.txt\nbar.txt\n");
+});
+
+test("paneRead throws a HerdrError for a genuine {code, message} error response", async (t) => {
+  mockExecFile(t, JSON.stringify({ code: "pane_not_found", message: "no such pane" }), "");
+  await assert.rejects(paneRead("w3:pB"), (error: unknown) => {
+    assert.ok(error instanceof HerdrError);
+    assert.equal(error.code, "pane_not_found");
+    assert.match(error.message, /\[pane_not_found\] no such pane/);
+    return true;
+  });
+});
+
+test("paneRead does not misclassify JSON-like terminal output with extra keys as an error", async (t) => {
+  // `code` キーを持つが herdr のエラー形状（code/messageのみ）と一致しない端末出力は
+  // そのままstdoutとして返す。
+  mockExecFile(t, JSON.stringify({ code: "ok", extra: "field" }), "");
+  const result = await paneRead("w3:pB");
+  assert.equal(result, JSON.stringify({ code: "ok", extra: "field" }));
 });
 
 test("propagates a timeout error via execError when herdr hangs", async (t) => {

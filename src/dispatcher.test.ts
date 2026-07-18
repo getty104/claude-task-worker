@@ -12,8 +12,16 @@ const childProcess = createRequire(import.meta.url)("node:child_process") as typ
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { runDispatcher, pollOnce, monitorSessions, shutdownDispatcher, createDispatcherShutdownHandler } =
-  (await import("./dispatcher.ts")) as typeof DispatcherModule;
+const {
+  runDispatcher,
+  pollOnce,
+  monitorSessions,
+  shutdownDispatcher,
+  createDispatcherShutdownHandler,
+  waitForPaneReady,
+  waitForWorkerStartup,
+  startWorkerInPane,
+} = (await import("./dispatcher.ts")) as typeof DispatcherModule;
 const { HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
@@ -22,7 +30,17 @@ interface HerdrScenario {
   existingLabels?: string[];
   brokenCreateLabels?: string[];
   brokenPaneLabels?: string[];
+  // ワーカーが起動しないままのペイン（process-info がシェルのみを返す）
+  neverStartingLabels?: string[];
 }
+
+// プロンプト待ち・起動確認のポーリングでテストを待たせないための短縮設定。
+const FAST_TIMING = {
+  paneReadyTimeoutMs: 50,
+  paneReadyPollIntervalMs: 1,
+  workerStartupTimeoutMs: 50,
+  workerStartupPollIntervalMs: 1,
+};
 
 function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: string[], createdLabels?: string[]): void {
   t.mock.method(
@@ -76,6 +94,21 @@ function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: strin
         callback(null, JSON.stringify({ result: null }), "");
         return;
       }
+      // `pane read` は JSON エンベロープではなく端末内容の生テキストを返す。
+      if (args[0] === "pane" && args[1] === "read") {
+        callback(null, "[user:~/my-app]$ ", "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "process-info") {
+        const paneId = args[args.indexOf("--pane") + 1];
+        const label = paneId?.startsWith("pane-") ? paneId.slice("pane-".length) : undefined;
+        const foreground =
+          label && scenario.neverStartingLabels?.includes(label)
+            ? { name: "zsh", argv: ["-zsh"], cmdline: "-zsh", pid: 100 }
+            : { name: "node", argv: [], cmdline: "node /usr/local/lib/claude-task-worker/dist/index.js all", pid: 101 };
+        callback(null, JSON.stringify({ result: { process_info: { foreground_processes: [foreground] } } }), "");
+        return;
+      }
       callback(new Error(`unexpected herdr args: ${args.join(" ")}`), "", "");
     },
   );
@@ -125,7 +158,7 @@ test("skips a project whose label already has a tab and does not create a new on
   });
 
   const projects: ResolvedProject[] = [{ name: "my-app", path: "/tmp/my-app" }];
-  const sessions = await runDispatcher(projects, "claude-task-worker all");
+  const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.equal(sessions.size, 0);
   assert.ok(warnLogs.some((line) => line.includes("my-app")));
@@ -139,7 +172,7 @@ test("creates tabs with a 'ctw:' prefixed label", async (t) => {
     { name: "my-app", path: "/tmp/my-app" },
     { name: "other-app", path: "/tmp/other-app" },
   ];
-  await runDispatcher(projects, "claude-task-worker all");
+  await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.deepEqual(createdLabels, ["ctw:my-app", "ctw:other-app"]);
 });
@@ -148,7 +181,7 @@ test("registers a WorkerSession in the SessionRegistry on success", async (t) =>
   mockHerdr(t, {});
 
   const projects: ResolvedProject[] = [{ name: "my-app", path: "/tmp/my-app" }];
-  const sessions = await runDispatcher(projects, "claude-task-worker all");
+  const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.equal(sessions.size, 1);
   const session = sessions.get("my-app");
@@ -171,7 +204,7 @@ test("continues dispatching remaining projects when one project fails", async (t
     { name: "broken-app", path: "/tmp/broken-app" },
     { name: "my-app", path: "/tmp/my-app" },
   ];
-  const sessions = await runDispatcher(projects, "claude-task-worker all");
+  const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.equal(sessions.size, 1);
   assert.ok(sessions.has("my-app"));
@@ -191,7 +224,7 @@ test("closes the dangling tab when sending the command to a created tab fails", 
     { name: "broken-app", path: "/tmp/broken-app" },
     { name: "my-app", path: "/tmp/my-app" },
   ];
-  const sessions = await runDispatcher(projects, "claude-task-worker all");
+  const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.equal(sessions.size, 1);
   assert.ok(sessions.has("my-app"));
@@ -200,15 +233,15 @@ test("closes the dangling tab when sending the command to a created tab fails", 
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "broken-app"')));
 });
 
-test("registers the session immediately after tabCreate, before awaiting paneSendText/paneSendKeys (regression guard against tab leak on shutdown)", async () => {
+test("registers the session immediately after tabCreate, before awaiting the command dispatch (regression guard against tab leak on shutdown)", async () => {
   const source = await readFile(new URL("./dispatcher.ts", import.meta.url), "utf8");
   const tabCreateIndex = source.indexOf("await tabCreate(");
   const sessionsSetIndex = source.indexOf("sessions.set(", tabCreateIndex);
-  const paneSendTextIndex = source.indexOf("await paneSendText(", tabCreateIndex);
-  assert.ok(tabCreateIndex !== -1 && sessionsSetIndex !== -1 && paneSendTextIndex !== -1);
+  const startWorkerIndex = source.indexOf("await startWorkerInPane(", tabCreateIndex);
+  assert.ok(tabCreateIndex !== -1 && sessionsSetIndex !== -1 && startWorkerIndex !== -1);
   assert.ok(
-    sessionsSetIndex < paneSendTextIndex,
-    "sessions.set() must run right after tabCreate() resolves, before the paneSendText/paneSendKeys awaits, so a SIGINT/SIGTERM arriving during those awaits still sees the tab in the SessionRegistry",
+    sessionsSetIndex < startWorkerIndex,
+    "sessions.set() must run right after tabCreate() resolves, before the startWorkerInPane await, so a SIGINT/SIGTERM arriving during the prompt wait / send / startup wait still sees the tab in the SessionRegistry",
   );
 });
 
@@ -243,6 +276,10 @@ test("closes the dangling tab and removes the leaked session when paneSendKeys (
         callback(null, JSON.stringify({ result: null }), "");
         return;
       }
+      if (args[0] === "pane" && args[1] === "read") {
+        callback(null, "[user:~/my-app]$ ", "");
+        return;
+      }
       if (args[0] === "pane" && args[1] === "send-text") {
         callback(null, JSON.stringify({ result: null }), "");
         return;
@@ -260,11 +297,209 @@ test("closes the dangling tab and removes the leaked session when paneSendKeys (
   });
 
   const projects: ResolvedProject[] = [{ name: "my-app", path: "/tmp/my-app" }];
-  const sessions = await runDispatcher(projects, "claude-task-worker all");
+  const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.equal(sessions.size, 0);
   assert.deepEqual(closedTabIds, ["tab-my-app"]);
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "my-app"')));
+});
+
+test("waits for the pane prompt before sending the command so a shell still initializing cannot swallow it", async (t) => {
+  const calls: string[] = [];
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      calls.push(args.slice(0, 2).join(" "));
+      if (args[0] === "pane" && args[1] === "read") {
+        // 最初の2回はシェル初期化中で何も描画されていない状態を返す。
+        const reads = calls.filter((call) => call === "pane read").length;
+        callback(null, reads <= 2 ? "" : "[user:~/my-app]$ ", "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "process-info") {
+        callback(
+          null,
+          JSON.stringify({
+            result: {
+              process_info: {
+                foreground_processes: [{ name: "node", argv: [], cmdline: "claude-task-worker all", pid: 1 }],
+              },
+            },
+          }),
+          "",
+        );
+        return;
+      }
+      callback(null, JSON.stringify({ result: null }), "");
+    },
+  );
+
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const started = await startWorkerInPane("pane-my-app", "claude-task-worker all", herdr, FAST_TIMING);
+
+  assert.equal(started, true);
+  const firstSendIndex = calls.indexOf("pane send-text");
+  const readsBeforeSend = calls.slice(0, firstSendIndex).filter((call) => call === "pane read").length;
+  assert.ok(readsBeforeSend >= 3, `expected the prompt to be polled before sending, got calls: ${calls.join(", ")}`);
+});
+
+test("resends the command when the worker process never appears, then gives up after the attempt limit", async (t) => {
+  const sendTextCount = { value: 0 };
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      if (args[0] === "pane" && args[1] === "read") {
+        callback(null, "[user:~/my-app]$ ", "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "send-text") {
+        sendTextCount.value += 1;
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "process-info") {
+        // 入力が捨てられ、フォアグラウンドがシェルのままのケース。
+        callback(
+          null,
+          JSON.stringify({
+            result: {
+              process_info: { foreground_processes: [{ name: "zsh", argv: ["-zsh"], cmdline: "-zsh", pid: 1 }] },
+            },
+          }),
+          "",
+        );
+        return;
+      }
+      callback(null, JSON.stringify({ result: null }), "");
+    },
+  );
+  t.mock.method(console, "warn", () => {});
+
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const started = await startWorkerInPane("pane-my-app", "claude-task-worker all", herdr, {
+    ...FAST_TIMING,
+    sendMaxAttempts: 3,
+  });
+
+  assert.equal(started, false);
+  assert.equal(sendTextCount.value, 3);
+});
+
+test("closes the tab and drops the session when the worker never starts in the dispatched pane", async (t) => {
+  const closedTabIds: string[] = [];
+  mockHerdr(t, { neverStartingLabels: ["dead-app"] }, closedTabIds);
+  const errorLogs: string[] = [];
+  t.mock.method(console, "error", (message: string) => {
+    errorLogs.push(message);
+  });
+  t.mock.method(console, "warn", () => {});
+
+  const projects: ResolvedProject[] = [
+    { name: "dead-app", path: "/tmp/dead-app" },
+    { name: "my-app", path: "/tmp/my-app" },
+  ];
+  const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
+
+  assert.equal(sessions.size, 1);
+  assert.ok(sessions.has("my-app"));
+  assert.deepEqual(closedTabIds, ["tab-dead-app"]);
+  assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "dead-app"')));
+});
+
+test("waitForPaneReady returns false when the pane stays empty until the timeout", async (t) => {
+  t.mock.method(childProcess, "execFile", (_c: string, _a: string[], _o: unknown, callback: ExecFileCallback) => {
+    callback(null, "", "");
+  });
+
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const ready = await waitForPaneReady("pane-my-app", herdr, { timeoutMs: 20, pollIntervalMs: 1 });
+
+  assert.equal(ready, false);
+});
+
+test("waitForWorkerStartup returns true once a claude-task-worker process appears", async (t) => {
+  let polls = 0;
+  t.mock.method(childProcess, "execFile", (_c: string, _a: string[], _o: unknown, callback: ExecFileCallback) => {
+    polls += 1;
+    const foreground =
+      polls < 3
+        ? { name: "zsh", argv: ["-zsh"], cmdline: "-zsh", pid: 1 }
+        : { name: "node", argv: [], cmdline: "claude-task-worker all", pid: 2 };
+    callback(null, JSON.stringify({ result: { process_info: { foreground_processes: [foreground] } } }), "");
+  });
+
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const started = await waitForWorkerStartup("pane-my-app", herdr, { timeoutMs: 500, pollIntervalMs: 1 });
+
+  assert.equal(started, "started");
+  assert.ok(polls >= 3);
+});
+
+test("waitForWorkerStartup returns other when the foreground process is neither a shell nor the worker", async (t) => {
+  t.mock.method(childProcess, "execFile", (_c: string, _a: string[], _o: unknown, callback: ExecFileCallback) => {
+    callback(
+      null,
+      JSON.stringify({
+        result: {
+          process_info: {
+            foreground_processes: [{ name: "npm", argv: ["run", "dev"], cmdline: "npm run dev", pid: 1 }],
+          },
+        },
+      }),
+      "",
+    );
+  });
+
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const result = await waitForWorkerStartup("pane-my-app", herdr, { timeoutMs: 500, pollIntervalMs: 1 });
+
+  assert.equal(result, "other");
+});
+
+test("gives up immediately without resending when the foreground process is neither a shell nor the worker", async (t) => {
+  const sendTextCount = { value: 0 };
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      if (args[0] === "pane" && args[1] === "read") {
+        callback(null, "[user:~/my-app]$ ", "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "send-text") {
+        sendTextCount.value += 1;
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "pane" && args[1] === "process-info") {
+        callback(
+          null,
+          JSON.stringify({
+            result: {
+              process_info: {
+                foreground_processes: [{ name: "npm", argv: ["run", "dev"], cmdline: "npm run dev", pid: 1 }],
+              },
+            },
+          }),
+          "",
+        );
+        return;
+      }
+      callback(null, JSON.stringify({ result: null }), "");
+    },
+  );
+  t.mock.method(console, "warn", () => {});
+
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const started = await startWorkerInPane("pane-my-app", "claude-task-worker all", herdr, {
+    ...FAST_TIMING,
+    sendMaxAttempts: 3,
+  });
+
+  assert.equal(started, false);
+  assert.equal(sendTextCount.value, 1);
 });
 
 function mockTabClose(t: TestContext, closedTabIds: string[]): void {
