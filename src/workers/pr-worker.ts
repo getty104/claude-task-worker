@@ -16,6 +16,7 @@ import {
   createWorktreeFromBranch,
   deleteLocalBranch,
   getWorktreePath,
+  localBranchExists,
   removeWorktree,
   removeWorktreeByBranch,
 } from "../worktree";
@@ -67,6 +68,18 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             // fast-forward できずに失敗するため、リモートを正として作り直させる。
             await removeWorktreeByBranch(pr.headRefName);
             await deleteLocalBranch(pr.headRefName);
+            // 削除できずにブランチが残っている＝locked worktree・実行中タスク・管理外
+            // worktree などが checkout 中。この状態で claude を起動してもスキル内の
+            // `gh pr checkout` が "is already used by worktree" で失敗し、モデル未起動の
+            // まま exit 0 する空振りセッションになるだけなので、この tick はスキップして
+            // ブロッカーが消えた後のポーリングで自然に再開させる。
+            if (await localBranchExists(pr.headRefName)) {
+              console.error(
+                `[${config.name}] PR #${pr.number}: branch ${pr.headRefName} is still checked out by another worktree; skipping this tick`,
+              );
+              await removeLabel("pr", pr.number, LABEL_IN_PROGRESS).catch(() => {});
+              continue;
+            }
             syncDefaultBranch(defaultBranch);
             // claude CLI の --worktree は locked な worktree を作り、異常終了時に
             // 削除不能な残骸を残すため使わない。ワーカー自身が worktree を生成して cwd として渡す。

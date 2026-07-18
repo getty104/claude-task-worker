@@ -2,12 +2,11 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { getWorkerConfig } from "./config.js";
 import { getDisplayWidth, truncateToWidth, padToWidth } from "./table.js";
+import { TASK_TIMEOUT_MS, STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result.js";
 
 type TaskStatus = "running" | "completed" | "failed";
 
 const childProcesses = new Map<number, ChildProcess>();
-
-const TASK_TIMEOUT_MS = 90 * 60 * 1000;
 
 interface TaskEntry {
   id: number;
@@ -201,11 +200,21 @@ export function run(
   });
   childProcesses.set(id, child);
 
-  child.stderr?.resume();
-
   const outputChunks: Buffer[] = [];
   child.stdout?.on("data", (chunk: Buffer) => {
     outputChunks.push(chunk);
+  });
+
+  // stderr は末尾 STDERR_TAIL_LIMIT 分だけ保持する（失敗時の通知に含める）
+  const stderrChunks: Buffer[] = [];
+  let stderrLen = 0;
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderrChunks.push(chunk);
+    stderrLen += chunk.length;
+    while (stderrChunks.length > 1 && stderrLen - stderrChunks[0].length >= STDERR_TAIL_LIMIT) {
+      stderrLen -= stderrChunks[0].length;
+      stderrChunks.shift();
+    }
   });
 
   let timedOut = false;
@@ -228,10 +237,12 @@ export function run(
 
   child.on("close", async (code) => {
     clearTimeout(timeoutHandle);
-    const output =
-      Buffer.concat(outputChunks).toString("utf-8") +
-      (timedOut ? `\n[worker] task timed out after ${TASK_TIMEOUT_MS / 1000}s` : "");
-    const finalStatus = !timedOut && code === 0 ? "completed" : "failed";
+    const { status: finalStatus, output } = buildTaskResult(
+      code,
+      timedOut,
+      Buffer.concat(outputChunks).toString("utf-8"),
+      Buffer.concat(stderrChunks).toString("utf-8").slice(-STDERR_TAIL_LIMIT),
+    );
     try {
       await Promise.race([
         onComplete?.(finalStatus, output) ?? Promise.resolve(),

@@ -108,6 +108,20 @@ export async function deleteLocalBranch(branchName: string): Promise<void> {
   }
 }
 
+/**
+ * ローカルブランチが存在するかを返す。
+ * deleteLocalBranch が「他の worktree で checkout 中」などの理由で削除に失敗しても
+ * エラーはログに留まるため、削除後に本当に消えたかはこの関数で確認する。
+ */
+export async function localBranchExists(branchName: string): Promise<boolean> {
+  try {
+    await execFileAsync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branchName}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getWorktreePath(worktreeId: string): string {
   return `${WORKTREES_DIR}/${worktreeId}`;
 }

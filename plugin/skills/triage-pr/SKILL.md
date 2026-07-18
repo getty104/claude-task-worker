@@ -39,8 +39,9 @@ hooks:
 
 # Instructions
 
-!`git fetch -p >/dev/null 2>&1`
-!`gh pr checkout $ARGUMENTS >/dev/null 2>&1`
+!`git fetch -p >/dev/null 2>&1 || true`
+
+> **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。`gh pr checkout` はかつてプリアンブルにあり、この事故を起こしたため本文のステップ0に移した。プリアンブルに戻さないこと。
 
 ## 実行モードの制約
 
@@ -49,6 +50,16 @@ hooks:
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `triage-pr` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-fix-onetime` の付与やマージ、`cc-triage-scope` の除去を進める。処理が未確定のままターンを終えると、判定未確定のまま `cc-fix-onetime` が付かず `fix-review-point` ワーカーへの引き継ぎが空振りしたり、マージ判定前にラベルが外れてPRが放置される状態壊れが起きる。
 
 ## 実行内容
+
+### ステップ0: PRブランチのcheckout
+
+以下を実行してPRブランチをcheckoutする。
+
+```bash
+gh pr checkout $ARGUMENTS
+```
+
+このコマンドが**失敗した場合**（典型例: `fatal: '<branch>' is already used by worktree at ...` — PRブランチが別のworktreeでcheckout中）は、**後続のステップに進まず**、エラー出力をそのまま含めて「判定: エラー」で結果報告を行い終了する。ラベル操作・自前のリトライは行わない（ブロッカー解消後のポーリングで自動的に再実行される）。
 
 ### ステップ1: コンフリクト検知とラベル付与
 
