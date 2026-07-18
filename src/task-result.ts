@@ -1,4 +1,4 @@
-export const TASK_TIMEOUT_MS = 90 * 60 * 1000;
+export const TASK_TIMEOUT_MS = 120 * 60 * 1000;
 
 // 失敗時の通知に含める stderr 末尾の上限。claude -p はエラーを stderr にしか出さない
 // ことがあり、破棄すると失敗通知が空になって原因調査ができなくなる。
