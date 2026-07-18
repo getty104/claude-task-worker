@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { getWorkerConfig } from "./config.js";
 import { getDisplayWidth, truncateToWidth, padToWidth } from "./table.js";
-import { TASK_TIMEOUT_MS, STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result.js";
+import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result.js";
 
 type TaskStatus = "running" | "completed" | "failed";
 
@@ -219,29 +219,9 @@ export function run(
     }
   });
 
-  let timedOut = false;
-  const timeoutHandle = setTimeout(() => {
-    timedOut = true;
-    console.error(`[worker] task #${id} timed out after ${TASK_TIMEOUT_MS / 1000}s, terminating`);
-    if (child.pid) {
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }, TASK_TIMEOUT_MS);
-  timeoutHandle.unref();
-
   child.on("close", async (code) => {
-    clearTimeout(timeoutHandle);
     const { status: finalStatus, output } = buildTaskResult(
       code,
-      timedOut,
       Buffer.concat(outputChunks).toString("utf-8"),
       Buffer.concat(stderrChunks).toString("utf-8").slice(-STDERR_TAIL_LIMIT),
     );
@@ -265,7 +245,6 @@ export function run(
   });
 
   child.on("error", async (err) => {
-    clearTimeout(timeoutHandle);
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
     try {
       await Promise.race([
