@@ -1,5 +1,3 @@
-export const TASK_TIMEOUT_MS = 120 * 60 * 1000;
-
 // 失敗時の通知に含める stderr 末尾の上限。claude -p はエラーを stderr にしか出さない
 // ことがあり、破棄すると失敗通知が空になって原因調査ができなくなる。
 export const STDERR_TAIL_LIMIT = 8 * 1024;
@@ -19,18 +17,11 @@ export interface TaskResult {
  * 再装填される triage-pr では毎ポーリングで空振りセッションを起動し続ける
  * 無限リトライループになる。
  */
-export function buildTaskResult(
-  code: number | null,
-  timedOut: boolean,
-  stdout: string,
-  stderrTail: string,
-): TaskResult {
+export function buildTaskResult(code: number | null, stdout: string, stderrTail: string): TaskResult {
   const emptyOutput = stdout.trim() === "";
-  const completed = !timedOut && code === 0 && !emptyOutput;
+  const completed = code === 0 && !emptyOutput;
   let output = stdout;
-  if (timedOut) {
-    output += `\n[worker] task timed out after ${TASK_TIMEOUT_MS / 1000}s`;
-  } else if (code === 0 && emptyOutput) {
+  if (code === 0 && emptyOutput) {
     output +=
       "[worker] claude exited with code 0 but produced no output " +
       "(session aborted before the model ran; e.g. a skill preamble command failed)";

@@ -48,7 +48,6 @@ export const DISALLOWED_TOOLS_ARG = DISALLOWED_TOOLS.join(",");
 // - CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0: 万一バックグラウンド化される経路が残った
 //   場合の保険。`claude -p` はバックグラウンドサブエージェントの完了を待つが、
 //   v2.1.182+ ではデフォルト10分で打ち切られる。0 は「無制限に待機」を意味する。
-//   待機の外側はワーカーの TASK_TIMEOUT_MS（process-manager）が上限として効く。
 //
 // 対象プロジェクトのリポジトリ設定に依存させないため、settings.json ではなく spawn 環境
 // 変数として全ワーカー起動に一律注入する（プラグインの settings.json は env を配布できない）。
