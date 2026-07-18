@@ -2,6 +2,8 @@
 name: create-issue-from-issue-number
 description: Re-analyze an existing GitHub Issue using its current title and body as input, refresh the implementation plan against the latest code state, and update the Issue in place. Use this when the user provides an Issue number (numeric, `#`-prefixed, or Issue URL) and wants to regenerate the Explore-based analysis. For reflecting comment-driven updates instead, use update-issue. For creating a brand-new Issue from a natural-language task description, use create-issue.
 argument-hint: "[Issue番号]"
+context: fork
+agent: claude-task-worker:worker-skill-executor
 hooks:
   PreToolUse:
     - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
@@ -31,17 +33,11 @@ hooks:
 
 # Instructions
 
-## 実行モードの制約: サブエージェント・サブスキル・Bashをバックグラウンド実行しないこと
+## 実行モードの制約
 
-本スキルは `claude-task-worker` の `create-issue` ワーカー（`cc-triage-scope` ラベル）から自動起動される想定で、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（例: `cc-issue-created` 付与）を進める。**本スキル内部で呼び出す `Agent` / `Skill` / `Bash` を絶対にバックグラウンド実行しないこと**。
+本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に `post-issue-body` スキルは投稿完了を同期的に受け取ってから次のフェーズに進む。
 
-- **`Agent` ツールは既定が `run_in_background: true`（バックグラウンド）**。呼び出しごとに **必ず `run_in_background: false` を明示指定** し、フォアグラウンドで同期的に結果を受け取ってから次の処理に進む。指定を省略した場合はバックグラウンドで走り、本スキルが未完のまま終了する
-- `Skill` に `run_in_background: true` を指定しない（既定は同期）。特に `post-issue-body` は投稿完了を受け取ってから次のフェーズに進む
-- 同一メッセージ内で複数の `Agent` / `Skill` を並列に投げるのは「並列実行」であって「バックグラウンド実行」ではないため許容される（各サブエージェントの完了はその場で同期的に待つ）
-- `Bash` にも `run_in_background: true` を指定しない。コマンド末尾に `&` を付けたり、`nohup` / `disown` / `setsid` でデタッチしたりしない
-- `ScheduleWakeup` などで処理を後回しにしない
-
-**理由**: バックグラウンド化すると子処理の完了前に本スキルが終了し、ワーカーが「正常完了」と誤認してラベル遷移を進める。description 更新前にラベルが遷移して triage 系スキルが古い状態で起動される、`post-issue-body` の投稿完了前に別ワーカーが動き出す、といった状態壊れを防ぐため、内部処理はすべて同期実行で完結させる。
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-issue` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（例: `cc-issue-created` 付与）を進める。処理が未完のままターンを終えると、description 更新前にラベルが遷移して triage 系スキルが古い状態で起動される、`post-issue-body` の投稿完了前に別ワーカーが動き出す、といった状態壊れが起きる。
 
 ## フェーズ0: 引数判定と事前チェック
 

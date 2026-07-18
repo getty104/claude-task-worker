@@ -2,6 +2,8 @@
 name: update-issue
 description: Update an existing GitHub Issue's description based on the issue number. Reads all issue comments and reflects any items not yet captured in the description. After refreshing the description, reviews it for remaining ambiguities or unclear requirements and posts any open questions as a follow-up 確認事項 comment.
 argument-hint: "[Issue番号]"
+context: fork
+agent: claude-task-worker:worker-skill-executor
 hooks:
   PreToolUse:
     - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
@@ -25,17 +27,11 @@ hooks:
 
 # Instructions
 
-## 実行モードの制約: サブエージェント・サブスキル・Bashをバックグラウンド実行しないこと
+## 実行モードの制約
 
-本スキルは `claude-task-worker` の `cc-update-issue` ラベルをトリガーに自動起動される想定で、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移や後続ワーカー起動を進める。**本スキル内部で呼び出す `Agent` / `Skill` / `Bash` を絶対にバックグラウンド実行しないこと**。
+本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に Explore サブエージェントは並列起動時も個別に `run_in_background: false` を指定し、`post-issue-body` スキルは投稿完了を同期的に受け取ってから次のステップに進む。
 
-- **`Agent` ツールは既定が `run_in_background: true`（バックグラウンド）**。呼び出しごとに **必ず `run_in_background: false` を明示指定** し、フォアグラウンドで同期的に結果を受け取ってから次の処理に進む。指定を省略した場合はバックグラウンドで走り、本スキルが未完のまま終了する。特に Explore サブエージェントは並列起動時も個別に `run_in_background: false` を指定する
-- `Skill` に `run_in_background: true` を指定しない（既定は同期）。特に `post-issue-body` は投稿完了を受け取ってから次のステップに進む
-- 同一メッセージ内で複数の `Agent` / `Skill` を並列に投げるのは「並列実行」であって「バックグラウンド実行」ではないため許容される（各サブエージェントの完了はその場で同期的に待つ）
-- `Bash` にも `run_in_background: true` を指定しない。コマンド末尾に `&` を付けたり、`nohup` / `disown` / `setsid` でデタッチしたりしない
-- `ScheduleWakeup` などで処理を後回しにしない
-
-**理由**: バックグラウンド化すると子処理の完了前に本スキルが終了し、ワーカーが「正常完了」と誤認して `cc-update-issue` を外すため、後続の `answer-issue-questions` / `triage-created-issue` / `exec-issue` などが古い description を前提に起動されてしまう。内部処理はすべて同期実行で完結させる。
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `cc-update-issue` ラベルをトリガーに自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-update-issue` を外す。処理が未完のままターンを終えると、後続の `answer-issue-questions` / `triage-created-issue` / `exec-issue` などが古い description を前提に起動されてしまう。
 
 ## 実行ステップ
 

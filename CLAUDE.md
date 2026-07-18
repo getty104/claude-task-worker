@@ -55,7 +55,9 @@ claude-task-worker all             # Run all workers concurrently
 
 ワーカーは各スキルを `claude -p "<skill> <n>"` の非対話（print）モードで起動する。print モードには再起動ループが無いため、スキル内でエージェントが処理をバックグラウンド化（`Bash(run_in_background:true)` / バックグラウンド `Agent` / `Monitor` / `ScheduleWakeup`）してターンを終えると、後続処理（E2E・テスト・commit/push・PR作成）の完了前にプロセスが exit 0 で終了してしまい、ワーカーが「正常完了」と誤認してラベル遷移（`cc-pr-created` 付与や `cc-fix-onetime` 除去）に進み、Issue/PR の状態が壊れる。
 
-これを防ぐため、3層のガードを設ける。
+ワーカー起動スキル10個（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr`）は、フロントマターの `context: fork` + `agent: claude-task-worker:worker-skill-executor` により、共通ルールを集約したカスタムエージェント **`plugin/agents/worker-skill-executor.md`** 上で実行される。共通ルール（バックグラウンド実行の禁止・同期実行の徹底・PreToolUse フック deny 時の振る舞い・TaskCreate の作法・自律実行原則）はこのエージェント定義に一元化され、各スキル本文の「実行モードの制約」セクションはスキル固有のリスク（どのラベル遷移が壊れるか）だけを記述する。なお、Skill tool 経由で呼ばれるヘルパースキル（`post-issue-body` / `read-github-issue` 等）は fork 化しない（`context: fork` スキルへ Skill 経由の args が届かない既知バグ anthropics/claude-code#34164 のため。ワーカー起動スキルは `claude -p` のスラッシュコマンド起動なので影響を受けない）。
+
+このプロンプトレベルの共通ルールに加えて、3層のハードガードを設ける。
 
 1. **CLI レベルの `--disallowedTools`**（`src/claude-args.ts` の `DISALLOWED_TOOLS`）: ワーカーが `claude -p` を起動する際（`issue-worker.ts` / `pr-worker.ts`）、自律非対話実行では原理的に使い道がない（または有害な）ツールを完全無効化する。全ワーカー起動に一律適用される。対象カテゴリ:
    - 遅延/yield: `Monitor` / `ScheduleWakeup` / `SendMessage`（後続ウェイクアップ・通知前提でプロセスが早期終了する。`SendMessage` はサブエージェントをバックグラウンドでしか再開できず、「完了通知を待つ」状態でターンを終える誘因になる）
@@ -66,7 +68,7 @@ claude-task-worker all             # Run all workers concurrently
 2. **スキルフロントマターの `PreToolUse` フック**（`plugin/scripts/block-async-execution.mjs`, matcher `Bash|Agent|Monitor|ScheduleWakeup`）: フォアグラウンドなら正当だがバックグラウンド実行が問題になる `Bash`（`run_in_background:true` / `&` 制御演算子 / `nohup`・`disown`・`setsid`）と `Agent`（`run_in_background:false` を明示しない呼び出し）を条件付きで deny し、フォアグラウンド同期実行への切り替えを促す。時間のかかる E2E テスト等も待ってから次に進む挙動が強制される。対象スキル: `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr`。**このフックはサブエージェント（`Agent`）内部のツール呼び出しには効かない**。サブエージェント内で処理がバックグラウンド化されターン終了で親に制御が返る事故は、スキル本文のブリーフィングテンプレート（実行モードの制約の伝播）と下記 3 のワーカーレベル検証で受け止める。
 3. **ワーカーレベルの完了検証**（`src/workers/exec-issue.ts` / `epic-issue.ts` の `onCompleted`）: 上記 2 層をすり抜けて exit 0 で終了しても、期待成果物を検証できるまでラベル遷移しない最後の砦。exec-issue は「Issue がクローズ済み（変更不要パス）」または「作業ブランチ（worktreeId）を head とする PR か Issue を closing 参照する PR の実在」を確認できた場合のみ `cc-pr-created` を付与し、確認できなければ `cc-need-human-check` を付与して Issue に状況コメントを残す。epic-issue は `cc-epic-<N>` を head とする Epic PR の実在確認後にのみ `cc-pr-created` を付ける。`onCompleted` が `false` を返すと `issue-worker.ts` は完了通知ではなく失敗通知（Slack）を送る。
 
-いずれもスキル本文の「バックグラウンド実行禁止」プロンプトを補完するハードガード。
+いずれも `worker-skill-executor` エージェント定義の「バックグラウンド実行禁止」プロンプトを補完するハードガード。
 
 ### Stopフックによる起動プロセスの後片付け（`plugin/scripts/stop-servers.mjs`）
 
