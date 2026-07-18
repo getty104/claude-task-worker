@@ -2,14 +2,7 @@
 name: resolve-pr-conflict
 description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。PRをマージ可能な状態に整えたいときに使用してください。
 argument-hint: "[pr-number]"
-context: fork
-agent: claude-task-worker:worker-skill-executor
 hooks:
-  PreToolUse:
-    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
-      hooks:
-        - type: command
-          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:
@@ -37,8 +30,6 @@ hooks:
 # Instructions
 
 ## 実行モードの制約
-
-本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に `git rebase` / `git push --force-with-lease` は同期実行で完了を確認してから完了報告する。
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `resolve-conflict` ワーカー（`cc-resolve-conflict` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-resolve-conflict` の除去を進める。処理が未完のままターンを終えると、rebase未完了のまま `triage-pr` ワーカーが再度PRを拾ってコンフリクトを再検知する無限ループや、リモート未反映のまま次工程に進む状態壊れが起きる。
 

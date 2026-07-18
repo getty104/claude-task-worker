@@ -2,14 +2,7 @@
 name: create-issue-from-issue-number
 description: Re-analyze an existing GitHub Issue using its current title and body as input, refresh the implementation plan against the latest code state, and update the Issue in place. Use this when the user provides an Issue number (numeric, `#`-prefixed, or Issue URL) and wants to regenerate the Explore-based analysis. For reflecting comment-driven updates instead, use update-issue. For creating a brand-new Issue from a natural-language task description, use create-issue.
 argument-hint: "[Issue番号]"
-context: fork
-agent: claude-task-worker:worker-skill-executor
 hooks:
-  PreToolUse:
-    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
-      hooks:
-        - type: command
-          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:
@@ -34,8 +27,6 @@ hooks:
 # Instructions
 
 ## 実行モードの制約
-
-本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に `post-issue-body` スキルは投稿完了を同期的に受け取ってから次のフェーズに進む。
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-issue` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（例: `cc-issue-created` 付与）を進める。処理が未完のままターンを終えると、description 更新前にラベルが遷移して triage 系スキルが古い状態で起動される、`post-issue-body` の投稿完了前に別ワーカーが動き出す、といった状態壊れが起きる。
 

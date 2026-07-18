@@ -2,14 +2,7 @@
 name: update-issue
 description: Update an existing GitHub Issue's description based on the issue number. Reads all issue comments and reflects any items not yet captured in the description. After refreshing the description, reviews it for remaining ambiguities or unclear requirements and posts any open questions as a follow-up 確認事項 comment.
 argument-hint: "[Issue番号]"
-context: fork
-agent: claude-task-worker:worker-skill-executor
 hooks:
-  PreToolUse:
-    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
-      hooks:
-        - type: command
-          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:
@@ -28,8 +21,6 @@ hooks:
 # Instructions
 
 ## 実行モードの制約
-
-本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に Explore サブエージェントは並列起動時も個別に `run_in_background: false` を指定し、`post-issue-body` スキルは投稿完了を同期的に受け取ってから次のステップに進む。
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `cc-update-issue` ラベルをトリガーに自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-update-issue` を外す。処理が未完のままターンを終えると、後続の `answer-issue-questions` / `triage-created-issue` / `exec-issue` などが古い description を前提に起動されてしまう。
 

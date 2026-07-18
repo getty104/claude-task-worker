@@ -7,8 +7,8 @@
 // skill exits, and a leftover server holding that directory as its cwd both wastes
 // resources and can block the worktree removal.
 //
-// The `block-async-execution` PreToolUse guard already prevents foreground work from
-// surviving turn-end, so anything still alive at Stop time has detached and reparented
+// Background task features are disabled for these runs (CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
+// injected by the worker), so anything still alive at Stop time has detached and reparented
 // to init/launchd (e.g. `docker compose up -d`, a Playwright `webServer`, a test runner
 // that daemonizes). A detached process keeps whatever cwd it was started in, and the
 // run's worktree cwd (`.claude/worktrees/<adj-noun-NNNN>`) is unique to this run, so

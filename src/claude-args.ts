@@ -5,20 +5,15 @@
 // 「入る」系だけを無効化し「出る」系（ExitPlanMode / ExitWorktree）は残す方針：
 // 万一その状態で開始してもモデルが脱出できるようにするため。
 //
-// 補足: バックグラウンド実行が問題になる `Bash`/`Agent` は、フォアグラウンドなら正当な
-// ため一律無効化できない。これらは各スキルの PreToolUse フック
-// (`plugin/scripts/block-async-execution.mjs`) が条件付きで deny する。
-// また `TaskCreate` 等の進捗管理、`WebFetch`/`WebSearch`/`LSP`/各種 MCP は正当な用途が
-// あるため無効化しない。
+// 補足: `TaskCreate` 等の進捗管理、`WebFetch`/`WebSearch`/`LSP`/各種 MCP は正当な用途が
+// あるため無効化しない。バックグラウンド実行は CLAUDE_SPAWN_ENV の
+// CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 で機能ごと無効化されるため、ツール単位の
+// ガードは不要。
 export const DISALLOWED_TOOLS = [
-  // 遅延 / yield: 後続ウェイクアップ前提。print モードには再起動ループが無いため、
+  // 遅延 / yield: 後続ウェイクアップ前提。print モードではウェイクアップが発火せず、
   // 呼ぶと処理未完のままプロセスが終了する。
   "Monitor",
   "ScheduleWakeup",
-  // SendMessage は過去に起動したサブエージェントをバックグラウンドでしか再開できず、
-  // 「完了通知を待ちます」でターンを終える誘因になる。未完のサブエージェントへの追加指示は
-  // フォアグラウンドの新規 Agent 起動で代替させる。
-  "SendMessage",
 
   // 対話 / 承認: 自律実行セッションには回答・承認するユーザーが存在しない。
   "AskUserQuestion",
@@ -41,18 +36,40 @@ export const DISALLOWED_TOOLS = [
 // 後続フラグとの境界を曖昧にしないよう、カンマ結合した1値として渡す。
 export const DISALLOWED_TOOLS_ARG = DISALLOWED_TOOLS.join(",");
 
-// `--append-subagent-system-prompt`（Claude Code v2.1.205+、`-p` 非対話モード限定）で、
-// ネストを含む全サブエージェントのシステムプロンプト末尾に注入するテキスト。
-// `worker-skill-executor` エージェント定義や各スキルの PreToolUse フック
-// (`plugin/scripts/block-async-execution.mjs`) はサブエージェント（`Agent`）内部の
-// ツール呼び出しには届かないため、バックグラウンド実行禁止ルールはこの注入で
-// 全サブエージェントへ適用する。
-export const SUBAGENT_SYSTEM_PROMPT = `あなたは claude-task-worker のワーカーが \`claude -p\`（非対話 print モード）で自動起動したセッション内のサブエージェントです。print モードには再起動ループが無く、親エージェントがターンを終えた時点でプロセスが正常終了します。あなたが処理をバックグラウンド化して未完のまま制御を返すと、外側のワーカーが「正常完了」と誤認して GitHub Issue/PR のラベル状態が壊れます。以下のルールを必ず遵守してください。
+// ワーカーが `claude -p` を spawn する際に process.env へ上書きマージする環境変数。
+//
+// - CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1: Claude 管理下のバックグラウンド機構
+//   （Bash の `run_in_background`・サブエージェントの自動バックグラウンド化）のみを
+//   無効化する。`nohup`/`disown`/末尾 `&` によるシェルレベルのプロセス detach や、
+//   `docker compose up -d` 等が起動する切り離しプロセスまでは防げないため、未完のまま
+//   ターンが終わってプロセスが exit 0 する事故を完全には防止できない。Stop フックに
+//   よる起動プロセスの後片付けとワーカーレベルの完了検証（onCompleted）が引き続き
+//   必要な理由はこのため。
+// - CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0: 万一バックグラウンド化される経路が残った
+//   場合の保険。`claude -p` はバックグラウンドサブエージェントの完了を待つが、
+//   v2.1.182+ ではデフォルト10分で打ち切られる。0 は「無制限に待機」を意味する。
+//   待機の外側はワーカーの TASK_TIMEOUT_MS（process-manager）が上限として効く。
+//
+// 対象プロジェクトのリポジトリ設定に依存させないため、settings.json ではなく spawn 環境
+// 変数として全ワーカー起動に一律注入する（プラグインの settings.json は env を配布できない）。
+export const CLAUDE_SPAWN_ENV = {
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+  CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0",
+} as const;
 
-- \`Bash\` を \`run_in_background: true\` で呼ばない。コマンド末尾に \`&\` を付けず、\`nohup\` / \`disown\` / \`setsid\` でプロセスをデタッチしない
-- \`Agent\` ツールは既定がバックグラウンド実行のため、呼び出しごとに必ず \`run_in_background: false\` を明示し、フォアグラウンドで完了を待ってから次へ進む
-- \`Skill\` ツールに \`run_in_background: true\` を指定しない
-- \`Monitor\` / \`ScheduleWakeup\` / \`SendMessage\` などで処理を後回しにしない。「完了通知を待ちます」のような通知待ち状態でターンを終えない
-- E2E テストのように時間のかかる処理も、同期実行で完了を待つのが正しい挙動であり、バックグラウンド化して待たずに進んではならない
-- バックグラウンドタスクが残った状態で完了報告してターンを終えない。未完の処理はフォアグラウンドで完了まで実行し切ってから報告する
-- ユーザーへの確認・質問は行わない（回答するユーザーは存在しない）。曖昧な場合は破壊的でない側を選び、その判断と根拠を最終報告に明記する`;
+// `--append-system-prompt` でメインエージェントのシステムプロンプト末尾に注入する
+// 自律実行原則。かつては各ワーカー起動スキルの「実行モードの制約」セクションに同文を
+// 複製していたが、ワーカー起動時の CLI 注入に一元化した（対話セッションでスキルを手動
+// 実行する場合は実在するユーザーと対話してよいため、スキル本文に置かないのが正しい）。
+export const SYSTEM_PROMPT = `このセッションは \`claude-task-worker\` のワーカーから \`claude -p\`（非対話 print モード）で自動起動されている。ユーザーへの確認・質問は行わず（回答するユーザーは存在しない）、起動されたスキルのルールに従って自律的に判断し、全ステップを完遂してから（または中断条件に該当した場合は理由を出力して）終了すること。曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する。`;
+
+// `--append-subagent-system-prompt`（Claude Code v2.1.205+、`-p` 非対話モード限定）で、
+// ネストを含む全サブエージェントのシステムプロンプト末尾に注入する自律実行原則。
+// `--append-system-prompt`（メインエージェント向け）はサブエージェント内部には
+// 届かないため、この注入で全サブエージェントへ適用する。
+export const SUBAGENT_SYSTEM_PROMPT = `あなたは claude-task-worker のワーカーが \`claude -p\`（非対話 print モード）で自動起動したセッション内のサブエージェントです。以下の自律実行原則を必ず遵守してください。
+
+- ユーザーへの確認・質問は行わない（回答するユーザーは存在しない）。判断はすべて委譲された指示（プロンプトで明示的に渡された内容）に従って自動で決定する
+- 曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する
+- 委譲されたタスクは最後まで完遂してから最終報告する。指示に定義された中断条件に該当した場合のみ、理由を出力して終了する
+- 子サブエージェントに作業を委譲した場合、その完了報告を鵜呑みにしない。\`git diff\` 等で実際の成果物を検証してから完了扱いにする`;
