@@ -68,6 +68,14 @@ claude-task-worker all             # Run all workers concurrently
 
 いずれもスキル本文の「バックグラウンド実行禁止」プロンプトを補完するハードガード。
 
+### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
+
+SKILL.md のプリアンブル（`!` インライン実行）のコマンドが失敗すると、`claude -p` セッションは**モデル未起動のまま何も出力せず exit 0 で終了する**。ワーカーはこれを正常完了と誤認してラベルを巻き戻すため、トリガーラベルが再装填される triage-pr では毎ポーリングで空振りセッションを起動し続ける無限リトライループになる（実例: `gh pr checkout` プリアンブルが「PRブランチを別worktreeがcheckout中」で失敗し、一晩で約700回の無出力実行と Slack 通知が発生）。対策は3層:
+
+1. **スキル側**: プリアンブルに失敗しうるコマンドを置かない（置く場合は `|| true` で非致命化する）。`gh pr checkout` は本文の「ステップ0」に移し、失敗時はエラー内容を含む結果報告を出して終了させる（`triage-pr` / `check-dependabot`）。
+2. **ワーカー側のプリフライト**（`src/workers/pr-worker.ts`）: `deleteLocalBranch` 後もPRブランチが残存する場合（locked worktree・実行中タスク・管理外worktreeがcheckout中）、スキル内の `gh pr checkout` が失敗すると分かっているため claude を起動せずそのtickをスキップし、ブロッカー解消後のポーリングで自然再開させる（`localBranchExists`）。
+3. **プロセスレベルの空出力検知**（`src/process-manager.ts` の `buildTaskResult`）: `claude -p` は正常完了時に必ず最終レポートを stdout に出力するため、exit 0 でも stdout が空（空白のみ含む）の実行は失敗として分類し、失敗通知を送る。あわせて stderr を末尾8KBまで保持し、失敗通知に含めて原因調査を可能にする（従来は stderr を破棄していたため失敗通知が空になっていた）。
+
 ### Stopフックによる起動プロセスの後片付け（`plugin/scripts/stop-servers.mjs`）
 
 上記の同期実行ガードでフォアグラウンド実行を強制しても、`docker compose up -d` やE2E/テストランナーが起動するWebサーバーのように、claudeプロセスから切り離されて init/launchd に再ペアレントされるサーバー・プロセスは、スキル完了後もポートを掴んだまま残留しうる。ワーカーはスキル終了直後にそのworktreeを削除するため、worktreeをcwdに持つ残留プロセスはリソースを浪費するだけでなくworktree削除の妨げにもなる。
