@@ -2,14 +2,7 @@
 name: triage-created-issue
 description: Triage a GitHub issue that already has the cc-issue-created label and is assumed to be ready to start. First inspect the comment history to decide whether human confirmation is needed (cc-need-human-check, highest priority); otherwise decide whether the issue should be closed as not needed, unanswered confirmation items remain (cc-answer-issue-questions), the description is stale relative to settled comment-history content and must be refreshed before execution (cc-update-issue), or it can move to execution (cc-exec-issue). Dependency checks are out of scope.
 argument-hint: "[Issue number]"
-context: fork
-agent: claude-task-worker:worker-skill-executor
 hooks:
-  PreToolUse:
-    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
-      hooks:
-        - type: command
-          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:
@@ -43,7 +36,7 @@ hooks:
 
 ## 実行モードの制約
 
-本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。
+本スキルは `claude-task-worker` のワーカーから `claude -p`（非対話 print モード）で自動起動されうる。ユーザーへの確認・質問は行わず（回答するユーザーは存在しない）、本スキルのルールに従って自律的に判断し、全ステップを完遂してから（または中断条件に該当した場合は理由を出力して）終了すること。曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する。
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `triage-created-issue` ワーカー（`cc-issue-created` + `cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-answer-issue-questions` / `cc-exec-issue` の付与や Issue のクローズ）を進める。処理が未完のままターンを終えると、判定未確定のまま `cc-answer-issue-questions` や `cc-exec-issue` が付与されず Issue が次のワーカーに引き継がれない（あるいは判定と異なるラベルが付与される）といった状態壊れが起きる。
 

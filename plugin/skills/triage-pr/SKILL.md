@@ -2,14 +2,7 @@
 name: triage-pr
 description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), generate and evaluate a fix plan via create-review-fix-plan, then take action (add cc-fix-onetime label if fixes are needed; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
 argument-hint: "[pr-number]"
-context: fork
-agent: claude-task-worker:worker-skill-executor
 hooks:
-  PreToolUse:
-    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
-      hooks:
-        - type: command
-          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:
@@ -45,7 +38,7 @@ hooks:
 
 ## 実行モードの制約
 
-本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に `create-review-fix-plan` スキルは、返却された修正プランの構造化サマリを同期的に受け取ってから判定・ラベル付与に進む。
+本スキルは `claude-task-worker` のワーカーから `claude -p`（非対話 print モード）で自動起動されうる。ユーザーへの確認・質問は行わず（回答するユーザーは存在しない）、本スキルのルールに従って自律的に判断し、全ステップを完遂してから（または中断条件に該当した場合は理由を出力して）終了すること。曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する。
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `triage-pr` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-fix-onetime` の付与やマージ、`cc-triage-scope` の除去を進める。処理が未確定のままターンを終えると、判定未確定のまま `cc-fix-onetime` が付かず `fix-review-point` ワーカーへの引き継ぎが空振りしたり、マージ判定前にラベルが外れてPRが放置される状態壊れが起きる。
 

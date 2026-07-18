@@ -3,14 +3,7 @@ name: create-epic-pr
 description: "Create an aggregated Epic PR from a `cc-epic-<Issue number>` branch to the default branch. Takes the Epic Issue number as argument, assumes sub-PRs have already been merged into the epic branch, and automatically generates the PR title and description from the commit log against the base branch (including sub-PR / sub-Issue references). The PR is posted via `gh pr create` with no label and `Closes #<Epic Issue>`."
 argument-hint: "[issue-number]"
 disable-model-invocation: true
-context: fork
-agent: claude-task-worker:worker-skill-executor
 hooks:
-  PreToolUse:
-    - matcher: "Bash|Agent|Monitor|ScheduleWakeup"
-      hooks:
-        - type: command
-          command: node ${CLAUDE_PLUGIN_ROOT}/scripts/block-async-execution.mjs
   Stop:
     - matcher: ""
       hooks:
@@ -28,7 +21,7 @@ hooks:
 
 ## 実行モードの制約
 
-本スキルは `worker-skill-executor` エージェント（`plugin/agents/worker-skill-executor.md`）上で `context: fork` 実行される。バックグラウンド実行の禁止・同期実行の徹底・自律実行原則といった共通ルールはエージェント定義に集約されており、必ずそれに従うこと。特に `gh pr create` は同期実行し、標準出力で返るPR URLを取得してから完了報告する。
+本スキルは `claude-task-worker` のワーカーから `claude -p`（非対話 print モード）で自動起動されうる。ユーザーへの確認・質問は行わず（回答するユーザーは存在しない）、本スキルのルールに従って自律的に判断し、全ステップを完遂してから（または中断条件に該当した場合は理由を出力して）終了すること。曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する。
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `epic-issue` ワーカー（`cc-epic-issue` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移や後続処理を進める。処理が未完のままターンを終えると、PR URL 未取得のまま報告されたり、Epic PR 未作成のまま `cc-epic-issue` が外れる状態壊れが起きる。
 

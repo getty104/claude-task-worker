@@ -42,10 +42,10 @@ export const execIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: s
         console.log(`[exec-issue] #${issueNumber}: issue closed by skill (no-change path), skip cc-pr-created`);
         return;
       }
-      // exit 0 は「PR作成完了」を保証しない。セッションがバックグラウンドタスクの完了通知を
-      // 待つ状態でターンを終えると、print モードではそのままプロセスが正常終了するため、
-      // PRの実在を確認できた場合のみ cc-pr-created を付与する。作業ブランチ（worktreeId）を
-      // head とするPRを第一に、ブランチが変えられたケースの保険として closing 参照PRも探す。
+      // exit 0 は「PR作成完了」を保証しない。処理未完のままターンが終わっても print モードでは
+      // プロセスが正常終了するため、PRの実在を確認できた場合のみ cc-pr-created を付与する。
+      // 作業ブランチ（worktreeId）を head とするPRを第一に、ブランチが変えられたケースの
+      // 保険として closing 参照PRも探す。
       const prNumber =
         (await findPrNumberByHeadRef(worktreeId, "all")) ?? (await findPrNumberClosingIssue(issueNumber));
       if (prNumber !== null) {

@@ -1,4 +1,4 @@
-import { DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT } from "../claude-args.js";
+import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
@@ -164,6 +164,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
               },
               cwd,
+              { ...CLAUDE_SPAWN_ENV },
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);

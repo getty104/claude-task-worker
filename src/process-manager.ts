@@ -180,6 +180,7 @@ export function run(
   path?: string,
   onComplete?: (status: "completed" | "failed", output: string) => Promise<void>,
   cwd?: string,
+  env?: Record<string, string>,
 ): void {
   tasks.set(id, {
     id,
@@ -197,6 +198,7 @@ export function run(
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
     ...(cwd ? { cwd } : {}),
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   childProcesses.set(id, child);
 
