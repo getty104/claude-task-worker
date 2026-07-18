@@ -26,7 +26,9 @@ interface IssueWorkerConfig {
   ownNumberFilters?: number[];
   labelFilters?: string[];
   preflight?: (issue: Issue) => Promise<PreflightResult>;
-  onCompleted?: (issueNumber: number) => Promise<void>;
+  // exit 0 でも期待成果物（PR等）を検証できなかった場合は false を返す。
+  // その場合ワーカーは完了通知ではなく失敗通知を送る。void / true は完了扱い。
+  onCompleted?: (issueNumber: number, worktreeId: string) => Promise<boolean | void>;
 }
 
 export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promise<void> {
@@ -135,13 +137,21 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
                 try {
                   if (status === "completed") {
-                    await config.onCompleted?.(issue.number);
-                    await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
+                    const verified = (await config.onCompleted?.(issue.number, worktreeId)) ?? true;
+                    if (verified === false) {
+                      await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+                    } else {
+                      await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
+                    }
                   } else {
                     await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
                   }
                 } catch (err) {
                   console.error(`[${config.name}] post-task error for #${issue.number}: ${err}`);
+                  await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output).catch(
+                    (notifyErr) =>
+                      console.error(`[${config.name}] notifyTaskFailed failed for #${issue.number}: ${notifyErr}`),
+                  );
                 } finally {
                   await removeLabel("issue", issue.number, "cc-in-progress").catch((err) =>
                     console.error(`[${config.name}] removeLabel cc-in-progress failed for #${issue.number}: ${err}`),

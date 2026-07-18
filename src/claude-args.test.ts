@@ -10,6 +10,7 @@ test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
     [
       "Monitor",
       "ScheduleWakeup",
+      "SendMessage",
       "AskUserQuestion",
       "EnterPlanMode",
       "CronCreate",
