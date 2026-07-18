@@ -56,7 +56,7 @@ claude-task-worker all             # Run all workers concurrently
 ワーカーは各スキルを `claude -p "<skill> <n>"` の非対話（print）モードで起動する。print モードには再起動ループが無いため、処理が未完のままターンが終わるとプロセスが exit 0 で終了し、ワーカーが「正常完了」と誤認してラベル遷移（`cc-pr-created` 付与や `cc-fix-onetime` 除去）に進み、Issue/PR の状態が壊れる。これを防ぐガードは以下の構成:
 
 1. **spawn 環境変数**（`src/claude-args.ts` の `CLAUDE_SPAWN_ENV`、`process-manager.ts` の spawn で `process.env` に上書きマージ）: 全ワーカー起動に一律注入される。対象プロジェクトのリポジトリ設定に依存させないため、settings.json ではなく spawn 環境変数で渡す（プラグインの settings.json は env を配布できない）。
-   - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`: Bash / サブエージェントの `run_in_background`・自動バックグラウンド化を含む全バックグラウンドタスク機能を無効化する。処理は常にフォアグラウンドの同期実行となり、未完のままターンが終わる事故を機能レベルで防ぐ。プロンプトでのバックグラウンド禁止ルールやツール単位のガードは不要になった（かつて存在した PreToolUse フック `block-async-execution.mjs` と `worker-skill-executor` エージェントは撤去済み）。
+   - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`: Claude 管理下のバックグラウンド機構（Bash の `run_in_background`・サブエージェントの自動バックグラウンド化）のみを無効化する。`nohup`/`disown`/末尾 `&` によるシェルレベルの detach や `docker compose up -d` 等が起動する切り離しプロセスまでは防げないため、未完のままターンが終わる事故を完全には防止できない（Stop フックによる起動プロセスの後片付けや、下記4のワーカーレベル完了検証が引き続き必要）。プロンプトでのバックグラウンド禁止ルールやツール単位のガードは不要になった（かつて存在した PreToolUse フック `block-async-execution.mjs` と `worker-skill-executor` エージェントは撤去済み）。
    - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: 万一バックグラウンド化される経路が残った場合の保険。`claude -p` のバックグラウンドサブエージェント待機（v2.1.182+ でデフォルト10分上限）を無制限にする。外側はワーカーの `TASK_TIMEOUT_MS`（`src/task-result.ts`）が上限として効く。
 2. **CLI レベルの `--disallowedTools`**（`src/claude-args.ts` の `DISALLOWED_TOOLS`）: 自律非対話実行では原理的に使い道がない（または有害な）ツールを完全無効化する。対象カテゴリ:
    - 遅延/yield: `Monitor` / `ScheduleWakeup`（後続ウェイクアップ前提だが print モードでは発火せず、プロセスが早期終了する）

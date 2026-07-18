@@ -76,13 +76,13 @@ test("findPrNumberClosingIssue returns null when the only referencing PR is CLOS
       data: {
         repository: {
           issue: {
-            closedByPullRequestsReferences: { nodes: [{ number: 42, state: "CLOSED" }] },
+            closedByPullRequestsReferences: { nodes: [{ number: 42, state: "CLOSED", headRefName: "adj-noun-1234" }] },
           },
         },
       },
     }),
   );
-  assert.equal(await findPrNumberClosingIssue(1), null);
+  assert.equal(await findPrNumberClosingIssue(1, "adj-noun-1234"), null);
 });
 
 test("findPrNumberClosingIssue returns the number of a MERGED referencing PR", async (t) => {
@@ -92,13 +92,13 @@ test("findPrNumberClosingIssue returns the number of a MERGED referencing PR", a
       data: {
         repository: {
           issue: {
-            closedByPullRequestsReferences: { nodes: [{ number: 7, state: "MERGED" }] },
+            closedByPullRequestsReferences: { nodes: [{ number: 7, state: "MERGED", headRefName: "adj-noun-1234" }] },
           },
         },
       },
     }),
   );
-  assert.equal(await findPrNumberClosingIssue(1), 7);
+  assert.equal(await findPrNumberClosingIssue(1, "adj-noun-1234"), 7);
 });
 
 test("findPrNumberClosingIssue returns the number of an OPEN referencing PR", async (t) => {
@@ -108,13 +108,13 @@ test("findPrNumberClosingIssue returns the number of an OPEN referencing PR", as
       data: {
         repository: {
           issue: {
-            closedByPullRequestsReferences: { nodes: [{ number: 9, state: "OPEN" }] },
+            closedByPullRequestsReferences: { nodes: [{ number: 9, state: "OPEN", headRefName: "adj-noun-1234" }] },
           },
         },
       },
     }),
   );
-  assert.equal(await findPrNumberClosingIssue(1), 9);
+  assert.equal(await findPrNumberClosingIssue(1, "adj-noun-1234"), 9);
 });
 
 test("findPrNumberClosingIssue skips a leading CLOSED node and returns the following MERGED one", async (t) => {
@@ -126,8 +126,8 @@ test("findPrNumberClosingIssue skips a leading CLOSED node and returns the follo
           issue: {
             closedByPullRequestsReferences: {
               nodes: [
-                { number: 42, state: "CLOSED" },
-                { number: 7, state: "MERGED" },
+                { number: 42, state: "CLOSED", headRefName: "adj-noun-1234" },
+                { number: 7, state: "MERGED", headRefName: "adj-noun-1234" },
               ],
             },
           },
@@ -135,5 +135,23 @@ test("findPrNumberClosingIssue skips a leading CLOSED node and returns the follo
       },
     }),
   );
-  assert.equal(await findPrNumberClosingIssue(1), 7);
+  assert.equal(await findPrNumberClosingIssue(1, "adj-noun-1234"), 7);
+});
+
+test("findPrNumberClosingIssue returns null when the referencing PR's headRefName does not match the expected branch", async (t) => {
+  // 過去の実行や無関係な貢献者の別ブランチが同じissueをclosing参照していても、
+  // 今回の作業ブランチ（expectedHeadRefName）と一致しなければ誤検出してはいけない。
+  mockRepoInfoThenGraphql(
+    t,
+    JSON.stringify({
+      data: {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: { nodes: [{ number: 7, state: "MERGED", headRefName: "other-branch" }] },
+          },
+        },
+      },
+    }),
+  );
+  assert.equal(await findPrNumberClosingIssue(1, "adj-noun-1234"), null);
 });

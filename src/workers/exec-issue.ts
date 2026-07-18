@@ -47,7 +47,7 @@ export const execIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: s
       // 作業ブランチ（worktreeId）を head とするPRを第一に、ブランチが変えられたケースの
       // 保険として closing 参照PRも探す。
       const prNumber =
-        (await findPrNumberByHeadRef(worktreeId, "all")) ?? (await findPrNumberClosingIssue(issueNumber));
+        (await findPrNumberByHeadRef(worktreeId, "all")) ?? (await findPrNumberClosingIssue(issueNumber, worktreeId));
       if (prNumber !== null) {
         await addLabel("issue", issueNumber, "cc-pr-created");
         return;
