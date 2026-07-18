@@ -64,10 +64,10 @@ claude-task-worker all             # Run all workers concurrently
    - スコープ外の副作用: `CronCreate` / `CronDelete` / `CronList` / `RemoteTrigger`（クラウド routine・リモート環境への副作用）
    - 環境管理の競合: `EnterWorktree`（ワーカー自前の worktree 管理と競合する）
    - `Exit*`（`ExitPlanMode` / `ExitWorktree`）は「万一その状態で開始した場合の脱出口」として残す。`TaskCreate` 等の進捗管理・`WebFetch`/`LSP`/各種 MCP（正当な用途あり）は無効化しない。
-3. **サブエージェントへの自律実行原則の注入**（`src/claude-args.ts` の `SUBAGENT_SYSTEM_PROMPT`、`--append-subagent-system-prompt`。Claude Code v2.1.205+、`-p` 非対話モード限定）: スキル本文はメインエージェントにしか届かないため、自律実行原則（ユーザーに質問しない・タスクを完遂してから報告する・子サブエージェントの報告を検証する）をネストを含む全サブエージェントのシステムプロンプト末尾に注入する。
+3. **自律実行原則のシステムプロンプト注入**（`src/claude-args.ts`）: メインエージェントへは `--append-system-prompt`（`SYSTEM_PROMPT`: 非対話起動である旨・ユーザーに質問しない・全ステップを完遂してから終了する・曖昧なら安全側を選び根拠を報告する）、サブエージェントへは `--append-subagent-system-prompt`（`SUBAGENT_SYSTEM_PROMPT`: 同原則＋子サブエージェントの報告検証。Claude Code v2.1.205+、`-p` 非対話モード限定、ネスト含む全サブエージェントに適用）で注入する。スキル本文に自律実行原則を複製しないのは、対話セッションでスキルを手動実行する場合は実在するユーザーと対話してよいため。
 4. **ワーカーレベルの完了検証**（`src/workers/exec-issue.ts` / `epic-issue.ts` の `onCompleted`）: 上記をすり抜けて exit 0 で終了しても、期待成果物を検証できるまでラベル遷移しない最後の砦。exec-issue は「Issue がクローズ済み（変更不要パス）」または「作業ブランチ（worktreeId）を head とする PR か Issue を closing 参照する PR の実在」を確認できた場合のみ `cc-pr-created` を付与し、確認できなければ `cc-need-human-check` を付与して Issue に状況コメントを残す。epic-issue は `cc-epic-<N>` を head とする Epic PR の実在確認後にのみ `cc-pr-created` を付ける。`onCompleted` が `false` を返すと `issue-worker.ts` は完了通知ではなく失敗通知（Slack）を送る。
 
-ワーカー起動スキル10個（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr`）の本文には、自律実行原則（ユーザーへ確認しない・全ステップを完遂してから終了する）とスキル固有のリスク（どのラベル遷移が壊れるか）を「実行モードの制約」セクションとして記述する。
+ワーカー起動スキル10個（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr`）の本文の「実行モードの制約」セクションには、スキル固有のリスク（どのラベル遷移が壊れるか）のみを記述する（自律実行原則は上記 3 の CLI 注入に一元化されており、スキル本文には複製しない）。
 
 ### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
 

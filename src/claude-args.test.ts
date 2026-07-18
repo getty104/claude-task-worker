@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as ClaudeArgsModule from "./claude-args";
 
-const { DISALLOWED_TOOLS, DISALLOWED_TOOLS_ARG, CLAUDE_SPAWN_ENV, SUBAGENT_SYSTEM_PROMPT } =
+const { DISALLOWED_TOOLS, DISALLOWED_TOOLS_ARG, CLAUDE_SPAWN_ENV, SYSTEM_PROMPT, SUBAGENT_SYSTEM_PROMPT } =
   (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
@@ -41,6 +41,14 @@ test("CLAUDE_SPAWN_ENV disables background tasks and lifts the bg-wait ceiling",
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0",
     },
   );
+});
+
+test("SYSTEM_PROMPT states the autonomous-execution principles for the main agent", () => {
+  // Injected via --append-system-prompt; replaces the paragraph formerly
+  // duplicated in every worker-driven skill's 実行モードの制約 section.
+  assert.ok(SYSTEM_PROMPT.includes("ユーザーへの確認・質問は行わず"));
+  assert.ok(SYSTEM_PROMPT.includes("全ステップを完遂してから"));
+  assert.ok(SYSTEM_PROMPT.includes("破壊的でない側"));
 });
 
 test("SUBAGENT_SYSTEM_PROMPT states the autonomous-execution principles", () => {

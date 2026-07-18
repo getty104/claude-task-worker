@@ -1,4 +1,4 @@
-import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT } from "../claude-args.js";
+import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
@@ -93,8 +93,11 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 "-p",
                 `${command} ${pr.number}`,
                 "--dangerously-skip-permissions",
+                "--chrome",
                 "--disallowedTools",
                 DISALLOWED_TOOLS_ARG,
+                "--append-system-prompt",
+                SYSTEM_PROMPT,
                 "--append-subagent-system-prompt",
                 SUBAGENT_SYSTEM_PROMPT,
                 "--model",

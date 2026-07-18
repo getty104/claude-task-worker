@@ -1,4 +1,4 @@
-import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT } from "../claude-args.js";
+import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
@@ -94,8 +94,11 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               "-p",
               `${command} ${issue.number}`,
               "--dangerously-skip-permissions",
+              "--chrome",
               "--disallowedTools",
               DISALLOWED_TOOLS_ARG,
+              "--append-system-prompt",
+              SYSTEM_PROMPT,
               "--append-subagent-system-prompt",
               SUBAGENT_SYSTEM_PROMPT,
               "--model",
