@@ -1,4 +1,4 @@
-import { DISALLOWED_TOOLS_ARG } from "../claude-args.js";
+import { DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
@@ -95,6 +95,8 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 "--dangerously-skip-permissions",
                 "--disallowedTools",
                 DISALLOWED_TOOLS_ARG,
+                "--append-subagent-system-prompt",
+                SUBAGENT_SYSTEM_PROMPT,
                 "--model",
                 model,
                 "--effort",
