@@ -16,7 +16,8 @@ import { init } from "./commands/init";
 import { install } from "./commands/install";
 import { update } from "./commands/update";
 import { version } from "./commands/version";
-import { buildTokenLimitText, send } from "./slack";
+import { fetchUsageInfo, formatTokenLimitText, send } from "./slack";
+import { writeRuncatUsage } from "./runcat";
 import {
   hasProjectFilter,
   parseProjectFilters,
@@ -249,11 +250,14 @@ if (hasProjectFilter()) {
   })();
 } else if (workerType === "usage") {
   (async () => {
-    const text = await buildTokenLimitText();
-    if (!text) {
+    const usage = await fetchUsageInfo();
+    if (!usage) {
       console.error("Failed to fetch usage info");
       process.exit(1);
     }
+    // RunCat Neo 用のスナップショット。書き出し失敗はログのみで Slack 通知は継続する
+    writeRuncatUsage(usage);
+    const text = formatTokenLimitText(usage);
     console.log(text.trim());
     await send({ text: `📊 Usage${text}` });
   })();

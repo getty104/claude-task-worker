@@ -24,7 +24,7 @@ export async function send(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
-interface UsageInfo {
+export interface UsageInfo {
   fiveHourUtilization: number;
   fiveHourResetsAt: string;
   sevenDayUtilization: number;
@@ -73,7 +73,7 @@ function writeUsageCache(data: UsageInfo): void {
   }
 }
 
-async function fetchUsageInfo(): Promise<UsageInfo | null> {
+export async function fetchUsageInfo(): Promise<UsageInfo | null> {
   const cached = readUsageCache();
   if (cached) return cached;
 
@@ -121,16 +121,18 @@ function formatResetTimeJST(isoString: string): string {
   });
 }
 
-export async function buildTokenLimitText(): Promise<string> {
-  const usage = await fetchUsageInfo();
-  if (!usage) return "";
-
+export function formatTokenLimitText(usage: UsageInfo): string {
   const fiveH = usage.fiveHourUtilization.toFixed(1);
   const sevenD = usage.sevenDayUtilization.toFixed(1);
   const emoji = utilizationEmoji(Math.max(usage.fiveHourUtilization, usage.sevenDayUtilization));
   const fiveHReset = formatResetTimeJST(usage.fiveHourResetsAt);
   const sevenDReset = formatResetTimeJST(usage.sevenDayResetsAt);
   return ` | ${emoji} 5h: ${fiveH}% (reset: ${fiveHReset}) / 7d: ${sevenD}% (reset: ${sevenDReset})`;
+}
+
+export async function buildTokenLimitText(): Promise<string> {
+  const usage = await fetchUsageInfo();
+  return usage ? formatTokenLimitText(usage) : "";
 }
 
 export async function notifyTaskCompleted(
