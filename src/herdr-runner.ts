@@ -25,6 +25,7 @@ export function taskTabLabel(projectName: string, number: number): string {
 // 完了判定の状態。TUI は起動直後 unknown / idle を経てから working になるため、
 // 「一度 working を観測してから idle になった」ことを完了条件にする。
 // idle 単独を完了とみなすと、起動直後のプロンプト表示前に完了と誤判定してしまう。
+// （`done` は起動直後には現れないため、この seenWorking ガードの対象外。後述）
 export interface CompletionTracker {
   seenWorking: boolean;
   warnedBlocked: boolean;
@@ -44,6 +45,18 @@ export function observeAgentStatus(
 ): { tracker: CompletionTracker; decision: TrackerDecision } {
   if (status === "working") {
     return { tracker: { ...tracker, seenWorking: true }, decision: "running" };
+  }
+  // `done` は「作業を終えたが、まだ誰もそのペインを見ていない」未確認完了の状態。
+  // ワーカーのタスクタブは誰も開かないため、herdr は idle ではなく done を返し続ける
+  // （ユーザーがタブを開くと idle へ落ちる）。done を知らないと unknown 扱いになり、
+  // 「タブを見るまでタスクが完了しない」バグになる。
+  //
+  // idle と違って seenWorking を要求しない。done は working からの遷移でしか現れず
+  // 起動直後に誤検知する余地が無い一方、ポーリング間隔（既定3秒）より短いタスクでは
+  // working を一度も観測できずに done へ到達しうるためで、ガードを付けると
+  // その取りこぼしがそのまま無限待ちになる。
+  if (status === "done") {
+    return { tracker, decision: "completed" };
   }
   if (status === "blocked") {
     // blocked（入力待ち）は人が herdr のペインを開いて解除する前提。自動失敗にはせず、
