@@ -89,10 +89,13 @@ test("buildClaudeArgs keeps the tool restrictions and the system prompt in both 
   }
 });
 
-test("buildClaudeEnv swaps the print-only ceiling for the herdr sound switch", () => {
+test("buildClaudeEnv drops the print-only ceiling in herdr mode", () => {
   assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
   assert.deepEqual(buildClaudeEnv("herdr"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
-    HERDR_DISABLE_SOUND: "1",
   });
+});
+
+test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server, not the pane)", () => {
+  assert.ok(!("HERDR_DISABLE_SOUND" in buildClaudeEnv("herdr")));
 });

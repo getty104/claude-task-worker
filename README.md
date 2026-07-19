@@ -312,7 +312,7 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 
 `mode: "herdr"` のときの1タスクの流れ:
 
-1. worktree を作成し、`ctw:<プロジェクト名>:#<Issue/PR番号>` ラベルのタブで claude を TUI 起動する（`HERDR_DISABLE_SOUND=1` を設定するため通知音は鳴らない）
+1. worktree を作成し、`ctw:<プロジェクト名>:#<Issue/PR番号>` ラベルのタブで claude を TUI 起動する
 2. herdr が持つ agent ステータスを監視し、`working` → `idle` の遷移をタスク完了とみなす
 3. 完了したらペインの内容を回収して通知に使い、タブを閉じてラベル・worktree を後片付けする
 
@@ -321,6 +321,15 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 - タブは `--project` で起動した場合そのプロジェクトのワークスペース内に作られる（herdrが各ペインへ注入する `HERDR_WORKSPACE_ID` を利用する）
 - `blocked`（claudeが入力待ち）になってもタスクは自動失敗にせず待機し続ける。ステータステーブルに `running:blocked` と表示されるので、herdrのタブを開いて直接対応できる
 - `mode: "herdr"` でherdrが未インストール・未起動の場合、ワーカーは起動時にエラー終了する（`"default"` へ勝手にフォールバックしない）
+- **タスク完了時の通知音はワーカー側から止められない**。herdr のエージェント状態遷移音を再生するのは herdr サーバープロセスで、`HERDR_DISABLE_SOUND` もそのプロセスの環境変数として読まれるため、タスクペインへ渡しても効かない（socket API にもペイン単位のミュートは無い）。無音にしたい場合は herdr 側の設定で行う:
+
+  ```toml
+  # ~/.config/herdr/config.toml
+  [ui.sound]
+  enabled = false
+  ```
+
+  適用は `herdr server reload-config`。この設定は herdr サーバー全体に効くため、ワーカー以外の対話セッションの完了音も鳴らなくなる（`[ui.sound.agents] claude = "off"` でも実質同じ範囲）。ワーカーだけを無音にしたい場合は、`HERDR_DISABLE_SOUND=1 herdr --session <name>` で別セッションを起動し、その中でディスパッチャーを動かす
 
 ### exec-issue
 
