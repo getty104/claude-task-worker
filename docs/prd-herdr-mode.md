@@ -66,12 +66,12 @@
 }
 ```
 
-**移行と後方互換**
+**移行**
+
+旧ファイル名 `projects.json` のサポートは行わない（決定事項、→ 確認事項 8-4）。単一ユーザー運用で移行対象が1ファイルのみのため、フォールバックを持たずに `config.json` へリネームする。
 
 - `config.json` が存在すればそれを読む
-- `config.json` が存在せず `projects.json` が存在する場合は `projects.json` を読み、`[config] projects.json is deprecated; rename it to config.json` の警告を出す（移行猶予）
-- 両方存在する場合は `config.json` を採用し、`projects.json` を無視する旨を警告する
-- どちらも存在しない場合の扱いは従来どおり:
+- 存在しない場合の扱いは従来どおり:
   - `--project` 指定時 → エラー終了（メッセージ中のパスは `config.json` を案内する）
   - `--project` 未指定時 → 設定ファイルなしで従来動作（`mode` は `"default"` 扱い）
 
@@ -335,7 +335,8 @@ herdr wait agent-status <pane_id> --status <idle|working|blocked|done|unknown> [
 2. **`mode` の粒度**: 「プロジェクト A だけ herdr モード」のような使い分けの需要があるか。ある場合は `projects` の値をオブジェクト形式（`{"path": "...", "mode": "herdr"}`）へ拡張する必要があり、既存の文字列形式との共存が必要になる。
    → **決定: トップレベル一括のみとする。プロジェクト別上書きは実装しない**（§4.2、§7 スコープ外）。
 3. **モジュール名**: `src/projects-config.ts` を `src/user-config.ts` へリネームするか、ファイル名は据え置いて中身だけ `config.json` 対応にするか。リポジトリローカルの `src/config.ts`（`claude-task-worker.json`）と紛らわしいため、本 PRD はリネームを推奨としている。
-4. **`projects.json` フォールバックの寿命**: 何バージョン残すか。単一ユーザー運用のため即時削除でも実害は小さいが、本 PRD は「警告付きで当面残す」を既定としている。
+4. **`projects.json` フォールバックの寿命**: 何バージョン残すか。
+   → **決定: フォールバックは実装しない**。単一ユーザー運用で移行対象が1ファイルのみのため、`config.json` へリネームして完了とする（§4.1）。
 5. **タスクタブの並び順・数の上限**: `maxConcurrentTasks` × ワーカー種別の数だけタブが同時に開きうる（`yolo` では最大10ワーカー）。タブが増えすぎる場合、ワーカー種別ごとにタブをまとめる（1タブ内で split する）案も考えられる。
 6. **`blocked` の扱い**: 無人運用では永久に詰まる可能性がある。一定時間 `blocked` が続いたら失敗扱いにしてタブを閉じる方が良いか。
    → **決定: 人が確認する前提とし、待機を継続する（自動失敗にはしない）**。herdr モードはそもそも人が覗いて介入できることが利点であり、`blocked` はその介入ポイントとして扱う。ステータステーブルに `blocked` を表示して気づけるようにする（§4.5）。
@@ -346,8 +347,7 @@ herdr wait agent-status <pane_id> --status <idle|working|blocked|done|unknown> [
 **設定ファイル**
 
 - [ ] `~/.config/claude-task-worker/config.json` が読み込まれ、`--project` ディスパッチが従来どおり動作する
-- [ ] `config.json` が無く `projects.json` がある場合、警告付きで `projects.json` が読まれる
-- [ ] 両方ある場合は `config.json` が採用され、その旨が警告される
+- [ ] `config.json` が存在しない状態で `--project` を指定するとエラー終了する
 - [ ] `mode` 未指定・不正値の場合は `"default"` にフォールバックする（不正値では警告が出る）
 
 **ワークスペース分離**

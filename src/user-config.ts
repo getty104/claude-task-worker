@@ -40,22 +40,12 @@ export function getUserConfigPath(): string {
   return join(getConfigDir(), "config.json");
 }
 
-// 旧ファイル名。config.json が無い場合に限りフォールバックとして読み込む。
-export function getLegacyUserConfigPath(): string {
-  return join(getConfigDir(), "projects.json");
-}
-
 function isDirectory(path: string): boolean {
   try {
     return statSync(path).isDirectory();
   } catch {
     return false;
   }
-}
-
-interface RawConfig {
-  raw: Record<string, unknown>;
-  path: string;
 }
 
 function parseConfigFile(path: string): Record<string, unknown> | undefined {
@@ -76,28 +66,10 @@ function parseConfigFile(path: string): Record<string, unknown> | undefined {
   }
 }
 
-// config.json を優先し、無い場合のみ旧 projects.json を警告付きで読む。
-// どちらも存在しない場合は undefined を返す（--project 未指定のワーカー起動では
+// 設定ファイルが存在しない場合は undefined を返す（--project 未指定のワーカー起動では
 // 設定ファイルが無いのが正常なため、ここでは例外にしない）。
-function readRawConfig(): RawConfig | undefined {
-  const configPath = getUserConfigPath();
-  const legacyPath = getLegacyUserConfigPath();
-
-  const raw = parseConfigFile(configPath);
-  if (raw !== undefined) {
-    if (parseConfigFile(legacyPath) !== undefined) {
-      console.warn(`[config] both config.json and projects.json exist; using config.json and ignoring ${legacyPath}`);
-    }
-    return { raw, path: configPath };
-  }
-
-  const legacyRaw = parseConfigFile(legacyPath);
-  if (legacyRaw !== undefined) {
-    console.warn(`[config] projects.json is deprecated; rename it to config.json: ${legacyPath} -> ${configPath}`);
-    return { raw: legacyRaw, path: legacyPath };
-  }
-
-  return undefined;
+function readRawConfig(): Record<string, unknown> | undefined {
+  return parseConfigFile(getUserConfigPath());
 }
 
 function parseMode(raw: Record<string, unknown>, path: string): RunMode {
@@ -109,12 +81,11 @@ function parseMode(raw: Record<string, unknown>, path: string): RunMode {
 }
 
 export function loadUserConfig(): UserConfig {
-  const configPath = getUserConfigPath();
-  const loaded = readRawConfig();
-  if (loaded === undefined) {
-    throw new UserConfigError(`config.json not found: ${configPath}`);
+  const path = getUserConfigPath();
+  const raw = readRawConfig();
+  if (raw === undefined) {
+    throw new UserConfigError(`config.json not found: ${path}`);
   }
-  const { raw, path } = loaded;
 
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new UserConfigError(`config.json must contain a JSON object: ${path}`);
@@ -217,18 +188,18 @@ export function resetRunModeCache(): void {
 // 壊れているといった理由で実行形態の判定に失敗させない。mode だけを取り出し、
 // 判定できない場合は "default" を返す。
 function readRunMode(): RunMode {
-  let loaded: RawConfig | undefined;
+  let raw: Record<string, unknown> | undefined;
   try {
-    loaded = readRawConfig();
+    raw = readRawConfig();
   } catch (err) {
     console.warn(`[config] failed to read config file, using "${DEFAULT_RUN_MODE}" mode: ${err}`);
     return DEFAULT_RUN_MODE;
   }
-  if (loaded === undefined) return DEFAULT_RUN_MODE;
-  if (typeof loaded.raw !== "object" || loaded.raw === null || Array.isArray(loaded.raw)) {
+  if (raw === undefined) return DEFAULT_RUN_MODE;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return DEFAULT_RUN_MODE;
   }
-  return parseMode(loaded.raw, loaded.path);
+  return parseMode(raw, getUserConfigPath());
 }
 
 // herdr モードのタブラベル（ctw:<project>:#<n>）に使うプロジェクト名を、

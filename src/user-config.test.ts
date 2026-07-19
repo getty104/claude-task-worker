@@ -16,7 +16,6 @@ const {
   resolveTargetProjects,
   UserConfigError,
   getUserConfigPath,
-  getLegacyUserConfigPath,
   getRunMode,
   resetRunModeCache,
   findProjectNameByPath,
@@ -145,71 +144,53 @@ test("resolveTargetProjects throws UserConfigError when resolution yields no pro
   assert.throws(() => resolveTargetProjects(["empty"], config), UserConfigError);
 });
 
-function writeLegacyConfigFile(content: string): void {
-  mkdirSync(configDir, { recursive: true });
-  writeFileSync(getLegacyUserConfigPath(), content, "utf-8");
-}
-
-function removeConfigFiles(): void {
+function removeConfigFile(): void {
   rmSync(getUserConfigPath(), { force: true });
-  rmSync(getLegacyUserConfigPath(), { force: true });
   resetRunModeCache();
 }
 
 test("loadUserConfig defaults mode to default when it is not specified", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ projects: { alpha: process.cwd() } }));
   assert.equal(loadUserConfig().mode, "default");
 });
 
 test("loadUserConfig accepts mode herdr", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ mode: "herdr", projects: { alpha: process.cwd() } }));
   assert.equal(loadUserConfig().mode, "herdr");
 });
 
 test("loadUserConfig falls back to default for an unknown mode", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ mode: "tmux", projects: { alpha: process.cwd() } }));
   assert.equal(loadUserConfig().mode, "default");
 });
 
-test("loadUserConfig reads the legacy projects.json when config.json is absent", () => {
-  removeConfigFiles();
-  writeLegacyConfigFile(JSON.stringify({ mode: "herdr", projects: { alpha: process.cwd() } }));
-  const config = loadUserConfig();
-  assert.deepEqual(Object.keys(config.projects), ["alpha"]);
-  assert.equal(config.mode, "herdr");
-});
-
-test("loadUserConfig prefers config.json over the legacy projects.json", () => {
-  removeConfigFiles();
-  writeLegacyConfigFile(JSON.stringify({ mode: "herdr", projects: { legacy: process.cwd() } }));
-  writeConfigFile(JSON.stringify({ mode: "default", projects: { current: process.cwd() } }));
-  const config = loadUserConfig();
-  assert.deepEqual(Object.keys(config.projects), ["current"]);
-  assert.equal(config.mode, "default");
+test("loadUserConfig throws UserConfigError when config.json does not exist", () => {
+  removeConfigFile();
+  assert.throws(() => loadUserConfig(), UserConfigError);
 });
 
 test("getRunMode returns default when no config file exists", () => {
-  removeConfigFiles();
+  removeConfigFile();
   assert.equal(getRunMode(), "default");
 });
 
 test("getRunMode reads mode from the config file", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ mode: "herdr", projects: {} }));
   assert.equal(getRunMode(), "herdr");
 });
 
 test("getRunMode does not fail when the projects section is broken", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ mode: "herdr", projects: [] }));
   assert.equal(getRunMode(), "herdr");
 });
 
 test("getRunMode caches the mode resolved on first call", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ mode: "herdr", projects: {} }));
   assert.equal(getRunMode(), "herdr");
   // 実行中に設定ファイルが書き換わっても、同一プロセス内では最初に確定した mode を保つ。
@@ -220,7 +201,7 @@ test("getRunMode caches the mode resolved on first call", () => {
 });
 
 test("findProjectNameByPath resolves a project name from its path", () => {
-  removeConfigFiles();
+  removeConfigFile();
   writeConfigFile(JSON.stringify({ projects: { alpha: process.cwd() } }));
   assert.equal(findProjectNameByPath(process.cwd()), "alpha");
   assert.equal(findProjectNameByPath(configHome), undefined);
