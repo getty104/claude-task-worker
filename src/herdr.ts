@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { resolve as resolvePath } from "node:path";
 import type * as ChildProcess from "node:child_process";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
@@ -73,6 +74,8 @@ export class HerdrError extends Error {
 interface HerdrRawResult {
   execError: NodeJS.ErrnoException | null;
   parsed: HerdrResponse | undefined;
+  // stdout ではなく stderr 側にエラーエンベロープが乗っていた場合の中身。
+  stderrError?: HerdrErrorPayload;
   stdout: string;
   stderr: string;
 }
@@ -88,29 +91,43 @@ function runHerdr(args: string[]): Promise<HerdrRawResult> {
       args,
       { timeout: HERDR_TIMEOUT_MS, killSignal: "SIGKILL" },
       (error, stdout, stderr) => {
-        let parsed: HerdrResponse | undefined;
-        try {
-          parsed = JSON.parse(stdout) as HerdrResponse;
-        } catch {
-          parsed = undefined;
-        }
-        resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stdout, stderr });
+        const parsed = parseHerdrResponse(stdout);
+        // 大半のコマンドは終了コード0＋stdoutにJSONを返すが、一部（実測では
+        // 存在しないタブへの `tab close`）は終了コード非0＋stderrにJSONを返す。
+        // stdout から error を取れなかった場合に限り stderr も見て、どちらの形でも
+        // エラーコードを取り出せるようにする（取り出せないと "tab_not_found は正常系"
+        // のような code 判定が効かず、グレースフル終了のたびに偽のエラーログが出る）。
+        // 結果（result）の取得元はあくまで stdout のみ。
+        const stderrError = parsed?.error ? undefined : parseHerdrResponse(stderr)?.error;
+        resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stderrError, stdout, stderr });
       },
     );
   });
+}
+
+function parseHerdrResponse(output: string): HerdrResponse | undefined {
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    return parsed as HerdrResponse;
+  } catch {
+    return undefined;
+  }
 }
 
 // allowEmptyResult: `pane send-text` / `pane send-keys` など結果を返さない
 // fire-and-forget 系コマンド専用のフラグ。これらは成功時に空stdout・空stderr・
 // 終了コード0を返すため、空応答を正常完了として扱えるようにする。
 async function execHerdr(args: string[], options?: { allowEmptyResult?: boolean }): Promise<unknown> {
-  const { execError, parsed, stdout, stderr } = await runHerdr(args);
+  const { execError, parsed, stderrError, stdout, stderr } = await runHerdr(args);
   const stderrSuffix = stderr.trim() ? `: ${stderr.trim()}` : "";
-  // stdout に有効な error JSON が乗っているケースは execFile の失敗より優先して扱う。
-  if (parsed?.error) {
+  // 有効な error JSON が乗っているケースは execFile の失敗より優先して扱う
+  // （stdout・stderr のどちらに出ていても HerdrError にして code 判定を効かせる）。
+  const errorPayload = parsed?.error ?? stderrError;
+  if (errorPayload) {
     throw new HerdrError(
-      `herdr ${args.join(" ")} failed: [${parsed.error.code}] ${parsed.error.message}`,
-      parsed.error.code,
+      `herdr ${args.join(" ")} failed: [${errorPayload.code}] ${errorPayload.message}`,
+      errorPayload.code,
     );
   }
   if (execError) {
@@ -135,6 +152,17 @@ function envArgs(env?: Record<string, string>): string[] {
   return Object.entries(env).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
 }
 
+// `--cwd` は herdr サーバー（別プロセス）側で解決されるため、相対パスを渡すと
+// ワーカーのcwdではなく herdr サーバーのcwd（実測でホームディレクトリ）を基準に
+// 解決されてしまう。しかもエラーにはならず黙ってホームで起動するため、
+// worktree を渡したつもりのタスクがリポジトリ外で走る。
+// 相対パスを herdr へ渡す経路を塞ぐため、境界であるここで必ず絶対パス化する
+// （getWorktreePath() は `.claude/worktrees/<id>` の相対パスを返す。default モードの
+// spawn({cwd}) はワーカーのcwd基準で解決されるため、この差が herdr モードでだけ牙をむく）。
+function cwdArgs(cwd: string): string[] {
+  return ["--cwd", resolvePath(cwd)];
+}
+
 export async function tabCreate({
   label,
   cwd,
@@ -155,8 +183,7 @@ export async function tabCreate({
     ...(workspaceId ? ["--workspace", workspaceId] : []),
     "--label",
     label,
-    "--cwd",
-    cwd,
+    ...cwdArgs(cwd),
     ...envArgs(env),
     "--no-focus",
   ])) as { root_pane?: { pane_id?: string }; tab?: { tab_id?: string } } | null | undefined;
@@ -222,8 +249,7 @@ export async function workspaceCreate({
     "create",
     "--label",
     label,
-    "--cwd",
-    cwd,
+    ...cwdArgs(cwd),
     ...envArgs(env),
     "--no-focus",
   ])) as
@@ -259,19 +285,21 @@ export async function workspaceClose(workspaceId: string): Promise<void> {
 
 // argv を直接実行してペインを起動する。`pane send-text` と違いシェルを経由しないため、
 // シェル初期化中に入力が捨てられるレース（dispatcher.ts の waitForPaneReady 参照）が起きない。
-// 起動先ワークスペース/タブの既存タブに split で入るため、専用タブが必要な場合は
-// 続けて paneMoveToNewTab() を呼ぶ。
+// 起動先はタブ内への split になるため、`tabId` で「どのタブに割り込むか」を必ず指定する
+// （省略すると workspace のアクティブタブ＝ユーザーが見ているタブに割り込んでちらつく）。
 export async function agentStart({
   name,
   cwd,
   argv,
   workspaceId,
+  tabId: targetTabId,
   env,
 }: {
   name: string;
   cwd: string;
   argv: string[];
   workspaceId?: string;
+  tabId?: string;
   env?: Record<string, string>;
 }): Promise<{ paneId: string; tabId: string }> {
   const result = (await execHerdr([
@@ -279,8 +307,8 @@ export async function agentStart({
     "start",
     name,
     ...(workspaceId ? ["--workspace", workspaceId] : []),
-    "--cwd",
-    cwd,
+    ...(targetTabId ? ["--tab", targetTabId] : []),
+    ...cwdArgs(cwd),
     ...envArgs(env),
     "--no-focus",
     "--",
@@ -292,29 +320,6 @@ export async function agentStart({
     throw new Error("Failed to start agent: invalid response structure from herdr");
   }
   return { paneId, tabId };
-}
-
-// ペインを新しいタブへ切り出す。agentStart が既存タブに split で入るため、
-// 1タスク1タブにするために使う。
-export async function paneMoveToNewTab(
-  paneId: string,
-  { label, workspaceId }: { label: string; workspaceId?: string },
-): Promise<{ tabId: string }> {
-  const result = (await execHerdr([
-    "pane",
-    "move",
-    paneId,
-    "--new-tab",
-    ...(workspaceId ? ["--workspace", workspaceId] : []),
-    "--label",
-    label,
-    "--no-focus",
-  ])) as { move_result?: { created_tab?: { tab_id?: string } } } | null | undefined;
-  const tabId = result?.move_result?.created_tab?.tab_id;
-  if (!tabId) {
-    throw new Error("Failed to move pane to a new tab: invalid response structure from herdr");
-  }
-  return { tabId };
 }
 
 function toAgentStatus(value: unknown): AgentStatus {

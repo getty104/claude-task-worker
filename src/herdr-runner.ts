@@ -81,10 +81,16 @@ export interface HerdrTask {
 }
 
 /**
- * herdr のタスク専用タブで claude を TUI 起動する。
+ * herdr のタスク専用タブで claude を TUI 起動する（1タスク=1タブ）。
  *
- * `agent start` は指定ワークスペースの既存タブへ split で入るため、続けて
- * `pane move --new-tab` でタスク専用タブへ切り出す（1タスク=1タブ）。
+ * 手順は「先にタスク専用タブを作り、その中へ agent を起動する」。
+ * `agent start` はタブ内への split でしかペインを作れないため、`--tab` を省略すると
+ * ワークスペースのアクティブタブ（＝ユーザーが見ているタブ）に一瞬ペインが割り込み、
+ * その後 `pane move --new-tab` で消える——というちらつきが起きる。
+ * 先に `--no-focus` でタブを作っておけば、割り込み先は最初から不可視の新規タブになる。
+ *
+ * 新規タブのルートペイン（シェル）は agent ペインを split で迎え入れた後は不要なので、
+ * 閉じてタブを agent ペイン1枚にする。
  */
 export async function startHerdrTask({
   label,
@@ -102,16 +108,24 @@ export async function startHerdrTask({
   herdr?: typeof HerdrModule;
 }): Promise<HerdrTask> {
   const mod = herdr ?? (await loadHerdr());
-  const { paneId } = await mod.agentStart({ name: label, cwd, argv, env, workspaceId });
+  const { tabId, paneId: shellPaneId } = await mod.tabCreate({ label, cwd, workspaceId, env });
+
+  let paneId: string;
   try {
-    const { tabId } = await mod.paneMoveToNewTab(paneId, { label, workspaceId });
-    return { paneId, tabId };
+    ({ paneId } = await mod.agentStart({ name: label, cwd, argv, env, workspaceId, tabId }));
   } catch (err) {
-    // タブへ切り出せなかった場合、起動済みのペインを放置すると別タスクのタブに
-    // 同居したまま残ってしまうため、閉じてから失敗させる。
-    await mod.paneClose(paneId).catch(() => {});
+    // agent を起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
+    await mod.tabClose(tabId).catch(() => {});
     throw err;
   }
+
+  // ルートペインを閉じられなくても agent 自体は動いているので、タスクは失敗させない
+  // （タブにシェルペインが1枚余分に残るだけで、タブごと閉じる stopHerdrTask で片付く）。
+  await mod.paneClose(shellPaneId).catch((err: unknown) => {
+    console.error(`[herdr-runner] failed to close the placeholder shell pane ${shellPaneId}: ${err}`);
+  });
+
+  return { paneId, tabId };
 }
 
 /**
