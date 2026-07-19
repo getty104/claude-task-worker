@@ -1,3 +1,4 @@
+import { installCodegraphCli } from "./codegraph.js";
 import { runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
@@ -45,7 +46,8 @@ export async function install(): Promise<void> {
   await addMarketplace();
   const pluginOk = await installPlugin();
   const cliOk = await installCli();
-  if (!pluginOk || !cliOk) {
+  const codegraphOk = await installCodegraphCli("install", "install");
+  if (!pluginOk || !cliOk || !codegraphOk) {
     process.exitCode = 1;
   }
   console.log("[install] Done.");
