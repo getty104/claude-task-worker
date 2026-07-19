@@ -6,8 +6,17 @@ import type * as HerdrModule from "./herdr";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { tabCreate, tabList, paneProcessInfo, paneSendText, paneSendKeys, paneRead, HerdrError } =
-  (await import("./herdr.ts")) as typeof HerdrModule;
+const {
+  tabCreate,
+  tabList,
+  paneProcessInfo,
+  paneSendText,
+  paneSendKeys,
+  paneRead,
+  agentStart,
+  workspaceCreate,
+  HerdrError,
+} = (await import("./herdr.ts")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -21,12 +30,30 @@ function mockExecFile(t: TestContext, stdout: string, stderr: string): void {
   );
 }
 
-function mockExecFileError(t: TestContext, error: NodeJS.ErrnoException): void {
+// herdr へ実際に渡された argv を検査するためのモック。
+function captureExecFileArgs(t: TestContext, stdout: string): { args: string[][] } {
+  const captured: string[][] = [];
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+      captured.push(args);
+      callback(null, stdout, "");
+    },
+  );
+  return { args: captured };
+}
+
+function cwdArgOf(args: string[]): string {
+  return args[args.indexOf("--cwd") + 1];
+}
+
+function mockExecFileError(t: TestContext, error: NodeJS.ErrnoException, stdout = "", stderr = ""): void {
   t.mock.method(
     childProcess,
     "execFile",
     (_command: string, _args: string[], _options: unknown, callback: ExecFileCallback) => {
-      callback(error, "", "");
+      callback(error, stdout, stderr);
     },
   );
 }
@@ -154,4 +181,81 @@ test("propagates a timeout error via execError when herdr hangs", async (t) => {
     assert.match(error.message, /Command timed out/);
     return true;
   });
+});
+
+// herdr の `tab close` は存在しないタブに対し「終了コード非0＋stderrにJSON」を返す
+// （実測）。ここで code を取り出せないと stopHerdrTask の「tab_not_found は正常系」
+// 判定が効かず、claude がグレースフルに終了するたびに偽のエラーログが出る。
+test("surfaces a HerdrError with its code when herdr writes the error envelope to stderr and exits non-zero", async (t) => {
+  const { tabClose } = (await import("./herdr.ts")) as typeof HerdrModule;
+  mockExecFileError(
+    t,
+    new Error("Command failed: herdr tab close w1:t2") as NodeJS.ErrnoException,
+    "",
+    JSON.stringify({ error: { code: "tab_not_found", message: "tab w1:t2 not found" } }),
+  );
+  await assert.rejects(tabClose("w1:t2"), (error: Error) => {
+    assert.ok(error instanceof HerdrError);
+    assert.equal((error as InstanceType<typeof HerdrError>).code, "tab_not_found");
+    return true;
+  });
+});
+
+test("does not treat stderr as a source of successful results", async (t) => {
+  // stderr 側は error エンベロープの取り出しにのみ使う。result が stdout に無ければ
+  // 従来どおり invalid JSON として失敗させる。
+  mockExecFileError(
+    t,
+    new Error("Command failed") as NodeJS.ErrnoException,
+    "",
+    JSON.stringify({ result: { tabs: [] } }),
+  );
+  await assert.rejects(tabList(), (error: Error) => {
+    assert.ok(!(error instanceof HerdrError));
+    return true;
+  });
+});
+
+// --cwd は herdr サーバー（別プロセス）が解決するため、相対パスのまま渡すと
+// ワーカーのcwdではなく herdr サーバーのcwd（＝ホームディレクトリ）基準になり、
+// worktree のつもりのタスクがリポジトリ外で走る。境界で必ず絶対パス化する。
+test("agentStart resolves a relative cwd to an absolute path before handing it to herdr", async (t) => {
+  const captured = captureExecFileArgs(t, JSON.stringify({ result: { agent: { pane_id: "p1", tab_id: "t1" } } }));
+  await agentStart({ name: "task", cwd: ".claude/worktrees/brave-otter-1234", argv: ["claude"] });
+  assert.equal(cwdArgOf(captured.args[0]), `${process.cwd()}/.claude/worktrees/brave-otter-1234`);
+});
+
+test("tabCreate resolves a relative cwd to an absolute path before handing it to herdr", async (t) => {
+  const captured = captureExecFileArgs(
+    t,
+    JSON.stringify({ result: { root_pane: { pane_id: "p1" }, tab: { tab_id: "t1" } } }),
+  );
+  await tabCreate({ label: "ctw:app:#1", cwd: ".claude/worktrees/brave-otter-1234" });
+  assert.equal(cwdArgOf(captured.args[0]), `${process.cwd()}/.claude/worktrees/brave-otter-1234`);
+});
+
+test("workspaceCreate resolves a relative cwd to an absolute path before handing it to herdr", async (t) => {
+  const captured = captureExecFileArgs(
+    t,
+    JSON.stringify({
+      result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "p1", tab_id: "t1" } },
+    }),
+  );
+  await workspaceCreate({ label: "ctw:app", cwd: "." });
+  assert.equal(cwdArgOf(captured.args[0]), process.cwd());
+});
+
+test("agentStart passes an absolute cwd through unchanged", async (t) => {
+  const captured = captureExecFileArgs(t, JSON.stringify({ result: { agent: { pane_id: "p1", tab_id: "t1" } } }));
+  await agentStart({ name: "task", cwd: "/tmp/worktree", argv: ["claude"] });
+  assert.equal(cwdArgOf(captured.args[0]), "/tmp/worktree");
+});
+
+// agent は必ず「タスク専用タブ」の中で起動する。--tab を省くとワークスペースの
+// アクティブタブ（ユーザーが見ているタブ）へ split で割り込んでちらつく。
+test("agentStart targets the given tab so it does not split into the visible tab", async (t) => {
+  const captured = captureExecFileArgs(t, JSON.stringify({ result: { agent: { pane_id: "p1", tab_id: "t9" } } }));
+  await agentStart({ name: "task", cwd: "/tmp/worktree", argv: ["claude"], tabId: "w1:t9" });
+  const args = captured.args[0];
+  assert.equal(args[args.indexOf("--tab") + 1], "w1:t9");
 });

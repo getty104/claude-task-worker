@@ -73,6 +73,9 @@ interface FakeHerdrOptions {
   paneSurvivesCtrlC?: boolean;
   // tabClose が投げるエラー（既に閉じているケースの再現）
   tabCloseError?: Error;
+  tabCreateError?: Error;
+  agentStartError?: Error;
+  paneCloseError?: Error;
 }
 
 function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
@@ -101,16 +104,19 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
       options.calls?.push(`tabClose:${tabId}`);
       if (options.tabCloseError) throw options.tabCloseError;
     },
-    agentStart: async ({ name }: { name: string }) => {
-      options.calls?.push(`agentStart:${name}`);
-      return { paneId: "pane-1", tabId: "tab-root" };
+    tabCreate: async ({ label, cwd }: { label: string; cwd: string }) => {
+      options.calls?.push(`tabCreate:${label}:${cwd}`);
+      if (options.tabCreateError) throw options.tabCreateError;
+      return { paneId: "pane-shell", tabId: "tab-task" };
     },
-    paneMoveToNewTab: async (paneId: string, { label }: { label: string }) => {
-      options.calls?.push(`paneMove:${paneId}:${label}`);
-      return { tabId: "tab-task" };
+    agentStart: async ({ name, tabId, cwd }: { name: string; tabId?: string; cwd: string }) => {
+      options.calls?.push(`agentStart:${name}:${tabId ?? "-"}:${cwd}`);
+      if (options.agentStartError) throw options.agentStartError;
+      return { paneId: "pane-1", tabId: tabId ?? "tab-root" };
     },
     paneClose: async (paneId: string) => {
       options.calls?.push(`paneClose:${paneId}`);
+      if (options.paneCloseError) throw options.paneCloseError;
     },
   } as unknown as typeof HerdrModule;
 }
@@ -162,7 +168,7 @@ test("waitForHerdrTask aborts when the worker is shutting down", async () => {
   assert.match(result.output, /shutting down/);
 });
 
-test("startHerdrTask moves the started pane into its own labeled tab", async () => {
+test("startHerdrTask creates the task tab first so the agent never flashes in the visible tab", async () => {
   const calls: string[] = [];
   const herdr = makeFakeHerdr({ statuses: [], calls });
   const task = await startHerdrTask({
@@ -172,7 +178,48 @@ test("startHerdrTask moves the started pane into its own labeled tab", async () 
     herdr,
   });
   assert.deepEqual(task, { paneId: "pane-1", tabId: "tab-task" });
-  assert.deepEqual(calls, ["agentStart:ctw:my-app:#12", "paneMove:pane-1:ctw:my-app:#12"]);
+  // タブ作成 → そのタブ限定で agent 起動 → 余ったシェルペインを片付ける、の順。
+  assert.deepEqual(calls, [
+    "tabCreate:ctw:my-app:#12:/tmp/worktree",
+    "agentStart:ctw:my-app:#12:tab-task:/tmp/worktree",
+    "paneClose:pane-shell",
+  ]);
+});
+
+test("startHerdrTask closes the task tab when the agent fails to start", async () => {
+  const calls: string[] = [];
+  const herdr = makeFakeHerdr({ statuses: [], calls, agentStartError: new Error("boom") });
+  await assert.rejects(
+    startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", argv: ["claude"], herdr }),
+    /boom/,
+  );
+  // シェルだけのタブを残さない。
+  assert.deepEqual(calls, [
+    "tabCreate:ctw:my-app:#12:/tmp/worktree",
+    "agentStart:ctw:my-app:#12:tab-task:/tmp/worktree",
+    "tabClose:tab-task",
+  ]);
+});
+
+test("startHerdrTask still returns the task when the placeholder shell pane cannot be closed", async () => {
+  const calls: string[] = [];
+  const herdr = makeFakeHerdr({ statuses: [], calls, paneCloseError: new Error("pane busy") });
+  const errorLogs: string[] = [];
+  const originalError = console.error;
+  console.error = (message: string) => errorLogs.push(String(message));
+  try {
+    // agent は起動できているので、ペイン1枚の後片付け失敗でタスクを落とさない。
+    const task = await startHerdrTask({
+      label: "ctw:my-app:#12",
+      cwd: "/tmp/worktree",
+      argv: ["claude"],
+      herdr,
+    });
+    assert.deepEqual(task, { paneId: "pane-1", tabId: "tab-task" });
+  } finally {
+    console.error = originalError;
+  }
+  assert.ok(errorLogs.some((line) => line.includes("placeholder shell pane")));
 });
 
 test("stopHerdrTask sends ctrl-c twice in one call so the claude TUI actually exits", async () => {
