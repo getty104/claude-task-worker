@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import type * as ChildProcess from "node:child_process";
 import type * as DispatcherModule from "./dispatcher";
 import type * as HerdrModule from "./herdr";
-import type { ResolvedProject } from "./projects-config";
+import type { ResolvedProject } from "./user-config";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
@@ -42,21 +42,34 @@ const FAST_TIMING = {
   workerStartupPollIntervalMs: 1,
 };
 
-function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: string[], createdLabels?: string[]): void {
+function mockHerdr(
+  t: TestContext,
+  scenario: HerdrScenario,
+  closedWorkspaceIds?: string[],
+  createdLabels?: string[],
+): void {
   t.mock.method(
     childProcess,
     "execFile",
     (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
-      if (args[0] === "tab" && args[1] === "list") {
-        const tabs = (scenario.existingLabels ?? []).map((label, index) => ({
-          tab_id: `w1:t${index}`,
+      if (args[0] === "workspace" && args[1] === "list") {
+        const workspaces = (scenario.existingLabels ?? []).map((label, index) => ({
+          workspace_id: `w${index}`,
           label,
-          workspace_id: "w1",
         }));
-        callback(null, JSON.stringify({ result: { tabs } }), "");
+        callback(null, JSON.stringify({ result: { workspaces } }), "");
         return;
       }
-      if (args[0] === "tab" && args[1] === "create") {
+      // checkHerdrAvailable は疎通確認に tab list を使う。
+      if (args[0] === "tab" && args[1] === "list") {
+        callback(null, JSON.stringify({ result: { tabs: [] } }), "");
+        return;
+      }
+      if (args[0] === "tab" && args[1] === "rename") {
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "workspace" && args[1] === "create") {
         const labelIndex = args.indexOf("--label");
         const rawLabel = args[labelIndex + 1];
         createdLabels?.push(rawLabel);
@@ -71,7 +84,8 @@ function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: strin
           null,
           JSON.stringify({
             result: {
-              root_pane: { pane_id: `pane-${label}` },
+              workspace: { workspace_id: `ws-${label}`, label: rawLabel },
+              root_pane: { pane_id: `pane-${label}`, tab_id: `tab-${label}` },
               tab: { tab_id: `tab-${label}` },
             },
           }),
@@ -79,9 +93,8 @@ function mockHerdr(t: TestContext, scenario: HerdrScenario, closedTabIds?: strin
         );
         return;
       }
-      if (args[0] === "tab" && args[1] === "close") {
-        const tabId = args[2];
-        closedTabIds?.push(tabId);
+      if (args[0] === "workspace" && args[1] === "close") {
+        closedWorkspaceIds?.push(args[2]);
         callback(null, JSON.stringify({ result: null }), "");
         return;
       }
@@ -187,6 +200,7 @@ test("registers a WorkerSession in the SessionRegistry on success", async (t) =>
   const session = sessions.get("my-app");
   assert.ok(session);
   assert.equal(session?.name, "my-app");
+  assert.equal(session?.workspaceId, "ws-my-app");
   assert.equal(session?.tabId, "tab-my-app");
   assert.equal(session?.paneId, "pane-my-app");
   assert.equal(session?.status, "running");
@@ -213,8 +227,8 @@ test("continues dispatching remaining projects when one project fails", async (t
 });
 
 test("closes the dangling tab when sending the command to a created tab fails", async (t) => {
-  const closedTabIds: string[] = [];
-  mockHerdr(t, { brokenPaneLabels: ["broken-app"] }, closedTabIds);
+  const closedWorkspaceIds: string[] = [];
+  mockHerdr(t, { brokenPaneLabels: ["broken-app"] }, closedWorkspaceIds);
   const errorLogs: string[] = [];
   t.mock.method(console, "error", (message: string) => {
     errorLogs.push(message);
@@ -229,24 +243,24 @@ test("closes the dangling tab when sending the command to a created tab fails", 
   assert.equal(sessions.size, 1);
   assert.ok(sessions.has("my-app"));
   assert.ok(!sessions.has("broken-app"));
-  assert.deepEqual(closedTabIds, ["tab-broken-app"]);
+  assert.deepEqual(closedWorkspaceIds, ["ws-broken-app"]);
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "broken-app"')));
 });
 
-test("registers the session immediately after tabCreate, before awaiting the command dispatch (regression guard against tab leak on shutdown)", async () => {
+test("registers the session immediately after workspaceCreate, before awaiting the command dispatch (regression guard against workspace leak on shutdown)", async () => {
   const source = await readFile(new URL("./dispatcher.ts", import.meta.url), "utf8");
-  const tabCreateIndex = source.indexOf("await tabCreate(");
-  const sessionsSetIndex = source.indexOf("sessions.set(", tabCreateIndex);
-  const startWorkerIndex = source.indexOf("await startWorkerInPane(", tabCreateIndex);
-  assert.ok(tabCreateIndex !== -1 && sessionsSetIndex !== -1 && startWorkerIndex !== -1);
+  const workspaceCreateIndex = source.indexOf("await workspaceCreate(");
+  const sessionsSetIndex = source.indexOf("sessions.set(", workspaceCreateIndex);
+  const startWorkerIndex = source.indexOf("await startWorkerInPane(", workspaceCreateIndex);
+  assert.ok(workspaceCreateIndex !== -1 && sessionsSetIndex !== -1 && startWorkerIndex !== -1);
   assert.ok(
     sessionsSetIndex < startWorkerIndex,
-    "sessions.set() must run right after tabCreate() resolves, before the startWorkerInPane await, so a SIGINT/SIGTERM arriving during the prompt wait / send / startup wait still sees the tab in the SessionRegistry",
+    "sessions.set() must run right after workspaceCreate() resolves, before the startWorkerInPane await, so a SIGINT/SIGTERM arriving during the prompt wait / send / startup wait still sees the workspace in the SessionRegistry",
   );
 });
 
 test("closes the dangling tab and removes the leaked session when paneSendKeys (the second await) fails after paneSendText already succeeded", async (t) => {
-  const closedTabIds: string[] = [];
+  const closedWorkspaceIds: string[] = [];
   t.mock.method(
     childProcess,
     "execFile",
@@ -255,7 +269,15 @@ test("closes the dangling tab and removes the leaked session when paneSendKeys (
         callback(null, JSON.stringify({ result: { tabs: [] } }), "");
         return;
       }
-      if (args[0] === "tab" && args[1] === "create") {
+      if (args[0] === "workspace" && args[1] === "list") {
+        callback(null, JSON.stringify({ result: { workspaces: [] } }), "");
+        return;
+      }
+      if (args[0] === "tab" && args[1] === "rename") {
+        callback(null, JSON.stringify({ result: null }), "");
+        return;
+      }
+      if (args[0] === "workspace" && args[1] === "create") {
         const labelIndex = args.indexOf("--label");
         const rawLabel = args[labelIndex + 1];
         const label = rawLabel.startsWith("ctw:") ? rawLabel.slice("ctw:".length) : rawLabel;
@@ -263,16 +285,16 @@ test("closes the dangling tab and removes the leaked session when paneSendKeys (
           null,
           JSON.stringify({
             result: {
-              root_pane: { pane_id: `pane-${label}` },
-              tab: { tab_id: `tab-${label}` },
+              workspace: { workspace_id: `ws-${label}`, label: rawLabel },
+              root_pane: { pane_id: `pane-${label}`, tab_id: `tab-${label}` },
             },
           }),
           "",
         );
         return;
       }
-      if (args[0] === "tab" && args[1] === "close") {
-        closedTabIds.push(args[2]);
+      if (args[0] === "workspace" && args[1] === "close") {
+        closedWorkspaceIds.push(args[2]);
         callback(null, JSON.stringify({ result: null }), "");
         return;
       }
@@ -300,7 +322,7 @@ test("closes the dangling tab and removes the leaked session when paneSendKeys (
   const sessions = await runDispatcher(projects, "claude-task-worker all", FAST_TIMING);
 
   assert.equal(sessions.size, 0);
-  assert.deepEqual(closedTabIds, ["tab-my-app"]);
+  assert.deepEqual(closedWorkspaceIds, ["ws-my-app"]);
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "my-app"')));
 });
 
@@ -388,8 +410,8 @@ test("resends the command when the worker process never appears, then gives up a
 });
 
 test("closes the tab and drops the session when the worker never starts in the dispatched pane", async (t) => {
-  const closedTabIds: string[] = [];
-  mockHerdr(t, { neverStartingLabels: ["dead-app"] }, closedTabIds);
+  const closedWorkspaceIds: string[] = [];
+  mockHerdr(t, { neverStartingLabels: ["dead-app"] }, closedWorkspaceIds);
   const errorLogs: string[] = [];
   t.mock.method(console, "error", (message: string) => {
     errorLogs.push(message);
@@ -404,7 +426,7 @@ test("closes the tab and drops the session when the worker never starts in the d
 
   assert.equal(sessions.size, 1);
   assert.ok(sessions.has("my-app"));
-  assert.deepEqual(closedTabIds, ["tab-dead-app"]);
+  assert.deepEqual(closedWorkspaceIds, ["ws-dead-app"]);
   assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to dispatch project "dead-app"')));
 });
 
@@ -502,13 +524,13 @@ test("gives up immediately without resending when the foreground process is neit
   assert.equal(sendTextCount.value, 1);
 });
 
-function mockTabClose(t: TestContext, closedTabIds: string[]): void {
+function mockWorkspaceClose(t: TestContext, closedWorkspaceIds: string[]): void {
   t.mock.method(
     childProcess,
     "execFile",
     (_command: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
-      if (args[0] === "tab" && args[1] === "close") {
-        closedTabIds.push(args[2]);
+      if (args[0] === "workspace" && args[1] === "close") {
+        closedWorkspaceIds.push(args[2]);
         callback(null, JSON.stringify({ result: null }), "");
         return;
       }
@@ -520,6 +542,7 @@ function mockTabClose(t: TestContext, closedTabIds: string[]): void {
 function makeSession(overrides: Partial<DispatcherModule.WorkerSession> = {}): DispatcherModule.WorkerSession {
   return {
     name: "my-app",
+    workspaceId: "ws-my-app",
     tabId: "tab-my-app",
     paneId: "pane-my-app",
     startedAt: new Date(),
@@ -545,8 +568,8 @@ test("pollOnce keeps a session that still has a claude-task-worker foreground pr
 });
 
 test("pollOnce treats a foreground process with a missing cmdline as not alive instead of throwing", async (t) => {
-  const closedTabIds: string[] = [];
-  mockTabClose(t, closedTabIds);
+  const closedWorkspaceIds: string[] = [];
+  mockWorkspaceClose(t, closedWorkspaceIds);
   const errorLogs: string[] = [];
   t.mock.method(console, "error", (message: string) => {
     errorLogs.push(message);
@@ -563,13 +586,13 @@ test("pollOnce treats a foreground process with a missing cmdline as not alive i
   await assert.doesNotReject(pollOnce(sessions, fakeHerdr));
 
   assert.equal(sessions.size, 0);
-  assert.deepEqual(closedTabIds, ["tab-my-app"]);
+  assert.deepEqual(closedWorkspaceIds, ["ws-my-app"]);
   assert.equal(errorLogs.length, 0);
 });
 
 test("pollOnce removes a session and closes the tab when the pane returned to the shell", async (t) => {
-  const closedTabIds: string[] = [];
-  mockTabClose(t, closedTabIds);
+  const closedWorkspaceIds: string[] = [];
+  mockWorkspaceClose(t, closedWorkspaceIds);
   const session = makeSession();
   const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
   const fakeHerdr = {
@@ -582,12 +605,12 @@ test("pollOnce removes a session and closes the tab when the pane returned to th
   await pollOnce(sessions, fakeHerdr);
 
   assert.equal(sessions.size, 0);
-  assert.deepEqual(closedTabIds, ["tab-my-app"]);
+  assert.deepEqual(closedWorkspaceIds, ["ws-my-app"]);
 });
 
 test("pollOnce removes a session without closing the tab when the pane is gone", async (t) => {
-  const closedTabIds: string[] = [];
-  mockTabClose(t, closedTabIds);
+  const closedWorkspaceIds: string[] = [];
+  mockWorkspaceClose(t, closedWorkspaceIds);
   const session = makeSession();
   const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
   const fakeHerdr = {
@@ -600,7 +623,7 @@ test("pollOnce removes a session without closing the tab when the pane is gone",
   await pollOnce(sessions, fakeHerdr);
 
   assert.equal(sessions.size, 0);
-  assert.deepEqual(closedTabIds, []);
+  assert.deepEqual(closedWorkspaceIds, []);
 });
 
 test("pollOnce keeps a session and logs on a transient error other than pane_not_found", async (t) => {
@@ -625,8 +648,8 @@ test("pollOnce keeps a session and logs on a transient error other than pane_not
 });
 
 test("monitorSessions resolves done once all sessions disappear", async (t) => {
-  const closedTabIds: string[] = [];
-  mockTabClose(t, closedTabIds);
+  const closedWorkspaceIds: string[] = [];
+  mockWorkspaceClose(t, closedWorkspaceIds);
   const session = makeSession();
   const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
   const fakeHerdr = {
@@ -687,10 +710,10 @@ function mockProcessExit(t: TestContext): number[] {
 function makeShutdownFakeHerdr(options: {
   ctrlCThreshold?: Record<string, number>;
   ctrlCCounts: Record<string, number>;
-  closedTabIds: string[];
+  closedWorkspaceIds: string[];
   sentKeys?: string[];
 }): typeof HerdrModule {
-  const { ctrlCThreshold = {}, ctrlCCounts, closedTabIds, sentKeys } = options;
+  const { ctrlCThreshold = {}, ctrlCCounts, closedWorkspaceIds, sentKeys } = options;
   return {
     HerdrError,
     paneSendKeys: async (paneId: string, ...keys: string[]) => {
@@ -706,8 +729,8 @@ function makeShutdownFakeHerdr(options: {
           : [{ name: "zsh", argv: [], cmdline: "zsh", pid: 123 }],
       };
     },
-    tabClose: async (tabId: string) => {
-      closedTabIds.push(tabId);
+    workspaceClose: async (workspaceId: string) => {
+      closedWorkspaceIds.push(workspaceId);
     },
   } as unknown as typeof HerdrModule;
 }
@@ -716,11 +739,11 @@ test("shutdownDispatcher: 全セッションが1回目のctrl-c送信後にタ�
   const exitCodes = mockProcessExit(t);
   // pollOnce の removeSession は herdr パラメータを無視して実際の herdr バイナリを
   // 呼び出すため、テストでは実プロセス起動を避けるべく execFile をモックする。
-  mockTabClose(t, []);
+  mockWorkspaceClose(t, []);
   const ctrlCCounts: Record<string, number> = {};
-  const closedTabIds: string[] = [];
+  const closedWorkspaceIds: string[] = [];
   const sentKeys: string[] = [];
-  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds, sentKeys });
+  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedWorkspaceIds, sentKeys });
 
   const session = makeSession();
   const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
@@ -730,7 +753,7 @@ test("shutdownDispatcher: 全セッションが1回目のctrl-c送信後にタ�
     pollIntervalMs: 5,
     shutdownTimeoutMs: 200,
     retryTimeoutMs: 200,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   });
 
   assert.equal(ctrlCCounts[session.paneId], 1);
@@ -743,12 +766,12 @@ test("shutdownDispatcher: 全セッションが1回目のctrl-c送信後にタ�
 
 test("shutdownDispatcher: 1回目タイムアウト後、生存paneにのみ再送1回して短縮タイムアウトで再待機する", async (t) => {
   const exitCodes = mockProcessExit(t);
-  mockTabClose(t, []);
+  mockWorkspaceClose(t, []);
   const ctrlCCounts: Record<string, number> = {};
-  const closedTabIds: string[] = [];
+  const closedWorkspaceIds: string[] = [];
   const fakeHerdr = makeShutdownFakeHerdr({
     ctrlCCounts,
-    closedTabIds,
+    closedWorkspaceIds,
     ctrlCThreshold: { "pane-my-app": 2 },
   });
 
@@ -760,7 +783,7 @@ test("shutdownDispatcher: 1回目タイムアウト後、生存paneにのみ再�
     pollIntervalMs: 5,
     shutdownTimeoutMs: 20,
     retryTimeoutMs: 200,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   });
 
   assert.equal(ctrlCCounts[session.paneId], 2);
@@ -768,12 +791,12 @@ test("shutdownDispatcher: 1回目タイムアウト後、生存paneにのみ再�
   assert.deepEqual(exitCodes, [0]);
 });
 
-test("shutdownDispatcher: 同時に2回呼んでも二重送信・二重待機・二重tabCloseが起きない", async (t) => {
+test("shutdownDispatcher: 同時に2回呼んでも二重送信・二重待機・二重workspaceCloseが起きない", async (t) => {
   const exitCodes = mockProcessExit(t);
-  mockTabClose(t, []);
+  mockWorkspaceClose(t, []);
   const ctrlCCounts: Record<string, number> = {};
-  const closedTabIds: string[] = [];
-  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds });
+  const closedWorkspaceIds: string[] = [];
+  const fakeHerdr = makeShutdownFakeHerdr({ ctrlCCounts, closedWorkspaceIds });
 
   const session = makeSession();
   const sessions: DispatcherModule.SessionRegistry = new Map([[session.name, session]]);
@@ -782,7 +805,7 @@ test("shutdownDispatcher: 同時に2回呼んでも二重送信・二重待機�
     pollIntervalMs: 5,
     shutdownTimeoutMs: 200,
     retryTimeoutMs: 200,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   };
 
   const p1 = shutdownDispatcher(sessions, undefined, shutdownOptions);
@@ -790,13 +813,13 @@ test("shutdownDispatcher: 同時に2回呼んでも二重送信・二重待機�
   await Promise.all([p1, p2]);
 
   assert.equal(ctrlCCounts[session.paneId], 1);
-  assert.deepEqual(closedTabIds, []);
+  assert.deepEqual(closedWorkspaceIds, []);
   assert.deepEqual(exitCodes, [0]);
 });
 
 test("shutdownDispatcher: monitorHandleが渡された場合stop()/done経由で先に停止してから待機に切り替わる", async (t) => {
   const exitCodes = mockProcessExit(t);
-  mockTabClose(t, []);
+  mockWorkspaceClose(t, []);
   const order: string[] = [];
   let resolveDone: () => void;
   const done = new Promise<void>((resolve) => {
@@ -814,9 +837,9 @@ test("shutdownDispatcher: monitorHandleが渡された場合stop()/done経由で
   };
 
   const ctrlCCounts: Record<string, number> = {};
-  const closedTabIds: string[] = [];
+  const closedWorkspaceIds: string[] = [];
   const fakeHerdr = {
-    ...makeShutdownFakeHerdr({ ctrlCCounts, closedTabIds }),
+    ...makeShutdownFakeHerdr({ ctrlCCounts, closedWorkspaceIds }),
     paneSendKeys: async (paneId: string) => {
       order.push("sendCtrlC");
       ctrlCCounts[paneId] = (ctrlCCounts[paneId] ?? 0) + 1;
@@ -831,23 +854,23 @@ test("shutdownDispatcher: monitorHandleが渡された場合stop()/done経由で
     pollIntervalMs: 5,
     shutdownTimeoutMs: 200,
     retryTimeoutMs: 200,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   });
 
   assert.deepEqual(order, ["stop", "done-resolved", "sendCtrlC"]);
   assert.deepEqual(exitCodes, [0]);
 });
 
-test("shutdownDispatcher: 残っている全タブがtabCloseで閉じられ、失敗しても他のcloseとプロセス終了がブロックされない", async (t) => {
+test("shutdownDispatcher: 残っている全ワークスペースがworkspaceCloseで閉じられ、失敗しても他のcloseとプロセス終了がブロックされない", async (t) => {
   const exitCodes = mockProcessExit(t);
   const errorLogs: string[] = [];
   t.mock.method(console, "error", (message: string) => {
     errorLogs.push(message);
   });
 
-  const closedTabIds: string[] = [];
-  const sessionA = makeSession({ name: "app-a", tabId: "tab-a", paneId: "pane-a" });
-  const sessionB = makeSession({ name: "app-b", tabId: "tab-b", paneId: "pane-b" });
+  const closedWorkspaceIds: string[] = [];
+  const sessionA = makeSession({ name: "app-a", workspaceId: "ws-a", tabId: "tab-a", paneId: "pane-a" });
+  const sessionB = makeSession({ name: "app-b", workspaceId: "ws-b", tabId: "tab-b", paneId: "pane-b" });
   const sessions: DispatcherModule.SessionRegistry = new Map([
     [sessionA.name, sessionA],
     [sessionB.name, sessionB],
@@ -859,11 +882,11 @@ test("shutdownDispatcher: 残っている全タブがtabCloseで閉じられ、�
     paneProcessInfo: async () => ({
       foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
     }),
-    tabClose: async (tabId: string) => {
-      if (tabId === "tab-a") {
-        throw new Error("tabClose boom");
+    workspaceClose: async (workspaceId: string) => {
+      if (workspaceId === "ws-a") {
+        throw new Error("workspaceClose boom");
       }
-      closedTabIds.push(tabId);
+      closedWorkspaceIds.push(workspaceId);
     },
   } as unknown as typeof HerdrModule;
 
@@ -872,17 +895,17 @@ test("shutdownDispatcher: 残っている全タブがtabCloseで閉じられ、�
     pollIntervalMs: 5,
     shutdownTimeoutMs: 20,
     retryTimeoutMs: 20,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   });
 
-  assert.deepEqual(closedTabIds, ["tab-b"]);
-  assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to close tab "tab-a"')));
+  assert.deepEqual(closedWorkspaceIds, ["ws-b"]);
+  assert.ok(errorLogs.some((line) => line.startsWith('[dispatcher] failed to close workspace "ws-a"')));
   assert.deepEqual(exitCodes, [1]);
 });
 
 test("shutdownDispatcher: 全タブのcloseに成功してもセッションが最終的に終了しなければexit(1)する", async (t) => {
   const exitCodes = mockProcessExit(t);
-  const closedTabIds: string[] = [];
+  const closedWorkspaceIds: string[] = [];
   const ctrlCCounts: Record<string, number> = {};
   const fakeHerdr = {
     HerdrError,
@@ -892,8 +915,8 @@ test("shutdownDispatcher: 全タブのcloseに成功してもセッションが�
     paneProcessInfo: async () => ({
       foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
     }),
-    tabClose: async (tabId: string) => {
-      closedTabIds.push(tabId);
+    workspaceClose: async (workspaceId: string) => {
+      closedWorkspaceIds.push(workspaceId);
     },
   } as unknown as typeof HerdrModule;
 
@@ -905,17 +928,17 @@ test("shutdownDispatcher: 全タブのcloseに成功してもセッションが�
     pollIntervalMs: 5,
     shutdownTimeoutMs: 20,
     retryTimeoutMs: 20,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   });
 
-  assert.deepEqual(closedTabIds, [session.tabId]);
+  assert.deepEqual(closedWorkspaceIds, [session.workspaceId]);
   assert.deepEqual(exitCodes, [1]);
 });
 
-test("shutdownDispatcher: forceKill:true を指定した2回目の呼び出しは1回目の完了を待たず強制的にctrl-c再送・tabClose・exit(1)を行う", async (t) => {
+test("shutdownDispatcher: forceKill:true を指定した2回目の呼び出しは1回目の完了を待たず強制的にctrl-c再送・workspaceClose・exit(1)を行う", async (t) => {
   const exitCodes = mockProcessExit(t);
   const ctrlCCounts: Record<string, number> = {};
-  const closedTabIds: string[] = [];
+  const closedWorkspaceIds: string[] = [];
   const fakeHerdr = {
     HerdrError,
     paneSendKeys: async (paneId: string) => {
@@ -924,8 +947,8 @@ test("shutdownDispatcher: forceKill:true を指定した2回目の呼び出し�
     paneProcessInfo: async () => ({
       foregroundProcesses: [{ name: "node", argv: [], cmdline: "claude-task-worker exec-issue", pid: 123 }],
     }),
-    tabClose: async (tabId: string) => {
-      closedTabIds.push(tabId);
+    workspaceClose: async (workspaceId: string) => {
+      closedWorkspaceIds.push(workspaceId);
     },
   } as unknown as typeof HerdrModule;
 
@@ -937,17 +960,17 @@ test("shutdownDispatcher: forceKill:true を指定した2回目の呼び出し�
     pollIntervalMs: 5,
     shutdownTimeoutMs: 50,
     retryTimeoutMs: 50,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
   });
 
   await shutdownDispatcher(sessions, undefined, {
     herdr: fakeHerdr,
-    tabCloseTimeoutMs: 50,
+    workspaceCloseTimeoutMs: 50,
     forceKill: true,
   });
 
   assert.ok((ctrlCCounts[session.paneId] ?? 0) >= 1);
-  assert.ok(closedTabIds.includes(session.tabId));
+  assert.ok(closedWorkspaceIds.includes(session.workspaceId));
   assert.ok(exitCodes.includes(1));
 
   await firstShutdown;

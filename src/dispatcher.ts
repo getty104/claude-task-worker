@@ -1,6 +1,6 @@
 import type * as HerdrModule from "./herdr";
 import type * as TableModule from "./table";
-import type { ResolvedProject } from "./projects-config";
+import type { ResolvedProject } from "./user-config";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。動的importのままにすることで、
@@ -34,18 +34,20 @@ export const WORKER_STARTUP_TIMEOUT_MS = 30 * 1000;
 export const WORKER_STARTUP_POLL_INTERVAL_MS = 500;
 export const SEND_MAX_ATTEMPTS = 3;
 
-// ディスパッチャーが作成するherdrタブのラベルに付与するプレフィックス。
-// claude-task-worker が起動したタブを他のタブと区別できるようにする。
-export const TAB_LABEL_PREFIX = "ctw:";
+// ディスパッチャーが作成するherdrワークスペース／タブのラベルに付与するプレフィックス。
+// claude-task-worker が起動したものを他と区別できるようにする。
+// herdr モードでワーカーが作るタスクタブ（ctw:<project>:#<n>）ともプレフィックスを共有する。
+export const LABEL_PREFIX = "ctw:";
 
-export function tabLabelFor(projectName: string): string {
-  return `${TAB_LABEL_PREFIX}${projectName}`;
+export function workspaceLabelFor(projectName: string): string {
+  return `${LABEL_PREFIX}${projectName}`;
 }
 
 export type WorkerSessionStatus = "running";
 
 export interface WorkerSession {
   name: string;
+  workspaceId: string;
   tabId: string;
   paneId: string;
   startedAt: Date;
@@ -167,7 +169,7 @@ export async function runDispatcher(
   timing?: DispatchTimingOptions,
 ): Promise<SessionRegistry> {
   const herdr = await loadHerdr();
-  const { checkHerdrAvailable, tabCreate, tabClose, tabList } = herdr;
+  const { checkHerdrAvailable, workspaceCreate, workspaceClose, workspaceList, tabRename } = herdr;
 
   try {
     await checkHerdrAvailable();
@@ -177,23 +179,37 @@ export async function runDispatcher(
     throw error;
   }
 
-  const existingTabs = await tabList();
-  const existingLabels = new Set(existingTabs.map((tab) => tab.label));
+  const existingWorkspaces = await workspaceList();
+  const existingLabels = new Set(existingWorkspaces.map((workspace) => workspace.label));
 
   const sessions: SessionRegistry = new Map();
 
   for (const project of projects) {
-    if (existingLabels.has(tabLabelFor(project.name))) {
-      console.warn(`[dispatcher] project "${project.name}" already has a running tab, skipping`);
+    const label = workspaceLabelFor(project.name);
+    if (existingLabels.has(label)) {
+      console.warn(`[dispatcher] project "${project.name}" already has a running workspace, skipping`);
       continue;
     }
 
-    let createdTabId: string | undefined;
+    let createdWorkspaceId: string | undefined;
     try {
-      const { paneId, tabId } = await tabCreate({ label: tabLabelFor(project.name), cwd: project.path });
-      createdTabId = tabId;
+      // プロジェクト名は herdr モードのワーカーがタスクタブのラベル（ctw:<project>:#<n>）に
+      // 使うため環境変数で渡す。ワークスペースIDは herdr が HERDR_WORKSPACE_ID として
+      // 各ペインへ自動注入するので、こちらから渡す必要はない。
+      const { workspaceId, tabId, paneId } = await workspaceCreate({
+        label,
+        cwd: project.path,
+        env: { CTW_PROJECT_NAME: project.name },
+      });
+      createdWorkspaceId = workspaceId;
+      // ワークスペース作成時のルートタブのラベルは herdr が自動採番する（"1" 等）ため、
+      // ワーカー本体のタブだと分かるようリネームする。
+      await tabRename(tabId, label).catch((error) =>
+        console.error(`[dispatcher] failed to rename the root tab for project "${project.name}": ${error}`),
+      );
       sessions.set(project.name, {
         name: project.name,
+        workspaceId,
         tabId,
         paneId,
         startedAt: new Date(),
@@ -208,11 +224,11 @@ export async function runDispatcher(
     } catch (error) {
       console.error(`[dispatcher] failed to dispatch project "${project.name}": ${error}`);
       sessions.delete(project.name);
-      if (createdTabId !== undefined) {
+      if (createdWorkspaceId !== undefined) {
         try {
-          await tabClose(createdTabId);
+          await workspaceClose(createdWorkspaceId);
         } catch (closeError) {
-          console.error(`[dispatcher] failed to close dangling tab for project "${project.name}": ${closeError}`);
+          console.error(`[dispatcher] failed to close dangling workspace for project "${project.name}": ${closeError}`);
         }
       }
     }
@@ -229,14 +245,15 @@ export interface MonitorHandle {
 export async function removeSession(
   sessions: SessionRegistry,
   name: string,
-  { closeTab }: { closeTab: boolean },
+  { closeWorkspace }: { closeWorkspace: boolean },
 ): Promise<void> {
   const session = sessions.get(name);
   if (!session) return;
   sessions.delete(name);
-  if (closeTab) {
-    const { tabClose } = await loadHerdr();
-    await tabClose(session.tabId);
+  if (closeWorkspace) {
+    const { workspaceClose } = await loadHerdr();
+    // ワークスペースごと閉じることで、herdr モードのワーカーが残したタスクタブも一緒に片付く。
+    await workspaceClose(session.workspaceId);
   }
 }
 
@@ -245,11 +262,11 @@ export async function pollOnce(sessions: SessionRegistry, herdr: typeof HerdrMod
     try {
       const { foregroundProcesses } = await herdr.paneProcessInfo(session.paneId);
       if (!foregroundProcesses.some(isWorkerProcess)) {
-        await removeSession(sessions, name, { closeTab: true });
+        await removeSession(sessions, name, { closeWorkspace: true });
       }
     } catch (error) {
       if (error instanceof herdr.HerdrError && error.code === "pane_not_found") {
-        await removeSession(sessions, name, { closeTab: false });
+        await removeSession(sessions, name, { closeWorkspace: false });
         continue;
       }
       console.error(`[dispatcher] failed to poll session "${name}": ${error}`);
@@ -274,7 +291,7 @@ export function renderSessionTable(sessions: SessionRegistry): void {
   const rows = entries.map((session) => ({
     project:
       getDisplayWidth(session.name) > maxProjectWidth ? truncateToWidth(session.name, maxProjectWidth) : session.name,
-    tab: session.tabId,
+    workspace: session.workspaceId,
     pane: session.paneId,
     status: session.status,
     uptime: formatUptime(session.startedAt, new Date()),
@@ -282,24 +299,24 @@ export function renderSessionTable(sessions: SessionRegistry): void {
 
   const colWidths = {
     project: Math.max(7, ...rows.map((r) => getDisplayWidth(r.project))),
-    tab: Math.max(3, ...rows.map((r) => r.tab.length)),
+    workspace: Math.max(9, ...rows.map((r) => r.workspace.length)),
     pane: Math.max(4, ...rows.map((r) => r.pane.length)),
     status: Math.max(6, ...rows.map((r) => r.status.length)),
     uptime: Math.max(6, ...rows.map((r) => r.uptime.length)),
   };
 
-  const cols = [colWidths.project, colWidths.tab, colWidths.pane, colWidths.status, colWidths.uptime];
+  const cols = [colWidths.project, colWidths.workspace, colWidths.pane, colWidths.status, colWidths.uptime];
   const line = (l: string, m: string, r: string, f: string) => `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
 
-  const row = (project: string, tab: string, pane: string, status: string, uptime: string) =>
-    `│ ${padToWidth(project, colWidths.project)} │ ${tab.padEnd(colWidths.tab)} │ ${pane.padEnd(colWidths.pane)} │ ${status.padEnd(colWidths.status)} │ ${uptime.padEnd(colWidths.uptime)} │`;
+  const row = (project: string, workspace: string, pane: string, status: string, uptime: string) =>
+    `│ ${padToWidth(project, colWidths.project)} │ ${workspace.padEnd(colWidths.workspace)} │ ${pane.padEnd(colWidths.pane)} │ ${status.padEnd(colWidths.status)} │ ${uptime.padEnd(colWidths.uptime)} │`;
 
   const lines: string[] = [];
   lines.push(line("┌", "┬", "┐", "─"));
-  lines.push(row("Project", "Tab", "Pane", "Status", "Uptime"));
+  lines.push(row("Project", "Workspace", "Pane", "Status", "Uptime"));
   lines.push(line("├", "┼", "┤", "─"));
   for (const r of rows) {
-    lines.push(row(r.project, r.tab, r.pane, r.status, r.uptime));
+    lines.push(row(r.project, r.workspace, r.pane, r.status, r.uptime));
   }
   lines.push(line("└", "┴", "┘", "─"));
 
@@ -360,7 +377,7 @@ export interface ShutdownOptions {
   pollIntervalMs?: number;
   shutdownTimeoutMs?: number;
   retryTimeoutMs?: number;
-  tabCloseTimeoutMs?: number;
+  workspaceCloseTimeoutMs?: number;
   forceKill?: boolean;
 }
 
@@ -396,7 +413,7 @@ async function waitUntilSessionsEmpty(
   return true;
 }
 
-async function closeRemainingTabs(
+async function closeRemainingWorkspaces(
   sessions: SessionRegistry,
   herdr: typeof HerdrModule,
   timeoutMs: number,
@@ -405,15 +422,15 @@ async function closeRemainingTabs(
     [...sessions.values()].map(async (session) => {
       try {
         await Promise.race([
-          herdr.tabClose(session.tabId),
+          herdr.workspaceClose(session.workspaceId),
           new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error("tabClose timed out")), timeoutMs).unref();
+            setTimeout(() => reject(new Error("workspaceClose timed out")), timeoutMs).unref();
           }),
         ]);
         return true;
       } catch (error) {
         console.error(
-          `[dispatcher] failed to close tab "${session.tabId}" for session "${session.name}" during shutdown: ${error}`,
+          `[dispatcher] failed to close workspace "${session.workspaceId}" for session "${session.name}" during shutdown: ${error}`,
         );
         return false;
       }
@@ -432,11 +449,11 @@ let shutdownPromise: Promise<void> | undefined;
 async function forceKillAllSessions(
   sessions: SessionRegistry,
   herdr: typeof HerdrModule,
-  tabCloseTimeoutMs: number,
+  workspaceCloseTimeoutMs: number,
 ): Promise<void> {
   console.log(`[dispatcher] force-kill requested, sending ctrl-c and closing ${sessions.size} session(s) immediately`);
   await sendCtrlCToAllSessions(sessions, herdr);
-  await closeRemainingTabs(sessions, herdr, tabCloseTimeoutMs);
+  await closeRemainingWorkspaces(sessions, herdr, workspaceCloseTimeoutMs);
   process.exit(1);
 }
 
@@ -448,8 +465,8 @@ export async function shutdownDispatcher(
   if (shutdownPromise) {
     if (options?.forceKill) {
       const herdr = options.herdr ?? (await loadHerdr());
-      const tabCloseTimeoutMs = options.tabCloseTimeoutMs ?? 5000;
-      await forceKillAllSessions(sessions, herdr, tabCloseTimeoutMs);
+      const workspaceCloseTimeoutMs = options.workspaceCloseTimeoutMs ?? 5000;
+      await forceKillAllSessions(sessions, herdr, workspaceCloseTimeoutMs);
       return;
     }
     console.log("[dispatcher] shutdown already in progress, ignoring duplicate request");
@@ -461,7 +478,7 @@ export async function shutdownDispatcher(
     const pollIntervalMs = options?.pollIntervalMs ?? POLL_INTERVAL_MS;
     const shutdownTimeoutMs = options?.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS;
     const retryTimeoutMs = options?.retryTimeoutMs ?? SHUTDOWN_RETRY_TIMEOUT_MS;
-    const tabCloseTimeoutMs = options?.tabCloseTimeoutMs ?? 5000;
+    const workspaceCloseTimeoutMs = options?.workspaceCloseTimeoutMs ?? 5000;
 
     if (monitorHandle) {
       monitorHandle.stop();
@@ -481,9 +498,9 @@ export async function shutdownDispatcher(
       finishedInTime = await waitUntilSessionsEmpty(sessions, herdr, pollIntervalMs, retryTimeoutMs);
     }
 
-    const allTabsClosed = await closeRemainingTabs(sessions, herdr, tabCloseTimeoutMs);
+    const allWorkspacesClosed = await closeRemainingWorkspaces(sessions, herdr, workspaceCloseTimeoutMs);
 
-    process.exit(finishedInTime && allTabsClosed ? 0 : 1);
+    process.exit(finishedInTime && allWorkspacesClosed ? 0 : 1);
   })();
 
   try {

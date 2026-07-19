@@ -23,7 +23,7 @@ import {
   assertProjectCompatibleCommand,
   buildForwardedCommand,
 } from "./dispatch-args";
-import { loadProjectsConfig, resolveTargetProjects, ProjectsConfigError } from "./projects-config";
+import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
 // dispatcher.ts / herdr.ts はワーカー起動には不要な --project 専用モジュールで、
 // dispatcher.ts のトップレベル await が即時実行されるのを避けるため、
 // 静的importではなく --project 使用時にのみ実行される動的importで遅延読込する。
@@ -152,6 +152,23 @@ process.on("unhandledRejection", (err) => {
   process.exit(1);
 });
 
+// mode: "herdr" のワーカーは全タスクを herdr のタブで実行するため、herdr が使えなければ
+// 1タスクも実行できない。ラベルだけ書き換えて失敗し続ける事故を避けるため、起動時に
+// 疎通を確認して落とす（"default" へのサイレントフォールバックはしない）。
+async function assertRunModeAvailable(): Promise<void> {
+  if (getRunMode() !== "herdr") return;
+  // herdr.ts は herdr モード（と --project）でのみ必要なため動的importで遅延読込する。
+  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  try {
+    await herdr.checkHerdrAvailable();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[worker] config.json has mode "herdr" but herdr is unavailable: ${message}`);
+    process.exit(1);
+  }
+  console.log("[worker] run mode: herdr (each task runs as a TUI session in its own herdr tab)");
+}
+
 if (!hasProjectFilter()) {
   process.on("SIGTERM", async () => {
     if (isShuttingDown()) return;
@@ -210,7 +227,7 @@ if (hasProjectFilter()) {
     process.on("SIGINT", shutdownController.handle);
 
     try {
-      const config = loadProjectsConfig();
+      const config = loadUserConfig();
       const projects = resolveTargetProjects(parseProjectFilters(), config);
       const forwardedCommand = buildForwardedCommand(process.argv.slice(2));
       sessions = await dispatcher.runDispatcher(projects, forwardedCommand);
@@ -229,7 +246,7 @@ if (hasProjectFilter()) {
         process.exit(0);
       }
     } catch (err) {
-      if (err instanceof ProjectsConfigError || err instanceof herdr.HerdrUnavailableError) {
+      if (err instanceof UserConfigError || err instanceof herdr.HerdrUnavailableError) {
         console.error(`[dispatcher] ${err.message}`);
         process.exit(1);
       }
@@ -262,6 +279,7 @@ if (hasProjectFilter()) {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
+    await assertRunModeAvailable();
     // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
     await removeStaleWorktrees();
     await Promise.all([
@@ -278,6 +296,7 @@ if (hasProjectFilter()) {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
+    await assertRunModeAvailable();
     await removeStaleWorktrees();
     await Promise.all([
       execIssueWorker({ epicFilters, labelFilters }),
@@ -296,6 +315,7 @@ if (hasProjectFilter()) {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
+    await assertRunModeAvailable();
     await removeStaleWorktrees();
     await WORKERS[workerType]({ epicFilters, labelFilters });
   })();

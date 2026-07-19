@@ -1,4 +1,4 @@
-import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../claude-args.js";
+import { buildClaudeArgs, buildClaudeEnv } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
@@ -6,6 +6,7 @@ import { syncDefaultBranch, ensureEpicBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { getRunMode } from "../user-config";
 import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../worktree";
 
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
@@ -90,22 +91,8 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             const command = skill || config.command;
 
             const parentNumber = issue.parent?.number;
-            const claudeArgs: string[] = [
-              "-p",
-              `${command} ${issue.number}`,
-              "--dangerously-skip-permissions",
-              "--chrome",
-              "--disallowedTools",
-              DISALLOWED_TOOLS_ARG,
-              "--append-system-prompt",
-              SYSTEM_PROMPT,
-              "--append-subagent-system-prompt",
-              SUBAGENT_SYSTEM_PROMPT,
-              "--model",
-              model,
-              "--effort",
-              effort,
-            ];
+            const mode = getRunMode();
+            const claudeArgs = buildClaudeArgs({ mode, prompt: `${command} ${issue.number}`, model, effort });
 
             // claude CLI の --worktree は locked な worktree を作り、異常終了時に
             // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
@@ -167,7 +154,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
               },
               cwd,
-              { ...CLAUDE_SPAWN_ENV },
+              buildClaudeEnv(mode),
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);

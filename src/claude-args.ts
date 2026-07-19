@@ -1,6 +1,9 @@
-// ワーカーは各スキルを `claude -p`（非対話・自律実行）で起動する。以下のツールは
-// この実行形態では原理的に使い道がない（または有害）なため、CLI の `--disallowedTools`
-// で完全に無効化する。存在しないツール名は無害な no-op になるため、環境差は問題ない。
+import type { RunMode } from "./user-config.js";
+
+// ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
+// herdr モードは herdr タブ内の TUI セッション。どちらも応答するユーザーは常駐しない）。
+// 以下のツールはこの実行形態では原理的に使い道がない（または有害）なため、CLI の
+// `--disallowedTools` で完全に無効化する。存在しないツール名は無害な no-op になるため、環境差は問題ない。
 //
 // 「入る」系だけを無効化し「出る」系（ExitPlanMode / ExitWorktree）は残す方針：
 // 万一その状態で開始してもモデルが脱出できるようにするため。
@@ -36,7 +39,7 @@ export const DISALLOWED_TOOLS = [
 // 後続フラグとの境界を曖昧にしないよう、カンマ結合した1値として渡す。
 export const DISALLOWED_TOOLS_ARG = DISALLOWED_TOOLS.join(",");
 
-// ワーカーが `claude -p` を spawn する際に process.env へ上書きマージする環境変数。
+// ワーカーが `claude -p`（default モード）を spawn する際に process.env へ上書きマージする環境変数。
 //
 // - CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1: Claude 管理下のバックグラウンド機構
 //   （Bash の `run_in_background`・サブエージェントの自動バックグラウンド化）のみを
@@ -56,19 +59,62 @@ export const CLAUDE_SPAWN_ENV = {
   CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0",
 } as const;
 
-// `--append-system-prompt` でメインエージェントのシステムプロンプト末尾に注入する
-// 自律実行原則。かつては各ワーカー起動スキルの「実行モードの制約」セクションに同文を
-// 複製していたが、ワーカー起動時の CLI 注入に一元化した（対話セッションでスキルを手動
-// 実行する場合は実在するユーザーと対話してよいため、スキル本文に置かないのが正しい）。
-export const SYSTEM_PROMPT = `このセッションは \`claude-task-worker\` のワーカーから \`claude -p\`（非対話 print モード）で自動起動されている。ユーザーへの確認・質問は行わず（回答するユーザーは存在しない）、起動されたスキルのルールに従って自律的に判断し、全ステップを完遂してから（または中断条件に該当した場合は理由を出力して）終了すること。曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する。`;
+// `--append-system-prompt` でシステムプロンプト末尾に注入する自律実行原則。
+// かつては各ワーカー起動スキルの「実行モードの制約」セクションに同文を複製していたが、
+// ワーカー起動時の CLI 注入に一元化した（対話セッションでスキルを手動実行する場合は
+// 実在するユーザーと対話してよいため、スキル本文に置かないのが正しい）。
+//
+// サブエージェント向けの原則もここに統合している。かつては
+// `--append-subagent-system-prompt`（`-p` 非対話モード限定）で全サブエージェントへ
+// 直接注入していたが、herdr モードの TUI 起動では同フラグが使えず、実行形態によって
+// 原則の届き方が変わってしまう。そのため注入経路を `--append-system-prompt` 一本に統一し、
+// サブエージェントへはメインエージェントが委譲プロンプトで伝える形にした。
+//
+// 文面は実行形態（`claude -p` / TUI）に依存しない表現にしてある。
+export const SYSTEM_PROMPT = `このセッションは \`claude-task-worker\` のワーカーから自動起動されている（応答できるユーザーは常駐していない）。以下の自律実行原則を必ず遵守すること。
 
-// `--append-subagent-system-prompt`（Claude Code v2.1.205+、`-p` 非対話モード限定）で、
-// ネストを含む全サブエージェントのシステムプロンプト末尾に注入する自律実行原則。
-// `--append-system-prompt`（メインエージェント向け）はサブエージェント内部には
-// 届かないため、この注入で全サブエージェントへ適用する。
-export const SUBAGENT_SYSTEM_PROMPT = `あなたは claude-task-worker のワーカーが \`claude -p\`（非対話 print モード）で自動起動したセッション内のサブエージェントです。以下の自律実行原則を必ず遵守してください。
-
-- ユーザーへの確認・質問は行わない（回答するユーザーは存在しない）。判断はすべて委譲された指示（プロンプトで明示的に渡された内容）に従って自動で決定する
+- ユーザーへの確認・質問は行わず、起動されたスキルのルールに従って自律的に判断する
 - 曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する
-- 委譲されたタスクは最後まで完遂してから最終報告する。指示に定義された中断条件に該当した場合のみ、理由を出力して終了する
-- 子サブエージェントに作業を委譲した場合、その完了報告を鵜呑みにしない。\`git diff\` 等で実際の成果物を検証してから完了扱いにする`;
+- 全ステップを完遂してから終了する（スキルに定義された中断条件に該当した場合のみ、理由を出力して終了する）
+- サブエージェントへ作業を委譲する場合は、上記の原則を委譲プロンプトにも明記して伝える
+- サブエージェントの完了報告は鵜呑みにしない。\`git diff\` 等で実際の成果物を検証してから完了扱いにする`;
+
+export interface ClaudeInvocation {
+  mode: RunMode;
+  // スキル呼び出し文字列（例: "/claude-task-worker:exec-issue 123"）
+  prompt: string;
+  model: string;
+  effort: string;
+}
+
+// claude の起動引数を組み立てる。モードによる差は `-p`（非対話 print モード）の有無だけで、
+// ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
+export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
+  return [
+    ...(mode === "herdr" ? [] : ["-p"]),
+    prompt,
+    "--dangerously-skip-permissions",
+    "--chrome",
+    "--disallowedTools",
+    DISALLOWED_TOOLS_ARG,
+    "--append-system-prompt",
+    SYSTEM_PROMPT,
+    "--model",
+    model,
+    "--effort",
+    effort,
+  ];
+}
+
+// claude へ渡す環境変数を組み立てる。
+// herdr モードでは `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` は print モード専用のため渡さず、
+// 代わりに `HERDR_DISABLE_SOUND=1` で通知音を止める（タスクが並列に走るため）。
+export function buildClaudeEnv(mode: RunMode): Record<string, string> {
+  if (mode === "herdr") {
+    return {
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
+      HERDR_DISABLE_SOUND: "1",
+    };
+  }
+  return { ...CLAUDE_SPAWN_ENV };
+}

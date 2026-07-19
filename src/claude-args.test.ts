@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as ClaudeArgsModule from "./claude-args";
 
-const { DISALLOWED_TOOLS, DISALLOWED_TOOLS_ARG, CLAUDE_SPAWN_ENV, SYSTEM_PROMPT, SUBAGENT_SYSTEM_PROMPT } =
+const { DISALLOWED_TOOLS, DISALLOWED_TOOLS_ARG, CLAUDE_SPAWN_ENV, SYSTEM_PROMPT, buildClaudeArgs, buildClaudeEnv } =
   (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
@@ -51,10 +51,48 @@ test("SYSTEM_PROMPT states the autonomous-execution principles for the main agen
   assert.ok(SYSTEM_PROMPT.includes("破壊的でない側"));
 });
 
-test("SUBAGENT_SYSTEM_PROMPT states the autonomous-execution principles", () => {
-  // The principles injected into every subagent: no user questions, finish the
-  // delegated task before reporting, verify nested subagent reports.
-  assert.ok(SUBAGENT_SYSTEM_PROMPT.includes("ユーザーへの確認・質問は行わない"));
-  assert.ok(SUBAGENT_SYSTEM_PROMPT.includes("完遂してから最終報告"));
-  assert.ok(SUBAGENT_SYSTEM_PROMPT.includes("完了報告を鵜呑みにしない"));
+test("SYSTEM_PROMPT also carries the subagent rules", () => {
+  // --append-subagent-system-prompt is print-mode only, so the subagent principles
+  // are folded into the single --append-system-prompt injection instead.
+  assert.ok(SYSTEM_PROMPT.includes("サブエージェントへ作業を委譲する場合"));
+  assert.ok(SYSTEM_PROMPT.includes("完了報告は鵜呑みにしない"));
+});
+
+test("SYSTEM_PROMPT does not assume a specific run mode", () => {
+  // Injected into both `claude -p` (default mode) and TUI (herdr mode) sessions.
+  assert.ok(!SYSTEM_PROMPT.includes("print"));
+});
+
+test("buildClaudeArgs uses -p only in default mode", () => {
+  const common = { prompt: "/skill 123", model: "sonnet", effort: "high" };
+  const defaultArgs = buildClaudeArgs({ mode: "default", ...common });
+  const herdrArgs = buildClaudeArgs({ mode: "herdr", ...common });
+
+  assert.equal(defaultArgs[0], "-p");
+  assert.equal(defaultArgs[1], "/skill 123");
+  assert.equal(herdrArgs[0], "/skill 123");
+  assert.ok(!herdrArgs.includes("-p"));
+  // Everything except the -p flag is identical between the two modes.
+  assert.deepEqual(defaultArgs.slice(1), herdrArgs);
+});
+
+test("buildClaudeArgs keeps the tool restrictions and the system prompt in both modes", () => {
+  for (const mode of ["default", "herdr"] as const) {
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "xhigh" });
+    assert.ok(args.includes("--dangerously-skip-permissions"));
+    assert.equal(args[args.indexOf("--disallowedTools") + 1], DISALLOWED_TOOLS_ARG);
+    assert.equal(args[args.indexOf("--append-system-prompt") + 1], SYSTEM_PROMPT);
+    assert.equal(args[args.indexOf("--model") + 1], "opus");
+    assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
+    // The subagent flag is print-mode only and no longer used in either mode.
+    assert.ok(!args.includes("--append-subagent-system-prompt"));
+  }
+});
+
+test("buildClaudeEnv swaps the print-only ceiling for the herdr sound switch", () => {
+  assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("herdr"), {
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+    HERDR_DISABLE_SOUND: "1",
+  });
 });
