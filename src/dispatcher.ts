@@ -43,6 +43,42 @@ export function workspaceLabelFor(projectName: string): string {
   return `${LABEL_PREFIX}${projectName}`;
 }
 
+// herdr は `workspace close` の際、閉じたワークスペースがフォーカスされていなくても
+// 別のワークスペース（実測では番号順で隣接するもの）へフォーカスを移す。そのため
+// ディスパッチャーがCtrl-Cで自分のワークスペースを片付けると、まったく無関係の
+// ワークスペースを見ていたユーザーの表示が勝手に切り替わってしまう。
+// close の直前にフォーカス中のワークスペースを控え、close 後に元へ戻すことで防ぐ。
+// 控える位置を close の直前に置いているのは、シャットダウン開始時点で控えると
+// セッション終了待ち（最大10分）の間にユーザーが手動で切り替えた先を巻き戻して
+// しまうため。close 前後の数百ミリ秒に窓を狭めることで巻き戻し事故を避ける。
+export async function focusedWorkspaceId(herdr: typeof HerdrModule): Promise<string | undefined> {
+  try {
+    const workspaces = await herdr.workspaceList();
+    return workspaces.find((workspace) => workspace.focused)?.workspaceId;
+  } catch (error) {
+    console.error(`[dispatcher] failed to read the focused workspace: ${error}`);
+    return undefined;
+  }
+}
+
+// closingWorkspaceIds に控えたワークスペース自身が含まれる場合（ユーザーが
+// ディスパッチャーのワークスペースを見ていた場合）は戻す先が消えているため、
+// herdr の既定の遷移先に任せて何もしない。
+export async function restoreWorkspaceFocus(
+  herdr: typeof HerdrModule,
+  previousWorkspaceId: string | undefined,
+  closingWorkspaceIds: Set<string>,
+): Promise<void> {
+  if (!previousWorkspaceId || closingWorkspaceIds.has(previousWorkspaceId)) return;
+  const currentWorkspaceId = await focusedWorkspaceId(herdr);
+  if (currentWorkspaceId === previousWorkspaceId) return;
+  try {
+    await herdr.workspaceFocus(previousWorkspaceId);
+  } catch (error) {
+    console.error(`[dispatcher] failed to restore focus to workspace "${previousWorkspaceId}": ${error}`);
+  }
+}
+
 export type WorkerSessionStatus = "running";
 
 export interface WorkerSession {
@@ -225,11 +261,13 @@ export async function runDispatcher(
       console.error(`[dispatcher] failed to dispatch project "${project.name}": ${error}`);
       sessions.delete(project.name);
       if (createdWorkspaceId !== undefined) {
+        const focusedBefore = await focusedWorkspaceId(herdr);
         try {
           await workspaceClose(createdWorkspaceId);
         } catch (closeError) {
           console.error(`[dispatcher] failed to close dangling workspace for project "${project.name}": ${closeError}`);
         }
+        await restoreWorkspaceFocus(herdr, focusedBefore, new Set([createdWorkspaceId]));
       }
     }
   }
@@ -246,14 +284,17 @@ export async function removeSession(
   sessions: SessionRegistry,
   name: string,
   { closeWorkspace }: { closeWorkspace: boolean },
+  herdrModule?: typeof HerdrModule,
 ): Promise<void> {
   const session = sessions.get(name);
   if (!session) return;
   sessions.delete(name);
   if (closeWorkspace) {
-    const { workspaceClose } = await loadHerdr();
+    const herdr = herdrModule ?? (await loadHerdr());
+    const focusedBefore = await focusedWorkspaceId(herdr);
     // ワークスペースごと閉じることで、herdr モードのワーカーが残したタスクタブも一緒に片付く。
-    await workspaceClose(session.workspaceId);
+    await herdr.workspaceClose(session.workspaceId);
+    await restoreWorkspaceFocus(herdr, focusedBefore, new Set([session.workspaceId]));
   }
 }
 
@@ -262,11 +303,11 @@ export async function pollOnce(sessions: SessionRegistry, herdr: typeof HerdrMod
     try {
       const { foregroundProcesses } = await herdr.paneProcessInfo(session.paneId);
       if (!foregroundProcesses.some(isWorkerProcess)) {
-        await removeSession(sessions, name, { closeWorkspace: true });
+        await removeSession(sessions, name, { closeWorkspace: true }, herdr);
       }
     } catch (error) {
       if (error instanceof herdr.HerdrError && error.code === "pane_not_found") {
-        await removeSession(sessions, name, { closeWorkspace: false });
+        await removeSession(sessions, name, { closeWorkspace: false }, herdr);
         continue;
       }
       console.error(`[dispatcher] failed to poll session "${name}": ${error}`);
@@ -418,6 +459,8 @@ async function closeRemainingWorkspaces(
   herdr: typeof HerdrModule,
   timeoutMs: number,
 ): Promise<boolean> {
+  const closingWorkspaceIds = new Set([...sessions.values()].map((session) => session.workspaceId));
+  const focusedBefore = await focusedWorkspaceId(herdr);
   const results = await Promise.all(
     [...sessions.values()].map(async (session) => {
       try {
@@ -436,6 +479,7 @@ async function closeRemainingWorkspaces(
       }
     }),
   );
+  await restoreWorkspaceFocus(herdr, focusedBefore, closingWorkspaceIds);
   return results.every((closed) => closed);
 }
 
