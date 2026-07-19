@@ -3,6 +3,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+// runcat.ts 側の slack.ts への import は type-only なので、実行時の循環参照は発生しない
+import { writeRuncatUsage } from "./runcat";
 
 const execAsync = promisify(exec);
 
@@ -73,7 +75,7 @@ function writeUsageCache(data: UsageInfo): void {
   }
 }
 
-export async function fetchUsageInfo(): Promise<UsageInfo | null> {
+async function fetchUsageInfo(): Promise<UsageInfo | null> {
   const cached = readUsageCache();
   if (cached) return cached;
 
@@ -121,7 +123,7 @@ function formatResetTimeJST(isoString: string): string {
   });
 }
 
-export function formatTokenLimitText(usage: UsageInfo): string {
+function formatTokenLimitText(usage: UsageInfo): string {
   const fiveH = usage.fiveHourUtilization.toFixed(1);
   const sevenD = usage.sevenDayUtilization.toFixed(1);
   const emoji = utilizationEmoji(Math.max(usage.fiveHourUtilization, usage.sevenDayUtilization));
@@ -130,9 +132,16 @@ export function formatTokenLimitText(usage: UsageInfo): string {
   return ` | ${emoji} 5h: ${fiveH}% (reset: ${fiveHReset}) / 7d: ${sevenD}% (reset: ${sevenDReset})`;
 }
 
+/**
+ * 現在の利用状況を取得し、RunCat Neo 用スナップショットを更新したうえで通知に添えるテキストを返す。
+ * ワーカーの完了/失敗通知はすべてここを通るため、タスクが終わるたびに RunCat 側も最新化される
+ * （Slack webhook 未設定でも通知が no-op になるだけで、スナップショットの更新は行われる）。
+ */
 export async function buildTokenLimitText(): Promise<string> {
   const usage = await fetchUsageInfo();
-  return usage ? formatTokenLimitText(usage) : "";
+  if (!usage) return "";
+  writeRuncatUsage(usage);
+  return formatTokenLimitText(usage);
 }
 
 export async function notifyTaskCompleted(
