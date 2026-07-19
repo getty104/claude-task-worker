@@ -39,7 +39,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`plugin/`** - Claude Code プラグイン本体（`.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `scripts/`, `.mcp.json`）
 - **`.claude-plugin/marketplace.json`** - このリポジトリを Claude Code マーケットプレイスとして公開するための定義
 - **`src/dispatcher.ts`** - ディスパッチャー本体。`runDispatcher()`（herdr疎通確認 → プロジェクトごとに**ワークスペース**を作成しルートペインへコマンド送信。ラベルは `workspaceLabelFor()` で `ctw:` プレフィックス付き（`LABEL_PREFIX`）にし、既存ワークスペースの重複判定も同プレフィックスで行う。ルートタブも同ラベルへ `tabRename()` する）、`startWorkerInPane()`（プロンプト待ち `waitForPaneReady()` → コマンド送信 → 起動確認 `waitForWorkerStartup()` → 未起動なら再送）、`monitorSessions()`（セッション生存監視＋ステータステーブル描画ループの起動）、`renderSessionTable()`（稼働セッション一覧のテーブル描画）、`shutdownDispatcher()`（SIGINT/SIGTERM時、各セッションへctrl-c送信 → 終了待機 → **ワークスペースクローズ**のグレースフルシャットダウン。ワークスペースごと閉じることで herdr モードのタスクタブも一緒に片付く）
-- **`src/herdr.ts`** - herdr CLIラッパー。`workspaceCreate`/`workspaceList`/`workspaceClose`（ワークスペース管理）、`tabCreate`/`tabRename`/`tabClose`/`tabList`（タブ管理）、`agentStart`（argvを直接実行してペイン起動。シェルを経由しないため送信レースが起きない。`tabId` で起動先タブを指定できる）、`agentGet`（agentステータス取得）、`paneSendText`/`paneSendKeys`（ペインへの入力送信）、`paneRead`（ペインの端末内容取得）、`paneGet`/`paneClose`、`paneProcessInfo`（フォアグラウンドプロセス確認）、`getCurrentWorkspaceId`（herdrが各ペインへ自動注入する `HERDR_WORKSPACE_ID` の読み出し）、`checkHerdrAvailable`（herdr導入・疎通確認）
+- **`src/herdr.ts`** - herdr CLIラッパー。`workspaceCreate`/`workspaceList`/`workspaceClose`/`workspaceFocus`（ワークスペース管理。`workspaceList` の `focused` はフォーカス復元の判定に使う）、`tabCreate`/`tabRename`/`tabClose`/`tabList`（タブ管理）、`agentStart`（argvを直接実行してペイン起動。シェルを経由しないため送信レースが起きない。`tabId` で起動先タブを指定できる）、`agentGet`（agentステータス取得）、`paneSendText`/`paneSendKeys`（ペインへの入力送信）、`paneRead`（ペインの端末内容取得）、`paneGet`/`paneClose`、`paneProcessInfo`（フォアグラウンドプロセス確認）、`getCurrentWorkspaceId`（herdrが各ペインへ自動注入する `HERDR_WORKSPACE_ID` の読み出し）、`checkHerdrAvailable`（herdr導入・疎通確認）
   - **`--cwd` は必ず絶対パスへ解決してから渡す**（`cwdArgs()`）。`--cwd` を解決するのはワーカーではなく herdr サーバー（別プロセス）のため、相対パスを渡すとワーカーのcwdではなく herdr サーバーのcwd基準で解決される。実測では**エラーにならず黙ってホームディレクトリで起動**するため、worktree を渡したつもりのタスクがリポジトリ外で走る。`getWorktreePath()` は相対パス（`.claude/worktrees/<id>`）を返し、default モードの `spawn({cwd})` はワーカーのcwd基準で正しく解決されるため、この差は herdr モードでだけ牙をむく
   - herdr は大半のコマンドで「終了コード0＋stdoutにJSON」を返すが、一部（実測では存在しないタブへの `tab close`）は「終了コード非0＋**stderr**にJSON」を返す。`runHerdr()` は stdout から error を取れなかった場合のみ stderr も解析し、どちらの形でも `HerdrError`（`code` 付き）にする。取り出せないと `stopHerdrTask()` の「`tab_not_found` は正常系」判定が効かず、claudeがグレースフル終了するたびに偽のエラーログが出る。ただし `result`（成功値）の取得元は stdout のみ
 - **`src/herdr-runner.ts`** - herdrモードのタスク実行。`startHerdrTask()`（`tabCreate` → そのタブ限定で `agentStart` → 余ったシェルペインを `paneClose` で1タスク=1タブにする）、`waitForHerdrTask()`（agentステータスのポーリング。`working`→`idle` で完了、`pane_not_found` で失敗、`blocked` は待機継続）、`buildHerdrTaskResult()`（ペイン出力が空なら空振りとして失敗扱い）、`stopHerdrTask()`（ctrl-c送信 → タブクローズ）、`taskTabLabel()`（`ctw:<project>:#<n>`）
@@ -129,6 +129,14 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 4. `runDispatcher()` が各プロジェクトのディレクトリでherdrワークスペース（ラベル `ctw:<project>`、`--env CTW_PROJECT_NAME=<project>`）を作成し、そのルートペインへ `startWorkerInPane()` で転送コマンドを送信してセッションを起動
 5. `monitorSessions()` がセッションの生存監視とステータステーブル描画ループを開始
 6. SIGINT/SIGTERM受信時は `shutdownDispatcher()` が全セッションへctrl-cを送信し、終了を待ってからワークスペースをクローズする
+
+#### ワークスペースクローズによるフォーカス移動へのガード（`restoreWorkspaceFocus()`）
+
+herdr は `workspace close` の際、**閉じたワークスペースがフォーカスされていなくても別のワークスペース（実測では番号順で隣接するもの）へフォーカスを移す**。そのため Ctrl-C でディスパッチャーを止めると、まったく無関係のワークスペースを見ていたユーザーの表示が勝手に切り替わる。`tab close` では起きず、`workspace close` 固有の挙動。herdr 側にこれを抑止するオプションは無い（`workspace close` に `--no-focus` 相当のパラメータは存在しない）。
+
+対策として、close の**直前**に `focusedWorkspaceId()` でフォーカス中のワークスペースを控え、close 後に `restoreWorkspaceFocus()` で戻す。控える位置を close 直前に置いているのは、シャットダウン開始時点で控えるとセッション終了待ち（最大10分）の間にユーザーが手動で切り替えた先を巻き戻してしまうため。close 前後の数百ミリ秒に窓を狭めることで巻き戻し事故を避けている。控えたワークスペース自身が close 対象に含まれる場合（ユーザーがディスパッチャーのワークスペースを見ていた場合）は戻す先が消えているため何もせず herdr の既定の遷移に任せる。
+
+適用箇所は `workspaceClose` を呼ぶ3経路すべて: `closeRemainingWorkspaces()`（シャットダウン・force-kill）、`removeSession()`（ワーカー自然終了時の `pollOnce` 経由）、`runDispatcher()` のダングリングワークスペース回収。`removeSession()` は以前 herdr モジュールを自前で動的importしていたが、フォーカス復元を同一インスタンスで行うためと、テストで実バイナリを呼ばずに済ませるため、`pollOnce()` から herdr を受け取るようにしてある。
 
 #### シェル初期化レースへのガード（`startWorkerInPane()`）
 

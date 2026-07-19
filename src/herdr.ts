@@ -13,6 +13,10 @@ export interface TabInfo {
 export interface WorkspaceInfo {
   workspaceId: string;
   label: string;
+  // herdr の UI が現在表示しているワークスペースかどうか。workspace close が
+  // フォーカスを別ワークスペースへ移してしまうため、閉じる前後の復元判定に使う
+  // （dispatcher.ts の restoreWorkspaceFocus 参照）。
+  focused: boolean;
 }
 
 export interface CreatedWorkspace {
@@ -267,7 +271,7 @@ export async function workspaceCreate({
 
 export async function workspaceList(): Promise<WorkspaceInfo[]> {
   const result = (await execHerdr(["workspace", "list"])) as
-    | { workspaces?: { workspace_id: string; label?: string }[] }
+    | { workspaces?: { workspace_id: string; label?: string; focused?: boolean }[] }
     | null
     | undefined;
   if (!result || !Array.isArray(result.workspaces)) {
@@ -276,11 +280,18 @@ export async function workspaceList(): Promise<WorkspaceInfo[]> {
   return result.workspaces.map((workspace) => ({
     workspaceId: workspace.workspace_id,
     label: workspace.label ?? "",
+    focused: workspace.focused === true,
   }));
 }
 
 export async function workspaceClose(workspaceId: string): Promise<void> {
   await execHerdr(["workspace", "close", workspaceId]);
+}
+
+// 指定ワークスペースを herdr の UI 上でアクティブにする。workspace close が奪った
+// フォーカスを元へ戻すために使う（dispatcher.ts の restoreWorkspaceFocus 参照）。
+export async function workspaceFocus(workspaceId: string): Promise<void> {
+  await execHerdr(["workspace", "focus", workspaceId]);
 }
 
 // argv を直接実行してペインを起動する。`pane send-text` と違いシェルを経由しないため、
