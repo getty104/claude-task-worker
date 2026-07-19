@@ -1,6 +1,7 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, CONFIG_PATH, WORKER_DEFAULTS } from "../config.js";
+import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
 const LABELS: { name: string; color: string }[] = [
   { name: "cc-update-issue", color: "e4e669" },
@@ -109,6 +110,10 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
 
   console.log("[init] Creating config file...");
   await createConfig(force);
+
+  console.log("[init] Setting up CodeGraph...");
+  await ensureCodegraphGitIgnore("init");
+  await runCodegraphInit("init");
 
   console.log("[init] Done.");
 }
