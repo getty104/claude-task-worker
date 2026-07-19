@@ -36,6 +36,23 @@ test("resetHour returns the JST hour only", () => {
   assert.equal(resetHour("2026-07-19T14:00:00Z"), "23");
 });
 
+test("resetStamp rounds a partial minute up to the next minute", () => {
+  // 22:59:59 JST → 23:00
+  assert.equal(resetStamp("2026-07-19T13:59:59Z", NOW), "23:00");
+  // 22:59:00.001 JST も同じく次の分へ繰り上げる
+  assert.equal(resetStamp("2026-07-19T13:59:00.001Z", NOW), "23:00");
+});
+
+test("resetStamp rolls over the JST date when rounding up crosses midnight", () => {
+  // 23:59:59 JST → 翌日 00:00 なので日付付きになる
+  assert.equal(resetStamp("2026-07-19T14:59:59Z", NOW), "07/20 00:00");
+});
+
+test("resetHour rounds up to the next hour when the minute rolls over", () => {
+  // 22:59:59 JST → 23:00 なので時は 23
+  assert.equal(resetHour("2026-07-19T13:59:59Z"), "23");
+});
+
 test("buildRuncatSnapshot formats metrics like statusline.py", () => {
   const snapshot = buildRuncatSnapshot(usage, NOW);
   assert.equal(snapshot.title, "Claude Code");
