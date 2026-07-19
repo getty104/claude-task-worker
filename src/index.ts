@@ -249,6 +249,7 @@ if (hasProjectFilter()) {
   })();
 } else if (workerType === "usage") {
   (async () => {
+    // buildTokenLimitText は取得した利用状況で RunCat 用スナップショットも更新する
     const text = await buildTokenLimitText();
     if (!text) {
       console.error("Failed to fetch usage info");
