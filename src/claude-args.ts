@@ -107,13 +107,19 @@ export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocatio
 }
 
 // claude へ渡す環境変数を組み立てる。
-// herdr モードでは `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` は print モード専用のため渡さず、
-// 代わりに `HERDR_DISABLE_SOUND=1` で通知音を止める（タスクが並列に走るため）。
+// herdr モードでは `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` は print モード専用のため渡さない。
+//
+// かつてここで `HERDR_DISABLE_SOUND=1` も渡していたが、これは**効かない**ので撤去した。
+// 同変数を読むのは herdr 本体の sound モジュール（`src/sound.rs` 冒頭で `NEXTEST` と共に
+// チェックされる）であり、参照されるのは**サウンドを再生する herdr サーバープロセス自身の
+// 環境変数**。タスクペイン（claude 子プロセス）の環境に入れてもサーバーには届かない。
+// エージェントの状態遷移音は herdr 側の設定（`~/.config/herdr/config.toml` の
+// `[ui.sound]`）か、ワーカー用 herdr セッションを `HERDR_DISABLE_SOUND=1` 付きで
+// 起動することでしか止められない。
 export function buildClaudeEnv(mode: RunMode): Record<string, string> {
   if (mode === "herdr") {
     return {
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
-      HERDR_DISABLE_SOUND: "1",
     };
   }
   return { ...CLAUDE_SPAWN_ENV };
