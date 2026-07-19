@@ -1,4 +1,4 @@
-import { CLAUDE_SPAWN_ENV, DISALLOWED_TOOLS_ARG, SUBAGENT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../claude-args.js";
+import { buildClaudeArgs, buildClaudeEnv } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
@@ -12,6 +12,7 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { getRunMode } from "../user-config";
 import {
   createWorktreeFromBranch,
   deleteLocalBranch,
@@ -87,24 +88,10 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             const cwd = getWorktreePath(worktreeId);
             const { model, effort, skill } = getWorkerConfig(config.name);
             const command = skill || config.command;
+            const mode = getRunMode();
             run(
               "claude",
-              [
-                "-p",
-                `${command} ${pr.number}`,
-                "--dangerously-skip-permissions",
-                "--chrome",
-                "--disallowedTools",
-                DISALLOWED_TOOLS_ARG,
-                "--append-system-prompt",
-                SYSTEM_PROMPT,
-                "--append-subagent-system-prompt",
-                SUBAGENT_SYSTEM_PROMPT,
-                "--model",
-                model,
-                "--effort",
-                effort,
-              ],
+              buildClaudeArgs({ mode, prompt: `${command} ${pr.number}`, model, effort }),
               pr.number,
               `PR #${pr.number} (${pr.headRefName})`,
               config.name,
@@ -149,7 +136,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 }
               },
               cwd,
-              { ...CLAUDE_SPAWN_ENV },
+              buildClaudeEnv(mode),
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);

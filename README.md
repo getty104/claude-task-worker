@@ -250,18 +250,19 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 
 ### `--project <name>` オプション
 
-指定したプロジェクト（またはプロジェクトグループ、`all`）に対して、[herdr](https://herdr.dev) 経由でコマンドをディスパッチする。指定すると、CLIはワーカーをその場で実行する代わりにディスパッチャーとして動作し、対象プロジェクトごとに独立したherdrタブでコマンドを実行する。
+指定したプロジェクト（またはプロジェクトグループ、`all`）に対して、[herdr](https://herdr.dev) 経由でコマンドをディスパッチする。指定すると、CLIはワーカーをその場で実行する代わりにディスパッチャーとして動作し、対象プロジェクトごとに独立したherdrワークスペースを作ってコマンドを実行する。
 
 プロジェクト名・グループ名・`all` のいずれかを指定できる。
 
-- プロジェクト名: `projects.json` の `projects` に登録された個別プロジェクト名
-- グループ名: `projects.json` の `projectGroups` に登録された、複数プロジェクト名をまとめたグループ名
-- `all`: `projects.json` の `projects` に登録された全プロジェクトが対象になる予約語（`projects` / `projectGroups` のキーとして使用不可）
+- プロジェクト名: `config.json` の `projects` に登録された個別プロジェクト名
+- グループ名: `config.json` の `projectGroups` に登録された、複数プロジェクト名をまとめたグループ名
+- `all`: `config.json` の `projects` に登録された全プロジェクトが対象になる予約語（`projects` / `projectGroups` のキーとして使用不可）
 
-`projects.json` は `$XDG_CONFIG_HOME/claude-task-worker/projects.json`（`XDG_CONFIG_HOME` 未設定の場合は `~/.config/claude-task-worker/projects.json`）に配置する。`projects` にプロジェクト名から絶対パスへのマッピングを、`projectGroups` にグループ名からプロジェクト名配列へのマッピングを記述する（`projectGroups` は省略可）。
+`config.json` は `$XDG_CONFIG_HOME/claude-task-worker/config.json`（`XDG_CONFIG_HOME` 未設定の場合は `~/.config/claude-task-worker/config.json`）に配置する。`projects` にプロジェクト名から絶対パスへのマッピングを、`projectGroups` にグループ名からプロジェクト名配列へのマッピングを記述する（`projectGroups` は省略可）。
 
 ```json
 {
+  "mode": "default",
   "projects": {
     "app-a": "/Users/me/repos/app-a",
     "app-b": "/Users/me/repos/app-b",
@@ -273,15 +274,19 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 }
 ```
 
+> ℹ️ 旧ファイル名 `projects.json` も当面は読み込まれるが、非推奨として警告が出る。`config.json` にリネームすること（両方存在する場合は `config.json` が優先される）。
+
+`mode` については [`mode`（タスクの実行形態）](#modeタスクの実行形態) を参照。
+
 `--project` は繰り返し指定可能で、複数指定した場合は解決後のプロジェクト集合の和集合が対象になる（重複は一意化される）。`--epic` / `--label` と併用でき、ディスパッチ先の各プロジェクトで実行されるコマンドにそのまま引き継がれる。
 
 以下のコマンドは `--project` と併用できない: `init` / `install` / `update` / `usage` / `version`
 
 ディスパッチャーは以下の3つの機能を持つ。
 
-- **一斉起動**: 対象プロジェクトごとにherdrタブを作成し、そのプロジェクトのディレクトリで（`--project` を除いた）同じコマンドを非同期実行する
-- **稼働一覧**: 各セッションのプロジェクト名・タブID・ペインID・ステータス・稼働時間をステータステーブルとして定期的に画面へ描画し、対象プロセスが終了したセッションは自動的に一覧から除去する
-- **一括停止**: SIGTERM/SIGINTを受けると、稼働中の全セッションへ ctrl-c を送信して各プロジェクトのコマンドを終了させ、終了を待ってからherdrタブを閉じる
+- **一斉起動**: 対象プロジェクトごとに `ctw:<プロジェクト名>` ラベルのherdrワークスペースを作成し、そのプロジェクトのディレクトリで（`--project` を除いた）同じコマンドを非同期実行する
+- **稼働一覧**: 各セッションのプロジェクト名・ワークスペースID・ペインID・ステータス・稼働時間をステータステーブルとして定期的に画面へ描画し、対象プロセスが終了したセッションは自動的に一覧から除去する
+- **一括停止**: SIGTERM/SIGINTを受けると、稼働中の全セッションへ ctrl-c を送信して各プロジェクトのコマンドを終了させ、終了を待ってからherdrワークスペースを閉じる（`mode: "herdr"` でワーカーが作ったタスクタブもワークスペースごと片付く）
 
 ```bash
 claude-task-worker all --project all
@@ -290,6 +295,34 @@ claude-task-worker all --project frontend
 claude-task-worker all --project app-a --project app-c    # app-a と app-c の和集合
 claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 ```
+
+### `mode`（タスクの実行形態）
+
+`config.json` のトップレベルに `mode` を書くと、ワーカーが各タスク（Issue/PR ごとの claude 実行）をどう起動するかを切り替えられる。プロジェクト単位の指定はできず、全ワーカー・全プロジェクトに一括で適用される。
+
+| `mode` | 挙動 |
+|--------|------|
+| `"default"`（既定） | タスクを `claude -p`（非対話 print モード）の子プロセスとして実行する |
+| `"herdr"` | タスクを herdr のタブ内で TUI セッションとして実行する。実行中の様子をherdrで覗ける |
+
+```json
+{
+  "mode": "herdr",
+  "projects": { "app-a": "/Users/me/repos/app-a" }
+}
+```
+
+`mode: "herdr"` のときの1タスクの流れ:
+
+1. worktree を作成し、`ctw:<プロジェクト名>:#<Issue/PR番号>` ラベルのタブで claude を TUI 起動する（`HERDR_DISABLE_SOUND=1` を設定するため通知音は鳴らない）
+2. herdr が持つ agent ステータスを監視し、`working` → `idle` の遷移をタスク完了とみなす
+3. 完了したらペインの内容を回収して通知に使い、タブを閉じてラベル・worktree を後片付けする
+
+補足:
+
+- タブは `--project` で起動した場合そのプロジェクトのワークスペース内に作られる（herdrが各ペインへ注入する `HERDR_WORKSPACE_ID` を利用する）
+- `blocked`（claudeが入力待ち）になってもタスクは自動失敗にせず待機し続ける。ステータステーブルに `running:blocked` と表示されるので、herdrのタブを開いて直接対応できる
+- `mode: "herdr"` でherdrが未インストール・未起動の場合、ワーカーは起動時にエラー終了する（`"default"` へ勝手にフォールバックしない）
 
 ### exec-issue
 
