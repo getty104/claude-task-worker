@@ -41,9 +41,17 @@ function jstFields(date: Date): { month: string; day: string; hour: string; minu
   return { month: pick("month"), day: pick("day"), hour: pick("hour"), minute: pick("minute") };
 }
 
+const MINUTE_MS = 60_000;
+
+/** 秒以下を切り上げて分境界に揃える（14:59:59 → 15:00:00）。リセット時刻は :59 秒で返るため、そのまま切り捨て表示すると 1 分手前に見える */
+function ceilToMinute(date: Date): Date {
+  const remainder = date.getTime() % MINUTE_MS;
+  return remainder === 0 ? date : new Date(date.getTime() + (MINUTE_MS - remainder));
+}
+
 function parseResetsAt(isoString: string): Date | null {
   const date = new Date(isoString);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return Number.isNaN(date.getTime()) ? null : ceilToMinute(date);
 }
 
 /** 'HH:MM' 形式。日を跨ぐ場合は 'MM/DD HH:MM' として日付も付ける。不正値は空文字。 */
