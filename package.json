@@ -1,6 +1,6 @@
 {
   "name": "claude-task-worker",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "description": "CLI tool that polls GitHub Issues/PRs and delegates work to Claude CLI",
   "type": "module",
   "main": "dist/index.js",
