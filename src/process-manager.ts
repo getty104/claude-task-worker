@@ -7,7 +7,7 @@ import type { HerdrTask } from "./herdr-runner.js";
 import { buildTaskTableLines } from "./table.js";
 import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result.js";
 import type { TaskResult } from "./task-result.js";
-import { findProjectNameByPath, getRunMode } from "./user-config.js";
+import { findProjectNameByPath, getHeadroomEnabled, getRunMode } from "./user-config.js";
 
 type TaskStatus = "running" | "completed" | "failed";
 
@@ -149,6 +149,7 @@ async function runViaHerdr(
     herdrTasks.set(id, task);
     result = await waitForHerdrTask(task.paneId, {
       signal: herdrAbortSignal,
+      headroom: getHeadroomEnabled(),
       onBlocked: () => console.warn(`[worker] #${id} is blocked and waiting for input in herdr tab "${label}"`),
       onStatus: (status) => {
         const task = tasks.get(id);
@@ -229,6 +230,7 @@ export function run(
       code,
       Buffer.concat(outputChunks).toString("utf-8"),
       Buffer.concat(stderrChunks).toString("utf-8").slice(-STDERR_TAIL_LIMIT),
+      { headroom: getHeadroomEnabled() },
     );
     // 台帳からの削除は onComplete（ラベル操作・worktree 削除）の完了後に行う。
     // 先に削除すると waitForAllProcesses() が後片付けの途中でプロセスの終了を許してしまう。

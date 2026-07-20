@@ -1,4 +1,4 @@
-import { buildClaudeArgs, buildClaudeEnv } from "../claude-args.js";
+import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
 import type { Issue } from "../gh";
@@ -6,7 +6,7 @@ import { syncDefaultBranch, ensureEpicBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { getRunMode } from "../user-config";
+import { getHeadroomEnabled, getRunMode } from "../user-config";
 import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../worktree";
 
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
@@ -92,7 +92,13 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
 
             const parentNumber = issue.parent?.number;
             const mode = getRunMode();
-            const claudeArgs = buildClaudeArgs({ mode, prompt: `${command} ${issue.number}`, model, effort });
+            const execution = buildClaudeExecution({
+              mode,
+              prompt: `${command} ${issue.number}`,
+              model,
+              effort,
+              headroom: getHeadroomEnabled(),
+            });
 
             // claude CLI の --worktree は locked な worktree を作り、異常終了時に
             // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
@@ -107,8 +113,8 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
 
             run(
-              "claude",
-              claudeArgs,
+              execution.command,
+              execution.args,
               issue.number,
               issue.title,
               config.name,

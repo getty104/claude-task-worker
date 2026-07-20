@@ -44,7 +44,7 @@ claude-task-worker all             # Run all workers concurrently
   - **`--cwd` は必ず絶対パスへ解決してから渡す**（`cwdArgs()`）。`--cwd` を解決するのはワーカーではなく herdr サーバー（別プロセス）のため、相対パスを渡すとワーカーのcwdではなく herdr サーバーのcwd基準で解決される。実測では**エラーにならず黙ってホームディレクトリで起動**するため、worktree を渡したつもりのタスクがリポジトリ外で走る。`getWorktreePath()` は相対パス（`.claude/worktrees/<id>`）を返し、default モードの `spawn({cwd})` はワーカーのcwd基準で正しく解決されるため、この差は herdr モードでだけ牙をむく
   - herdr は大半のコマンドで「終了コード0＋stdoutにJSON」を返すが、一部（実測では存在しないタブへの `tab close`）は「終了コード非0＋**stderr**にJSON」を返す。`runHerdr()` は stdout から error を取れなかった場合のみ stderr も解析し、どちらの形でも `HerdrError`（`code` 付き）にする。取り出せないと `stopHerdrTask()` の「`tab_not_found` は正常系」判定が効かず、claudeがグレースフル終了するたびに偽のエラーログが出る。ただし `result`（成功値）の取得元は stdout のみ
 - **`src/herdr-runner.ts`** - herdrモードのタスク実行。`startHerdrTask()`（`tabCreate` → そのタブ限定で `agentStart` → 余ったシェルペインを `paneClose` で1タスク=1タブにする）、`waitForHerdrTask()`（agentステータスのポーリング。`done` または `working`→`idle` で完了、`pane_not_found` で失敗、`blocked` は待機継続）、`buildHerdrTaskResult()`（ペイン出力が空なら空振りとして失敗扱い）、`stopHerdrTask()`（ctrl-c送信 → タブクローズ）、`taskTabLabel()`（`ctw:<project>:#<n>`）
-- **`src/user-config.ts`** - `config.json`（`~/.config/claude-task-worker/config.json` または `$XDG_CONFIG_HOME` 配下）のロード・検証・対象プロジェクト解決。`UserConfig`（`mode`/`projects`/`projectGroups`）、`loadUserConfig()`（読み込み・検証）、`resolveTargetProjects()`（プロジェクト名/グループ名/予約語 `all` の展開）、`getRunMode()`（`mode` の解決。設定ファイル不在・projects破損でも `"default"` を返し、プロセス内でキャッシュする）、`findProjectNameByPath()`（herdrモードのタブラベル用にパスからプロジェクト名を逆引き）。リポジトリ直下の `claude-task-worker.json` を扱う `src/config.ts` とは別物
+- **`src/user-config.ts`** - `config.json`（`~/.config/claude-task-worker/config.json` または `$XDG_CONFIG_HOME` 配下）のロード・検証・対象プロジェクト解決。`UserConfig`（`mode`/`headroom`/`projects`/`projectGroups`）、`loadUserConfig()`（読み込み・検証）、`resolveTargetProjects()`（プロジェクト名/グループ名/予約語 `all` の展開）、`getRunMode()`（`mode` の解決。設定ファイル不在・projects破損でも `"default"` を返し、プロセス内でキャッシュする）、`getHeadroomEnabled()`（`headroom` の解決。`getRunMode()` と同じくプロセス内でキャッシュし、判定できなければ `false`）、`findProjectNameByPath()`（herdrモードのタブラベル用にパスからプロジェクト名を逆引き）。リポジトリ直下の `claude-task-worker.json` を扱う `src/config.ts` とは別物
 - **`src/dispatch-args.ts`** - `--project` ディスパッチ用CLI引数ヘルパー。`PROJECT_INCOMPATIBLE_COMMANDS`（`--project` と併用不可なコマンド一覧: `init`/`install`/`update`/`usage`/`version`）、`parseProjectFilters()`/`hasProjectFilter()`（`--project` の抽出・検出）、`buildForwardedCommand()`（`--project` とその値を除去し他プロジェクトへ転送するコマンド文字列を構築）
 
 ### Worker共通ライフサイクル
@@ -127,6 +127,17 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - `~/.config/herdr/config.toml` の `[ui.sound] enabled = false`（herdrサーバー全体。`herdr server reload-config` で適用）
 - 同 `[ui.sound.agents] claude = "off"`（claudeエージェント全体。対話セッションも無音になる）
 - ワーカー用に別 herdr セッションを `HERDR_DISABLE_SOUND=1 herdr --session <name>` で起動し、その中でディスパッチャーを動かす（サーバーへのenv継承は未検証）
+
+### `headroom`（Headroom 経由でのタスク実行）
+
+`config.json` のトップレベル `headroom`（boolean、既定 `false`）が `true` のとき、タスクを `claude` の直接起動ではなく `headroom wrap claude -- <引数>` で起動する（Headroom がローカルプロキシを立て `ANTHROPIC_BASE_URL` を差し替えてコンテキストを圧縮する）。`mode` と同じくトップレベル一括の設定で、`getHeadroomEnabled()` がプロセス起動時に一度だけ解決してキャッシュする。
+
+コマンドの組み立ては `src/claude-args.ts` の `buildClaudeExecution()`（`{ command, args }` を返す）。`mode` とは直交し、default モードでは `spawn` の command に、herdr モードでは `agentStart` の argv 先頭になる。どちらもシェルを経由せず argv を直接実行するためクォートの考慮は不要。
+
+- **claude の引数はすべて `--` の後ろに置く**。`headroom wrap claude` は自前のオプション（`--port` / `--memory` / `--no-mcp` 等）を持ち、`-p` のように衝突しうるフラグは `--` の後ろでないと claude へ届かない（headroom 側は click の `ignore_unknown_options` + `UNPROCESSED` で `--` を消費し、残りを `subprocess.run([claude_bin, *claude_args])` へそのまま渡す）。未知フラグのパススルーに頼らず全引数を後ろへ回すことで、将来 headroom にオプションが増えたときの衝突も防ぐ
+- exit code は headroom が claude のものを `SystemExit(result.returncode)` で伝播するため、default モードの成否判定はそのまま使える
+- **`headroom wrap claude` は claude 起動前に起動バナーを無条件で stdout へ出す**（`--verbose` と無関係で、抑止するオプションも無い）。これをそのまま数えると「exit 0 かつ stdout が空＝空振りセッション」の検知が永久に効かなくなるため、`buildTaskResult()` / `buildHerdrTaskResult()` は `headroom` が有効なとき `stripHeadroomBanner()`（先頭から続く空行 / 2スペース始まりの行を落とす）を通してから空判定する。バナーは claude 起動前にすべて出力され各行が空行か2スペース始まりなので、この形で claude 本体の出力に触れずに除去できる。通知に載せる `output` は元の stdout のままにしてあり、判定を誤っても失敗側（ラベルを進めない安全側）に倒れる
+- `headroom: true` で headroom コマンドが PATH に無い場合は `assertHeadroomAvailable()`（`src/index.ts`）がワーカー起動時にエラー終了させる（直接起動へのサイレントフォールバックはしない）
 
 ### `--project` ディスパッチ
 

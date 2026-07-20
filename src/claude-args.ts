@@ -101,6 +101,9 @@ export interface ClaudeInvocation {
   effort: string;
 }
 
+export const CLAUDE_COMMAND = "claude";
+export const HEADROOM_COMMAND = "headroom";
+
 // claude の起動引数を組み立てる。モードによる差は `-p`（非対話 print モード）の有無だけで、
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
 export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
@@ -118,6 +121,36 @@ export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocatio
     "--effort",
     effort,
   ];
+}
+
+export interface ClaudeExecution {
+  command: string;
+  args: string[];
+}
+
+/**
+ * タスクを起動する実行可能ファイルと引数を組み立てる。
+ *
+ * `headroom` が有効な場合は `headroom wrap claude -- <claude の引数>` になる
+ * （Headroom がプロキシを起動し、`ANTHROPIC_BASE_URL` を差し替えて claude を起動する）。
+ *
+ * **`--` の区切りは必須**。`headroom wrap claude` は自前のオプション
+ * （`--port` / `--memory` / `--no-mcp` 等）を持ち、`-p` のように headroom 側の解釈と
+ * 衝突しうるフラグは `--` の後ろに置かないと claude まで届かない
+ * （headroom のヘルプも `headroom wrap claude -- -p` を print モードの例として挙げている）。
+ * 未知フラグのパススルーに頼らず全引数を `--` の後ろへ置くことで、将来 headroom 側に
+ * 追加されたオプションと `buildClaudeArgs()` のフラグが衝突する事故も防ぐ。
+ *
+ * 実行形態（default / herdr）とは直交する。default モードでは spawn の command に、
+ * herdr モードでは `agent start ... -- <argv>` の argv 先頭になる。どちらも
+ * シェルを経由せず argv を直接実行するため、クォートの考慮は不要。
+ */
+export function buildClaudeExecution(invocation: ClaudeInvocation & { headroom?: boolean }): ClaudeExecution {
+  const args = buildClaudeArgs(invocation);
+  if (!invocation.headroom) {
+    return { command: CLAUDE_COMMAND, args };
+  }
+  return { command: HEADROOM_COMMAND, args: ["wrap", CLAUDE_COMMAND, "--", ...args] };
 }
 
 // claude へ渡す環境変数を組み立てる。

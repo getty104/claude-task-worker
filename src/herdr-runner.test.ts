@@ -74,6 +74,12 @@ test("buildHerdrTaskResult passes the pane content through on success", () => {
   assert.equal(result.output, "done: created PR #12");
 });
 
+test("buildHerdrTaskResult sees through the headroom launch banner", () => {
+  const banner = "\n  ╔═══════╗\n  ║ HEADROOM WRAP: CLAUDE ║\n  ANTHROPIC_BASE_URL=http://127.0.0.1:8787\n\n";
+  assert.equal(buildHerdrTaskResult(banner, { headroom: true }).status, "failed");
+  assert.equal(buildHerdrTaskResult(`${banner}done: created PR #12`, { headroom: true }).status, "completed");
+});
+
 interface FakeHerdrOptions {
   statuses: AgentStatus[];
   paneOutput?: string;
