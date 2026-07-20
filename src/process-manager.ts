@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import { getWorkerConfig } from "./config.js";
 import type { AgentStatus } from "./herdr.js";
 import type { HerdrTask } from "./herdr-runner.js";
-import { getDisplayWidth, truncateToWidth, padToWidth } from "./table.js";
+import { buildTaskTableLines } from "./table.js";
 import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result.js";
 import type { TaskResult } from "./task-result.js";
 import { findProjectNameByPath, getRunMode } from "./user-config.js";
@@ -19,7 +19,7 @@ const herdrTasks = new Map<number, HerdrTask>();
 // force kill 時に herdr タスクの待機ループを抜けさせるためのフラグ。
 const herdrAbortSignal = { aborted: false };
 
-interface TaskEntry {
+export interface TaskEntry {
   id: number;
   title: string;
   status: TaskStatus;
@@ -67,112 +67,10 @@ export function isWorkerAtCapacity(workerName: string): boolean {
   return count >= getWorkerConfig(workerName).maxConcurrentTasks;
 }
 
-function formatDuration(start: Date, end: Date = new Date()): string {
-  const diffMs = end.getTime() - start.getTime();
-  const totalSeconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
-
-function formatTime(date: Date): string {
-  const h = String(date.getHours()).padStart(2, "0");
-  const m = String(date.getMinutes()).padStart(2, "0");
-  const s = String(date.getSeconds()).padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
 
 function renderTable(): void {
-  const entries = [...tasks.values()];
-  if (entries.length === 0) return;
-
-  const runningTasks = entries.filter((t) => t.status === "running");
-  const finishedTasks = entries.filter((t) => t.status !== "running");
-
-  const maxTitleWidth = 40;
-  const maxPathWidth = 40;
-
-  const allRows = [
-    ...runningTasks.map((t) => ({
-      id: `#${t.id}`,
-      title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
-      worker: t.workerName,
-      path: t.path ? (t.path.length > maxPathWidth ? truncateToWidth(t.path, maxPathWidth) : t.path) : "",
-      // herdr モードでは agent ステータス（working / blocked 等）を併記し、
-      // 人の介入が必要な blocked にも気づけるようにする。
-      status: t.agentStatus ? `${t.status}:${t.agentStatus}` : t.status,
-      time: formatTime(t.startedAt),
-      duration: formatDuration(t.startedAt),
-    })),
-    ...finishedTasks.map((t) => ({
-      id: `#${t.id}`,
-      title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
-      worker: t.workerName,
-      path: t.path ? (t.path.length > maxPathWidth ? truncateToWidth(t.path, maxPathWidth) : t.path) : "",
-      status: t.status,
-      time: formatTime(t.finishedAt ?? t.startedAt),
-      duration: formatDuration(t.startedAt, t.finishedAt),
-    })),
-  ];
-
-  const hasPath = allRows.some((r) => r.path !== "");
-
-  const colWidths = {
-    id: Math.max(3, ...allRows.map((r) => r.id.length)),
-    title: Math.max(5, ...allRows.map((r) => getDisplayWidth(r.title))),
-    worker: Math.max(6, ...allRows.map((r) => r.worker.length)),
-    ...(hasPath ? { path: Math.max(8, ...allRows.map((r) => r.path.length)) } : {}),
-    status: Math.max(6, ...allRows.map((r) => r.status.length)),
-    time: Math.max(4, ...allRows.map((r) => r.time.length)),
-    duration: Math.max(8, ...allRows.map((r) => r.duration.length)),
-  };
-
-  const pad = (s: string, w: number, useDisplayWidth = false) =>
-    useDisplayWidth ? padToWidth(s, w) : s + " ".repeat(w - s.length);
-  const cols = hasPath
-    ? [
-        colWidths.id,
-        colWidths.title,
-        colWidths.worker,
-        colWidths.path!,
-        colWidths.status,
-        colWidths.time,
-        colWidths.duration,
-      ]
-    : [colWidths.id, colWidths.title, colWidths.worker, colWidths.status, colWidths.time, colWidths.duration];
-  const line = (l: string, m: string, r: string, f: string) => `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
-
-  const row = (
-    id: string,
-    title: string,
-    worker: string,
-    path: string,
-    status: string,
-    time: string,
-    duration: string,
-  ) =>
-    hasPath
-      ? `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(path, colWidths.path!)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`
-      : `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`;
-
-  const lines: string[] = [];
-  lines.push(line("┌", "┬", "┐", "─"));
-  lines.push(row("#", "Title", "Worker", "Worktree", "Status", "Time", "Duration"));
-  lines.push(line("├", "┼", "┤", "─"));
-
-  for (const r of allRows.filter((r) => r.status === "running")) {
-    lines.push(row(r.id, r.title, r.worker, r.path, r.status, r.time, r.duration));
-  }
-
-  if (runningTasks.length > 0 && finishedTasks.length > 0) {
-    lines.push(line("├", "┼", "┤", "─"));
-  }
-
-  for (const r of allRows.filter((r) => r.status !== "running")) {
-    lines.push(row(r.id, r.title, r.worker, r.path, r.status, r.time, r.duration));
-  }
-
-  lines.push(line("└", "┴", "┘", "─"));
+  const lines = buildTaskTableLines([...tasks.values()]);
+  if (lines.length === 0) return;
 
   console.clear();
   console.log(lines.join("\n"));
