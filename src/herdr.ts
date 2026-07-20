@@ -40,6 +40,9 @@ export interface AgentInfo {
   tabId: string;
   workspaceId: string;
   agentStatus: AgentStatus;
+  // claude のセッションID（`agent_session.kind === "id"` のときのみ）。
+  // `~/.claude/projects/*/<sessionId>.jsonl` の transcript を引く鍵に使う。
+  sessionId?: string;
 }
 
 export interface PaneProcessInfo {
@@ -347,18 +350,31 @@ function toAgentStatus(value: unknown): AgentStatus {
 // HerdrError（code: "pane_not_found" 等）が投げられる。
 export async function agentGet(target: string): Promise<AgentInfo> {
   const result = (await execHerdr(["agent", "get", target])) as
-    | { agent?: { pane_id?: string; tab_id?: string; workspace_id?: string; agent_status?: unknown } }
+    | {
+        agent?: {
+          pane_id?: string;
+          tab_id?: string;
+          workspace_id?: string;
+          agent_status?: unknown;
+          agent_session?: { kind?: unknown; value?: unknown };
+        };
+      }
     | null
     | undefined;
   const agent = result?.agent;
   if (!agent?.pane_id) {
     throw new Error(`Failed to get agent info for ${target}: invalid response structure from herdr`);
   }
+  // agent_session は `kind: "id"` のときだけ claude のセッションIDが入る
+  // （`kind: "path"` などセッションIDでない形も返しうるため種別で絞る）。
+  const session = agent.agent_session;
+  const sessionId = session?.kind === "id" && typeof session.value === "string" ? session.value : undefined;
   return {
     paneId: agent.pane_id,
     tabId: agent.tab_id ?? "",
     workspaceId: agent.workspace_id ?? "",
     agentStatus: toAgentStatus(agent.agent_status),
+    sessionId,
   };
 }
 

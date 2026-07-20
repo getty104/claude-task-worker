@@ -74,6 +74,22 @@ test("buildHerdrTaskResult passes the pane content through on success", () => {
   assert.equal(result.output, "done: created PR #12");
 });
 
+test("buildHerdrTaskResult prefers the transcript report over the TUI pane content", () => {
+  // ペインの末尾は入力ボックスとステータスバーで埋まっており、Slack 通知が切り出す
+  // 末尾1000文字は TUI の装飾しか含まない。transcript の最終レポートを本文にする。
+  const pane = ["⏺ 修正しました", "", "─────────────", "❯", "─────────────", "  ctx ⣤ 7% │ 5h 26%"].join("\n");
+  const result = buildHerdrTaskResult(pane, { report: "  PR #12 を作成しました  " });
+  assert.deepEqual(result, { status: "completed", output: "PR #12 を作成しました" });
+});
+
+test("buildHerdrTaskResult falls back to the pane content when the transcript report is empty", () => {
+  assert.deepEqual(buildHerdrTaskResult("PR created", { report: "  \n " }), {
+    status: "completed",
+    output: "PR created",
+  });
+  assert.equal(buildHerdrTaskResult("   ", { report: "" }).status, "failed");
+});
+
 test("buildHerdrTaskResult sees through the headroom launch banner", () => {
   const banner = "\n  ╔═══════╗\n  ║ HEADROOM WRAP: CLAUDE ║\n  ANTHROPIC_BASE_URL=http://127.0.0.1:8787\n\n";
   assert.equal(buildHerdrTaskResult(banner, { headroom: true }).status, "failed");
@@ -85,6 +101,8 @@ interface FakeHerdrOptions {
   paneOutput?: string;
   agentGetError?: Error;
   calls?: string[];
+  // agent get が返す claude のセッションID（transcript を引く鍵）
+  sessionId?: string;
   // ctrl-c 後もペインが残り続ける（claude が終了しない）ケースの再現
   paneSurvivesCtrlC?: boolean;
   // tabClose が投げるエラー（既に閉じているケースの再現）
@@ -109,7 +127,7 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
       options.calls?.push(`agentGet:${target}`);
       if (options.agentGetError && statuses.length === 0) throw options.agentGetError;
       const agentStatus = statuses.shift() ?? "idle";
-      return { paneId: target, tabId: "tab-1", workspaceId: "w1", agentStatus };
+      return { paneId: target, tabId: "tab-1", workspaceId: "w1", agentStatus, sessionId: options.sessionId };
     },
     paneRead: async () => options.paneOutput ?? "task finished",
     paneSendKeys: async (paneId: string, ...keys: string[]) => {
@@ -146,6 +164,31 @@ test("waitForHerdrTask completes on the working -> idle transition and returns t
 test("waitForHerdrTask completes on done so a task tab nobody looks at is not stuck forever", async () => {
   const herdr = makeFakeHerdr({ statuses: ["unknown", "working", "done"], paneOutput: "PR created" });
   const result = await waitForHerdrTask("pane-1", { herdr, pollIntervalMs: 1 });
+  assert.deepEqual(result, { status: "completed", output: "PR created" });
+});
+
+test("waitForHerdrTask reports the transcript of the session herdr exposes on the pane", async () => {
+  const herdr = makeFakeHerdr({
+    statuses: ["unknown", "working", "done"],
+    paneOutput: "❯\n  ctx ⣤ 7% │ 5h 26%",
+    sessionId: "d3796b28-57e1-47fb-be7f-586e910ea883",
+  });
+  const seen: (string | undefined)[] = [];
+  const result = await waitForHerdrTask("pane-1", {
+    herdr,
+    pollIntervalMs: 1,
+    readReport: (sessionId) => {
+      seen.push(sessionId);
+      return "PR #12 を作成しました";
+    },
+  });
+  assert.deepEqual(result, { status: "completed", output: "PR #12 を作成しました" });
+  assert.deepEqual(seen, ["d3796b28-57e1-47fb-be7f-586e910ea883"]);
+});
+
+test("waitForHerdrTask falls back to the pane output when no transcript is found", async () => {
+  const herdr = makeFakeHerdr({ statuses: ["working", "done"], paneOutput: "PR created" });
+  const result = await waitForHerdrTask("pane-1", { herdr, pollIntervalMs: 1, readReport: () => "" });
   assert.deepEqual(result, { status: "completed", output: "PR created" });
 });
 
