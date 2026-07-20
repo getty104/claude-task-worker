@@ -46,7 +46,7 @@ export async function install(): Promise<void> {
   await addMarketplace();
   const pluginOk = await installPlugin();
   const cliOk = await installCli();
-  const codegraphOk = await installCodegraphCli("install", "install");
+  const codegraphOk = await installCodegraphCli("install");
   if (!pluginOk || !cliOk || !codegraphOk) {
     process.exitCode = 1;
   }

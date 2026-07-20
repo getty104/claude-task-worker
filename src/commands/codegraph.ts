@@ -42,23 +42,42 @@ export function appendIgnoreEntry(current: string, entry: string): string | null
 }
 
 /**
- * CodeGraph CLI をグローバルインストール（更新も同じコマンドで賄う）。
+ * CodeGraph CLI をグローバルインストールする。
  *
  * `codegraph install`（エージェント設定の書き込み）はあえて実行しない。MCP サーバーの登録は
  * プラグインの `.mcp.json` が担っており、両方走らせると同じサーバーが二重登録されるため。
  */
-export async function installCodegraphCli(logPrefix: string, mode: "install" | "update"): Promise<boolean> {
-  const progressive = mode === "install" ? "Installing" : "Updating";
-  const past = mode === "install" ? "installed" : "updated";
-  console.log(`[${logPrefix}] ${progressive} CodeGraph CLI (npm install -g ${CODEGRAPH_PACKAGE}@latest)...`);
+export async function installCodegraphCli(logPrefix: string): Promise<boolean> {
+  console.log(`[${logPrefix}] Installing CodeGraph CLI (npm install -g ${CODEGRAPH_PACKAGE}@latest)...`);
   try {
     const { runCommand } = await loadRunCommand();
     await runCommand("npm", ["install", "-g", `${CODEGRAPH_PACKAGE}@latest`]);
-    console.log(`[${logPrefix}] CodeGraph CLI ${past}.`);
+    console.log(`[${logPrefix}] CodeGraph CLI installed.`);
     return true;
   } catch (err) {
-    console.error(`[${logPrefix}] Failed to ${mode} CodeGraph CLI: ${(err as Error).message}`);
+    console.error(`[${logPrefix}] Failed to install CodeGraph CLI: ${(err as Error).message}`);
     return false;
+  }
+}
+
+/**
+ * CodeGraph CLI を更新する。CodeGraph 自身が持つ `codegraph upgrade` を使う
+ * （配布方法の変更に追随できるため、`npm install -g` で外から上書きするより確実）。
+ *
+ * 未インストールの環境では `codegraph` コマンド自体が無く upgrade は失敗するため、
+ * その場合は `installCodegraphCli()` へフォールバックする。`claude-task-worker update` は
+ * CodeGraph 導入前のマシンでも実行されうるので、ここで打ち切らない。
+ */
+export async function upgradeCodegraphCli(logPrefix: string): Promise<boolean> {
+  console.log(`[${logPrefix}] Updating CodeGraph CLI (codegraph upgrade)...`);
+  try {
+    const { runCommand } = await loadRunCommand();
+    await runCommand("codegraph", ["upgrade"]);
+    console.log(`[${logPrefix}] CodeGraph CLI updated.`);
+    return true;
+  } catch (err) {
+    console.error(`[${logPrefix}] codegraph upgrade failed (${(err as Error).message}); installing instead...`);
+    return installCodegraphCli(logPrefix);
   }
 }
 
