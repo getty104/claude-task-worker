@@ -104,6 +104,17 @@ export interface ClaudeInvocation {
 export const CLAUDE_COMMAND = "claude";
 export const HEADROOM_COMMAND = "headroom";
 
+// `headroom wrap claude` 自身のオプション（`--` より **前** に置く。`--` の後ろは
+// すべて claude へ素通しされるため、ここへ置くと headroom に解釈されず無視される）。
+//
+// - `--1m`: プロキシ経由でも 1M コンテキストウィンドウを維持する。付けないと headroom は
+//   1M window を有効化せず（proxy が既定の window にフォールバックする）、ワーカーが扱う
+//   大きめのコンテキストで挙動が変わる。**これが未指定だと context サイズが意図せず膨らむ**。
+// - `--memory`: セッション横断の永続メモリを有効化する。
+// - `--code-graph`: tokensave のコードグラフインデックスを即時構築する（headroom 既定の
+//   圧縮バックエンド）。
+export const HEADROOM_WRAP_OPTIONS = ["--1m", "--memory", "--code-graph"] as const;
+
 // claude の起動引数を組み立てる。モードによる差は `-p`（非対話 print モード）の有無だけで、
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
 export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
@@ -131,15 +142,19 @@ export interface ClaudeExecution {
 /**
  * タスクを起動する実行可能ファイルと引数を組み立てる。
  *
- * `headroom` が有効な場合は `headroom wrap claude -- <claude の引数>` になる
+ * `headroom` が有効な場合は
+ * `headroom wrap claude <HEADROOM_WRAP_OPTIONS> -- <claude の引数>` になる
  * （Headroom がプロキシを起動し、`ANTHROPIC_BASE_URL` を差し替えて claude を起動する）。
  *
  * **`--` の区切りは必須**。`headroom wrap claude` は自前のオプション
- * （`--port` / `--memory` / `--no-mcp` 等）を持ち、`-p` のように headroom 側の解釈と
- * 衝突しうるフラグは `--` の後ろに置かないと claude まで届かない
+ * （`--port` / `--memory` / `--no-mcp` / `--1m` 等）を持ち、`-p` のように headroom 側の
+ * 解釈と衝突しうるフラグは `--` の後ろに置かないと claude まで届かない
  * （headroom のヘルプも `headroom wrap claude -- -p` を print モードの例として挙げている）。
  * 未知フラグのパススルーに頼らず全引数を `--` の後ろへ置くことで、将来 headroom 側に
  * 追加されたオプションと `buildClaudeArgs()` のフラグが衝突する事故も防ぐ。
+ *
+ * 逆に headroom 自身へ渡すオプション（`HEADROOM_WRAP_OPTIONS`）は `--` の **前** に置く。
+ * `--1m`（1M window 維持）が無いと proxy 経由で context サイズが膨らむため必須。
  *
  * 実行形態（default / herdr）とは直交する。default モードでは spawn の command に、
  * herdr モードでは `agent start ... -- <argv>` の argv 先頭になる。どちらも
@@ -150,7 +165,10 @@ export function buildClaudeExecution(invocation: ClaudeInvocation & { headroom?:
   if (!invocation.headroom) {
     return { command: CLAUDE_COMMAND, args };
   }
-  return { command: HEADROOM_COMMAND, args: ["wrap", CLAUDE_COMMAND, "--", ...args] };
+  return {
+    command: HEADROOM_COMMAND,
+    args: ["wrap", CLAUDE_COMMAND, ...HEADROOM_WRAP_OPTIONS, "--", ...args],
+  };
 }
 
 // claude へ渡す環境変数を組み立てる。

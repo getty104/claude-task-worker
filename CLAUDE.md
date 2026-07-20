@@ -130,11 +130,15 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 ### `headroom`（Headroom 経由でのタスク実行）
 
-`config.json` のトップレベル `headroom`（boolean、既定 `false`）が `true` のとき、タスクを `claude` の直接起動ではなく `headroom wrap claude -- <引数>` で起動する（Headroom がローカルプロキシを立て `ANTHROPIC_BASE_URL` を差し替えてコンテキストを圧縮する）。`mode` と同じくトップレベル一括の設定で、`getHeadroomEnabled()` がプロセス起動時に一度だけ解決してキャッシュする。
+`config.json` のトップレベル `headroom`（boolean、既定 `false`）が `true` のとき、タスクを `claude` の直接起動ではなく `headroom wrap claude <HEADROOM_WRAP_OPTIONS> -- <引数>` で起動する（Headroom がローカルプロキシを立て `ANTHROPIC_BASE_URL` を差し替えてコンテキストを圧縮する）。`mode` と同じくトップレベル一括の設定で、`getHeadroomEnabled()` がプロセス起動時に一度だけ解決してキャッシュする。
 
 コマンドの組み立ては `src/claude-args.ts` の `buildClaudeExecution()`（`{ command, args }` を返す）。`mode` とは直交し、default モードでは `spawn` の command に、herdr モードでは `agentStart` の argv 先頭になる。どちらもシェルを経由せず argv を直接実行するためクォートの考慮は不要。
 
-- **claude の引数はすべて `--` の後ろに置く**。`headroom wrap claude` は自前のオプション（`--port` / `--memory` / `--no-mcp` 等）を持ち、`-p` のように衝突しうるフラグは `--` の後ろでないと claude へ届かない（headroom 側は click の `ignore_unknown_options` + `UNPROCESSED` で `--` を消費し、残りを `subprocess.run([claude_bin, *claude_args])` へそのまま渡す）。未知フラグのパススルーに頼らず全引数を後ろへ回すことで、将来 headroom にオプションが増えたときの衝突も防ぐ
+- **claude の引数はすべて `--` の後ろに置く**。`headroom wrap claude` は自前のオプション（`--port` / `--memory` / `--no-mcp` / `--1m` 等）を持ち、`-p` のように衝突しうるフラグは `--` の後ろでないと claude へ届かない（headroom 側は click の `ignore_unknown_options` + `UNPROCESSED` で `--` を消費し、残りを `subprocess.run([claude_bin, *claude_args])` へそのまま渡す）。未知フラグのパススルーに頼らず全引数を後ろへ回すことで、将来 headroom にオプションが増えたときの衝突も防ぐ
+- **headroom 自身へ渡すオプション（`HEADROOM_WRAP_OPTIONS`）は逆に `--` の前に置く**。`--` の後ろは claude へ素通しされ headroom には解釈されないため。現在渡しているのは `--1m` / `--memory` / `--code-graph` の3つ:
+  - `--1m`: proxy 経由でも 1M コンテキストウィンドウを維持する。**未指定だと headroom が 1M window を有効化せず context サイズが意図せず膨らむ**（headroom オプションを付けたら context が異常肥大した実測の原因がこれ）
+  - `--memory`: セッション横断の永続メモリを有効化する
+  - `--code-graph`: tokensave のコードグラフインデックスを即時構築する（headroom 既定の圧縮バックエンド）
 - exit code は headroom が claude のものを `SystemExit(result.returncode)` で伝播するため、default モードの成否判定はそのまま使える
 - **`headroom wrap claude` は claude 起動前に起動バナーを無条件で stdout へ出す**（`--verbose` と無関係で、抑止するオプションも無い）。これをそのまま数えると「exit 0 かつ stdout が空＝空振りセッション」の検知が永久に効かなくなるため、`buildTaskResult()` / `buildHerdrTaskResult()` は `headroom` が有効なとき `stripHeadroomBanner()`（先頭から続く空行 / 2スペース始まりの行を落とす）を通してから空判定する。バナーは claude 起動前にすべて出力され各行が空行か2スペース始まりなので、この形で claude 本体の出力に触れずに除去できる。通知に載せる `output` は元の stdout のままにしてあり、判定を誤っても失敗側（ラベルを進めない安全側）に倒れる
 - `headroom: true` で headroom コマンドが PATH に無い場合は `assertHeadroomAvailable()`（`src/index.ts`）がワーカー起動時にエラー終了させる（直接起動へのサイレントフォールバックはしない）
