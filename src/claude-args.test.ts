@@ -12,6 +12,7 @@ const {
   buildClaudeArgs,
   buildClaudeEnv,
   buildClaudeExecution,
+  HEADROOM_WRAP_OPTIONS,
 } = (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
@@ -136,7 +137,23 @@ test("buildClaudeExecution wraps claude with headroom when enabled", () => {
   const execution = buildClaudeExecution({ ...invocation, headroom: true });
 
   assert.equal(execution.command, HEADROOM_COMMAND);
-  assert.deepEqual(execution.args, ["wrap", "claude", "--", ...buildClaudeArgs(invocation)]);
+  assert.deepEqual(execution.args, ["wrap", "claude", ...HEADROOM_WRAP_OPTIONS, "--", ...buildClaudeArgs(invocation)]);
+});
+
+test("buildClaudeExecution enables the 1M window and memory / code-graph backends", () => {
+  const execution = buildClaudeExecution({
+    mode: "default",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    headroom: true,
+  });
+  const separator = execution.args.indexOf("--");
+  // Every headroom-own option must sit before the -- separator so headroom parses them.
+  for (const flag of ["--1m", "--memory", "--code-graph"]) {
+    const index = execution.args.indexOf(flag);
+    assert.ok(index > 1 && index < separator, `${flag} must be a headroom wrap option before --`);
+  }
 });
 
 test("buildClaudeExecution puts every claude flag after the -- separator", () => {
@@ -151,9 +168,9 @@ test("buildClaudeExecution puts every claude flag after the -- separator", () =>
       headroom: true,
     });
     const separator = execution.args.indexOf("--");
-    assert.equal(separator, 2);
-    // Nothing before the separator except `wrap claude`.
-    assert.deepEqual(execution.args.slice(0, separator), ["wrap", "claude"]);
+    assert.equal(separator, 2 + HEADROOM_WRAP_OPTIONS.length);
+    // Nothing before the separator except `wrap claude` and headroom's own options.
+    assert.deepEqual(execution.args.slice(0, separator), ["wrap", "claude", ...HEADROOM_WRAP_OPTIONS]);
     for (const flag of ["-p", "--model", "--effort", "--disallowedTools", "--append-system-prompt"]) {
       const index = execution.args.indexOf(flag);
       if (index === -1) continue; // -p is default-mode only
@@ -168,6 +185,8 @@ test("buildClaudeExecution keeps headroom orthogonal to the run mode", () => {
   const herdrArgs = buildClaudeExecution({ mode: "herdr", ...common }).args;
 
   // -p remains the only difference between the two modes, even when wrapped.
-  assert.equal(defaultArgs[3], "-p");
-  assert.deepEqual(defaultArgs.slice(4), herdrArgs.slice(3));
+  const defaultSep = defaultArgs.indexOf("--");
+  const herdrSep = herdrArgs.indexOf("--");
+  assert.equal(defaultArgs[defaultSep + 1], "-p");
+  assert.deepEqual(defaultArgs.slice(defaultSep + 2), herdrArgs.slice(herdrSep + 1));
 });
