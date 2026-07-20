@@ -67,7 +67,6 @@ export function isWorkerAtCapacity(workerName: string): boolean {
   return count >= getWorkerConfig(workerName).maxConcurrentTasks;
 }
 
-
 function renderTable(): void {
   const lines = buildTaskTableLines([...tasks.values()]);
   if (lines.length === 0) return;

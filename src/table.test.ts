@@ -5,9 +5,8 @@ import type * as TableModule from "./table";
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { getDisplayWidth, truncateToWidth, padToWidth, buildTaskTableLines } = (await import(
-  "./table.ts"
-)) as typeof TableModule;
+const { getDisplayWidth, truncateToWidth, padToWidth, buildTaskTableLines } =
+  (await import("./table.ts")) as typeof TableModule;
 
 test("getDisplayWidth returns 0 for empty string", () => {
   assert.equal(getDisplayWidth(""), 0);
