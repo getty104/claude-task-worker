@@ -135,10 +135,16 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 コマンドの組み立ては `src/claude-args.ts` の `buildClaudeExecution()`（`{ command, args }` を返す）。`mode` とは直交し、default モードでは `spawn` の command に、herdr モードでは `agentStart` の argv 先頭になる。どちらもシェルを経由せず argv を直接実行するためクォートの考慮は不要。
 
 - **claude の引数はすべて `--` の後ろに置く**。`headroom wrap claude` は自前のオプション（`--port` / `--memory` / `--no-mcp` / `--1m` 等）を持ち、`-p` のように衝突しうるフラグは `--` の後ろでないと claude へ届かない（headroom 側は click の `ignore_unknown_options` + `UNPROCESSED` で `--` を消費し、残りを `subprocess.run([claude_bin, *claude_args])` へそのまま渡す）。未知フラグのパススルーに頼らず全引数を後ろへ回すことで、将来 headroom にオプションが増えたときの衝突も防ぐ
-- **headroom 自身へ渡すオプション（`HEADROOM_WRAP_OPTIONS`）は逆に `--` の前に置く**。`--` の後ろは claude へ素通しされ headroom には解釈されないため。現在渡しているのは `--1m` / `--memory` / `--code-graph` の3つ:
-  - `--1m`: proxy 経由でも 1M コンテキストウィンドウを維持する。**未指定だと headroom が 1M window を有効化せず context サイズが意図せず膨らむ**（headroom オプションを付けたら context が異常肥大した実測の原因がこれ）
+- **headroom 自身へ渡すオプション（`HEADROOM_WRAP_OPTIONS`）は逆に `--` の前に置く**。`--` の後ろは claude へ素通しされ headroom には解釈されないため。現在渡しているのは `--1m` / `--memory` / `--no-tokensave` / `--no-serena` の4つ:
+  - `--1m`: 1M コンテキストウィンドウを要求させる。ただし**このフラグ単体ではワーカーに効かない**（下記「1M window の解放は `--model` 側で行う」参照）。`--model` を渡さなくなった場合の保険として残している
   - `--memory`: セッション横断の永続メモリを有効化する
-  - `--code-graph`: tokensave のコードグラフインデックスを即時構築する（headroom 既定の圧縮バックエンド）
+  - `--no-tokensave` / `--no-serena`: 重いコードグラフ MCP の自動登録を止める（下記参照）
+- **1M window の解放は `--model` へ付ける `[1m]` サフィックスが担う**（`withContext1mSuffix()`）。Claude Code は model id が `[1m]` で終わるときだけ `context-1m` beta ヘッダを送るが、headroom の `--1m` は **`ANTHROPIC_MODEL=<model>[1m]` をセットするだけ**の実装（`wrap.py` の `_resolve_1m_model()`）で、CLI の `--model` が環境変数に勝つため、`--model sonnet` を明示するワーカー起動では素通しされていた。proxy のリクエストログで `anthropic-beta` から `context-1m` が欠落することを実測で確認済み。headroom は `ANTHROPIC_MODEL=claude-opus-4-8[1m] (1M context window)` と成功したかのように表示するため、ログを見ても気づけない。サフィックスはエイリアスへ直接連結してよい（`--model 'sonnet[1m]'` でヘッダが送出されることを実測確認済み。エイリアス→フルモデルIDの変換表は新モデル追加のたびに陳腐化するため持たない）
+- **tokensave MCP は `--no-tokensave` で明示的に切る**。ただし**コンテキスト削減が目的ではない**。狙いは (1) headroom がタスク起動のたびに走らせる再登録＋再インデックス（`_setup_tokensave_mcp(..., force=True)` → `_index_tokensave_project()`）を止めること、(2) ワーカーの都合で `~/.claude.json` の**トップレベル** `mcpServers`（＝ユーザーの対話セッション）が書き換わるのを止めること。コード探索は codegraph MCP（`plugin/.mcp.json`）が担い、`--append-system-prompt` の探索方針もそちらを指しているため機能面の損失はない
+  - **`--code-graph` を外すだけでは止まらない**。同フラグは「今すぐ index を張れ」の意味しかなく、tokensave の登録自体は `_setup_coding_compressor()` が**既定で**行う
+  - **`--no-serena` を併せて渡す必要がある**。`_setup_coding_compressor()` は tokensave が無効だと Serena MCP をバックアップとして登録するため、`--no-tokensave` 単体では別の MCP に置き換わるだけになる
+  - 既存の登録は、ledger（`~/.headroom/mcp_installs.json`）が headroom によるインストールを証明する場合に限り `--no-tokensave` が削除する（ユーザーが自分で入れたエントリは残す）
+  - **MCP のツール数はコンテキスト肥大の主因ではない**。tokensave はツール81個・schema 約 15.7k tokens 相当だが、headroom が `ENABLE_TOOL_SEARCH=true` を立てて Claude Code のオンデマンドツール読み込みを有効にするため、MCP のツールスキーマはリクエストに載らず名前だけが遅延解決される。同一条件の A/B 実測差は **11 bytes / 3 tokens**（有り: content-length 114,638・tok_before 13,029 → 無し: 114,627・13,026）。ベースラインを占めているのは遅延できない組み込みツールの schema（proxy ログの `tool_search_deferral:15tools:12663tok`）であり、MCP を減らしても縮まない
 - exit code は headroom が claude のものを `SystemExit(result.returncode)` で伝播するため、default モードの成否判定はそのまま使える
 - **`headroom wrap claude` は claude 起動前に起動バナーを無条件で stdout へ出す**（`--verbose` と無関係で、抑止するオプションも無い）。これをそのまま数えると「exit 0 かつ stdout が空＝空振りセッション」の検知が永久に効かなくなるため、`buildTaskResult()` / `buildHerdrTaskResult()` は `headroom` が有効なとき `stripHeadroomBanner()`（先頭から続く空行 / 2スペース始まりの行を落とす）を通してから空判定する。バナーは claude 起動前にすべて出力され各行が空行か2スペース始まりなので、この形で claude 本体の出力に触れずに除去できる。通知に載せる `output` は元の stdout のままにしてあり、判定を誤っても失敗側（ラベルを進めない安全側）に倒れる
 - `headroom: true` で headroom コマンドが PATH に無い場合は `assertHeadroomAvailable()`（`src/index.ts`）がワーカー起動時にエラー終了させる（直接起動へのサイレントフォールバックはしない）
