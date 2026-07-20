@@ -1,6 +1,9 @@
 import type * as HerdrModule from "./herdr";
 import type { AgentStatus } from "./herdr";
 import type { TaskResult } from "./task-result";
+// node --experimental-strip-types は実ファイル解決を要求するため、値のimportは
+// .ts 拡張子付きにする（herdr-runner.ts はテストから直接 .ts で読み込まれる）。
+import { stripHeadroomBanner } from "./task-result.ts";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする（dispatcher.ts と同様）。
@@ -75,9 +78,14 @@ export function observeAgentStatus(
  * 「ペインの内容が空か」だけで成否を判定する。プリアンブル失敗などでモデルが
  * 起動しないまま idle になったセッションを空振りとして失敗扱いにする狙いは
  * task-result.ts の buildTaskResult と同じ。
+ *
+ * `headroom` が有効な場合、ペインには claude の手前に headroom の起動バナーが残りうる。
+ * バナーだけのペインを「出力あり」と誤認しないよう、default モードと同じく空判定の前に
+ * 取り除く（通知に載せる output は元のペイン内容のままにする）。
  */
-export function buildHerdrTaskResult(paneOutput: string): TaskResult {
-  if (paneOutput.trim() === "") {
+export function buildHerdrTaskResult(paneOutput: string, options?: { headroom?: boolean }): TaskResult {
+  const meaningful = options?.headroom ? stripHeadroomBanner(paneOutput) : paneOutput;
+  if (meaningful.trim() === "") {
     return {
       status: "failed",
       output:
@@ -158,6 +166,7 @@ export async function waitForHerdrTask(
     onBlocked?: () => void;
     onStatus?: (status: AgentStatus) => void;
     signal?: { aborted: boolean };
+    headroom?: boolean;
   },
 ): Promise<TaskResult> {
   const mod = options?.herdr ?? (await loadHerdr());
@@ -191,7 +200,7 @@ export async function waitForHerdrTask(
 
     if (observed.decision === "completed") {
       const output = await readPaneOutput(paneId, mod);
-      return buildHerdrTaskResult(output);
+      return buildHerdrTaskResult(output, { headroom: options?.headroom });
     }
     if (observed.decision === "blocked-first-seen") {
       options?.onBlocked?.();

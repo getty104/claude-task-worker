@@ -274,7 +274,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 }
 ```
 
-`mode` については [`mode`（タスクの実行形態）](#modeタスクの実行形態) を参照。
+`mode` については [`mode`（タスクの実行形態）](#modeタスクの実行形態) を、`headroom` については [`headroom`（Headroom 経由でのタスク実行）](#headroomheadroom-経由でのタスク実行) を参照。
 
 `--project` は繰り返し指定可能で、複数指定した場合は解決後のプロジェクト集合の和集合が対象になる（重複は一意化される）。`--epic` / `--label` と併用でき、ディスパッチ先の各プロジェクトで実行されるコマンドにそのまま引き継がれる。
 
@@ -330,6 +330,31 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
   ```
 
   適用は `herdr server reload-config`。この設定は herdr サーバー全体に効くため、ワーカー以外の対話セッションの完了音も鳴らなくなる（`[ui.sound.agents] claude = "off"` でも実質同じ範囲）。ワーカーだけを無音にしたい場合は、`HERDR_DISABLE_SOUND=1 herdr --session <name>` で別セッションを起動し、その中でディスパッチャーを動かす
+
+### `headroom`（Headroom 経由でのタスク実行）
+
+`config.json` のトップレベルに `"headroom": true` を書くと、ワーカーは各タスクの claude を [Headroom](https://github.com/headroom-ai/headroom) 経由（`headroom wrap claude`）で起動する。Headroom がローカルプロキシを立ててコンテキストを圧縮し、`ANTHROPIC_BASE_URL` を差し替えた状態で claude を起動する。既定は `false`（`claude` を直接起動する）。
+
+`mode` と同じくトップレベル一括の設定で、プロジェクト単位・ワーカー単位の指定はできない。
+
+```json
+{
+  "headroom": true,
+  "projects": { "app-a": "/Users/me/repos/app-a" }
+}
+```
+
+| `headroom` | 実行されるコマンド |
+|-----------|------------------|
+| `false`（既定） | `claude <引数>` |
+| `true` | `headroom wrap claude -- <引数>` |
+
+補足:
+
+- `mode` とは独立して組み合わせられる（`mode: "herdr"` の TUI 起動も `headroom wrap claude` になる）
+- claude へ渡す引数はすべて `--` の後ろに置かれる。`headroom wrap claude` 自身も `--port` / `--memory` などのオプションを持ち、`-p` のように衝突しうるフラグは `--` の後ろでないと claude に届かないため
+- `headroom: true` で headroom コマンドが PATH に無い場合、ワーカーは起動時にエラー終了する（`mode: "herdr"` と同じく、サイレントに直接起動へフォールバックはしない）
+- `headroom wrap claude` は claude を起動する前に起動バナー（枠線・`ANTHROPIC_BASE_URL=...` など）を stdout へ出力し、これを抑止するオプションは無い。ワーカーは空振りセッション検知（exit 0 かつ無出力を失敗とみなす判定）の前にこのバナーを取り除くため、検知は `headroom: true` でも従来どおり機能する。ただし Slack 通知の本文にはバナーがそのまま含まれる
 
 ### exec-issue
 

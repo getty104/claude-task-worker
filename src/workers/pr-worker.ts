@@ -1,4 +1,4 @@
-import { buildClaudeArgs, buildClaudeEnv } from "../claude-args.js";
+import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
@@ -12,7 +12,7 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { getRunMode } from "../user-config";
+import { getHeadroomEnabled, getRunMode } from "../user-config";
 import {
   createWorktreeFromBranch,
   deleteLocalBranch,
@@ -89,9 +89,16 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             const { model, effort, skill } = getWorkerConfig(config.name);
             const command = skill || config.command;
             const mode = getRunMode();
+            const execution = buildClaudeExecution({
+              mode,
+              prompt: `${command} ${pr.number}`,
+              model,
+              effort,
+              headroom: getHeadroomEnabled(),
+            });
             run(
-              "claude",
-              buildClaudeArgs({ mode, prompt: `${command} ${pr.number}`, model, effort }),
+              execution.command,
+              execution.args,
               pr.number,
               `PR #${pr.number} (${pr.headRefName})`,
               config.name,

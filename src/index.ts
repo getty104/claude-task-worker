@@ -23,7 +23,8 @@ import {
   assertProjectCompatibleCommand,
   buildForwardedCommand,
 } from "./dispatch-args";
-import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode, getHeadroomEnabled } from "./user-config";
+import { HEADROOM_COMMAND } from "./claude-args";
 // dispatcher.ts / herdr.ts はワーカー起動には不要な --project 専用モジュールで、
 // dispatcher.ts のトップレベル await が即時実行されるのを避けるため、
 // 静的importではなく --project 使用時にのみ実行される動的importで遅延読込する。
@@ -169,6 +170,29 @@ async function assertRunModeAvailable(): Promise<void> {
   console.log("[worker] run mode: herdr (each task runs as a TUI session in its own herdr tab)");
 }
 
+// headroom: true のワーカーは全タスクを `headroom wrap claude` で起動するため、headroom が
+// PATH に無ければ spawn が ENOENT で即失敗する（＝ラベルだけ書き換わって全タスクが失敗する）。
+// assertRunModeAvailable() と同じ方針で、起動時に存在を確認して落とす。
+async function assertHeadroomAvailable(): Promise<void> {
+  if (!getHeadroomEnabled()) return;
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  try {
+    await promisify(execFile)(HEADROOM_COMMAND, ["--version"]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[worker] config.json has headroom: true but the headroom CLI is unavailable: ${message}`);
+    process.exit(1);
+  }
+  console.log("[worker] headroom: enabled (each task runs as `headroom wrap claude`)");
+}
+
+// 起動前の前提チェックをまとめて実行する。
+async function assertRunPrerequisites(): Promise<void> {
+  await assertRunModeAvailable();
+  await assertHeadroomAvailable();
+}
+
 if (!hasProjectFilter()) {
   process.on("SIGTERM", async () => {
     if (isShuttingDown()) return;
@@ -279,7 +303,7 @@ if (hasProjectFilter()) {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
-    await assertRunModeAvailable();
+    await assertRunPrerequisites();
     // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
     await removeStaleWorktrees();
     await Promise.all([
@@ -296,7 +320,7 @@ if (hasProjectFilter()) {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
-    await assertRunModeAvailable();
+    await assertRunPrerequisites();
     await removeStaleWorktrees();
     await Promise.all([
       execIssueWorker({ epicFilters, labelFilters }),
@@ -315,7 +339,7 @@ if (hasProjectFilter()) {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
-    await assertRunModeAvailable();
+    await assertRunPrerequisites();
     await removeStaleWorktrees();
     await WORKERS[workerType]({ epicFilters, labelFilters });
   })();
