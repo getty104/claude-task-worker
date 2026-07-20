@@ -4,6 +4,7 @@ import type { TaskResult } from "./task-result";
 // node --experimental-strip-types は実ファイル解決を要求するため、値のimportは
 // .ts 拡張子付きにする（herdr-runner.ts はテストから直接 .ts で読み込まれる）。
 import { stripHeadroomBanner } from "./task-result.ts";
+import { readFinalReport } from "./transcript.ts";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする（dispatcher.ts と同様）。
@@ -75,15 +76,28 @@ export function observeAgentStatus(
 
 /**
  * herdr モードのタスク結果を組み立てる。`claude -p` と違い exit code が無いため、
- * 「ペインの内容が空か」だけで成否を判定する。プリアンブル失敗などでモデルが
+ * 「出力が空か」だけで成否を判定する。プリアンブル失敗などでモデルが
  * 起動しないまま idle になったセッションを空振りとして失敗扱いにする狙いは
  * task-result.ts の buildTaskResult と同じ。
+ *
+ * 通知に載せる本文は **transcript から取った最終レポート（`report`）を最優先**する。
+ * ペインの端末内容は「会話ログ + 空行パディング + 入力ボックス + ステータスバー」で、
+ * Slack 通知が切り出す末尾1000文字はほぼ TUI の装飾しか含まないため、通知本文として
+ * 使い物にならない（transcript.ts 参照）。transcript を引けなかった場合のみ
+ * 従来どおりペイン内容へフォールバックする。
  *
  * `headroom` が有効な場合、ペインには claude の手前に headroom の起動バナーが残りうる。
  * バナーだけのペインを「出力あり」と誤認しないよう、default モードと同じく空判定の前に
  * 取り除く（通知に載せる output は元のペイン内容のままにする）。
  */
-export function buildHerdrTaskResult(paneOutput: string, options?: { headroom?: boolean }): TaskResult {
+export function buildHerdrTaskResult(
+  paneOutput: string,
+  options?: { headroom?: boolean; report?: string },
+): TaskResult {
+  const report = options?.report?.trim() ?? "";
+  if (report !== "") {
+    return { status: "completed", output: report };
+  }
   const meaningful = options?.headroom ? stripHeadroomBanner(paneOutput) : paneOutput;
   if (meaningful.trim() === "") {
     return {
@@ -150,7 +164,8 @@ export async function startHerdrTask({
 }
 
 /**
- * agent ステータスをポーリングしてタスクの完了を待ち、ペインの内容を回収する。
+ * agent ステータスをポーリングしてタスクの完了を待ち、完了時の出力を回収する。
+ * 出力は transcript の最終レポートを優先し、引けない場合だけペイン内容を使う。
  *
  * - `working` → `idle` の遷移を完了とみなす
  * - `blocked` は人の介入を待つ状態として待機を継続する（自動失敗にはしない）
@@ -167,11 +182,16 @@ export async function waitForHerdrTask(
     onStatus?: (status: AgentStatus) => void;
     signal?: { aborted: boolean };
     headroom?: boolean;
+    // テスト用の差し替え口（既定は transcript.ts の readFinalReport）。
+    readReport?: (sessionId: string | undefined) => string;
   },
 ): Promise<TaskResult> {
   const mod = options?.herdr ?? (await loadHerdr());
   const pollIntervalMs = options?.pollIntervalMs ?? AGENT_POLL_INTERVAL_MS;
   let tracker = createCompletionTracker();
+  // 完了後に transcript を引くための claude セッションID。herdr は TUI の起動直後には
+  // まだセッションIDを持たないため、ポーリングのたびに最新の値で更新する。
+  let sessionId: string | undefined;
 
   for (;;) {
     if (options?.signal?.aborted) {
@@ -180,7 +200,9 @@ export async function waitForHerdrTask(
 
     let status: AgentStatus;
     try {
-      status = (await mod.agentGet(paneId)).agentStatus;
+      const agent = await mod.agentGet(paneId);
+      status = agent.agentStatus;
+      if (agent.sessionId) sessionId = agent.sessionId;
     } catch (err) {
       if (err instanceof mod.HerdrError && err.code === "pane_not_found") {
         return {
@@ -200,7 +222,8 @@ export async function waitForHerdrTask(
 
     if (observed.decision === "completed") {
       const output = await readPaneOutput(paneId, mod);
-      return buildHerdrTaskResult(output, { headroom: options?.headroom });
+      const report = (options?.readReport ?? readFinalReport)(sessionId);
+      return buildHerdrTaskResult(output, { headroom: options?.headroom, report });
     }
     if (observed.decision === "blocked-first-seen") {
       options?.onBlocked?.();
