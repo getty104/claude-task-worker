@@ -6,13 +6,8 @@ import type * as CodegraphModule from "./codegraph";
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { appendIgnoreEntry, globalGitIgnorePath, CODEGRAPH_IGNORE_ENTRY, CODEGRAPH_AGENT_INSTALL_ARGS } =
+const { appendIgnoreEntry, globalGitIgnorePath, CODEGRAPH_IGNORE_ENTRY } =
   (await import("./codegraph.ts")) as typeof CodegraphModule;
-
-test("CODEGRAPH_AGENT_INSTALL_ARGS registers only the Claude target, non-interactively", () => {
-  // install/update は非対話で走るため、--yes を落とすとプロンプトで固まる。
-  assert.deepEqual([...CODEGRAPH_AGENT_INSTALL_ARGS], ["install", "--target=claude", "--yes"]);
-});
 
 test("appendIgnoreEntry creates the entry when the file is empty", () => {
   assert.equal(appendIgnoreEntry("", CODEGRAPH_IGNORE_ENTRY), ".codegraph/\n");

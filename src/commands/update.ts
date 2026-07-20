@@ -1,4 +1,4 @@
-import { installCodegraphCli, installCodegraphForClaude } from "./codegraph.js";
+import { installCodegraphCli } from "./codegraph.js";
 import { runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
@@ -45,10 +45,7 @@ export async function update(): Promise<void> {
   const marketplaceOk = await updateMarketplace();
   const pluginOk = await updatePlugin();
   const cliOk = await updateCli();
-  // MCP サーバー登録は CLI の更新後にのみ意味を持つため、成功時だけ続ける。
-  // 更新でも毎回実行して、CodeGraph 側でサーバー定義が変わった場合に追随させる。
-  const codegraphCliOk = await installCodegraphCli("update", "update");
-  const codegraphOk = codegraphCliOk && (await installCodegraphForClaude("update"));
+  const codegraphOk = await installCodegraphCli("update", "update");
   if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk) {
     process.exitCode = 1;
   }
