@@ -58,6 +58,17 @@ test("SYSTEM_PROMPT also carries the subagent rules", () => {
   assert.ok(SYSTEM_PROMPT.includes("完了報告は鵜呑みにしない"));
 });
 
+test("SYSTEM_PROMPT tells the agent to prefer CodeGraph over text search", () => {
+  // explore-agent has the detailed procedure, but the main agent (and any other
+  // subagent it delegates to) only learns the preference from here.
+  assert.ok(SYSTEM_PROMPT.includes("CodeGraph が使える場合"));
+  // Availability is decided by the MCP tool alone.
+  assert.ok(SYSTEM_PROMPT.includes("MCP ツール"));
+  assert.ok(SYSTEM_PROMPT.includes("codegraph_explore"));
+  // And the agent must not set CodeGraph up mid-task.
+  assert.ok(SYSTEM_PROMPT.includes("インデックスを用意しようとしない"));
+});
+
 test("SYSTEM_PROMPT does not assume a specific run mode", () => {
   // Injected into both `claude -p` (default mode) and TUI (herdr mode) sessions.
   assert.ok(!SYSTEM_PROMPT.includes("print"));
