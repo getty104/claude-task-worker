@@ -25,9 +25,15 @@ export interface CreatedWorkspace {
   paneId: string;
 }
 
-// herdr が claude の実行状態として保持する値。TUI セッションはタスク完了後も
-// プロセスが生き続けるため、herdr モードではこのステータスが完了シグナルになる。
-export type AgentStatus = "working" | "idle" | "blocked" | "unknown";
+// herdr が claude の実行状態として保持する値（`herdr api schema` の AgentStatus と一致させる）。
+// TUI セッションはタスク完了後もプロセスが生き続けるため、herdr モードではこのステータスが
+// 完了シグナルになる。
+//
+// `done` は「作業を終えたが、ユーザーがまだそのペインを見ていない」未確認完了の状態。
+// herdr は working から idle へ落ちたペインが非フォーカスだと idle ではなく done を返し、
+// ユーザーがタブを開いた時点で idle に落とす（`agent explain` の検出結果自体は idle のまま）。
+// この値を知らないと、誰もタブを見ないワーカーのタスクは永久に完了扱いにならない。
+export type AgentStatus = "working" | "idle" | "blocked" | "done" | "unknown";
 
 export interface AgentInfo {
   paneId: string;
@@ -334,7 +340,7 @@ export async function agentStart({
 }
 
 function toAgentStatus(value: unknown): AgentStatus {
-  return value === "working" || value === "idle" || value === "blocked" ? value : "unknown";
+  return value === "working" || value === "idle" || value === "blocked" || value === "done" ? value : "unknown";
 }
 
 // ペインで動いているエージェントの状態を取得する。ペインが消えている場合は

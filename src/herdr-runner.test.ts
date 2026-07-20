@@ -41,6 +41,16 @@ test("observeAgentStatus only completes after a working status has been seen", (
   assert.equal(result.decision, "completed");
 });
 
+test("observeAgentStatus completes on done (unviewed completion) without requiring a seen working status", () => {
+  // ワーカーのタスクタブは誰も開かないため、herdr は idle ではなく done を返し続ける。
+  // ポーリング間隔より短いタスクでは working を観測できないまま done に至るため、
+  // seenWorking を要求すると永久に完了しない。
+  const tracker = createCompletionTracker();
+
+  const result = observeAgentStatus(tracker, "done");
+  assert.equal(result.decision, "completed");
+});
+
 test("observeAgentStatus reports a blocked status only the first time", () => {
   let tracker = createCompletionTracker();
 
@@ -123,6 +133,12 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
 
 test("waitForHerdrTask completes on the working -> idle transition and returns the pane output", async () => {
   const herdr = makeFakeHerdr({ statuses: ["unknown", "working", "working", "idle"], paneOutput: "PR created" });
+  const result = await waitForHerdrTask("pane-1", { herdr, pollIntervalMs: 1 });
+  assert.deepEqual(result, { status: "completed", output: "PR created" });
+});
+
+test("waitForHerdrTask completes on done so a task tab nobody looks at is not stuck forever", async () => {
+  const herdr = makeFakeHerdr({ statuses: ["unknown", "working", "done"], paneOutput: "PR created" });
   const result = await waitForHerdrTask("pane-1", { herdr, pollIntervalMs: 1 });
   assert.deepEqual(result, { status: "completed", output: "PR created" });
 });
