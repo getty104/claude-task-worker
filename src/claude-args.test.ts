@@ -13,6 +13,7 @@ const {
   buildClaudeEnv,
   buildClaudeExecution,
   HEADROOM_WRAP_OPTIONS,
+  withContext1mSuffix,
 } = (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
@@ -133,14 +134,20 @@ test("buildClaudeExecution runs claude directly when headroom is off", () => {
 });
 
 test("buildClaudeExecution wraps claude with headroom when enabled", () => {
-  const invocation = { mode: "default", prompt: "/skill 123", model: "sonnet", effort: "high" } as const;
-  const execution = buildClaudeExecution({ ...invocation, headroom: true });
+  const invocation = {
+    mode: "default",
+    prompt: "/skill 123",
+    model: "sonnet",
+    effort: "high",
+    headroom: true,
+  } as const;
+  const execution = buildClaudeExecution(invocation);
 
   assert.equal(execution.command, HEADROOM_COMMAND);
   assert.deepEqual(execution.args, ["wrap", "claude", ...HEADROOM_WRAP_OPTIONS, "--", ...buildClaudeArgs(invocation)]);
 });
 
-test("buildClaudeExecution enables the 1M window and memory / code-graph backends", () => {
+test("buildClaudeExecution passes headroom's own options before the -- separator", () => {
   const execution = buildClaudeExecution({
     mode: "default",
     prompt: "/skill 1",
@@ -150,10 +157,49 @@ test("buildClaudeExecution enables the 1M window and memory / code-graph backend
   });
   const separator = execution.args.indexOf("--");
   // Every headroom-own option must sit before the -- separator so headroom parses them.
-  for (const flag of ["--1m", "--memory", "--code-graph"]) {
+  for (const flag of ["--1m", "--memory", "--no-tokensave", "--no-serena"]) {
     const index = execution.args.indexOf(flag);
     assert.ok(index > 1 && index < separator, `${flag} must be a headroom wrap option before --`);
   }
+});
+
+test("buildClaudeExecution opts out of tokensave and its Serena fallback", () => {
+  // Not a context-size optimisation: with ENABLE_TOOL_SEARCH on, MCP tool schemas stay out
+  // of the request (measured A/B difference: 11 bytes). The point is to stop headroom
+  // re-registering + re-indexing tokensave on every task launch, and to stop it mutating the
+  // user's global ~/.claude.json. --code-graph would contradict the opt-out, and
+  // --no-tokensave alone just swaps in Serena.
+  const execution = buildClaudeExecution({
+    mode: "default",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    headroom: true,
+  });
+  assert.ok(!execution.args.includes("--code-graph"));
+  assert.ok(execution.args.includes("--no-tokensave"));
+  assert.ok(execution.args.includes("--no-serena"));
+});
+
+test("buildClaudeArgs appends the [1m] suffix to --model only under headroom", () => {
+  const common = { mode: "default", prompt: "/skill 1", effort: "high" } as const;
+
+  // headroom's --1m only sets ANTHROPIC_MODEL, which the CLI's --model overrides, so the
+  // suffix has to ride on --model itself for Claude Code to send the context-1m beta header.
+  const wrapped = buildClaudeArgs({ ...common, model: "sonnet", headroom: true });
+  assert.equal(wrapped[wrapped.indexOf("--model") + 1], "sonnet[1m]");
+
+  // Without headroom there is no proxy stripping the model picker, so leave the model alone.
+  for (const headroom of [undefined, false]) {
+    const direct = buildClaudeArgs({ ...common, model: "sonnet", headroom });
+    assert.equal(direct[direct.indexOf("--model") + 1], "sonnet");
+  }
+});
+
+test("withContext1mSuffix is idempotent", () => {
+  assert.equal(withContext1mSuffix("opus"), "opus[1m]");
+  assert.equal(withContext1mSuffix("opus[1m]"), "opus[1m]");
+  assert.equal(withContext1mSuffix("claude-sonnet-5[1m]"), "claude-sonnet-5[1m]");
 });
 
 test("buildClaudeExecution puts every claude flag after the -- separator", () => {

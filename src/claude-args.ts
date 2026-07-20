@@ -99,6 +99,9 @@ export interface ClaudeInvocation {
   prompt: string;
   model: string;
   effort: string;
+  // Headroom 経由で起動するか（`--model` への `[1m]` 付与を左右する。後述の
+  // `withContext1mSuffix()` 参照）。
+  headroom?: boolean;
 }
 
 export const CLAUDE_COMMAND = "claude";
@@ -107,17 +110,59 @@ export const HEADROOM_COMMAND = "headroom";
 // `headroom wrap claude` 自身のオプション（`--` より **前** に置く。`--` の後ろは
 // すべて claude へ素通しされるため、ここへ置くと headroom に解釈されず無視される）。
 //
-// - `--1m`: プロキシ経由でも 1M コンテキストウィンドウを維持する。付けないと headroom は
-//   1M window を有効化せず（proxy が既定の window にフォールバックする）、ワーカーが扱う
-//   大きめのコンテキストで挙動が変わる。**これが未指定だと context サイズが意図せず膨らむ**。
+// - `--1m`: 1M コンテキストウィンドウを要求させる。ただし headroom 側の実装は
+//   **`ANTHROPIC_MODEL=<model>[1m]` を起動プロセスへセットするだけ**で、claude CLI の
+//   `--model` は環境変数より優先されるため、ワーカーのように `--model` を明示指定する
+//   起動ではこのフラグ単体では効かない（`withContext1mSuffix()` 参照）。実際に効かせて
+//   いるのは `--model` 側のサフィックスで、このフラグは `--model` を渡さなくなった場合の
+//   保険として残してある。
 // - `--memory`: セッション横断の永続メモリを有効化する。
-// - `--code-graph`: tokensave のコードグラフインデックスを即時構築する（headroom 既定の
-//   圧縮バックエンド）。
-export const HEADROOM_WRAP_OPTIONS = ["--1m", "--memory", "--code-graph"] as const;
+// - `--no-tokensave`: tokensave MCP の登録を止める。**コンテキスト削減が目的ではない**
+//   （後述）。狙いは次の2つ:
+//     1. headroom はタスク起動のたびに `_setup_tokensave_mcp(..., force=True)` で再登録＋
+//        プロジェクトの再インデックス（`_index_tokensave_project()`）を走らせる。ワーカーは
+//        Issue ごとにプロセスを立ち上げるため、この往復がタスク数だけ積み上がる
+//     2. 登録先が `~/.claude.json` の**トップレベル** `mcpServers` なので、ワーカーの都合で
+//        ユーザーのグローバル設定（＝対話セッション）まで書き換わる
+//   コード探索はプラグインの codegraph MCP（`plugin/.mcp.json`）が担い、`SYSTEM_PROMPT` の
+//   探索方針もそちらを指しているため、機能面の損失もない。
+//   **tokensave は headroom の既定で登録される**ため、`--code-graph`（＝「今すぐ index を
+//   張れ」）を外すだけでは止まらず、この明示的なオプトアウトが要る。ledger
+//   （`~/.headroom/mcp_installs.json`）が headroom によるインストールを証明する場合は、
+//   既存エントリの削除も headroom 側が行う。
+//
+//   なお tokensave はツールを81個公開しており schema は約 15.7k tokens 相当だが、これが
+//   そのままコンテキストに載るわけではない。headroom は `ENABLE_TOOL_SEARCH=true` を立てて
+//   Claude Code のオンデマンドツール読み込みを有効にするため、MCP のツールスキーマは
+//   リクエストに載らず名前だけが遅延解決される。**同一条件の A/B で実測した差は
+//   11 bytes / 3 tokens**（tokensave 有り: content-length 114,638・tok_before 13,029 →
+//   無し: 114,627・13,026）。コンテキスト肥大の主因は MCP ではなく、遅延できない組み込み
+//   ツールの schema（proxy ログの `tool_search_deferral:15tools:12663tok`）である。
+// - `--no-serena`: Serena MCP のバックアップ登録を止める。headroom の
+//   `_setup_coding_compressor()` は tokensave が無効だと Serena を代替として登録するため、
+//   `--no-tokensave` だけでは別の MCP に置き換わり、上記2つの狙いがどちらも達成できない。
+//
+// `--code-graph` は渡さない（`--no-tokensave` と矛盾する。上記参照）。
+export const HEADROOM_WRAP_OPTIONS = ["--1m", "--memory", "--no-tokensave", "--no-serena"] as const;
+
+// Claude Code は model id が `[1m]` で終わる場合にのみ `context-1m` beta ヘッダを送り、
+// 1M コンテキストウィンドウを解放する。headroom の `--1m` は ANTHROPIC_MODEL 経由でしか
+// これを行わず、CLI の `--model` が環境変数に勝つため、ワーカー起動では素通しされていた
+// （proxy のリクエストログで `context-1m` ヘッダが欠落していることを実測で確認済み）。
+// 付ける側を `--model` の値へ移すことで、`--model` を明示していても 1M window が効く。
+//
+// エイリアス（`sonnet` / `opus`）にそのまま連結してよい。`--model 'sonnet[1m]'` でも
+// `context-1m-2025-08-07` ヘッダが送出されることを実測で確認しており、エイリアスから
+// フルモデルIDへの変換表を持つ必要はない（持つと新モデル追加のたびに陳腐化する）。
+const CONTEXT_1M_SUFFIX = "[1m]";
+
+export function withContext1mSuffix(model: string): string {
+  return model.endsWith(CONTEXT_1M_SUFFIX) ? model : `${model}${CONTEXT_1M_SUFFIX}`;
+}
 
 // claude の起動引数を組み立てる。モードによる差は `-p`（非対話 print モード）の有無だけで、
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
-export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
+export function buildClaudeArgs({ mode, prompt, model, effort, headroom }: ClaudeInvocation): string[] {
   return [
     ...(mode === "herdr" ? [] : ["-p"]),
     prompt,
@@ -128,7 +173,7 @@ export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocatio
     "--append-system-prompt",
     SYSTEM_PROMPT,
     "--model",
-    model,
+    headroom ? withContext1mSuffix(model) : model,
     "--effort",
     effort,
   ];
@@ -154,13 +199,16 @@ export interface ClaudeExecution {
  * 追加されたオプションと `buildClaudeArgs()` のフラグが衝突する事故も防ぐ。
  *
  * 逆に headroom 自身へ渡すオプション（`HEADROOM_WRAP_OPTIONS`）は `--` の **前** に置く。
- * `--1m`（1M window 維持）が無いと proxy 経由で context サイズが膨らむため必須。
+ *
+ * 1M コンテキストウィンドウの解放は headroom の `--1m` ではなく `--model` へ付ける
+ * `[1m]` サフィックスが担う（`withContext1mSuffix()` 参照）。`--1m` は
+ * ANTHROPIC_MODEL しか触らず、CLI の `--model` に負けるため単体では効かない。
  *
  * 実行形態（default / herdr）とは直交する。default モードでは spawn の command に、
  * herdr モードでは `agent start ... -- <argv>` の argv 先頭になる。どちらも
  * シェルを経由せず argv を直接実行するため、クォートの考慮は不要。
  */
-export function buildClaudeExecution(invocation: ClaudeInvocation & { headroom?: boolean }): ClaudeExecution {
+export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecution {
   const args = buildClaudeArgs(invocation);
   if (!invocation.headroom) {
     return { command: CLAUDE_COMMAND, args };
