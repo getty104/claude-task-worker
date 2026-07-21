@@ -10,6 +10,8 @@ import { triagePrWorker } from "./workers/triage-pr";
 import { resolveConflictWorker } from "./workers/resolve-conflict";
 import { checkDependabotWorker } from "./workers/check-dependabot";
 import { epicIssueWorker } from "./workers/epic-issue";
+import { createUiDesignWorker } from "./workers/create-ui-design";
+import { applyUiDesignWorker } from "./workers/apply-ui-design";
 import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
 import { removeStaleWorktrees } from "./worktree";
 import { init } from "./commands/init";
@@ -44,6 +46,8 @@ const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: s
   "resolve-conflict": resolveConflictWorker,
   "check-dependabot": checkDependabotWorker,
   "epic-issue": epicIssueWorker,
+  "create-ui-design": createUiDesignWorker,
+  "apply-ui-design": applyUiDesignWorker,
 };
 
 function printUsage(): void {
@@ -67,6 +71,8 @@ Workers:
   resolve-conflict  Poll cc-resolve-conflict PRs and run /resolve-conflict
   check-dependabot  Poll dependabot PRs every 1 hour
   epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
+  create-ui-design  Poll cc-create-ui-design issues and create a Pencil design PR (requires uiDesign.enabled)
+  apply-ui-design   Poll cc-ui-design-pr-created issues and write the design reference back once the design PR is merged (requires uiDesign.enabled)
   all               Poll all workers except triage-created-issue, triage-pr, check-dependabot
   yolo              Poll all workers including triage-created-issue, triage-pr, check-dependabot
 
@@ -314,6 +320,8 @@ if (hasProjectFilter()) {
       answerIssueQuestionsWorker({ epicFilters, labelFilters }),
       resolveConflictWorker(),
       epicIssueWorker({ epicFilters, labelFilters }),
+      createUiDesignWorker({ epicFilters, labelFilters }),
+      applyUiDesignWorker({ epicFilters, labelFilters }),
     ]);
   })();
 } else if (workerType === "yolo") {
@@ -333,6 +341,8 @@ if (hasProjectFilter()) {
       triagePrWorker(),
       resolveConflictWorker(),
       epicIssueWorker({ epicFilters, labelFilters }),
+      createUiDesignWorker({ epicFilters, labelFilters }),
+      applyUiDesignWorker({ epicFilters, labelFilters }),
     ]);
   })();
 } else {

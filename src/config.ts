@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, sep as SEP } from "node:path";
 
 export type WorkerName =
   | "exec-issue"
@@ -11,7 +11,9 @@ export type WorkerName =
   | "check-dependabot"
   | "triage-pr"
   | "resolve-conflict"
-  | "epic-issue";
+  | "epic-issue"
+  | "create-ui-design"
+  | "apply-ui-design";
 
 export interface WorkerRuntimeConfig {
   skill: string;
@@ -22,10 +24,23 @@ export interface WorkerRuntimeConfig {
   maxConcurrentTasks: number;
 }
 
+// Pencil デザイン先行ワークフロー（create-ui-design / apply-ui-design）の設定。
+// Pencil を使っていないリポジトリで勝手にデザインPRが作られないようオプトインにする。
+export interface UiDesignConfig {
+  enabled: boolean;
+  designDir: string;
+}
+
 interface Config {
   fixReviewPointCallbackCommentMessage?: string;
+  uiDesign: UiDesignConfig;
   workers: Record<string, WorkerRuntimeConfig>;
 }
+
+export const DEFAULT_UI_DESIGN_CONFIG: UiDesignConfig = {
+  enabled: false,
+  designDir: "designs",
+};
 
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   skill: "",
@@ -117,10 +132,27 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
   },
+  "create-ui-design": {
+    skill: "/claude-task-worker:create-ui-design",
+    model: "sonnet",
+    effort: "high",
+    pollingIntervalSeconds: 60,
+    cooldownSeconds: 0,
+    maxConcurrentTasks: 1,
+  },
+  "apply-ui-design": {
+    skill: "/claude-task-worker:apply-ui-design",
+    model: "sonnet",
+    effort: "high",
+    pollingIntervalSeconds: 300,
+    cooldownSeconds: 0,
+    maxConcurrentTasks: 1,
+  },
 };
 
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
+  uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
   workers: {},
 };
 
@@ -192,6 +224,39 @@ function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | nul
   return result;
 }
 
+// parseWorkerEntry と同じく「不正値は警告して既定値」で倒す。
+export function parseUiDesignEntry(val: unknown): UiDesignConfig {
+  const result: UiDesignConfig = { ...DEFAULT_UI_DESIGN_CONFIG };
+  if (typeof val !== "object" || val === null || Array.isArray(val)) {
+    console.warn(`[config] invalid uiDesign: expected object, using defaults`);
+    return result;
+  }
+  const entry = val as Record<string, unknown>;
+  if ("enabled" in entry) {
+    if (typeof entry.enabled === "boolean") {
+      result.enabled = entry.enabled;
+    } else {
+      console.warn(
+        `[config] invalid uiDesign.enabled: ${String(entry.enabled)}, using default ${DEFAULT_UI_DESIGN_CONFIG.enabled}`,
+      );
+    }
+  }
+  if ("designDir" in entry) {
+    const normalized =
+      typeof entry.designDir === "string" && entry.designDir.length > 0 ? normalize(entry.designDir) : null;
+    const isContained =
+      normalized !== null && !isAbsolute(normalized) && normalized !== ".." && !normalized.startsWith(`..${SEP}`);
+    if (isContained) {
+      result.designDir = normalized;
+    } else {
+      console.warn(
+        `[config] invalid uiDesign.designDir: ${String(entry.designDir)}, using default ${DEFAULT_UI_DESIGN_CONFIG.designDir}`,
+      );
+    }
+  }
+  return result;
+}
+
 export function loadConfig(): Config {
   const configPath = CONFIG_PATH;
   let raw: Record<string, unknown>;
@@ -199,18 +264,22 @@ export function loadConfig(): Config {
     raw = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ...DEFAULT_CONFIG, workers: {} };
+      return { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, workers: {} };
     }
     throw err;
   }
 
-  const result: Config = { ...DEFAULT_CONFIG, workers: {} };
+  const result: Config = { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, workers: {} };
 
   if ("fixReviewPointCallbackCommentMessage" in raw) {
     const val = raw["fixReviewPointCallbackCommentMessage"];
     if (typeof val === "string") {
       result.fixReviewPointCallbackCommentMessage = val;
     }
+  }
+
+  if ("uiDesign" in raw) {
+    result.uiDesign = parseUiDesignEntry(raw["uiDesign"]);
   }
 
   if ("workers" in raw) {
@@ -231,4 +300,15 @@ export function loadConfig(): Config {
 export function getWorkerConfig(workerName: string): WorkerRuntimeConfig {
   const config = loadConfig();
   return config.workers[workerName] ?? { ...defaultsFor(workerName) };
+}
+
+// 設定ファイル不在・破損でもワークフローが勝手に有効化されないよう、
+// 読み込みに失敗した場合は既定（無効）へ倒す。
+export function getUiDesignConfig(): UiDesignConfig {
+  try {
+    return loadConfig().uiDesign;
+  } catch (err) {
+    console.warn(`[config] failed to load uiDesign config, using defaults: ${err}`);
+    return { ...DEFAULT_UI_DESIGN_CONFIG };
+  }
 }
