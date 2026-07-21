@@ -1,6 +1,6 @@
 # PRD: UI実装Issueに対する Pencil デザイン先行ワークフロー
 
-- ステータス: Draft
+- ステータス: Approved（確認事項は 2026-07-21 に決着。8 章参照）
 - 作成日: 2026-07-21
 - 対象リポジトリ: getty104/claude-task-worker
 - 関連 PRD: [prd-herdr-mode.md](./prd-herdr-mode.md) / [prd-multi-project-dispatch.md](./prd-multi-project-dispatch.md)
@@ -234,11 +234,12 @@ Pencil を使っていないリポジトリで勝手にデザイン PR が作ら
 
 | キー | 既定値 | 意味 |
 |---|---|---|
-| `uiDesign.enabled` | `false` | 本ワークフローの有効化。`false` の間は `triage-created-issue` が E-1 を評価せず、2つの新ワーカーも起動時にログを出してポーリングしない |
+| `uiDesign.enabled` | `false` | 本ワークフローの有効化。`false` の間は `triage-created-issue` が E-1 を評価せず、2つの新ワーカーも**起動しない** |
 | `uiDesign.designDir` | `"designs"` | `.pen` とスナップショットの配置先（リポジトリルートからの相対パス） |
 
 - 検証方針は既存の `parseWorkerEntry()` と同じく「不正値は警告して既定値」
-- `uiDesign.enabled: false` でも、人が手動で `cc-create-ui-design` を付けた場合は動かす（明示操作を尊重する）。この判断は 8-3 の確認事項とする
+- **`uiDesign.enabled: false` のときは `create-ui-design` / `apply-ui-design` ワーカーを起動しない**（決定事項）。`all` / `yolo` および個別コマンドのいずれでも、起動時に設定を読んで無効ならスキップし、その旨を 1 行ログに出す（`[create-ui-design] uiDesign.enabled is false, skipping`）。個別コマンドで明示的に `claude-task-worker create-ui-design` を実行した場合も同様に起動せず終了する
+  - このため、**設定が無効なリポジトリでは人が手動で `cc-create-ui-design` を付けても何も起きない**。ラベルを消費するワーカーが存在しないため、既存リポジトリの挙動は本機能の追加前と完全に一致する（デザインフローを使いたい場合は `uiDesign.enabled: true` を設定する）
 
 ### 4.7 ラベル（新規 4 種）
 
@@ -259,11 +260,24 @@ Pencil を使っていないリポジトリで勝手にデザイン PR が作ら
 - 実装 PR で `.pen` を編集しない（デザイン変更はデザインフローへ戻す）
 - デザインと実装が乖離せざるを得ない場合は、その理由を実装 PR の body に記載する
 
+**デザイン参照セクションの欠落検出（ステップ 0 相当）**
+
+`cc-ui-design-ready` ラベルが付いているのに description に `## UIデザイン` セクションが無い場合、デザインの合意内容が実装セッションに届かない状態になっている（人が description を書き換えて参照を消した、`apply-ui-design` が途中で壊れた等）。この状態を検出したら、**デザインなしで実装を進めず**に次を行って終了する（決定事項）。
+
+1. Issue に状況コメントを投稿する（`cc-ui-design-ready` が付いているのに参照が無いこと、デザイン PR を辿れば `.pen` の所在が分かること、対応後の進め方）
+2. `cc-need-human-check` を付与する
+3. 実装（コード変更・PR 作成）は行わない
+
+`cc-need-human-check` は `issue-worker.ts` の共通除外ラベルに含まれるため、付与後はポーリング候補から外れ、人がラベルを外すまで再実行されない。
+
+**復旧の導線**: 人が参照を復元する代わりに、`cc-ui-design-ready` と `cc-need-human-check` を外して `cc-ui-design-pr-created` を付け直せば、`apply-ui-design` がデザイン PR（`cc-ui-design-<N>`、MERGED）を再検出して description を再生成する。
+
 ### 4.9 CLI への登録
 
 - `src/config.ts`: `WorkerName` に `"create-ui-design"` / `"apply-ui-design"` を追加、`WORKER_DEFAULTS` にエントリを追加
 - `src/index.ts`: `WORKERS` マップ、`all` / `yolo` の `Promise.all`、`printUsage()` の Workers 一覧に追加
 - `all` / `yolo` の両方に含める（`triage-*` のような「暴走リスクのあるワーカー」ではなく、ラベル駆動で明示的にトリガーされるため）
+- **起動ゲート**: 2つの新ワーカーは起動時に `uiDesign.enabled` を読み、`false` ならポーリングを開始せず 1 行ログを出して即 return する（4.6）。`all` / `yolo` からの一括起動でも個別コマンドでも同じ判定を通すため、判定はワーカー実装側（`create-ui-design.ts` / `apply-ui-design.ts`）に置き、`index.ts` の分岐は増やさない
 
 ## 5. スコープ外
 
@@ -318,17 +332,21 @@ Pencil を使っていないリポジトリで勝手にデザイン PR が作ら
 |---|---|
 | UI タスクの誤判定でデザイン PR が乱発される | 判定が割れる場合はデザインを作らない側に倒す。`uiDesign.enabled` によるオプトイン。判定理由を Issue にコメントで残す |
 | デザイン PR が `Closes #N` で実装 Issue を閉じてしまう | スキルで closing keyword を禁止し、`Refs #N` のみ許可する。`onCompleted` で Issue が CLOSED になっていないことを検証する |
-| デザイン PR が長期間マージされず Issue が停滞する | `apply-ui-design` の `preflight` は `skip` を返すだけで状態を壊さない。停滞は `cc-ui-design-pr-created` ラベルで可視化される。滞留時間の通知は将来課題（8-4） |
+| デザイン PR が長期間マージされず Issue が停滞する | `apply-ui-design` の `preflight` は `skip` を返すだけで状態を壊さない。デザイン PR には `cc-triage-scope` が付いており `triage-pr` が自動でレビュー・マージへ進めるため、通常は停滞しない。滞留時間の通知はスコープ外（8-4） |
 | epic 配下の Issue でデザインが実装ブランチに存在しない | デザイン PR のベースを実装と同じ（`cc-epic-<親>` または default）に揃える（4.3） |
 | `.pen` のコンフリクトでリベースが破壊的になる | 既存の `resolve-pr-conflict` → `resolve-pencil-conflict` の委譲に乗せる。デザイン PR は差分が `.pen` と PNG のみのため衝突面が小さい |
 | Pencil 未インストール・未認証の環境で毎ポーリング空振りする | スキルのステップ 0 で検出し `cc-need-human-check` を付与して停止する（共通除外ラベルにより再取得されない） |
-| デザイン反映後に人が description を書き換え、参照が消える | `cc-ui-design-ready` はラベルとして残る。`exec-issue` 側は description のセクション有無で判断するため、消えた場合はデザインなしで実装される（許容。8-5） |
+| デザイン反映後に人が description を書き換え、参照が消える | `cc-ui-design-ready` が付いているのに `## UIデザイン` セクションが無い状態を `exec-issue` 側で検出し、実装せず `cc-need-human-check` に落とす（4.8） |
 
-## 8. 確認事項
+## 8. 決定事項（旧・確認事項）
 
-1. **デザインの粒度**: 1 Issue = 1 `.pen` ファイルでよいか。既存 `.pen` に画面を追記していく運用（1 プロダクト = 1 ファイル）にすると、コンフリクトと PR 差分が大きくなる一方でデザインの一貫性は保ちやすい。本 PRD は「対応する既存ファイルがあれば更新、なければ新規」としているが、既存ファイルの対応付け基準を明文化すべきか。
-2. **`triage-created-issue` への統合か、独立ワーカーか**: 本 PRD は既存トリアージにパターン E-1 を足す案。代わりに `cc-issue-created` を見る独立の判定ワーカーを作る案もあるが、ラベル遷移の分岐点が 2 箇所に増えるため採用していない。この判断でよいか。
-3. **`uiDesign.enabled: false` のときの手動 `cc-create-ui-design`**: 4.6 では「明示操作を尊重して動かす」としているが、設定で完全に無効化（ワーカー自体を起動しない）する方が事故が少ないという判断もありうる。どちらを採るか。
-4. **デザイン PR の滞留通知**: `cc-ui-design-pr-created` のまま N 日経過した Issue を Slack に通知する仕組みを本リリースに含めるか（現状はスコープ外としている）。
-5. **description からデザイン参照が消えた場合の扱い**: `cc-ui-design-ready` が付いているのにセクションが無い状態を、`exec-issue` 側で検出して `cc-need-human-check` に落とすべきか、デザインなしで実装させてよいか。
-6. **デザインレビューの人間ゲート**: 本 PRD ではデザイン PR も `triage-pr` が自動マージする。UI の見た目は人の合意を要する性質が強いため、デザイン PR には `cc-release-ready` 相当の「人が明示的にマージする」ゲートを設けるべきか。設けると自動化のリードタイムは伸びるが、意図しないデザインが実装まで通り抜ける事故は防げる。
+いずれも 2026-07-21 に決着済み。未決の確認事項は残っていない。
+
+| # | 論点 | 決定 | 反映先 |
+|---|---|---|---|
+| 8-1 | デザインの粒度（1 Issue = 1 `.pen` か、1 プロダクト = 1 ファイルか） | 本 PRD の案どおり「対応する既存 `.pen` があれば更新、なければ新規作成」で進める | 4.3（変更なし） |
+| 8-2 | UI 判定を `triage-created-issue` に統合するか、独立ワーカーにするか | 本 PRD の案どおり既存トリアージにパターン E-1 を追加する（ラベル遷移の分岐点を 1 箇所に保つ） | 4.2（変更なし） |
+| 8-3 | `uiDesign.enabled: false` のときの手動 `cc-create-ui-design` | **ワーカー自体を起動しない**。設定が無効なリポジトリでは手動でラベルを付けても何も起きず、本機能の追加前と完全に同一の挙動になる | 4.6 |
+| 8-4 | デザイン PR の滞留通知 | **スコープ外**。デザイン PR には `cc-triage-scope` が付き `triage-pr` が自動でレビュー・マージへ進めるため、専用の滞留通知は設けない | 5 / 7 |
+| 8-5 | description からデザイン参照が消えた場合 | **`cc-need-human-check` に落とす**。デザインなしでの実装は行わない | 4.8 / 7 |
+| 8-6 | デザイン PR の人間マージゲート | **不要**。デザイン PR も他の PR と同じく `triage-pr` が自動マージする（`cc-release-ready` 相当のゲートは設けない） | 4.4（変更なし） |
