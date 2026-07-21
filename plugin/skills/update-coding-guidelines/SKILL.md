@@ -19,6 +19,7 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bas
 - リポジトリルート`CODING_GUIDELINES.md`への追記・既存ルールとの統合・圧縮
 - `commit-push` skillで変更をコミット・push（必要なら専用feature branchへ切替）
 - `create-pr` skillでPRを作成し、PR URLを返却
+- 作成したPRに`gh api user`で取得した自分自身をAssigneeとして付与し、`cc-triage-scope`ラベルを付与
 - 編集差分のサマリ報告
 
 **絶対にやらないこと**:
@@ -211,7 +212,27 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 PR作成後、create-prが返却するPR URLを記録しておく。
 
-### 5-3. Issue番号なしのケースの後処理（**Issue番号が未指定の場合のみ実行**）
+### 5-3. Assignee・ラベルの付与確認（**毎回必ず実行**）
+
+`create-pr`側でもAssignee（`gh api user`のログインユーザー）と`cc-triage-scope`ラベルを付ける手順になっているが、`create-pr`は`context: fork`のサブエージェントで実行され結果を検証できないため、本スキル側で実際に付いているかを確認し、欠けていれば`gh pr edit`で補う。
+
+```bash
+PR_NUMBER=$(gh pr view --json number --jq '.number')
+GH_USER=$(gh api user --jq '.login')
+
+# 現状を確認
+gh pr view "$PR_NUMBER" --json assignees,labels \
+  --jq '{assignees: [.assignees[].login], labels: [.labels[].name]}'
+
+# 欠けていても冪等に付与できるため、そのまま実行してよい
+gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
+```
+
+- `--add-assignee` / `--add-label` は既に付与済みでもエラーにならないため、確認結果によらず実行してよい
+- `cc-triage-scope`ラベルがリポジトリに存在せず`gh pr edit`が失敗する場合は、`gh label create cc-triage-scope` で作成してから再実行する
+- Assignee付与が権限等で失敗した場合はPR作成自体は成功しているため、フェーズ6の出力に「Assignee付与失敗」と明記して続行する
+
+### 5-4. Issue番号なしのケースの後処理（**Issue番号が未指定の場合のみ実行**）
 
 `create-pr`が残した`Closes #`（数字なし）行を`gh pr edit`で削除する。
 
@@ -227,7 +248,7 @@ gh pr view "$PR_NUMBER" --json body --jq '.body' \
 
 Issue番号が指定されていたケースでは正常な`Closes #<Issue番号>`が入っているのでこのステップはスキップする。
 
-**完了条件**: PRが作成されており、PR URLが手元にあり、Issue番号未指定ケースでは本文の`Closes #`空行が削除されていること。
+**完了条件**: PRが作成されており、PR URLが手元にあり、Assignee（自分自身）と`cc-triage-scope`ラベルが付与済みで、Issue番号未指定ケースでは本文の`Closes #`空行が削除されていること。
 
 ## フェーズ6: 出力
 
@@ -253,6 +274,8 @@ Issue番号が指定されていたケースでは正常な`Closes #<Issue番号
 ## PR
 - ブランチ: <feature branch名>
 - PR URL: <URL>
+- Assignee: <ログインユーザー名>（付与失敗時はその旨と理由）
+- ラベル: cc-triage-scope（付与失敗時はその旨と理由）
 - 関連Issue: #<num>（指定なしの場合は「なし」）
 ```
 
