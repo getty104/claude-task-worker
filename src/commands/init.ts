@@ -16,6 +16,10 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-resolve-conflict", color: "fbca04" },
   { name: "cc-epic-issue", color: "8b5cf6" },
   { name: "cc-release-ready", color: "2da44e" },
+  { name: "cc-create-ui-design", color: "ff8ad8" },
+  { name: "cc-ui-design-pr-created", color: "d4a5e8" },
+  { name: "cc-ui-design-ready", color: "bfd4f2" },
+  { name: "cc-ui-design", color: "ec4899" },
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"

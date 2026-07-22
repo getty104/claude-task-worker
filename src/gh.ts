@@ -160,6 +160,38 @@ export async function findPrNumberByHeadRef(
   return prs.length > 0 ? prs[0].number : null;
 }
 
+export interface PullRequestStateInfo {
+  number: number;
+  state: string;
+  mergedAt: string | null;
+}
+
+// head ref から PR の状態（OPEN / MERGED / CLOSED）を取得する。
+// apply-ui-design の preflight がデザインPRのマージ完了を待つために使う。
+export async function findPrStateByHeadRef(headRefName: string): Promise<PullRequestStateInfo | null> {
+  const output = await execGh([
+    "pr",
+    "list",
+    "--state",
+    "all",
+    "--head",
+    headRefName,
+    "--json",
+    "number,state,mergedAt",
+    "--limit",
+    "1",
+  ]);
+  const prs: { number: number; state: string; mergedAt: string | null }[] = JSON.parse(output);
+  if (prs.length === 0) return null;
+  return { number: prs[0].number, state: prs[0].state, mergedAt: prs[0].mergedAt ?? null };
+}
+
+export async function getIssueBody(issueNumber: number): Promise<string> {
+  const output = await execGh(["issue", "view", String(issueNumber), "--json", "body"]);
+  const parsed = JSON.parse(output);
+  return typeof parsed?.body === "string" ? parsed.body : "";
+}
+
 export async function getIssueState(issueNumber: number): Promise<string> {
   const output = await execGh(["issue", "view", String(issueNumber), "--json", "state"]);
   const parsed = JSON.parse(output);
