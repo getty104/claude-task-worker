@@ -60,6 +60,8 @@ claude-task-worker all             # Run all workers concurrently
 6. `.claude/worktrees/<worktreeId>` にワーカー自身がworktreeを生成し（`claude --worktree` は locked worktree の残骸問題があるため不使用）、Claude CLI をそのworktreeをcwdとして起動する（`mode: "default"` は `claude -p` の非同期spawn、`mode: "herdr"` は herdr のタスク専用タブでTUI起動。後述の「`mode`（タスクの実行形態）」参照）
 7. 完了時コールバックでラベル・worktree・ローカルブランチをクリーンアップ
 
+サブIssue（`parent` を持つIssue）の worktree は `cc-epic-<parent番号>` から作られる（`issue-worker.ts`）。**分析系スキルもこのベースブランチを「ターゲットブランチ」として明示的に導出する**（`create-issue-from-issue-number` / `update-issue` / `answer-issue-questions` の冒頭ステップ。導出ロジックは `exec-issue` / `create-pr` と同一の parent → upstream → default の順）。worktree 自体は正しく epic ブランチ由来なのに、スキル本文がベースブランチの概念を持たないと、モデルが暗黙にデフォルトブランチをターゲットと見なし、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであること**を「マージされていないがどうするか」という本来不要な検討事項・確認事項として description や回答コメントへ書き込む。同ステップでは (1) デフォルトブランチとの差分を論点にしない、(2) Epic PR の未マージは正常状態として確認事項化しない、(3) `gh pr list` の関連PRは `baseRefName == BASE_BRANCH` のものだけを対象にする（Epic PR 自身を除外する）、の3点を規定している。
+
 ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
 
 ### 同期実行ガード（`claude -p` セッションの早期終了防止）
