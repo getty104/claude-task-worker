@@ -43,6 +43,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # npm version の `version` ライフサイクルフック (package.json の scripts.version)
+      # が plugin/.claude-plugin/plugin.json のバージョンも package.json に揃えて上げる。
+      # 続く `git commit -am` が両ファイルを一緒にコミットする。
       - name: Bump version
         id: version
         run: |

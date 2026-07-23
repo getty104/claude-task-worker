@@ -20,8 +20,8 @@ export default [
     },
   },
   {
-    // Plugin runtime scripts run under Node (hook commands), not part of the TS build.
-    files: ["plugin/scripts/**/*.mjs"],
+    // Node scripts run under Node (hook commands / release tooling), not part of the TS build.
+    files: ["plugin/scripts/**/*.mjs", "scripts/**/*.mjs"],
     languageOptions: {
       globals: { process: "readonly", console: "readonly" },
     },
