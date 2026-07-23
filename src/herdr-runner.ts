@@ -215,8 +215,10 @@ async function waitForPaneReady(
     let content = "";
     try {
       content = await mod.paneRead(paneId, { source: "visible" });
-    } catch {
-      // 一時的な読み取り失敗はタイムアウトまで再試行する。
+    } catch (err) {
+      // 一時的な読み取り失敗はタイムアウトまで再試行する。ただし herdr 通信自体の
+      // 問題を無言で握り潰すと原因調査が難しくなるため、waitForHerdrTask と同様にログは残す。
+      console.error(`[herdr-runner] failed to read pane ${paneId} while waiting for its prompt: ${err}`);
     }
     if (content.trim() !== "") return true;
     if (Date.now() >= deadline) return false;
@@ -241,7 +243,11 @@ async function waitForAgentDetected(
       return true;
     } catch (err) {
       if (err instanceof mod.HerdrError && err.code === "pane_not_found") return false;
-      // agent_not_found（まだ検出前）や一時的な失敗は待機を継続する。
+      // agent_not_found（まだ検出前）は正常な待機継続。それ以外の想定外エラー
+      // （herdr 通信の問題など）は、waitForHerdrTask と同様にログを残してから継続する。
+      if (!(err instanceof mod.HerdrError && err.code === "agent_not_found")) {
+        console.error(`[herdr-runner] unexpected error while waiting for agent detection on pane ${paneId}: ${err}`);
+      }
     }
     if (Date.now() >= deadline) return false;
     await sleep(pollIntervalMs);
@@ -294,10 +300,7 @@ export async function waitForHerdrTask(
       // エージェント検出が外れる（agent_not_found）ので、両方を「claude が消えた」失敗として扱う。
       // startHerdrTask が検出を確認してからこの待機に入るため、ここでの agent_not_found は
       // 起動前の未検出ではなく途中消滅を意味する。
-      if (
-        err instanceof mod.HerdrError &&
-        (err.code === "pane_not_found" || err.code === "agent_not_found")
-      ) {
+      if (err instanceof mod.HerdrError && (err.code === "pane_not_found" || err.code === "agent_not_found")) {
         return {
           status: "failed",
           output: "[worker] the claude agent disappeared before the task completed (claude died or the tab was closed)",

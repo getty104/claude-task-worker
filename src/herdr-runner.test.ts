@@ -255,10 +255,7 @@ test("startHerdrTask launches claude into the task tab's root shell pane", async
   // ルートペインがそのまま claude のペインになる（余剰シェルペインの paneClose は不要）。
   assert.deepEqual(task, { paneId: "pane-root", tabId: "tab-task" });
   // タブ作成 → ルートペインへ起動コマンド送信、の順。
-  assert.deepEqual(calls, [
-    "tabCreate:ctw:my-app:#12:/tmp/worktree",
-    "launchAgent:pane-root:claude /skill 12",
-  ]);
+  assert.deepEqual(calls, ["tabCreate:ctw:my-app:#12:/tmp/worktree", "launchAgent:pane-root:claude /skill 12"]);
 });
 
 test("startHerdrTask closes the task tab when launching the command fails", async () => {

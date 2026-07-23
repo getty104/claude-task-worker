@@ -257,11 +257,6 @@ test("shellQuoteArgv escapes embedded single quotes", () => {
 test("launchAgentInPane sends the quoted command then enter to the pane shell", async (t) => {
   const captured = captureExecFileArgs(t, "");
   await launchAgentInPane("w1:p1", ["headroom", "wrap", "claude", "--", "-p", "run it"]);
-  assert.deepEqual(captured.args[0], [
-    "pane",
-    "send-text",
-    "w1:p1",
-    "'headroom' 'wrap' 'claude' '--' '-p' 'run it'",
-  ]);
+  assert.deepEqual(captured.args[0], ["pane", "send-text", "w1:p1", "'headroom' 'wrap' 'claude' '--' '-p' 'run it'"]);
   assert.deepEqual(captured.args[1], ["pane", "send-keys", "w1:p1", "enter"]);
 });
