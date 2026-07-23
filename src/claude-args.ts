@@ -204,9 +204,10 @@ export interface ClaudeExecution {
  * `[1m]` サフィックスが担う（`withContext1mSuffix()` 参照）。`--1m` は
  * ANTHROPIC_MODEL しか触らず、CLI の `--model` に負けるため単体では効かない。
  *
- * 実行形態（default / herdr）とは直交する。default モードでは spawn の command に、
- * herdr モードでは `agent start ... -- <argv>` の argv 先頭になる。どちらも
- * シェルを経由せず argv を直接実行するため、クォートの考慮は不要。
+ * 実行形態（default / herdr）とは直交する。default モードでは spawn の command
+ * （シェル非経由、クォート不要）に、herdr モードでは `launchAgentInPane` が
+ * `[command, ...args]` の argv として組み立てる。herdr モードは send-text でシェルへ
+ * 流し込むため、`shellQuoteArgv` が各トークンを quoting してシェルの解釈を無効化する。
  */
 export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecution {
   const args = buildClaudeArgs(invocation);

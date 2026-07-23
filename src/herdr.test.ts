@@ -13,7 +13,8 @@ const {
   paneSendText,
   paneSendKeys,
   paneRead,
-  agentStart,
+  shellQuoteArgv,
+  launchAgentInPane,
   workspaceCreate,
   HerdrError,
 } = (await import("./herdr.ts")) as typeof HerdrModule;
@@ -216,15 +217,6 @@ test("does not treat stderr as a source of successful results", async (t) => {
   });
 });
 
-// --cwd は herdr サーバー（別プロセス）が解決するため、相対パスのまま渡すと
-// ワーカーのcwdではなく herdr サーバーのcwd（＝ホームディレクトリ）基準になり、
-// worktree のつもりのタスクがリポジトリ外で走る。境界で必ず絶対パス化する。
-test("agentStart resolves a relative cwd to an absolute path before handing it to herdr", async (t) => {
-  const captured = captureExecFileArgs(t, JSON.stringify({ result: { agent: { pane_id: "p1", tab_id: "t1" } } }));
-  await agentStart({ name: "task", cwd: ".claude/worktrees/brave-otter-1234", argv: ["claude"] });
-  assert.equal(cwdArgOf(captured.args[0]), `${process.cwd()}/.claude/worktrees/brave-otter-1234`);
-});
-
 test("tabCreate resolves a relative cwd to an absolute path before handing it to herdr", async (t) => {
   const captured = captureExecFileArgs(
     t,
@@ -245,17 +237,31 @@ test("workspaceCreate resolves a relative cwd to an absolute path before handing
   assert.equal(cwdArgOf(captured.args[0]), process.cwd());
 });
 
-test("agentStart passes an absolute cwd through unchanged", async (t) => {
-  const captured = captureExecFileArgs(t, JSON.stringify({ result: { agent: { pane_id: "p1", tab_id: "t1" } } }));
-  await agentStart({ name: "task", cwd: "/tmp/worktree", argv: ["claude"] });
-  assert.equal(cwdArgOf(captured.args[0]), "/tmp/worktree");
+// send-text はペインのシェルへ生テキストを流し込むため、argv をシェルで安全に実行できる
+// 1行へ組み立てる。シングルクォート内はあらゆる文字が literal になるので、バッククォート・
+// `$`・改行・空白を含む引数もシェルに解釈されずそのまま claude へ渡る。
+test("shellQuoteArgv wraps each token in single quotes so shell metacharacters stay literal", () => {
+  assert.equal(
+    shellQuoteArgv(["claude", "--append-system-prompt", "use `git` & $HOME now"]),
+    "'claude' '--append-system-prompt' 'use `git` & $HOME now'",
+  );
 });
 
-// agent は必ず「タスク専用タブ」の中で起動する。--tab を省くとワークスペースの
-// アクティブタブ（ユーザーが見ているタブ）へ split で割り込んでちらつく。
-test("agentStart targets the given tab so it does not split into the visible tab", async (t) => {
-  const captured = captureExecFileArgs(t, JSON.stringify({ result: { agent: { pane_id: "p1", tab_id: "t9" } } }));
-  await agentStart({ name: "task", cwd: "/tmp/worktree", argv: ["claude"], tabId: "w1:t9" });
-  const args = captured.args[0];
-  assert.equal(args[args.indexOf("--tab") + 1], "w1:t9");
+test("shellQuoteArgv escapes embedded single quotes", () => {
+  assert.equal(shellQuoteArgv(["echo", "it's ok"]), `'echo' 'it'\\''s ok'`);
+});
+
+// 新しい herdr の agent start は headroom ラッパーを起動できないため、タスクタブの
+// ルートペインのシェルへ起動コマンドを流し込む方式にした。send-text（クォート済みコマンド）
+// → send-keys enter の順で送る。
+test("launchAgentInPane sends the quoted command then enter to the pane shell", async (t) => {
+  const captured = captureExecFileArgs(t, "");
+  await launchAgentInPane("w1:p1", ["headroom", "wrap", "claude", "--", "-p", "run it"]);
+  assert.deepEqual(captured.args[0], [
+    "pane",
+    "send-text",
+    "w1:p1",
+    "'headroom' 'wrap' 'claude' '--' '-p' 'run it'",
+  ]);
+  assert.deepEqual(captured.args[1], ["pane", "send-keys", "w1:p1", "enter"]);
 });
