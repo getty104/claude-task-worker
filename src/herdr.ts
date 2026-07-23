@@ -303,43 +303,29 @@ export async function workspaceFocus(workspaceId: string): Promise<void> {
   await execHerdr(["workspace", "focus", workspaceId]);
 }
 
-// argv を直接実行してペインを起動する。`pane send-text` と違いシェルを経由しないため、
-// シェル初期化中に入力が捨てられるレース（dispatcher.ts の waitForPaneReady 参照）が起きない。
-// 起動先はタブ内への split になるため、`tabId` で「どのタブに割り込むか」を必ず指定する
-// （省略すると workspace のアクティブタブ＝ユーザーが見ているタブに割り込んでちらつく）。
-export async function agentStart({
-  name,
-  cwd,
-  argv,
-  workspaceId,
-  tabId: targetTabId,
-  env,
-}: {
-  name: string;
-  cwd: string;
-  argv: string[];
-  workspaceId?: string;
-  tabId?: string;
-  env?: Record<string, string>;
-}): Promise<{ paneId: string; tabId: string }> {
-  const result = (await execHerdr([
-    "agent",
-    "start",
-    name,
-    ...(workspaceId ? ["--workspace", workspaceId] : []),
-    ...(targetTabId ? ["--tab", targetTabId] : []),
-    ...cwdArgs(cwd),
-    ...envArgs(env),
-    "--no-focus",
-    "--",
-    ...argv,
-  ])) as { agent?: { pane_id?: string; tab_id?: string } } | null | undefined;
-  const paneId = result?.agent?.pane_id;
-  const tabId = result?.agent?.tab_id;
-  if (!paneId || !tabId) {
-    throw new Error("Failed to start agent: invalid response structure from herdr");
-  }
-  return { paneId, tabId };
+// argv をシェルで安全に実行できる1行へ組み立てる。各トークンをシングルクォートで囲み、
+// 内部の `'` だけを `'\''` でエスケープする。シングルクォート内はあらゆる文字が literal に
+// なるため、SYSTEM_PROMPT のようなバッククォート・`$`・改行を含む引数もシェルに解釈されず
+// そのまま claude へ渡る（`launchAgentInPane` が send-text でこの1行をシェルへ流し込む）。
+export function shellQuoteArgv(argv: string[]): string {
+  return argv.map((arg) => `'${arg.replace(/'/g, `'\\''`)}'`).join(" ");
+}
+
+// 既存ペイン（タスクタブのルートシェル）へ起動コマンドを流し込んで claude(TUI) を起動する。
+//
+// **`agent start` は使わない**。新しい herdr（0.7 系）の `agent start` は
+// `--kind <KIND>` の**正規実行ファイル**（claude なら PATH 上の `claude`）しか起動できず、
+// `headroom wrap claude ...` のようなラッパー経由の起動ができない（`--workspace`/`--tab`/
+// `--cwd`/`--env` も廃止され、`unknown option: --workspace` で失敗する）。
+// そこでルートペインのシェルへ `send-text` で起動コマンドを送り、`send-keys enter` で実行する。
+// claude は herdr の**自動エージェント検出**でそのまま agent として捕捉されるため、
+// `agent start` による明示登録は不要で、`agentGet(paneId)` が状態・セッションIDを返す
+// （cwd と env は tabCreate の `--cwd` / `--env` でシェルへ渡してあり、そこから起動する
+// claude が継承する）。シェル初期化中に送ると入力が捨てられるレースがあるため、
+// 呼び出し側は送信前にプロンプト描画を待つこと（herdr-runner の waitForPaneReady 参照）。
+export async function launchAgentInPane(paneId: string, argv: string[]): Promise<void> {
+  await paneSendText(paneId, shellQuoteArgv(argv));
+  await paneSendKeys(paneId, "enter");
 }
 
 function toAgentStatus(value: unknown): AgentStatus {

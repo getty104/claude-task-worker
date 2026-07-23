@@ -103,13 +103,17 @@ interface FakeHerdrOptions {
   calls?: string[];
   // agent get が返す claude のセッションID（transcript を引く鍵）
   sessionId?: string;
-  // ctrl-c 後もペインが残り続ける（claude が終了しない）ケースの再現
+  // ctrl-c 後もペインが残り続ける（claude が終了しない）ケースの再現。
+  // 新モデルでは claude はシェルペインで動くため、終了しても消えるのはペインではなく
+  // agent 検出（agentGet が agent_not_found を返す）。
   paneSurvivesCtrlC?: boolean;
   // tabClose が投げるエラー（既に閉じているケースの再現）
   tabCloseError?: Error;
   tabCreateError?: Error;
-  agentStartError?: Error;
-  paneCloseError?: Error;
+  // launchAgentInPane（起動コマンド送信）が投げるエラー
+  launchError?: Error;
+  // 起動後 claude が agent として検出されない（waitForAgentDetected をタイムアウトさせる）
+  agentNeverDetected?: boolean;
 }
 
 function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
@@ -117,14 +121,13 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
   let ctrlCSent = false;
   return {
     HerdrError,
-    paneGet: async (paneId: string) => {
-      if (ctrlCSent && !options.paneSurvivesCtrlC) {
-        throw new HerdrError(`pane ${paneId} not found`, "pane_not_found");
-      }
-      return { paneId, tabId: "tab-task" };
-    },
     agentGet: async (target: string) => {
-      options.calls?.push(`agentGet:${target}`);
+      // ctrl-c 後は claude が終了して agent 検出が外れる（ペインは残る）。
+      if (ctrlCSent && !options.paneSurvivesCtrlC) {
+        throw new HerdrError(`agent ${target} not found`, "agent_not_found");
+      }
+      // 起動しても claude が検出されないシナリオ。
+      if (options.agentNeverDetected) throw new HerdrError(`agent ${target} not found`, "agent_not_found");
       if (options.agentGetError && statuses.length === 0) throw options.agentGetError;
       const agentStatus = statuses.shift() ?? "idle";
       return { paneId: target, tabId: "tab-1", workspaceId: "w1", agentStatus, sessionId: options.sessionId };
@@ -134,6 +137,10 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
       options.calls?.push(`sendKeys:${paneId}:${keys.join(",")}`);
       if (keys.filter((key) => key === "ctrl+c").length >= 2) ctrlCSent = true;
     },
+    launchAgentInPane: async (paneId: string, argv: string[]) => {
+      options.calls?.push(`launchAgent:${paneId}:${argv.join(" ")}`);
+      if (options.launchError) throw options.launchError;
+    },
     tabClose: async (tabId: string) => {
       options.calls?.push(`tabClose:${tabId}`);
       if (options.tabCloseError) throw options.tabCloseError;
@@ -141,16 +148,7 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
     tabCreate: async ({ label, cwd }: { label: string; cwd: string }) => {
       options.calls?.push(`tabCreate:${label}:${cwd}`);
       if (options.tabCreateError) throw options.tabCreateError;
-      return { paneId: "pane-shell", tabId: "tab-task" };
-    },
-    agentStart: async ({ name, tabId, cwd }: { name: string; tabId?: string; cwd: string }) => {
-      options.calls?.push(`agentStart:${name}:${tabId ?? "-"}:${cwd}`);
-      if (options.agentStartError) throw options.agentStartError;
-      return { paneId: "pane-1", tabId: tabId ?? "tab-root" };
-    },
-    paneClose: async (paneId: string) => {
-      options.calls?.push(`paneClose:${paneId}`);
-      if (options.paneCloseError) throw options.paneCloseError;
+      return { paneId: "pane-root", tabId: "tab-task" };
     },
   } as unknown as typeof HerdrModule;
 }
@@ -199,7 +197,19 @@ test("waitForHerdrTask fails when the pane disappears", async () => {
   });
   const result = await waitForHerdrTask("pane-1", { herdr, pollIntervalMs: 1 });
   assert.equal(result.status, "failed");
-  assert.match(result.output, /pane disappeared/);
+  assert.match(result.output, /disappeared/);
+});
+
+// 新モデルでは claude はシェルペインで動くため、途中で claude が死ぬとペイン消失ではなく
+// agent 検出が外れる（agent_not_found）。これも「claude が消えた」失敗として扱う。
+test("waitForHerdrTask fails when the agent disappears mid-task", async () => {
+  const herdr = makeFakeHerdr({
+    statuses: ["working"],
+    agentGetError: new HerdrError("agent w1:p1 not found", "agent_not_found"),
+  });
+  const result = await waitForHerdrTask("pane-1", { herdr, pollIntervalMs: 1 });
+  assert.equal(result.status, "failed");
+  assert.match(result.output, /disappeared/);
 });
 
 test("waitForHerdrTask fails when the session goes idle without producing output", async () => {
@@ -233,7 +243,7 @@ test("waitForHerdrTask aborts when the worker is shutting down", async () => {
   assert.match(result.output, /shutting down/);
 });
 
-test("startHerdrTask creates the task tab first so the agent never flashes in the visible tab", async () => {
+test("startHerdrTask launches claude into the task tab's root shell pane", async () => {
   const calls: string[] = [];
   const herdr = makeFakeHerdr({ statuses: [], calls });
   const task = await startHerdrTask({
@@ -242,18 +252,15 @@ test("startHerdrTask creates the task tab first so the agent never flashes in th
     argv: ["claude", "/skill 12"],
     herdr,
   });
-  assert.deepEqual(task, { paneId: "pane-1", tabId: "tab-task" });
-  // タブ作成 → そのタブ限定で agent 起動 → 余ったシェルペインを片付ける、の順。
-  assert.deepEqual(calls, [
-    "tabCreate:ctw:my-app:#12:/tmp/worktree",
-    "agentStart:ctw:my-app:#12:tab-task:/tmp/worktree",
-    "paneClose:pane-shell",
-  ]);
+  // ルートペインがそのまま claude のペインになる（余剰シェルペインの paneClose は不要）。
+  assert.deepEqual(task, { paneId: "pane-root", tabId: "tab-task" });
+  // タブ作成 → ルートペインへ起動コマンド送信、の順。
+  assert.deepEqual(calls, ["tabCreate:ctw:my-app:#12:/tmp/worktree", "launchAgent:pane-root:claude /skill 12"]);
 });
 
-test("startHerdrTask closes the task tab when the agent fails to start", async () => {
+test("startHerdrTask closes the task tab when launching the command fails", async () => {
   const calls: string[] = [];
-  const herdr = makeFakeHerdr({ statuses: [], calls, agentStartError: new Error("boom") });
+  const herdr = makeFakeHerdr({ statuses: [], calls, launchError: new Error("boom") });
   await assert.rejects(
     startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", argv: ["claude"], herdr }),
     /boom/,
@@ -261,30 +268,32 @@ test("startHerdrTask closes the task tab when the agent fails to start", async (
   // シェルだけのタブを残さない。
   assert.deepEqual(calls, [
     "tabCreate:ctw:my-app:#12:/tmp/worktree",
-    "agentStart:ctw:my-app:#12:tab-task:/tmp/worktree",
+    "launchAgent:pane-root:claude",
     "tabClose:tab-task",
   ]);
 });
 
-test("startHerdrTask still returns the task when the placeholder shell pane cannot be closed", async () => {
+// 起動コマンドを送っても claude が agent として検出されなければ（プリアンブル失敗などで
+// 起動しなかった等）、waitForHerdrTask が無限待ちに陥る前にここで失敗として確定させ、
+// シェルだけのタブを閉じる。
+test("startHerdrTask closes the task tab when claude is never detected", async () => {
   const calls: string[] = [];
-  const herdr = makeFakeHerdr({ statuses: [], calls, paneCloseError: new Error("pane busy") });
-  const errorLogs: string[] = [];
-  const originalError = console.error;
-  console.error = (message: string) => errorLogs.push(String(message));
-  try {
-    // agent は起動できているので、ペイン1枚の後片付け失敗でタスクを落とさない。
-    const task = await startHerdrTask({
+  const herdr = makeFakeHerdr({ statuses: [], calls, agentNeverDetected: true });
+  await assert.rejects(
+    startHerdrTask({
       label: "ctw:my-app:#12",
       cwd: "/tmp/worktree",
       argv: ["claude"],
       herdr,
-    });
-    assert.deepEqual(task, { paneId: "pane-1", tabId: "tab-task" });
-  } finally {
-    console.error = originalError;
-  }
-  assert.ok(errorLogs.some((line) => line.includes("placeholder shell pane")));
+      timing: { agentDetectTimeoutMs: 5, agentDetectPollIntervalMs: 1 },
+    }),
+    /not detected/,
+  );
+  assert.deepEqual(calls, [
+    "tabCreate:ctw:my-app:#12:/tmp/worktree",
+    "launchAgent:pane-root:claude",
+    "tabClose:tab-task",
+  ]);
 });
 
 test("stopHerdrTask sends ctrl-c twice in one call so the claude TUI actually exits", async () => {

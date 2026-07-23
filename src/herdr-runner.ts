@@ -115,17 +115,41 @@ export interface HerdrTask {
   tabId: string;
 }
 
+// タスクタブのルートペインにシェルプロンプトが現れるまで待つ上限。
+export const PANE_READY_TIMEOUT_MS = 30 * 1000;
+export const PANE_READY_POLL_INTERVAL_MS = 200;
+// 起動コマンド送信後、claude が herdr の自動エージェント検出で捕捉されるまで待つ上限。
+// headroom 経由の起動はプロキシ立ち上げ分だけ遅くなるため広めに取る。
+export const AGENT_DETECT_TIMEOUT_MS = 120 * 1000;
+export const AGENT_DETECT_POLL_INTERVAL_MS = 500;
+
+export interface StartTiming {
+  paneReadyTimeoutMs?: number;
+  paneReadyPollIntervalMs?: number;
+  agentDetectTimeoutMs?: number;
+  agentDetectPollIntervalMs?: number;
+}
+
 /**
  * herdr のタスク専用タブで claude を TUI 起動する（1タスク=1タブ）。
  *
- * 手順は「先にタスク専用タブを作り、その中へ agent を起動する」。
- * `agent start` はタブ内への split でしかペインを作れないため、`--tab` を省略すると
- * ワークスペースのアクティブタブ（＝ユーザーが見ているタブ）に一瞬ペインが割り込み、
- * その後 `pane move --new-tab` で消える——というちらつきが起きる。
- * 先に `--no-focus` でタブを作っておけば、割り込み先は最初から不可視の新規タブになる。
+ * `--no-focus` でタスク専用タブを作り、その**ルートペイン（シェル）へ起動コマンドを
+ * 流し込んで** claude を起動する（`launchAgentInPane`）。新しい herdr（0.7 系）の
+ * `agent start` は `--kind` の正規実行ファイルしか起動できず `headroom wrap claude ...`
+ * を起動できない（かつ `--workspace`/`--tab` が廃止され `unknown option: --workspace` で
+ * 失敗する）ため、agent start は使わない。claude は herdr の自動エージェント検出で
+ * そのまま捕捉されるため、`agentGet(paneId)` で状態・セッションIDを取得できる。
  *
- * 新規タブのルートペイン（シェル）は agent ペインを split で迎え入れた後は不要なので、
- * 閉じてタブを agent ペイン1枚にする。
+ * ルートペインがそのまま claude のペインになるので、旧実装のような余剰シェルペインの
+ * `paneClose` は不要。
+ *
+ * 手順:
+ * 1. tabCreate（`--no-focus`）でユーザーの見ているタブに割り込まないタスク専用タブを作る
+ * 2. waitForPaneReady でシェルプロンプトの描画を待つ（未描画で送ると入力が捨てられる）
+ * 3. launchAgentInPane で起動コマンドを送る
+ * 4. waitForAgentDetected で claude が agent として検出されるまで待つ（旧 agent start が
+ *    担っていた「起動確認」の代替）。検出できなければ失敗として確定し、タブを閉じる
+ *    （検出前の agent_not_found を waitForHerdrTask が握ると無限待ちになるため）
  */
 export async function startHerdrTask({
   label,
@@ -134,6 +158,7 @@ export async function startHerdrTask({
   env,
   workspaceId,
   herdr,
+  timing,
 }: {
   label: string;
   cwd: string;
@@ -141,26 +166,92 @@ export async function startHerdrTask({
   env?: Record<string, string>;
   workspaceId?: string;
   herdr?: typeof HerdrModule;
+  timing?: StartTiming;
 }): Promise<HerdrTask> {
   const mod = herdr ?? (await loadHerdr());
-  const { tabId, paneId: shellPaneId } = await mod.tabCreate({ label, cwd, workspaceId, env });
+  const { tabId, paneId } = await mod.tabCreate({ label, cwd, workspaceId, env });
 
-  let paneId: string;
   try {
-    ({ paneId } = await mod.agentStart({ name: label, cwd, argv, env, workspaceId, tabId }));
+    // tabCreate 直後のペインはシェル初期化中でプロンプト未表示のことがある。その状態で
+    // 起動コマンドを送ると入力が捨てられて claude が起動しない（dispatcher の
+    // waitForPaneReady と同じレース）。描画が現れるまで待ってから送る。
+    const ready = await waitForPaneReady(paneId, mod, {
+      timeoutMs: timing?.paneReadyTimeoutMs,
+      pollIntervalMs: timing?.paneReadyPollIntervalMs,
+    });
+    if (!ready) {
+      console.warn(`[herdr-runner] pane ${paneId} produced no prompt before the timeout, launching anyway`);
+    }
+    await mod.launchAgentInPane(paneId, argv);
+    const detected = await waitForAgentDetected(paneId, mod, {
+      timeoutMs: timing?.agentDetectTimeoutMs,
+      pollIntervalMs: timing?.agentDetectPollIntervalMs,
+    });
+    if (!detected) {
+      throw new Error(
+        `claude was not detected in pane ${paneId} after launch (it may have failed to start; e.g. a skill preamble command failed)`,
+      );
+    }
   } catch (err) {
-    // agent を起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
+    // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
     await mod.tabClose(tabId).catch(() => {});
     throw err;
   }
 
-  // ルートペインを閉じられなくても agent 自体は動いているので、タスクは失敗させない
-  // （タブにシェルペインが1枚余分に残るだけで、タブごと閉じる stopHerdrTask で片付く）。
-  await mod.paneClose(shellPaneId).catch((err: unknown) => {
-    console.error(`[herdr-runner] failed to close the placeholder shell pane ${shellPaneId}: ${err}`);
-  });
-
   return { paneId, tabId };
+}
+
+// ペインに最初の出力（シェルのプロンプト）が現れるまで待つ。プロンプト文字列はユーザーの
+// シェル設定依存のため内容は判定せず「何か描画されたか」だけを見る（dispatcher.ts と同じ方針）。
+async function waitForPaneReady(
+  paneId: string,
+  mod: typeof HerdrModule,
+  options?: { timeoutMs?: number; pollIntervalMs?: number },
+): Promise<boolean> {
+  const timeoutMs = options?.timeoutMs ?? PANE_READY_TIMEOUT_MS;
+  const pollIntervalMs = options?.pollIntervalMs ?? PANE_READY_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let content = "";
+    try {
+      content = await mod.paneRead(paneId, { source: "visible" });
+    } catch (err) {
+      // 一時的な読み取り失敗はタイムアウトまで再試行する。ただし herdr 通信自体の
+      // 問題を無言で握り潰すと原因調査が難しくなるため、waitForHerdrTask と同様にログは残す。
+      console.error(`[herdr-runner] failed to read pane ${paneId} while waiting for its prompt: ${err}`);
+    }
+    if (content.trim() !== "") return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(pollIntervalMs);
+  }
+}
+
+// 起動コマンド送信後、claude が herdr の自動エージェント検出で捕捉される（agentGet が
+// 成功する）まで待つ。shell だけのペインでは agentGet が agent_not_found を投げるため、
+// それが解消したら検出成功とみなす。ペイン自体が消えた（pane_not_found）場合は起動不能。
+async function waitForAgentDetected(
+  paneId: string,
+  mod: typeof HerdrModule,
+  options?: { timeoutMs?: number; pollIntervalMs?: number },
+): Promise<boolean> {
+  const timeoutMs = options?.timeoutMs ?? AGENT_DETECT_TIMEOUT_MS;
+  const pollIntervalMs = options?.pollIntervalMs ?? AGENT_DETECT_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await mod.agentGet(paneId);
+      return true;
+    } catch (err) {
+      if (err instanceof mod.HerdrError && err.code === "pane_not_found") return false;
+      // agent_not_found（まだ検出前）は正常な待機継続。それ以外の想定外エラー
+      // （herdr 通信の問題など）は、waitForHerdrTask と同様にログを残してから継続する。
+      if (!(err instanceof mod.HerdrError && err.code === "agent_not_found")) {
+        console.error(`[herdr-runner] unexpected error while waiting for agent detection on pane ${paneId}: ${err}`);
+      }
+    }
+    if (Date.now() >= deadline) return false;
+    await sleep(pollIntervalMs);
+  }
 }
 
 /**
@@ -204,10 +295,15 @@ export async function waitForHerdrTask(
       status = agent.agentStatus;
       if (agent.sessionId) sessionId = agent.sessionId;
     } catch (err) {
-      if (err instanceof mod.HerdrError && err.code === "pane_not_found") {
+      // 新モデルでは claude はタブのルートシェルペインで動くため、claude が異常終了しても
+      // ペインは残る（シェルへ戻る）。この場合ペイン消失（pane_not_found）ではなく
+      // エージェント検出が外れる（agent_not_found）ので、両方を「claude が消えた」失敗として扱う。
+      // startHerdrTask が検出を確認してからこの待機に入るため、ここでの agent_not_found は
+      // 起動前の未検出ではなく途中消滅を意味する。
+      if (err instanceof mod.HerdrError && (err.code === "pane_not_found" || err.code === "agent_not_found")) {
         return {
           status: "failed",
-          output: "[worker] the claude pane disappeared before the task completed (claude died or the tab was closed)",
+          output: "[worker] the claude agent disappeared before the task completed (claude died or the tab was closed)",
         };
       }
       // 一時的な herdr の応答失敗でタスクを落とさない（次のポーリングで回復しうる）。
@@ -246,8 +342,11 @@ async function readPaneOutput(paneId: string, mod: typeof HerdrModule): Promise<
 export const CLAUDE_EXIT_TIMEOUT_MS = 15 * 1000;
 export const CLAUDE_EXIT_POLL_INTERVAL_MS = 200;
 
-// ペインが消えるまで待つ。消えた＝そのペインのプロセス（claude）が終了したということ。
-async function waitForPaneGone(
+// claude が終了する（agent 検出が外れる）まで待つ。新モデルでは claude はタブの
+// ルートシェルペインで動くため、claude が終了してもペイン自体は残り（シェルへ戻る）、
+// `agentGet` が agent_not_found を返すようになる。ペインごと消える（pane_not_found）
+// ケースも合わせて「claude が終了した」とみなす。
+async function waitForAgentGone(
   paneId: string,
   mod: typeof HerdrModule,
   options?: { timeoutMs?: number; pollIntervalMs?: number },
@@ -257,9 +356,11 @@ async function waitForPaneGone(
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      await mod.paneGet(paneId);
+      await mod.agentGet(paneId);
     } catch (err) {
-      if (err instanceof mod.HerdrError && err.code === "pane_not_found") return true;
+      if (err instanceof mod.HerdrError && (err.code === "agent_not_found" || err.code === "pane_not_found")) {
+        return true;
+      }
       // 一時的な herdr の応答失敗では諦めず、タイムアウトまで再試行する。
     }
     if (Date.now() >= deadline) return false;
@@ -280,9 +381,10 @@ async function waitForPaneGone(
  * ここで終了させずに tabClose だけに頼ると、claude は後片付けの機会を得られないまま
  * 強制終了される。
  *
- * claude がグレースフルに終了するとペインが消え、そのタブに他のペインが無ければ
- * タブも自動で消える。そのため tabClose は「残っていた場合の強制クローズ」として呼び、
- * 既に消えている場合のエラー（tab_not_found）は正常系として扱う。
+ * 新モデルでは claude はタブのルートシェルペインで動くため、claude がグレースフルに
+ * 終了してもペイン（＝シェル）とタブは残る。そのため tabClose は必須で、agent 検出が
+ * 外れる（＝claude が終了した）のを待ってから確実にタブごと閉じる。既にタブが
+ * 消えているケース（tab_not_found）は正常系として握り潰す。
  */
 export async function stopHerdrTask(
   task: HerdrTask,
@@ -293,7 +395,7 @@ export async function stopHerdrTask(
 
   try {
     await mod.paneSendKeys(task.paneId, "ctrl+c", "ctrl+c");
-    const exited = await waitForPaneGone(task.paneId, mod, {
+    const exited = await waitForAgentGone(task.paneId, mod, {
       timeoutMs: options?.exitTimeoutMs,
       pollIntervalMs: options?.exitPollIntervalMs,
     });
