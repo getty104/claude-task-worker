@@ -143,7 +143,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 }
               },
               cwd,
-              buildClaudeEnv(mode),
+              buildClaudeEnv(mode, getHeadroomEnabled()),
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);

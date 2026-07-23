@@ -230,11 +230,42 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
 // エージェントの状態遷移音は herdr 側の設定（`~/.config/herdr/config.toml` の
 // `[ui.sound]`）か、ワーカー用 herdr セッションを `HERDR_DISABLE_SOUND=1` 付きで
 // 起動することでしか止められない。
-export function buildClaudeEnv(mode: RunMode): Record<string, string> {
-  if (mode === "herdr") {
-    return {
-      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
-    };
+//
+// `headroom` が有効なときは `HEADROOM_LOSSLESS=1` を渡して CCR（Compress-Cache-Retrieve）の
+// **retrieve ツール注入を無効化**する。これは以下の 400 エラーの根本対策:
+//
+//   API Error: 400 Tool reference 'headroom_retrieve' not found in available tools
+//
+// 原因は CodeGraph MCP の出力フォーマットと headroom の CCR マーカー正規表現の衝突。
+// CodeGraph は自前のページング用に `[N items compressed to M. Retrieve more: hash=<24hex>]`
+// という文字列を出力に埋め込むが、これは headroom の CCR マーカー検出正規表現
+// （`\[(\d+) \w+ compressed to (\d+)\. Retrieve more: hash=([a-f0-9]{24})\]`、
+// headroom の `ccr/tool_injection.py`）に**バイト単位で一致**する。ワーカーは探索に
+// CodeGraph MCP を使うため（`SYSTEM_PROMPT` の探索方針参照）、その出力を headroom の
+// プロキシが「自分が圧縮した内容」と誤検知し、`headroom_retrieve` ツールを request の
+// `tools` へ注入する。モデルは CodeGraph 出力中の "Retrieve more: hash=..." に釣られて
+// `headroom_retrieve(hash=...)` を呼ぶ（headroom の圧縮ストアにその hash は無いので
+// retrieve 自体は空振りする）。この tool_use は以降の会話履歴に残る一方、次のターンでは
+// CodeGraph のマーカーが frozen prefix 側に入り「今回の新規マーカー無し」と判定され、
+// prompt cache 保護のため retrieve ツールの再注入が見送られる。結果、履歴に残った
+// `headroom_retrieve` の tool_use がツール定義を失って宙に浮き、Anthropic API が上記 400 を返す。
+//
+// `HEADROOM_LOSSLESS=1` は headroom プロキシ起動時に `ccr_inject_tool=False` に落とすため
+// （headroom の `proxy/server.py`）、CodeGraph のマーカーを検知しても retrieve ツールを
+// 一切注入せず、この連鎖を断ち切る。単なる `HEADROOM_NO_CCR=1` と違い圧縮自体は
+// lossless（format-native compaction + marker-free SmartCrusher）で維持されるため、
+// ツール出力の情報欠落は起こさない。
+//
+// 注意: `HEADROOM_LOSSLESS` は headroom の hot-reload 対象 knob ではなく、プロキシ起動時に
+// のみ反映される。既に常駐している headroom プロキシは `headroom wrap` から再利用されて
+// この env を拾わないため、設定反映には**プロキシの再起動が一度必要**。
+export function buildClaudeEnv(mode: RunMode, headroom: boolean): Record<string, string> {
+  const env: Record<string, string> =
+    mode === "herdr"
+      ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
+      : { ...CLAUDE_SPAWN_ENV };
+  if (headroom) {
+    env.HEADROOM_LOSSLESS = "1";
   }
-  return { ...CLAUDE_SPAWN_ENV };
+  return env;
 }
