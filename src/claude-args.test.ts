@@ -112,14 +112,25 @@ test("buildClaudeArgs keeps the tool restrictions and the system prompt in both 
 });
 
 test("buildClaudeEnv drops the print-only ceiling in herdr mode", () => {
-  assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
-  assert.deepEqual(buildClaudeEnv("herdr"), {
+  assert.deepEqual(buildClaudeEnv("default", false), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("herdr", false), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   });
 });
 
 test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server, not the pane)", () => {
-  assert.ok(!("HERDR_DISABLE_SOUND" in buildClaudeEnv("herdr")));
+  assert.ok(!("HERDR_DISABLE_SOUND" in buildClaudeEnv("herdr", false)));
+});
+
+test("buildClaudeEnv sets HEADROOM_LOSSLESS only under headroom (disables CCR retrieve-tool injection)", () => {
+  // CodeGraph MCP output embeds `[N items compressed to M. Retrieve more: hash=<24hex>]`
+  // markers that byte-match headroom's CCR marker regex, causing headroom to inject a
+  // `headroom_retrieve` tool that later goes orphaned -> API 400. HEADROOM_LOSSLESS=1
+  // disables the tool injection (ccr_inject_tool=False) while keeping compression lossless.
+  assert.equal(buildClaudeEnv("default", true).HEADROOM_LOSSLESS, "1");
+  assert.equal(buildClaudeEnv("herdr", true).HEADROOM_LOSSLESS, "1");
+  assert.ok(!("HEADROOM_LOSSLESS" in buildClaudeEnv("default", false)));
+  assert.ok(!("HEADROOM_LOSSLESS" in buildClaudeEnv("herdr", false)));
 });
 
 test("buildClaudeExecution runs claude directly when headroom is off", () => {

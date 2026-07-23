@@ -160,7 +160,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
               },
               cwd,
-              buildClaudeEnv(mode),
+              buildClaudeEnv(mode, getHeadroomEnabled()),
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
