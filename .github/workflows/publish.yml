@@ -46,11 +46,16 @@ jobs:
       # npm version の `version` ライフサイクルフック (package.json の scripts.version)
       # が plugin/.claude-plugin/plugin.json のバージョンも package.json に揃えて上げる。
       # 続く `git commit -am` が両ファイルを一緒にコミットする。
+      #
+      # バージョンは npm version の stdout ではなく package.json から読む。
+      # `version` フックがあると npm の run-script バナー (`> version` 等) や
+      # フック内の console.log が stdout に混じり、それを $GITHUB_OUTPUT へ書くと
+      # `Invalid format '> version'` で失敗するため。
       - name: Bump version
         id: version
         run: |
-          new_version=$(npm version "${{ inputs.semver }}" --no-git-tag-version)
-          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+          npm version "${{ inputs.semver }}" --no-git-tag-version
+          echo "version=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push
         run: |
