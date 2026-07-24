@@ -131,7 +131,13 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
     agentStart: async (paneId: string, { name, args }: { name: string; args: string[] }) => {
       options.calls?.push(`agentStart:${paneId}:${name}:${args.join(" ")}`);
       if (options.agentStartError) throw options.agentStartError;
-      return { paneId, tabId: "tab-task", workspaceId: "w1", agentStatus: "idle" as const, sessionId: options.sessionId };
+      return {
+        paneId,
+        tabId: "tab-task",
+        workspaceId: "w1",
+        agentStatus: "idle" as const,
+        sessionId: options.sessionId,
+      };
     },
     tabClose: async (tabId: string) => {
       options.calls?.push(`tabClose:${tabId}`);
@@ -255,10 +261,7 @@ test("startHerdrTask launches claude into the task tab's root shell pane via age
 test("startHerdrTask closes the task tab when agent start fails", async () => {
   const calls: string[] = [];
   const herdr = makeFakeHerdr({ statuses: [], calls, agentStartError: new Error("boom") });
-  await assert.rejects(
-    startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", args: [], herdr }),
-    /boom/,
-  );
+  await assert.rejects(startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", args: [], herdr }), /boom/);
   // シェルだけのタブを残さない。
   assert.deepEqual(calls, [
     "tabCreate:ctw:my-app:#12:/tmp/worktree",

@@ -103,22 +103,17 @@ export const HERDR_TIMEOUT_MS = 15 * 1000;
 // （短いと待機の途中で execFile が SIGKILL してしまう。agentStart 参照）。
 function runHerdr(args: string[], timeoutMs: number = HERDR_TIMEOUT_MS): Promise<HerdrRawResult> {
   return new Promise((resolve) => {
-    childProcess.execFile(
-      "herdr",
-      args,
-      { timeout: timeoutMs, killSignal: "SIGKILL" },
-      (error, stdout, stderr) => {
-        const parsed = parseHerdrResponse(stdout);
-        // 大半のコマンドは終了コード0＋stdoutにJSONを返すが、一部（実測では
-        // 存在しないタブへの `tab close`）は終了コード非0＋stderrにJSONを返す。
-        // stdout から error を取れなかった場合に限り stderr も見て、どちらの形でも
-        // エラーコードを取り出せるようにする（取り出せないと "tab_not_found は正常系"
-        // のような code 判定が効かず、グレースフル終了のたびに偽のエラーログが出る）。
-        // 結果（result）の取得元はあくまで stdout のみ。
-        const stderrError = parsed?.error ? undefined : parseHerdrResponse(stderr)?.error;
-        resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stderrError, stdout, stderr });
-      },
-    );
+    childProcess.execFile("herdr", args, { timeout: timeoutMs, killSignal: "SIGKILL" }, (error, stdout, stderr) => {
+      const parsed = parseHerdrResponse(stdout);
+      // 大半のコマンドは終了コード0＋stdoutにJSONを返すが、一部（実測では
+      // 存在しないタブへの `tab close`）は終了コード非0＋stderrにJSONを返す。
+      // stdout から error を取れなかった場合に限り stderr も見て、どちらの形でも
+      // エラーコードを取り出せるようにする（取り出せないと "tab_not_found は正常系"
+      // のような code 判定が効かず、グレースフル終了のたびに偽のエラーログが出る）。
+      // 結果（result）の取得元はあくまで stdout のみ。
+      const stderrError = parsed?.error ? undefined : parseHerdrResponse(stderr)?.error;
+      resolve({ execError: error as NodeJS.ErrnoException | null, parsed, stderrError, stdout, stderr });
+    });
   });
 }
 
