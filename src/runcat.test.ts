@@ -7,7 +7,7 @@ import type * as RuncatModule from "./runcat";
 import type { UsageInfo } from "./slack";
 
 const { buildRuncatSnapshot, resetStamp, resetHour, writeRuncatUsage } =
-  (await import("./runcat.ts")) as typeof RuncatModule;
+  (await import("./runcat")) as typeof RuncatModule;
 
 // 2026-07-19 21:00 JST
 const NOW = new Date("2026-07-19T12:00:00Z");

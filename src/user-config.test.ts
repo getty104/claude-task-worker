@@ -19,7 +19,7 @@ const {
   getRunMode,
   resetRunModeCache,
   findProjectNameByPath,
-} = (await import("./user-config.ts")) as typeof UserConfigModule;
+} = (await import("./user-config")) as typeof UserConfigModule;
 
 const configDir = join(configHome, "claude-task-worker");
 

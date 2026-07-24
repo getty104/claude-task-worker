@@ -14,7 +14,7 @@ const {
   buildClaudeEnv,
   buildClaudeExecution,
   systemPromptFilePath,
-} = (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
+} = (await import("./claude-args")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
   assert.deepEqual(

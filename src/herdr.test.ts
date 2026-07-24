@@ -18,7 +18,7 @@ const {
   AGENT_START_READY_TIMEOUT_MS,
   workspaceCreate,
   HerdrError,
-} = (await import("./herdr.ts")) as typeof HerdrModule;
+} = (await import("./herdr")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -189,7 +189,7 @@ test("propagates a timeout error via execError when herdr hangs", async (t) => {
 // （実測）。ここで code を取り出せないと stopHerdrTask の「tab_not_found は正常系」
 // 判定が効かず、claude がグレースフルに終了するたびに偽のエラーログが出る。
 test("surfaces a HerdrError with its code when herdr writes the error envelope to stderr and exits non-zero", async (t) => {
-  const { tabClose } = (await import("./herdr.ts")) as typeof HerdrModule;
+  const { tabClose } = (await import("./herdr")) as typeof HerdrModule;
   mockExecFileError(
     t,
     new Error("Command failed: herdr tab close w1:t2") as NodeJS.ErrnoException,

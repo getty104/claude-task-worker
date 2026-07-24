@@ -5,7 +5,7 @@ import type * as DispatchArgsModule from "./dispatch-args";
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { buildForwardedCommand, shellQuote } = (await import("./dispatch-args.ts")) as typeof DispatchArgsModule;
+const { buildForwardedCommand, shellQuote } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
 test("buildForwardedCommand strips --project and its value from argv.slice(2)-shaped input", () => {
   const argv = ["all", "--project", "foo"];

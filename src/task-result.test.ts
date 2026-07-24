@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as TaskResultModule from "./task-result";
 
-const { buildTaskResult } = (await import("./task-result.ts")) as typeof TaskResultModule;
+const { buildTaskResult } = (await import("./task-result")) as typeof TaskResultModule;
 
 test("exit 0 with output is completed and keeps stdout as-is", () => {
   const result = buildTaskResult(0, "判定: パターンB-通常（マージ済み）\n", "");

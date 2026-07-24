@@ -3,13 +3,13 @@ import type { AgentStatus } from "./herdr";
 import type { TaskResult } from "./task-result";
 // node --experimental-strip-types は実ファイル解決を要求するため、値のimportは
 // .ts 拡張子付きにする（herdr-runner.ts はテストから直接 .ts で読み込まれる）。
-import { readFinalReport } from "./transcript.ts";
+import { readFinalReport } from "./transcript";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする（dispatcher.ts と同様）。
 // herdr.ts は herdr モードでのみ必要なため、静的importにはしない。
 async function loadHerdr(): Promise<typeof HerdrModule> {
-  return (await import("./herdr.ts")) as typeof HerdrModule;
+  return (await import("./herdr")) as typeof HerdrModule;
 }
 
 // agent ステータスのポーリング間隔。TUI セッションは完了後もプロセスが生き続けるため、

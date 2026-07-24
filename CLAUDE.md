@@ -189,7 +189,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 ## Conventions
 
-- ESM (`NodeNext` module) — importは `.js` 拡張子付き
+- ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
 - ログは `[worker-name]` プレフィックス付き
 - エラーはtry-catchでログ出力し、ワーカーはクラッシュせず継続
 - SIGTERM/SIGINT で全子プロセスを graceful shutdown

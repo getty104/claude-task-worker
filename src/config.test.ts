@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type * as ConfigModule from "./config";
 
-const { parseUiDesignEntry, DEFAULT_UI_DESIGN_CONFIG } = (await import("./config.ts")) as typeof ConfigModule;
+const { parseUiDesignEntry, DEFAULT_UI_DESIGN_CONFIG } = (await import("./config")) as typeof ConfigModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
 function silenceWarn(t: TestContext): void {

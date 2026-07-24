@@ -164,7 +164,7 @@ process.on("unhandledRejection", (err) => {
 async function assertRunModeAvailable(): Promise<void> {
   if (getRunMode() !== "herdr") return;
   // herdr.ts は herdr モード（と --project）でのみ必要なため動的importで遅延読込する。
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   try {
     await herdr.checkHerdrAvailable();
   } catch (err) {
@@ -222,8 +222,8 @@ if (hasProjectFilter()) {
     // .ts 拡張子付きのリテラル文字列で動的importする（dispatcher.ts と同様）。
     // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
     // dispatcher.ts / herdr.ts は --project 使用時にのみ必要なモジュールで、この分岐内で読込む。
-    const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
-    const dispatcher = (await import("./dispatcher.ts")) as typeof DispatcherModule;
+    const herdr = (await import("./herdr")) as typeof HerdrModule;
+    const dispatcher = (await import("./dispatcher")) as typeof DispatcherModule;
 
     // 起動処理（runDispatcher/monitorSessions）が完了する前にシグナルを受けても
     // タブ・セッションが放置されないよう、起動処理より前にハンドラを登録する。

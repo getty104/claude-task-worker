@@ -8,11 +8,11 @@ import type { ResolvedProject } from "./user-config";
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容し、
 // リテラル文字列のため esbuild も単一ファイルバンドルにインライン化できる。
 async function loadHerdr(): Promise<typeof HerdrModule> {
-  return (await import("./herdr.ts")) as typeof HerdrModule;
+  return (await import("./herdr")) as typeof HerdrModule;
 }
 
 async function loadTable(): Promise<typeof TableModule> {
-  return (await import("./table.ts")) as typeof TableModule;
+  return (await import("./table")) as typeof TableModule;
 }
 
 const { getDisplayWidth, truncateToWidth, padToWidth } = await loadTable();

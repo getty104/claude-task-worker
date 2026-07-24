@@ -21,8 +21,8 @@ const {
   waitForPaneReady,
   waitForWorkerStartup,
   startWorkerInPane,
-} = (await import("./dispatcher.ts")) as typeof DispatcherModule;
-const { HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
+} = (await import("./dispatcher")) as typeof DispatcherModule;
+const { HerdrError } = (await import("./herdr")) as typeof HerdrModule;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
@@ -397,7 +397,7 @@ test("waits for the pane prompt before sending the command so a shell still init
     },
   );
 
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   const started = await startWorkerInPane("pane-my-app", "claude-task-worker all", herdr, FAST_TIMING);
 
   assert.equal(started, true);
@@ -439,7 +439,7 @@ test("resends the command when the worker process never appears, then gives up a
   );
   t.mock.method(console, "warn", () => {});
 
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   const started = await startWorkerInPane("pane-my-app", "claude-task-worker all", herdr, {
     ...FAST_TIMING,
     sendMaxAttempts: 3,
@@ -475,7 +475,7 @@ test("waitForPaneReady returns false when the pane stays empty until the timeout
     callback(null, "", "");
   });
 
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   const ready = await waitForPaneReady("pane-my-app", herdr, { timeoutMs: 20, pollIntervalMs: 1 });
 
   assert.equal(ready, false);
@@ -492,7 +492,7 @@ test("waitForWorkerStartup returns true once a claude-task-worker process appear
     callback(null, JSON.stringify({ result: { process_info: { foreground_processes: [foreground] } } }), "");
   });
 
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   const started = await waitForWorkerStartup("pane-my-app", herdr, { timeoutMs: 500, pollIntervalMs: 1 });
 
   assert.equal(started, "started");
@@ -514,7 +514,7 @@ test("waitForWorkerStartup returns other when the foreground process is neither 
     );
   });
 
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   const result = await waitForWorkerStartup("pane-my-app", herdr, { timeoutMs: 500, pollIntervalMs: 1 });
 
   assert.equal(result, "other");
@@ -554,7 +554,7 @@ test("gives up immediately without resending when the foreground process is neit
   );
   t.mock.method(console, "warn", () => {});
 
-  const herdr = (await import("./herdr.ts")) as typeof HerdrModule;
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
   const started = await startWorkerInPane("pane-my-app", "claude-task-worker all", herdr, {
     ...FAST_TIMING,
     sendMaxAttempts: 3,

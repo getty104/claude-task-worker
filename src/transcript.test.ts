@@ -7,7 +7,7 @@ import type * as TranscriptModule from "./transcript";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求する。
 const { extractFinalAssistantText, findTranscriptPath, readFinalReport } =
-  (await import("./transcript.ts")) as typeof TranscriptModule;
+  (await import("./transcript")) as typeof TranscriptModule;
 
 function assistantLine(text: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({
