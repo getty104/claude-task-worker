@@ -1,3 +1,6 @@
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { RunMode } from "./user-config.js";
 
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
@@ -59,7 +62,9 @@ export const CLAUDE_SPAWN_ENV = {
   CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0",
 } as const;
 
-// `--append-system-prompt` でシステムプロンプト末尾に注入する自律実行原則。
+// `--append-system-prompt-file` でシステムプロンプト末尾に注入する自律実行原則。
+// （文字列を直接 `--append-system-prompt` へ渡すのではなくファイル経由にする理由は
+// `systemPromptFilePath()` を参照。）
 // かつては各ワーカー起動スキルの「実行モードの制約」セクションに同文を複製していたが、
 // ワーカー起動時の CLI 注入に一元化した（対話セッションでスキルを手動実行する場合は
 // 実在するユーザーと対話してよいため、スキル本文に置かないのが正しい）。
@@ -103,8 +108,38 @@ export interface ClaudeInvocation {
 
 export const CLAUDE_COMMAND = "claude";
 
+let cachedSystemPromptFilePath: string | undefined;
+
+// SYSTEM_PROMPT を絶対パスのファイルへ書き出し、その絶対パスを返す（プロセス内で一度だけ）。
+//
+// herdr モードは agent 引数を `herdr agent start ... -- <args>` としてターゲットシェル経由で
+// 起動するが、herdr は**改行を含む引数**を拒否する
+// （code: `invalid_agent_argument` / "agent arguments cannot be encoded safely for the
+// target shell"）。SYSTEM_PROMPT は複数行のため、`--append-system-prompt <文字列>` で
+// 直接渡すと herdr モードのタスク起動が必ずこのエラーで失敗する。そこで内容をファイルへ
+// 逃がし、`--append-system-prompt-file <path>` で参照させる（引数に改行が乗らなくなる）。
+// default モード（spawn。シェルを介さないので改行自体は問題ない）でも同じファイル参照を
+// 使い、両モードの引数を一致させておく。
+//
+// 内容はビルドごとに静的なので、プロセス単位の固定パスへ一度だけ書けば十分。file は消さず
+// 残す（claude が起動時に読むまで存在し続ける必要があり、tmpdir は OS が回収する）。
+// 半端な読み取りを避けるため一時ファイル + rename で原子的に書き込む。
+export function systemPromptFilePath(): string {
+  if (cachedSystemPromptFilePath) return cachedSystemPromptFilePath;
+  const dir = path.join(os.tmpdir(), "claude-task-worker");
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, `append-system-prompt-${process.pid}.txt`);
+  const tmp = `${target}.tmp`;
+  writeFileSync(tmp, SYSTEM_PROMPT, "utf8");
+  renameSync(tmp, target);
+  cachedSystemPromptFilePath = target;
+  return target;
+}
+
 // claude の起動引数を組み立てる。モードによる差は `-p`（非対話 print モード）の有無だけで、
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
+// システムプロンプトはファイル経由（`--append-system-prompt-file`）で渡す（理由は
+// `systemPromptFilePath()` を参照）。
 export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
   return [
     ...(mode === "herdr" ? [] : ["-p"]),
@@ -113,8 +148,8 @@ export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocatio
     "--chrome",
     "--disallowedTools",
     DISALLOWED_TOOLS_ARG,
-    "--append-system-prompt",
-    SYSTEM_PROMPT,
+    "--append-system-prompt-file",
+    systemPromptFilePath(),
     "--model",
     model,
     "--effort",

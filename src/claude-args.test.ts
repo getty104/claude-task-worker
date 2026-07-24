@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type * as ClaudeArgsModule from "./claude-args";
 
 const {
@@ -11,6 +13,7 @@ const {
   buildClaudeArgs,
   buildClaudeEnv,
   buildClaudeExecution,
+  systemPromptFilePath,
 } = (await import("./claude-args.ts")) as typeof ClaudeArgsModule;
 
 test("DISALLOWED_TOOLS covers the tools with no autonomous use", () => {
@@ -100,11 +103,28 @@ test("buildClaudeArgs keeps the tool restrictions and the system prompt in both 
     const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "xhigh" });
     assert.ok(args.includes("--dangerously-skip-permissions"));
     assert.equal(args[args.indexOf("--disallowedTools") + 1], DISALLOWED_TOOLS_ARG);
-    assert.equal(args[args.indexOf("--append-system-prompt") + 1], SYSTEM_PROMPT);
+    // The system prompt is passed via a file (see below); the inline flag must not be used.
+    assert.ok(!args.includes("--append-system-prompt"));
+    assert.equal(args[args.indexOf("--append-system-prompt-file") + 1], systemPromptFilePath());
     assert.equal(args[args.indexOf("--model") + 1], "opus");
     assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
     // The subagent flag is print-mode only and no longer used in either mode.
     assert.ok(!args.includes("--append-subagent-system-prompt"));
+  }
+});
+
+test("buildClaudeArgs passes the system prompt via a file so no arg carries a newline", () => {
+  // herdr rejects any agent argument containing a newline with
+  // invalid_agent_argument ("agent arguments cannot be encoded safely for the
+  // target shell"), so the multiline SYSTEM_PROMPT must go through a file.
+  for (const mode of ["default", "herdr"] as const) {
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "high" });
+    for (const arg of args) {
+      assert.ok(!arg.includes("\n"), `arg must not contain a newline: ${JSON.stringify(arg)}`);
+    }
+    const promptPath = args[args.indexOf("--append-system-prompt-file") + 1];
+    assert.ok(path.isAbsolute(promptPath), "system prompt file path must be absolute");
+    assert.equal(readFileSync(promptPath, "utf8"), SYSTEM_PROMPT);
   }
 });
 
