@@ -12,7 +12,7 @@
     "dev": "tsc --noEmit --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\" \"plugin/scripts/**/*.test.mjs\"",
+    "test": "node --experimental-strip-types --import ./scripts/test-resolver.mjs --test \"src/**/*.test.ts\" \"plugin/scripts/**/*.test.mjs\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "version": "node scripts/sync-plugin-version.mjs && git add plugin/.claude-plugin/plugin.json",

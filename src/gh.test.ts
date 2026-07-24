@@ -6,7 +6,7 @@ import type * as GhModule from "./gh";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { hasLabel, findPrNumberClosingIssue } = (await import("./gh.ts")) as typeof GhModule;
+const { hasLabel, findPrNumberClosingIssue } = (await import("./gh")) as typeof GhModule;
 
 const REPO_INFO_STDOUT = JSON.stringify({
   owner: { login: "getty104" },

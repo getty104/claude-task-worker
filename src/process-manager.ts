@@ -1,13 +1,21 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
-import { getWorkerConfig } from "./config.js";
-import type { AgentStatus } from "./herdr.js";
-import type { HerdrTask } from "./herdr-runner.js";
-import { buildTaskTableLines } from "./table.js";
-import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result.js";
-import type { TaskResult } from "./task-result.js";
-import { findProjectNameByPath, getRunMode } from "./user-config.js";
+import { StringDecoder } from "node:string_decoder";
+import { getWorkerConfig } from "./config";
+import type { AgentStatus } from "./herdr";
+import type { HerdrTask } from "./herdr-runner";
+import {
+  LOG_DISPLAY_LIMIT,
+  TASK_DISPLAY_LIMIT,
+  buildLogTableLines,
+  buildTaskTableLines,
+  selectRecentTasks,
+} from "./table";
+import type { LogTableEntry } from "./table";
+import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result";
+import type { TaskResult } from "./task-result";
+import { findProjectNameByPath, getRunMode } from "./user-config";
 
 type TaskStatus = "running" | "completed" | "failed";
 
@@ -32,6 +40,52 @@ export interface TaskEntry {
 }
 
 const tasks = new Map<number, TaskEntry>();
+
+// 実行中タスクの標準出力/エラー出力の直近ログ（全タスク横断のローリングバッファ）。
+// default モードの子プロセスの stdout/stderr を行単位で溜め、直近 LOG_DISPLAY_LIMIT 行だけ残す。
+// herdr モードは TUI 起動で stdout をストリームしないため、ここには載らない。
+export const logLines: LogTableEntry[] = [];
+
+function pushLogLine(id: number, stream: "stdout" | "stderr", text: string): void {
+  const trimmed = text.replace(/\r$/, "");
+  if (trimmed.trim().length === 0) return;
+  logLines.push({ id, stream, text: trimmed, time: new Date() });
+  if (logLines.length > LOG_DISPLAY_LIMIT) {
+    logLines.splice(0, logLines.length - LOG_DISPLAY_LIMIT);
+  }
+}
+
+// chunk 境界が行の途中で割れても正しく1行ずつ拾えるよう、未確定の末尾を持ち越す。
+// マルチバイト文字が chunk 境界で分断される場合に備え、バイト単位ではなく StringDecoder で
+// デコードする（chunk.toString("utf-8") だと分断されたバイト列が U+FFFD に化ける）。
+export function makeLogFeeder(id: number, stream: "stdout" | "stderr") {
+  let partial = "";
+  const decoder = new StringDecoder("utf-8");
+  return {
+    feed(chunk: Buffer): void {
+      partial += decoder.write(chunk);
+      const parts = partial.split("\n");
+      partial = parts.pop() ?? "";
+      for (const part of parts) pushLogLine(id, stream, part);
+    },
+    flush(): void {
+      partial += decoder.end();
+      if (partial.length > 0) {
+        pushLogLine(id, stream, partial);
+        partial = "";
+      }
+    },
+  };
+}
+
+// 完了タスクの台帳を直近 TASK_DISPLAY_LIMIT 件に刈り込む（実行中タスクは常に保持）。
+// 表示は selectRecentTasks が別途上限を課すが、長時間稼働で Map が無制限に膨らむのを防ぐ。
+function pruneTaskHistory(): void {
+  const finished = [...tasks.values()]
+    .filter((t) => t.status !== "running")
+    .sort((a, b) => (b.finishedAt ?? b.startedAt).getTime() - (a.finishedAt ?? a.startedAt).getTime());
+  for (const t of finished.slice(TASK_DISPLAY_LIMIT)) tasks.delete(t.id);
+}
 
 let shuttingDown = false;
 
@@ -68,8 +122,15 @@ export function isWorkerAtCapacity(workerName: string): boolean {
 }
 
 function renderTable(): void {
-  const lines = buildTaskTableLines([...tasks.values()]);
-  if (lines.length === 0) return;
+  const taskLines = buildTaskTableLines(selectRecentTasks([...tasks.values()]));
+  const logTableLines = buildLogTableLines(logLines);
+  if (taskLines.length === 0 && logTableLines.length === 0) return;
+
+  const lines = [...taskLines];
+  if (logTableLines.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Logs", ...logTableLines);
+  }
 
   console.clear();
   console.log(lines.join("\n"));
@@ -104,6 +165,7 @@ async function finishTask(id: number, result: TaskResult, onComplete?: OnComplet
     task.finishedAt = new Date();
     task.agentStatus = undefined;
   }
+  pruneTaskHistory();
   renderTable();
 }
 
@@ -125,8 +187,8 @@ async function runViaHerdr(
   cwd?: string,
   env?: Record<string, string>,
 ): Promise<void> {
-  const { startHerdrTask, stopHerdrTask, taskTabLabel, waitForHerdrTask } = await import("./herdr-runner.ts");
-  const { getCurrentWorkspaceId } = await import("./herdr.ts");
+  const { startHerdrTask, stopHerdrTask, taskTabLabel, waitForHerdrTask } = await import("./herdr-runner");
+  const { getCurrentWorkspaceId } = await import("./herdr");
 
   const label = taskTabLabel(resolveProjectName(), id);
   let task: HerdrTask | undefined;
@@ -182,6 +244,9 @@ export function run(
   cwd?: string,
   env?: Record<string, string>,
 ): void {
+  // 同じ Issue/PR を再実行したときは古いエントリを削除してから入れ直し、
+  // Map の挿入順で「最新に繰り上げる」（selectRecentTasks の直近順表示と揃える）。
+  tasks.delete(id);
   tasks.set(id, {
     id,
     title,
@@ -209,9 +274,14 @@ export function run(
   });
   childProcesses.set(id, child);
 
+  // 標準出力/エラー出力の直近ログをステータステーブル下に表示するための行フィーダー。
+  const stdoutFeeder = makeLogFeeder(id, "stdout");
+  const stderrFeeder = makeLogFeeder(id, "stderr");
+
   const outputChunks: Buffer[] = [];
   child.stdout?.on("data", (chunk: Buffer) => {
     outputChunks.push(chunk);
+    stdoutFeeder.feed(chunk);
   });
 
   // stderr は末尾 STDERR_TAIL_LIMIT 分だけ保持する（失敗時の通知に含める）
@@ -224,9 +294,12 @@ export function run(
       stderrLen -= stderrChunks[0].length;
       stderrChunks.shift();
     }
+    stderrFeeder.feed(chunk);
   });
 
   child.on("close", async (code) => {
+    stdoutFeeder.flush();
+    stderrFeeder.flush();
     const result = buildTaskResult(
       code,
       Buffer.concat(outputChunks).toString("utf-8"),

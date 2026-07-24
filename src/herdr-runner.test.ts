@@ -6,7 +6,7 @@ import type * as HerdrRunnerModule from "./herdr-runner";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
-const { HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
+const { HerdrError } = (await import("./herdr")) as typeof HerdrModule;
 const {
   taskTabLabel,
   toAgentName,
@@ -16,7 +16,7 @@ const {
   waitForHerdrTask,
   startHerdrTask,
   stopHerdrTask,
-} = (await import("./herdr-runner.ts")) as typeof HerdrRunnerModule;
+} = (await import("./herdr-runner")) as typeof HerdrRunnerModule;
 
 test("taskTabLabel formats the tab label as ctw:<project>:#<number>", () => {
   assert.equal(taskTabLabel("my-app", 123), "ctw:my-app:#123");

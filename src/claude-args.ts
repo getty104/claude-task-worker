@@ -1,7 +1,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { RunMode } from "./user-config.js";
+import type { RunMode } from "./user-config";
 
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
 // herdr モードは herdr タブ内の TUI セッション。どちらも応答するユーザーは常駐しない）。

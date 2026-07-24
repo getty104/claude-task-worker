@@ -73,6 +73,62 @@ function formatTime(date: Date): string {
   return `${h}:${m}:${s}`;
 }
 
+/**
+ * 罫線付きテーブルを組み立てる汎用ヘルパー。列幅はヘッダーと全行の表示幅から算出し、
+ * 全角を幅2として桁揃えする。`groups` は行グループの配列で、空でないグループの境目に
+ * 区切り罫線を引く（タスクテーブルの実行中/完了セクションの区切りに使う）。
+ */
+function renderBoxTable(headers: string[], groups: string[][][]): string[] {
+  const allRows = groups.flat();
+  const widths = headers.map((h, i) =>
+    Math.max(1, getDisplayWidth(h), ...allRows.map((r) => getDisplayWidth(r[i] ?? ""))),
+  );
+
+  const border = (l: string, m: string, r: string) => `${l}${widths.map((w) => "─".repeat(w + 2)).join(m)}${r}`;
+  const row = (cells: string[]) => `│ ${cells.map((c, i) => padToWidth(c ?? "", widths[i])).join(" │ ")} │`;
+
+  const lines: string[] = [];
+  lines.push(border("┌", "┬", "┐"));
+  lines.push(row(headers));
+  lines.push(border("├", "┼", "┤"));
+
+  const nonEmpty = groups.filter((g) => g.length > 0);
+  nonEmpty.forEach((group, gi) => {
+    if (gi > 0) lines.push(border("├", "┼", "┤"));
+    for (const r of group) lines.push(row(r));
+  });
+
+  lines.push(border("└", "┴", "┘"));
+  return lines;
+}
+
+/** タスクテーブル/ログテーブルで表示する既定の最大件数。 */
+export const TASK_DISPLAY_LIMIT = 20;
+export const LOG_DISPLAY_LIMIT = 20;
+
+/** タスクの「直近さ」の基準時刻。完了は finishedAt、実行中は startedAt。 */
+function taskRecency(t: TaskTableEntry): number {
+  return (t.finishedAt ?? t.startedAt).getTime();
+}
+
+/**
+ * 表示するタスクを「直近 limit 件」に絞り込む純粋関数。同じ Issue/PR（id）は
+ * 呼び出し元の Map で既に一意化されている前提だが、二重登録に備えて id で重複排除し
+ * 最新のものだけを残す。実行中タスクを先頭に、その下を直近順（新しい順）に並べ、
+ * 合計 limit 件で打ち切る。
+ */
+export function selectRecentTasks(entries: TaskTableEntry[], limit: number = TASK_DISPLAY_LIMIT): TaskTableEntry[] {
+  // id で重複排除（後勝ち＝最新を残す）
+  const byId = new Map<number, TaskTableEntry>();
+  for (const e of entries) byId.set(e.id, e);
+  const unique = [...byId.values()];
+
+  const running = unique.filter((t) => t.status === "running").sort((a, b) => taskRecency(b) - taskRecency(a));
+  const finished = unique.filter((t) => t.status !== "running").sort((a, b) => taskRecency(b) - taskRecency(a));
+
+  return [...running, ...finished].slice(0, limit);
+}
+
 /** ステータステーブルの各行を組み立てる。副作用を持たないのでそのままテストできる。 */
 export function buildTaskTableLines(entries: TaskTableEntry[], now: Date = new Date()): string[] {
   if (entries.length === 0) return [];
@@ -83,91 +139,88 @@ export function buildTaskTableLines(entries: TaskTableEntry[], now: Date = new D
   const maxTitleWidth = 40;
   const maxPathWidth = 40;
 
-  const runningRows = runningTasks.map((t) => ({
-    id: `#${t.id}`,
-    title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
-    worker: t.workerName,
-    path: t.path ? (t.path.length > maxPathWidth ? truncateToWidth(t.path, maxPathWidth) : t.path) : "",
-    // herdr モードでは agent ステータス（working / blocked 等）を併記し、
-    // 人の介入が必要な blocked にも気づけるようにする。
-    status: t.agentStatus ? `${t.status}:${t.agentStatus}` : t.status,
-    time: formatTime(t.startedAt),
-    duration: formatDuration(t.startedAt, now),
-  }));
+  const truncTitle = (s: string) => (getDisplayWidth(s) > maxTitleWidth ? truncateToWidth(s, maxTitleWidth) : s);
+  const truncPath = (p?: string) =>
+    p ? (getDisplayWidth(p) > maxPathWidth ? truncateToWidth(p, maxPathWidth) : p) : "";
 
-  const finishedRows = finishedTasks.map((t) => ({
-    id: `#${t.id}`,
-    title: getDisplayWidth(t.title) > maxTitleWidth ? truncateToWidth(t.title, maxTitleWidth) : t.title,
-    worker: t.workerName,
-    path: t.path ? (t.path.length > maxPathWidth ? truncateToWidth(t.path, maxPathWidth) : t.path) : "",
-    status: t.status,
-    time: formatTime(t.finishedAt ?? t.startedAt),
-    duration: formatDuration(t.startedAt, t.finishedAt ?? now),
-  }));
+  const hasPath = entries.some((t) => truncPath(t.path) !== "");
 
-  // 列幅の算出は全行を対象にするが、セクションの振り分けには使わない。
   // status 文字列は herdr モードで `running:working` のように装飾されるため、
-  // 表示値で running か否かを判定すると実行中タスクが完了セクションへ紛れ込む。
-  const allRows = [...runningRows, ...finishedRows];
+  // 表示値ではなく status フィールドで実行中/完了のセクション振り分けを行う。
+  const runningRows = runningTasks.map((t) =>
+    taskRow(
+      t,
+      truncTitle(t.title),
+      truncPath(t.path),
+      hasPath,
+      t.agentStatus ? `${t.status}:${t.agentStatus}` : t.status,
+      formatTime(t.startedAt),
+      formatDuration(t.startedAt, now),
+    ),
+  );
+  const finishedRows = finishedTasks.map((t) =>
+    taskRow(
+      t,
+      truncTitle(t.title),
+      truncPath(t.path),
+      hasPath,
+      t.status,
+      formatTime(t.finishedAt ?? t.startedAt),
+      formatDuration(t.startedAt, t.finishedAt ?? now),
+    ),
+  );
 
-  const hasPath = allRows.some((r) => r.path !== "");
+  const headers = hasPath
+    ? ["#", "Title", "Worker", "Worktree", "Status", "Time", "Duration"]
+    : ["#", "Title", "Worker", "Status", "Time", "Duration"];
 
-  const colWidths = {
-    id: Math.max(3, ...allRows.map((r) => r.id.length)),
-    title: Math.max(5, ...allRows.map((r) => getDisplayWidth(r.title))),
-    worker: Math.max(6, ...allRows.map((r) => r.worker.length)),
-    ...(hasPath ? { path: Math.max(8, ...allRows.map((r) => r.path.length)) } : {}),
-    status: Math.max(6, ...allRows.map((r) => r.status.length)),
-    time: Math.max(4, ...allRows.map((r) => r.time.length)),
-    duration: Math.max(8, ...allRows.map((r) => r.duration.length)),
-  };
+  return renderBoxTable(headers, [runningRows, finishedRows]);
+}
 
-  const pad = (s: string, w: number, useDisplayWidth = false) =>
-    useDisplayWidth ? padToWidth(s, w) : s + " ".repeat(w - s.length);
-  const cols = hasPath
-    ? [
-        colWidths.id,
-        colWidths.title,
-        colWidths.worker,
-        colWidths.path!,
-        colWidths.status,
-        colWidths.time,
-        colWidths.duration,
-      ]
-    : [colWidths.id, colWidths.title, colWidths.worker, colWidths.status, colWidths.time, colWidths.duration];
-  const line = (l: string, m: string, r: string, f: string) => `${l}${cols.map((w) => f.repeat(w + 2)).join(m)}${r}`;
+function taskRow(
+  t: TaskTableEntry,
+  title: string,
+  path: string,
+  hasPath: boolean,
+  status: string,
+  time: string,
+  duration: string,
+): string[] {
+  return hasPath
+    ? [`#${t.id}`, title, t.workerName, path, status, time, duration]
+    : [`#${t.id}`, title, t.workerName, status, time, duration];
+}
 
-  const row = (
-    id: string,
-    title: string,
-    worker: string,
-    path: string,
-    status: string,
-    time: string,
-    duration: string,
-  ) =>
-    hasPath
-      ? `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(path, colWidths.path!)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`
-      : `│ ${pad(id, colWidths.id)} │ ${pad(title, colWidths.title, true)} │ ${pad(worker, colWidths.worker)} │ ${pad(status, colWidths.status)} │ ${pad(time, colWidths.time)} │ ${pad(duration, colWidths.duration)} │`;
+/** ログテーブル1行分。実行中タスクの標準出力/エラー出力の1行に対応する。 */
+export interface LogTableEntry {
+  id: number;
+  stream: string;
+  text: string;
+  time: Date;
+}
 
-  const lines: string[] = [];
-  lines.push(line("┌", "┬", "┐", "─"));
-  lines.push(row("#", "Title", "Worker", "Worktree", "Status", "Time", "Duration"));
-  lines.push(line("├", "┼", "┤", "─"));
+// ANSI エスケープ・制御文字はテーブルの桁揃えを壊すため除去する。
+// eslint-disable-next-line no-control-regex -- ANSI/制御文字を意図的に対象にする
+const CONTROL_CHARS = /\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x08\x0b-\x1f\x7f]/g;
 
-  for (const r of runningRows) {
-    lines.push(row(r.id, r.title, r.worker, r.path, r.status, r.time, r.duration));
-  }
+function sanitizeLogText(text: string): string {
+  return text.replace(CONTROL_CHARS, " ").replace(/\t/g, " ");
+}
 
-  if (runningRows.length > 0 && finishedRows.length > 0) {
-    lines.push(line("├", "┼", "┤", "─"));
-  }
+/** 実行中タスクの標準出力/エラー出力のログをテーブルに組み立てる純粋関数。 */
+export function buildLogTableLines(entries: LogTableEntry[]): string[] {
+  if (entries.length === 0) return [];
 
-  for (const r of finishedRows) {
-    lines.push(row(r.id, r.title, r.worker, r.path, r.status, r.time, r.duration));
-  }
+  const maxTextWidth = 100;
+  const rows = entries.map((e) => {
+    const text = sanitizeLogText(e.text);
+    return [
+      formatTime(e.time),
+      `#${e.id}`,
+      e.stream,
+      getDisplayWidth(text) > maxTextWidth ? truncateToWidth(text, maxTextWidth) : text,
+    ];
+  });
 
-  lines.push(line("└", "┴", "┘", "─"));
-
-  return lines;
+  return renderBoxTable(["Time", "#", "Stream", "Log"], [rows]);
 }

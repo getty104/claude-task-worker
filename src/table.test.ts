@@ -5,8 +5,8 @@ import type * as TableModule from "./table";
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { getDisplayWidth, truncateToWidth, padToWidth, buildTaskTableLines } =
-  (await import("./table.ts")) as typeof TableModule;
+const { getDisplayWidth, truncateToWidth, padToWidth, buildTaskTableLines, selectRecentTasks, buildLogTableLines } =
+  (await import("./table")) as typeof TableModule;
 
 test("getDisplayWidth returns 0 for empty string", () => {
   assert.equal(getDisplayWidth(""), 0);
@@ -293,8 +293,130 @@ test("buildTaskTableLines shows the worktree column only when some task has a pa
   assert.doesNotMatch(withoutPath.join("\n"), /Worktree/);
 });
 
+test("buildTaskTableLines truncates a full-width path by display width, not JS string length", () => {
+  // 全角文字を22個 + ASCII前置き "a/" で JS 文字列長は24（40以下）だが、
+  // 表示幅は 2 + 22*2 = 46 で maxPathWidth(40) を超える。
+  const path = "a/" + "日".repeat(22);
+  assert.ok(path.length <= 40);
+  assert.ok(getDisplayWidth(path) > 40);
+
+  const lines = buildTaskTableLines([task({ id: 1, status: "running", path })], NOW);
+
+  const widths = new Set(lines.map((l) => getDisplayWidth(l)));
+  assert.equal(widths.size, 1);
+});
+
 test("buildTaskTableLines measures elapsed time against the supplied clock", () => {
   const lines = buildTaskTableLines([task({ id: 1, status: "running" })], NOW);
 
   assert.match(dataRows(lines)[0], /0m 30s/);
+});
+
+// --- selectRecentTasks ---
+
+function at(iso: string): Date {
+  return new Date(iso);
+}
+
+test("selectRecentTasks caps the list at the given limit", () => {
+  const entries = Array.from({ length: 30 }, (_, i) =>
+    task({ id: i, status: "completed", finishedAt: at(`2026-07-20T12:00:${String(i).padStart(2, "0")}`) }),
+  );
+
+  assert.equal(selectRecentTasks(entries, 20).length, 20);
+});
+
+test("selectRecentTasks dedupes by id, keeping the last (most recent) entry", () => {
+  const selected = selectRecentTasks([
+    task({ id: 5, status: "completed", finishedAt: at("2026-07-20T12:00:00") }),
+    task({ id: 5, status: "running", startedAt: at("2026-07-20T12:05:00") }),
+  ]);
+
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].status, "running");
+});
+
+test("selectRecentTasks lists running tasks ahead of finished ones", () => {
+  const selected = selectRecentTasks([
+    task({ id: 1, status: "completed", finishedAt: at("2026-07-20T12:10:00") }),
+    task({ id: 2, status: "running", startedAt: at("2026-07-20T12:00:00") }),
+  ]);
+
+  assert.deepEqual(
+    selected.map((t) => t.id),
+    [2, 1],
+  );
+});
+
+test("selectRecentTasks orders finished tasks newest-first by finish time", () => {
+  const selected = selectRecentTasks([
+    task({ id: 1, status: "completed", finishedAt: at("2026-07-20T12:00:00") }),
+    task({ id: 2, status: "completed", finishedAt: at("2026-07-20T12:05:00") }),
+    task({ id: 3, status: "failed", finishedAt: at("2026-07-20T12:02:00") }),
+  ]);
+
+  assert.deepEqual(
+    selected.map((t) => t.id),
+    [2, 3, 1],
+  );
+});
+
+test("selectRecentTasks keeps the most recent 20 finished tasks when over the limit", () => {
+  const entries = Array.from({ length: 25 }, (_, i) =>
+    task({ id: i, status: "completed", finishedAt: at(`2026-07-20T12:${String(i).padStart(2, "0")}:00`) }),
+  );
+
+  const selectedIds = selectRecentTasks(entries, 20).map((t) => t.id);
+  // 最も古い #0..#4 が落ち、直近の #24 が先頭に来る
+  assert.equal(selectedIds[0], 24);
+  assert.ok(!selectedIds.includes(0));
+  assert.ok(!selectedIds.includes(4));
+});
+
+// --- buildLogTableLines ---
+
+type LogTableEntry = TableModule.LogTableEntry;
+
+function log(overrides: Partial<LogTableEntry> & Pick<LogTableEntry, "id" | "text">): LogTableEntry {
+  return {
+    stream: "stdout",
+    time: at("2026-07-20T12:00:05"),
+    ...overrides,
+  };
+}
+
+test("buildLogTableLines returns no lines when there are no logs", () => {
+  assert.deepEqual(buildLogTableLines([]), []);
+});
+
+test("buildLogTableLines renders a header with the log columns", () => {
+  const lines = buildLogTableLines([log({ id: 1, text: "hello" })]);
+
+  assert.match(lines.join("\n"), /Time.*#.*Stream.*Log/);
+});
+
+test("buildLogTableLines renders the id, stream and text of each entry", () => {
+  const lines = buildLogTableLines([log({ id: 42, stream: "stderr", text: "boom happened" })]).join("\n");
+
+  assert.match(lines, /#42/);
+  assert.match(lines, /stderr/);
+  assert.match(lines, /boom happened/);
+});
+
+test("buildLogTableLines strips ANSI/control chars so the table stays aligned", () => {
+  const lines = buildLogTableLines([log({ id: 1, text: "\x1b[31mred\x1b[0m\ttab" })]);
+
+  const joined = lines.join("\n");
+  assert.ok(!joined.includes("\x1b"));
+  assert.match(joined, /red/);
+  // 全行の表示幅が揃っている（制御文字が幅計算を狂わせていない）
+  const widths = new Set(lines.map((l) => getDisplayWidth(l)));
+  assert.equal(widths.size, 1);
+});
+
+test("buildLogTableLines keeps every row the same display width with wide characters", () => {
+  const lines = buildLogTableLines([log({ id: 1, text: "ascii line" }), log({ id: 2, text: "日本語のログ行" })]);
+
+  const widths = new Set(lines.map((l) => getDisplayWidth(l)));
+  assert.equal(widths.size, 1);
 });
