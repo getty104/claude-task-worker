@@ -25,6 +25,21 @@ export function taskTabLabel(projectName: string, number: number): string {
   return `ctw:${projectName}:#${number}`;
 }
 
+// `herdr agent start <name>` の agent 名は「小文字始まり・小文字/数字/'-'/'_' のみ・1〜32文字」に
+// 制限される（違反すると invalid_agent_name で起動が失敗する）。タブラベル（`ctw:<project>:#<n>`）は
+// `:` や `#` を含むためそのままでは使えないので、無効文字を `-` へ潰して規則に合う名前へ変換する。
+// 純粋関数として export し、ユニットテストで規則違反を検証できるようにする。
+export function toAgentName(label: string): string {
+  const sanitized = label
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-") // 無効文字（`:` `#` 全角など）を `-` へ
+    .replace(/-+/g, "-") // 連続する `-` を1つに畳む
+    .replace(/^[-_]+/, ""); // 先頭の `-`/`_` を除去（小文字始まりを保証する下ごしらえ）
+  // 先頭が小文字英字でなければ（数字始まり・空になった場合含む）接頭辞を足して規則を満たす。
+  const withLeadingLetter = /^[a-z]/.test(sanitized) ? sanitized : `ctw-${sanitized}`;
+  return withLeadingLetter.slice(0, 32).replace(/[-_]+$/, "");
+}
+
 // 完了判定の状態。TUI は起動直後 unknown / idle を経てから working になるため、
 // 「一度 working を観測してから idle になった」ことを完了条件にする。
 // idle 単独を完了とみなすと、起動直後のプロンプト表示前に完了と誤判定してしまう。
@@ -121,7 +136,8 @@ export interface StartTiming {
  * herdr のタスク専用タブで claude を TUI 起動する（1タスク=1タブ）。
  *
  * `--no-focus` でタスク専用タブを作り、その**ルートペイン（シェル）で** `herdr agent start`
- * を使って claude を起動する。`agent start <label> --kind claude --pane <id> -- <args>` は、
+ * を使って claude を起動する。`agent start <name> --kind claude --pane <id> -- <args>` は（name は
+ * ラベルを agent 名規則へ変換した `toAgentName(label)`）、
  * ペインのシェルで claude を起動し、agent として検出され入力待ちになるまで同期的にブロックする
  * （旧 send-text 方式の「起動コマンド送信 → 自動検出待ちポーリング」を1コマンドで担う）。
  * `--kind claude` が実行ファイルを供給するため、`args` には claude のフラグだけを渡す
@@ -167,7 +183,8 @@ export async function startHerdrTask({
     if (!ready) {
       console.warn(`[herdr-runner] pane ${paneId} produced no prompt before the timeout, launching anyway`);
     }
-    await mod.agentStart(paneId, { name: label, args, readyTimeoutMs: timing?.agentStartReadyTimeoutMs });
+    // agent 名はラベルと違い文字種が厳しく制限されるため、ラベルから規則に合う名前へ変換して渡す。
+    await mod.agentStart(paneId, { name: toAgentName(label), args, readyTimeoutMs: timing?.agentStartReadyTimeoutMs });
   } catch (err) {
     // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
     await mod.tabClose(tabId).catch(() => {});

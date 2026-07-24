@@ -9,6 +9,7 @@ import type * as HerdrRunnerModule from "./herdr-runner";
 const { HerdrError } = (await import("./herdr.ts")) as typeof HerdrModule;
 const {
   taskTabLabel,
+  toAgentName,
   createCompletionTracker,
   observeAgentStatus,
   buildHerdrTaskResult,
@@ -19,6 +20,29 @@ const {
 
 test("taskTabLabel formats the tab label as ctw:<project>:#<number>", () => {
   assert.equal(taskTabLabel("my-app", 123), "ctw:my-app:#123");
+});
+
+const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+
+test("toAgentName converts a task tab label into a valid herdr agent name", () => {
+  // `:` と `#` を含むラベルは agent 名規則に違反するため潰されること。
+  assert.equal(toAgentName(taskTabLabel("my-app", 123)), "ctw-my-app-123");
+  assert.match(toAgentName(taskTabLabel("my-app", 123)), AGENT_NAME_RE);
+});
+
+test("toAgentName satisfies the herdr agent name rules for tricky inputs", () => {
+  // 大文字・全角・記号を含む、数字始まり、先頭記号、超長文字列でも規則を満たす。
+  const cases = [
+    taskTabLabel("Dementia_App", 12),
+    taskTabLabel("プロジェクト", 7),
+    taskTabLabel("123numeric", 9),
+    taskTabLabel("a".repeat(60), 999999),
+    "###",
+  ];
+  for (const label of cases) {
+    const name = toAgentName(label);
+    assert.match(name, AGENT_NAME_RE, `"${label}" -> "${name}" should be a valid agent name`);
+  }
 });
 
 test("observeAgentStatus only completes after a working status has been seen", () => {
@@ -253,7 +277,7 @@ test("startHerdrTask launches claude into the task tab's root shell pane via age
   // ルートペインがそのまま claude のペインになる（余剰シェルペインの paneClose は不要）。
   assert.deepEqual(task, { paneId: "pane-root", tabId: "tab-task" });
   // タブ作成 → ルートペインで agent start、の順。args には実行ファイル claude は含めない。
-  assert.deepEqual(calls, ["tabCreate:ctw:my-app:#12:/tmp/worktree", "agentStart:pane-root:ctw:my-app:#12:/skill 12"]);
+  assert.deepEqual(calls, ["tabCreate:ctw:my-app:#12:/tmp/worktree", "agentStart:pane-root:ctw-my-app-12:/skill 12"]);
 });
 
 // agent start は検出できなければ herdr がエラーを返す（起動失敗・プリアンブル失敗など）。
@@ -265,7 +289,7 @@ test("startHerdrTask closes the task tab when agent start fails", async () => {
   // シェルだけのタブを残さない。
   assert.deepEqual(calls, [
     "tabCreate:ctw:my-app:#12:/tmp/worktree",
-    "agentStart:pane-root:ctw:my-app:#12:",
+    "agentStart:pane-root:ctw-my-app-12:",
     "tabClose:tab-task",
   ]);
 });
