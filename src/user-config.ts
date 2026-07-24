@@ -10,13 +10,8 @@ export type RunMode = "default" | "herdr";
 
 export const DEFAULT_RUN_MODE: RunMode = "default";
 
-// `headroom` が true のとき、タスクの claude を `headroom wrap claude` 経由で起動する
-// （Headroom のプロキシにAPI呼び出しを通してコンテキストを圧縮する）。既定は無効。
-export const DEFAULT_HEADROOM = false;
-
 export interface UserConfig {
   mode: RunMode;
-  headroom: boolean;
   projects: Record<string, string>;
   projectGroups: Record<string, string[]>;
 }
@@ -85,14 +80,6 @@ function parseMode(raw: Record<string, unknown>, path: string): RunMode {
   return DEFAULT_RUN_MODE;
 }
 
-function parseHeadroom(raw: Record<string, unknown>, path: string): boolean {
-  if (!("headroom" in raw)) return DEFAULT_HEADROOM;
-  const value = raw["headroom"];
-  if (typeof value === "boolean") return value;
-  console.warn(`[config] invalid headroom: ${JSON.stringify(value)} in ${path}, using ${DEFAULT_HEADROOM}`);
-  return DEFAULT_HEADROOM;
-}
-
 export function loadUserConfig(): UserConfig {
   const path = getUserConfigPath();
   const raw = readRawConfig();
@@ -121,7 +108,6 @@ export function loadUserConfig(): UserConfig {
   }
 
   const mode = parseMode(raw, path);
-  const headroom = parseHeadroom(raw, path);
   const rawProjects = raw["projects"] as Record<string, unknown>;
   const rawProjectGroups = ("projectGroups" in raw ? raw["projectGroups"] : {}) as Record<string, unknown>;
 
@@ -178,7 +164,7 @@ export function loadUserConfig(): UserConfig {
     projectGroups[groupName] = members;
   }
 
-  return { mode, headroom, projects, projectGroups };
+  return { mode, projects, projectGroups };
 }
 
 // mode はプロセス起動時に確定させる。実行中に設定ファイルが書き換わっても、
@@ -200,51 +186,20 @@ export function resetRunModeCache(): void {
 
 // ワーカーは `--project` 無しでも起動されるため、設定ファイルが無い・projects セクションが
 // 壊れているといった理由で実行形態の判定に失敗させない。mode だけを取り出し、
-// 判定できない場合は "default" を返す。
+// 判定できない場合は "default" を返す。設定ファイルが無い・壊れている場合は既定へ倒す。
 function readRunMode(): RunMode {
-  const raw = readTopLevelConfig(`using "${DEFAULT_RUN_MODE}" mode`);
-  if (raw === undefined) return DEFAULT_RUN_MODE;
-  return parseMode(raw, getUserConfigPath());
-}
-
-// headroom も mode と同じくプロセス起動時に確定させる。実行中に設定ファイルが
-// 書き換わっても、同一プロセス内で「headroom 経由で起動したタスク」と
-// 「直接起動したタスク」が混在しないようにするため。
-let cachedHeadroom: boolean | undefined;
-
-export function getHeadroomEnabled(): boolean {
-  if (cachedHeadroom === undefined) {
-    cachedHeadroom = readHeadroom();
-  }
-  return cachedHeadroom;
-}
-
-// テスト用。設定ファイルを差し替えて再解決させる。
-export function resetHeadroomCache(): void {
-  cachedHeadroom = undefined;
-}
-
-function readHeadroom(): boolean {
-  const raw = readTopLevelConfig(`using headroom=${DEFAULT_HEADROOM}`);
-  if (raw === undefined) return DEFAULT_HEADROOM;
-  return parseHeadroom(raw, getUserConfigPath());
-}
-
-// トップレベルのスカラー設定（mode / headroom）を読み出すための共通処理。
-// 設定ファイルが無い・壊れている場合は undefined を返し、呼び出し側に既定値を使わせる。
-function readTopLevelConfig(fallbackDescription: string): Record<string, unknown> | undefined {
   let raw: Record<string, unknown> | undefined;
   try {
     raw = readRawConfig();
   } catch (err) {
-    console.warn(`[config] failed to read config file, ${fallbackDescription}: ${err}`);
-    return undefined;
+    console.warn(`[config] failed to read config file, using "${DEFAULT_RUN_MODE}" mode: ${err}`);
+    return DEFAULT_RUN_MODE;
   }
-  if (raw === undefined) return undefined;
+  if (raw === undefined) return DEFAULT_RUN_MODE;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return undefined;
+    return DEFAULT_RUN_MODE;
   }
-  return raw;
+  return parseMode(raw, getUserConfigPath());
 }
 
 // herdr モードのタブラベル（ctw:<project>:#<n>）に使うプロジェクト名を、

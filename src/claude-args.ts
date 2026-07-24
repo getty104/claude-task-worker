@@ -99,70 +99,13 @@ export interface ClaudeInvocation {
   prompt: string;
   model: string;
   effort: string;
-  // Headroom 経由で起動するか（`--model` への `[1m]` 付与を左右する。後述の
-  // `withContext1mSuffix()` 参照）。
-  headroom?: boolean;
 }
 
 export const CLAUDE_COMMAND = "claude";
-export const HEADROOM_COMMAND = "headroom";
-
-// `headroom wrap claude` 自身のオプション（`--` より **前** に置く。`--` の後ろは
-// すべて claude へ素通しされるため、ここへ置くと headroom に解釈されず無視される）。
-//
-// - `--1m`: 1M コンテキストウィンドウを要求させる。ただし headroom 側の実装は
-//   **`ANTHROPIC_MODEL=<model>[1m]` を起動プロセスへセットするだけ**で、claude CLI の
-//   `--model` は環境変数より優先されるため、ワーカーのように `--model` を明示指定する
-//   起動ではこのフラグ単体では効かない（`withContext1mSuffix()` 参照）。実際に効かせて
-//   いるのは `--model` 側のサフィックスで、このフラグは `--model` を渡さなくなった場合の
-//   保険として残してある。
-// - `--memory`: セッション横断の永続メモリを有効化する。
-// - `--no-tokensave`: tokensave MCP の登録を止める。**コンテキスト削減が目的ではない**
-//   （後述）。狙いは次の2つ:
-//     1. headroom はタスク起動のたびに `_setup_tokensave_mcp(..., force=True)` で再登録＋
-//        プロジェクトの再インデックス（`_index_tokensave_project()`）を走らせる。ワーカーは
-//        Issue ごとにプロセスを立ち上げるため、この往復がタスク数だけ積み上がる
-//     2. 登録先が `~/.claude.json` の**トップレベル** `mcpServers` なので、ワーカーの都合で
-//        ユーザーのグローバル設定（＝対話セッション）まで書き換わる
-//   コード探索はプラグインの codegraph MCP（`plugin/.mcp.json`）が担い、`SYSTEM_PROMPT` の
-//   探索方針もそちらを指しているため、機能面の損失もない。
-//   **tokensave は headroom の既定で登録される**ため、`--code-graph`（＝「今すぐ index を
-//   張れ」）を外すだけでは止まらず、この明示的なオプトアウトが要る。ledger
-//   （`~/.headroom/mcp_installs.json`）が headroom によるインストールを証明する場合は、
-//   既存エントリの削除も headroom 側が行う。
-//
-//   なお tokensave はツールを81個公開しており schema は約 15.7k tokens 相当だが、これが
-//   そのままコンテキストに載るわけではない。headroom は `ENABLE_TOOL_SEARCH=true` を立てて
-//   Claude Code のオンデマンドツール読み込みを有効にするため、MCP のツールスキーマは
-//   リクエストに載らず名前だけが遅延解決される。**同一条件の A/B で実測した差は
-//   11 bytes / 3 tokens**（tokensave 有り: content-length 114,638・tok_before 13,029 →
-//   無し: 114,627・13,026）。コンテキスト肥大の主因は MCP ではなく、遅延できない組み込み
-//   ツールの schema（proxy ログの `tool_search_deferral:15tools:12663tok`）である。
-// - `--no-serena`: Serena MCP のバックアップ登録を止める。headroom の
-//   `_setup_coding_compressor()` は tokensave が無効だと Serena を代替として登録するため、
-//   `--no-tokensave` だけでは別の MCP に置き換わり、上記2つの狙いがどちらも達成できない。
-//
-// `--code-graph` は渡さない（`--no-tokensave` と矛盾する。上記参照）。
-export const HEADROOM_WRAP_OPTIONS = ["--1m", "--memory", "--no-tokensave", "--no-serena"] as const;
-
-// Claude Code は model id が `[1m]` で終わる場合にのみ `context-1m` beta ヘッダを送り、
-// 1M コンテキストウィンドウを解放する。headroom の `--1m` は ANTHROPIC_MODEL 経由でしか
-// これを行わず、CLI の `--model` が環境変数に勝つため、ワーカー起動では素通しされていた
-// （proxy のリクエストログで `context-1m` ヘッダが欠落していることを実測で確認済み）。
-// 付ける側を `--model` の値へ移すことで、`--model` を明示していても 1M window が効く。
-//
-// エイリアス（`sonnet` / `opus`）にそのまま連結してよい。`--model 'sonnet[1m]'` でも
-// `context-1m-2025-08-07` ヘッダが送出されることを実測で確認しており、エイリアスから
-// フルモデルIDへの変換表を持つ必要はない（持つと新モデル追加のたびに陳腐化する）。
-const CONTEXT_1M_SUFFIX = "[1m]";
-
-export function withContext1mSuffix(model: string): string {
-  return model.endsWith(CONTEXT_1M_SUFFIX) ? model : `${model}${CONTEXT_1M_SUFFIX}`;
-}
 
 // claude の起動引数を組み立てる。モードによる差は `-p`（非対話 print モード）の有無だけで、
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
-export function buildClaudeArgs({ mode, prompt, model, effort, headroom }: ClaudeInvocation): string[] {
+export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
   return [
     ...(mode === "herdr" ? [] : ["-p"]),
     prompt,
@@ -173,7 +116,7 @@ export function buildClaudeArgs({ mode, prompt, model, effort, headroom }: Claud
     "--append-system-prompt",
     SYSTEM_PROMPT,
     "--model",
-    headroom ? withContext1mSuffix(model) : model,
+    model,
     "--effort",
     effort,
   ];
@@ -187,37 +130,13 @@ export interface ClaudeExecution {
 /**
  * タスクを起動する実行可能ファイルと引数を組み立てる。
  *
- * `headroom` が有効な場合は
- * `headroom wrap claude <HEADROOM_WRAP_OPTIONS> -- <claude の引数>` になる
- * （Headroom がプロキシを起動し、`ANTHROPIC_BASE_URL` を差し替えて claude を起動する）。
- *
- * **`--` の区切りは必須**。`headroom wrap claude` は自前のオプション
- * （`--port` / `--memory` / `--no-mcp` / `--1m` 等）を持ち、`-p` のように headroom 側の
- * 解釈と衝突しうるフラグは `--` の後ろに置かないと claude まで届かない
- * （headroom のヘルプも `headroom wrap claude -- -p` を print モードの例として挙げている）。
- * 未知フラグのパススルーに頼らず全引数を `--` の後ろへ置くことで、将来 headroom 側に
- * 追加されたオプションと `buildClaudeArgs()` のフラグが衝突する事故も防ぐ。
- *
- * 逆に headroom 自身へ渡すオプション（`HEADROOM_WRAP_OPTIONS`）は `--` の **前** に置く。
- *
- * 1M コンテキストウィンドウの解放は headroom の `--1m` ではなく `--model` へ付ける
- * `[1m]` サフィックスが担う（`withContext1mSuffix()` 参照）。`--1m` は
- * ANTHROPIC_MODEL しか触らず、CLI の `--model` に負けるため単体では効かない。
- *
  * 実行形態（default / herdr）とは直交する。default モードでは spawn の command
- * （シェル非経由、クォート不要）に、herdr モードでは `launchAgentInPane` が
- * `[command, ...args]` の argv として組み立てる。herdr モードは send-text でシェルへ
- * 流し込むため、`shellQuoteArgv` が各トークンを quoting してシェルの解釈を無効化する。
+ * （`claude`）と引数にそのまま渡す。herdr モードでは `command`（＝claude）を agent kind、
+ * `args` を `herdr agent start ... -- <args>` の agent 引数として使う
+ * （`herdr-runner.ts` の `startHerdrTask` 参照）。
  */
 export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecution {
-  const args = buildClaudeArgs(invocation);
-  if (!invocation.headroom) {
-    return { command: CLAUDE_COMMAND, args };
-  }
-  return {
-    command: HEADROOM_COMMAND,
-    args: ["wrap", CLAUDE_COMMAND, ...HEADROOM_WRAP_OPTIONS, "--", ...args],
-  };
+  return { command: CLAUDE_COMMAND, args: buildClaudeArgs(invocation) };
 }
 
 // claude へ渡す環境変数を組み立てる。
@@ -230,42 +149,8 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
 // エージェントの状態遷移音は herdr 側の設定（`~/.config/herdr/config.toml` の
 // `[ui.sound]`）か、ワーカー用 herdr セッションを `HERDR_DISABLE_SOUND=1` 付きで
 // 起動することでしか止められない。
-//
-// `headroom` が有効なときは `HEADROOM_LOSSLESS=1` を渡して CCR（Compress-Cache-Retrieve）の
-// **retrieve ツール注入を無効化**する。これは以下の 400 エラーの根本対策:
-//
-//   API Error: 400 Tool reference 'headroom_retrieve' not found in available tools
-//
-// 原因は CodeGraph MCP の出力フォーマットと headroom の CCR マーカー正規表現の衝突。
-// CodeGraph は自前のページング用に `[N items compressed to M. Retrieve more: hash=<24hex>]`
-// という文字列を出力に埋め込むが、これは headroom の CCR マーカー検出正規表現
-// （`\[(\d+) \w+ compressed to (\d+)\. Retrieve more: hash=([a-f0-9]{24})\]`、
-// headroom の `ccr/tool_injection.py`）に**バイト単位で一致**する。ワーカーは探索に
-// CodeGraph MCP を使うため（`SYSTEM_PROMPT` の探索方針参照）、その出力を headroom の
-// プロキシが「自分が圧縮した内容」と誤検知し、`headroom_retrieve` ツールを request の
-// `tools` へ注入する。モデルは CodeGraph 出力中の "Retrieve more: hash=..." に釣られて
-// `headroom_retrieve(hash=...)` を呼ぶ（headroom の圧縮ストアにその hash は無いので
-// retrieve 自体は空振りする）。この tool_use は以降の会話履歴に残る一方、次のターンでは
-// CodeGraph のマーカーが frozen prefix 側に入り「今回の新規マーカー無し」と判定され、
-// prompt cache 保護のため retrieve ツールの再注入が見送られる。結果、履歴に残った
-// `headroom_retrieve` の tool_use がツール定義を失って宙に浮き、Anthropic API が上記 400 を返す。
-//
-// `HEADROOM_LOSSLESS=1` は headroom プロキシ起動時に `ccr_inject_tool=False` に落とすため
-// （headroom の `proxy/server.py`）、CodeGraph のマーカーを検知しても retrieve ツールを
-// 一切注入せず、この連鎖を断ち切る。単なる `HEADROOM_NO_CCR=1` と違い圧縮自体は
-// lossless（format-native compaction + marker-free SmartCrusher）で維持されるため、
-// ツール出力の情報欠落は起こさない。
-//
-// 注意: `HEADROOM_LOSSLESS` は headroom の hot-reload 対象 knob ではなく、プロキシ起動時に
-// のみ反映される。既に常駐している headroom プロキシは `headroom wrap` から再利用されて
-// この env を拾わないため、設定反映には**プロキシの再起動が一度必要**。
-export function buildClaudeEnv(mode: RunMode, headroom: boolean): Record<string, string> {
-  const env: Record<string, string> =
-    mode === "herdr"
-      ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
-      : { ...CLAUDE_SPAWN_ENV };
-  if (headroom) {
-    env.HEADROOM_LOSSLESS = "1";
-  }
-  return env;
+export function buildClaudeEnv(mode: RunMode): Record<string, string> {
+  return mode === "herdr"
+    ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
+    : { ...CLAUDE_SPAWN_ENV };
 }

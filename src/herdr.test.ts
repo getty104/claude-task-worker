@@ -13,8 +13,9 @@ const {
   paneSendText,
   paneSendKeys,
   paneRead,
-  shellQuoteArgv,
-  launchAgentInPane,
+  agentStart,
+  AGENT_KIND,
+  AGENT_START_READY_TIMEOUT_MS,
   workspaceCreate,
   HerdrError,
 } = (await import("./herdr.ts")) as typeof HerdrModule;
@@ -237,26 +238,55 @@ test("workspaceCreate resolves a relative cwd to an absolute path before handing
   assert.equal(cwdArgOf(captured.args[0]), process.cwd());
 });
 
-// send-text はペインのシェルへ生テキストを流し込むため、argv をシェルで安全に実行できる
-// 1行へ組み立てる。シングルクォート内はあらゆる文字が literal になるので、バッククォート・
-// `$`・改行・空白を含む引数もシェルに解釈されずそのまま claude へ渡る。
-test("shellQuoteArgv wraps each token in single quotes so shell metacharacters stay literal", () => {
-  assert.equal(
-    shellQuoteArgv(["claude", "--append-system-prompt", "use `git` & $HOME now"]),
-    "'claude' '--append-system-prompt' 'use `git` & $HOME now'",
+// agent start は既存ペインのシェルで claude を起動し、検出＋入力待ちになるまでブロックする。
+// 実行ファイル（claude）は --kind が供給するため、`--` の後ろへ渡すのは claude のフラグだけ。
+test("agentStart launches claude via `agent start` with the flags after --", async (t) => {
+  const captured = captureExecFileArgs(
+    t,
+    JSON.stringify({
+      result: {
+        agent: {
+          pane_id: "w1:p1",
+          tab_id: "w1:t1",
+          workspace_id: "w1",
+          agent_status: "idle",
+          agent_session: { kind: "id", value: "sess-123" },
+        },
+      },
+    }),
   );
+  const info = await agentStart("w1:p1", { name: "ctw:app:#7", args: ["--model", "sonnet", "--effort", "low"] });
+  assert.deepEqual(captured.args[0], [
+    "agent",
+    "start",
+    "ctw:app:#7",
+    "--kind",
+    AGENT_KIND,
+    "--pane",
+    "w1:p1",
+    "--timeout",
+    String(AGENT_START_READY_TIMEOUT_MS),
+    "--",
+    "--model",
+    "sonnet",
+    "--effort",
+    "low",
+  ]);
+  // 返り値は agent get と同じ AgentInfo（セッションIDを含む）へ正規化される。
+  assert.equal(info.paneId, "w1:p1");
+  assert.equal(info.agentStatus, "idle");
+  assert.equal(info.sessionId, "sess-123");
 });
 
-test("shellQuoteArgv escapes embedded single quotes", () => {
-  assert.equal(shellQuoteArgv(["echo", "it's ok"]), `'echo' 'it'\\''s ok'`);
-});
-
-// 新しい herdr の agent start は headroom ラッパーを起動できないため、タスクタブの
-// ルートペインのシェルへ起動コマンドを流し込む方式にした。send-text（クォート済みコマンド）
-// → send-keys enter の順で送る。
-test("launchAgentInPane sends the quoted command then enter to the pane shell", async (t) => {
-  const captured = captureExecFileArgs(t, "");
-  await launchAgentInPane("w1:p1", ["headroom", "wrap", "claude", "--", "-p", "run it"]);
-  assert.deepEqual(captured.args[0], ["pane", "send-text", "w1:p1", "'headroom' 'wrap' 'claude' '--' '-p' 'run it'"]);
-  assert.deepEqual(captured.args[1], ["pane", "send-keys", "w1:p1", "enter"]);
+test("agentStart throws a HerdrError when herdr reports the pane is not found", async (t) => {
+  mockExecFile(
+    t,
+    JSON.stringify({ error: { code: "agent_pane_not_found", message: "agent target pane w1:p1 not found" } }),
+    "",
+  );
+  await assert.rejects(agentStart("w1:p1", { name: "ctw:app:#7", args: [] }), (error: Error) => {
+    assert.ok(error instanceof HerdrError);
+    assert.equal((error as InstanceType<typeof HerdrError>).code, "agent_pane_not_found");
+    return true;
+  });
 });

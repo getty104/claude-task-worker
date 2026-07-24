@@ -18,8 +18,6 @@ const {
   getUserConfigPath,
   getRunMode,
   resetRunModeCache,
-  getHeadroomEnabled,
-  resetHeadroomCache,
   findProjectNameByPath,
 } = (await import("./user-config.ts")) as typeof UserConfigModule;
 
@@ -84,7 +82,6 @@ test("loadUserConfig loads a valid config.json normally", () => {
 test("resolveTargetProjects throws UserConfigError for constructor/toString requests", () => {
   const config = {
     mode: "default" as const,
-    headroom: false,
     projects: { alpha: "/tmp/alpha" },
     projectGroups: { mygroup: ["alpha"] },
   };
@@ -96,7 +93,6 @@ test("resolveTargetProjects throws UserConfigError for constructor/toString requ
 test("resolveTargetProjects resolves known projects and groups normally", () => {
   const config = {
     mode: "default" as const,
-    headroom: false,
     projects: { alpha: "/tmp/alpha", beta: "/tmp/beta" },
     projectGroups: { mygroup: ["alpha", "beta"] },
   };
@@ -142,7 +138,6 @@ test("loadUserConfig throws UserConfigError when projects contains a __proto__ k
 test("resolveTargetProjects throws UserConfigError when resolution yields no projects", () => {
   const config = {
     mode: "default" as const,
-    headroom: false,
     projects: {},
     projectGroups: { empty: [] },
   };
@@ -152,7 +147,6 @@ test("resolveTargetProjects throws UserConfigError when resolution yields no pro
 function removeConfigFile(): void {
   rmSync(getUserConfigPath(), { force: true });
   resetRunModeCache();
-  resetHeadroomCache();
 }
 
 test("loadUserConfig defaults mode to default when it is not specified", () => {
@@ -204,53 +198,6 @@ test("getRunMode caches the mode resolved on first call", () => {
   assert.equal(getRunMode(), "herdr");
   resetRunModeCache();
   assert.equal(getRunMode(), "default");
-});
-
-test("loadUserConfig defaults headroom to false when it is not specified", () => {
-  removeConfigFile();
-  writeConfigFile(JSON.stringify({ projects: { alpha: process.cwd() } }));
-  assert.equal(loadUserConfig().headroom, false);
-});
-
-test("loadUserConfig accepts headroom true", () => {
-  removeConfigFile();
-  writeConfigFile(JSON.stringify({ headroom: true, projects: { alpha: process.cwd() } }));
-  assert.equal(loadUserConfig().headroom, true);
-});
-
-test("loadUserConfig falls back to false for a non-boolean headroom", () => {
-  removeConfigFile();
-  // "true" as a string must not enable headroom silently.
-  writeConfigFile(JSON.stringify({ headroom: "true", projects: { alpha: process.cwd() } }));
-  assert.equal(loadUserConfig().headroom, false);
-});
-
-test("getHeadroomEnabled returns false when no config file exists", () => {
-  removeConfigFile();
-  assert.equal(getHeadroomEnabled(), false);
-});
-
-test("getHeadroomEnabled reads headroom from the config file", () => {
-  removeConfigFile();
-  writeConfigFile(JSON.stringify({ headroom: true, projects: {} }));
-  assert.equal(getHeadroomEnabled(), true);
-});
-
-test("getHeadroomEnabled does not fail when the projects section is broken", () => {
-  removeConfigFile();
-  writeConfigFile(JSON.stringify({ headroom: true, projects: [] }));
-  assert.equal(getHeadroomEnabled(), true);
-});
-
-test("getHeadroomEnabled caches the value resolved on first call", () => {
-  removeConfigFile();
-  writeConfigFile(JSON.stringify({ headroom: true, projects: {} }));
-  assert.equal(getHeadroomEnabled(), true);
-  // 実行中に設定ファイルが書き換わっても、同一プロセス内では最初に確定した値を保つ。
-  writeConfigFile(JSON.stringify({ headroom: false, projects: {} }));
-  assert.equal(getHeadroomEnabled(), true);
-  resetHeadroomCache();
-  assert.equal(getHeadroomEnabled(), false);
 });
 
 test("findProjectNameByPath resolves a project name from its path", () => {

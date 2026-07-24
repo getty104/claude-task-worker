@@ -97,12 +97,16 @@ export const HERDR_TIMEOUT_MS = 15 * 1000;
 
 // herdr は error 発生時も終了コード0を返すため、execFile の成否ではなく
 // stdout の JSON パース結果（parsed）と error.code の両方を呼び出し側で判定させる。
-function runHerdr(args: string[]): Promise<HerdrRawResult> {
+//
+// timeoutMs は既定 HERDR_TIMEOUT_MS。`agent start` のように herdr 側が検出完了まで
+// 同期的にブロックするコマンドは、その待機時間より長い execFile タイムアウトを渡す
+// （短いと待機の途中で execFile が SIGKILL してしまう。agentStart 参照）。
+function runHerdr(args: string[], timeoutMs: number = HERDR_TIMEOUT_MS): Promise<HerdrRawResult> {
   return new Promise((resolve) => {
     childProcess.execFile(
       "herdr",
       args,
-      { timeout: HERDR_TIMEOUT_MS, killSignal: "SIGKILL" },
+      { timeout: timeoutMs, killSignal: "SIGKILL" },
       (error, stdout, stderr) => {
         const parsed = parseHerdrResponse(stdout);
         // 大半のコマンドは終了コード0＋stdoutにJSONを返すが、一部（実測では
@@ -131,8 +135,11 @@ function parseHerdrResponse(output: string): HerdrResponse | undefined {
 // allowEmptyResult: `pane send-text` / `pane send-keys` など結果を返さない
 // fire-and-forget 系コマンド専用のフラグ。これらは成功時に空stdout・空stderr・
 // 終了コード0を返すため、空応答を正常完了として扱えるようにする。
-async function execHerdr(args: string[], options?: { allowEmptyResult?: boolean }): Promise<unknown> {
-  const { execError, parsed, stderrError, stdout, stderr } = await runHerdr(args);
+async function execHerdr(
+  args: string[],
+  options?: { allowEmptyResult?: boolean; timeoutMs?: number },
+): Promise<unknown> {
+  const { execError, parsed, stderrError, stdout, stderr } = await runHerdr(args, options?.timeoutMs);
   const stderrSuffix = stderr.trim() ? `: ${stderr.trim()}` : "";
   // 有効な error JSON が乗っているケースは execFile の失敗より優先して扱う
   // （stdout・stderr のどちらに出ていても HerdrError にして code 判定を効かせる）。
@@ -303,65 +310,86 @@ export async function workspaceFocus(workspaceId: string): Promise<void> {
   await execHerdr(["workspace", "focus", workspaceId]);
 }
 
-// argv をシェルで安全に実行できる1行へ組み立てる。各トークンをシングルクォートで囲み、
-// 内部の `'` だけを `'\''` でエスケープする。シングルクォート内はあらゆる文字が literal に
-// なるため、SYSTEM_PROMPT のようなバッククォート・`$`・改行を含む引数もシェルに解釈されず
-// そのまま claude へ渡る（`launchAgentInPane` が send-text でこの1行をシェルへ流し込む）。
-export function shellQuoteArgv(argv: string[]): string {
-  return argv.map((arg) => `'${arg.replace(/'/g, `'\\''`)}'`).join(" ");
-}
-
-// 既存ペイン（タスクタブのルートシェル）へ起動コマンドを流し込んで claude(TUI) を起動する。
-//
-// **`agent start` は使わない**。新しい herdr（0.7 系）の `agent start` は
-// `--kind <KIND>` の**正規実行ファイル**（claude なら PATH 上の `claude`）しか起動できず、
-// `headroom wrap claude ...` のようなラッパー経由の起動ができない（`--workspace`/`--tab`/
-// `--cwd`/`--env` も廃止され、`unknown option: --workspace` で失敗する）。
-// そこでルートペインのシェルへ `send-text` で起動コマンドを送り、`send-keys enter` で実行する。
-// claude は herdr の**自動エージェント検出**でそのまま agent として捕捉されるため、
-// `agent start` による明示登録は不要で、`agentGet(paneId)` が状態・セッションIDを返す
-// （cwd と env は tabCreate の `--cwd` / `--env` でシェルへ渡してあり、そこから起動する
-// claude が継承する）。シェル初期化中に送ると入力が捨てられるレースがあるため、
-// 呼び出し側は送信前にプロンプト描画を待つこと（herdr-runner の waitForPaneReady 参照）。
-export async function launchAgentInPane(paneId: string, argv: string[]): Promise<void> {
-  await paneSendText(paneId, shellQuoteArgv(argv));
-  await paneSendKeys(paneId, "enter");
-}
-
 function toAgentStatus(value: unknown): AgentStatus {
   return value === "working" || value === "idle" || value === "blocked" || value === "done" ? value : "unknown";
 }
 
-// ペインで動いているエージェントの状態を取得する。ペインが消えている場合は
-// HerdrError（code: "pane_not_found" 等）が投げられる。
-export async function agentGet(target: string): Promise<AgentInfo> {
-  const result = (await execHerdr(["agent", "get", target])) as
-    | {
-        agent?: {
-          pane_id?: string;
-          tab_id?: string;
-          workspace_id?: string;
-          agent_status?: unknown;
-          agent_session?: { kind?: unknown; value?: unknown };
-        };
-      }
-    | null
-    | undefined;
-  const agent = result?.agent;
-  if (!agent?.pane_id) {
-    throw new Error(`Failed to get agent info for ${target}: invalid response structure from herdr`);
-  }
+// `agent start` / `agent get` が返す agent オブジェクトの生形。両コマンドで同一構造。
+interface RawAgent {
+  pane_id?: string;
+  tab_id?: string;
+  workspace_id?: string;
+  agent_status?: unknown;
+  agent_session?: { kind?: unknown; value?: unknown };
+}
+
+function toAgentInfo(agent: RawAgent): AgentInfo {
   // agent_session は `kind: "id"` のときだけ claude のセッションIDが入る
   // （`kind: "path"` などセッションIDでない形も返しうるため種別で絞る）。
   const session = agent.agent_session;
   const sessionId = session?.kind === "id" && typeof session.value === "string" ? session.value : undefined;
   return {
-    paneId: agent.pane_id,
+    paneId: agent.pane_id ?? "",
     tabId: agent.tab_id ?? "",
     workspaceId: agent.workspace_id ?? "",
     agentStatus: toAgentStatus(agent.agent_status),
     sessionId,
   };
+}
+
+// `herdr agent start` の agent kind。ワーカーは常に claude を起動する。
+export const AGENT_KIND = "claude";
+
+// `agent start --timeout` へ渡す「エージェント検出＋入力待ちになるまでの待機上限」。
+// herdr の許容範囲は最大 300000ms。cold start でも取りこぼさないよう広めに取る。
+export const AGENT_START_READY_TIMEOUT_MS = 120 * 1000;
+
+// execFile 側のタイムアウトは herdr の `--timeout` の待機時間より必ず長くする
+// （短いと検出待ちの途中で execFile が SIGKILL してしまう）。その差分。
+const AGENT_START_EXEC_BUFFER_MS = 15 * 1000;
+
+// 既存ペイン（タスクタブのルートシェル）で claude(TUI) を起動する。
+//
+// `herdr agent start <name> --kind claude --pane <id> --timeout <ms> -- <args>` は、対象ペインの
+// シェルで claude を起動し、**agent として検出され入力待ちになる（interactive_ready）まで
+// 同期的にブロックする**。旧 send-text 方式の「起動コマンド送信 → 自動検出待ち」を1コマンドで
+// 担うため、呼び出し側は起動確認の別ポーリングが不要になる。検出できなければ herdr が
+// エラー（例: `agent_pane_not_found`）を返し、execHerdr が HerdrError を投げる。
+//
+// **`args` に実行ファイル（claude）は含めない**。実行ファイルは `--kind` が供給するため、
+// `--` の後ろへ渡すのは claude のフラグだけ（herdr は返り値の argv で `["claude", ...args]` と
+// 補完する）。cwd と env は tabCreate の `--cwd` / `--env` でペインへ渡してあり、そこで起動する
+// claude が継承する。呼び出し側は agent start の前にシェルプロンプトの描画を待つこと
+// （herdr-runner の waitForPaneReady 参照）。
+export async function agentStart(
+  paneId: string,
+  {
+    name,
+    args,
+    kind = AGENT_KIND,
+    readyTimeoutMs = AGENT_START_READY_TIMEOUT_MS,
+  }: { name: string; args: string[]; kind?: string; readyTimeoutMs?: number },
+): Promise<AgentInfo> {
+  const result = (await execHerdr(
+    ["agent", "start", name, "--kind", kind, "--pane", paneId, "--timeout", String(readyTimeoutMs), "--", ...args],
+    { timeoutMs: readyTimeoutMs + AGENT_START_EXEC_BUFFER_MS },
+  )) as { agent?: RawAgent } | null | undefined;
+  const agent = result?.agent;
+  if (!agent?.pane_id) {
+    throw new Error(`Failed to start agent in pane ${paneId}: invalid response structure from herdr`);
+  }
+  return toAgentInfo(agent);
+}
+
+// ペインで動いているエージェントの状態を取得する。ペインが消えている場合は
+// HerdrError（code: "pane_not_found" 等）が投げられる。
+export async function agentGet(target: string): Promise<AgentInfo> {
+  const result = (await execHerdr(["agent", "get", target])) as { agent?: RawAgent } | null | undefined;
+  const agent = result?.agent;
+  if (!agent?.pane_id) {
+    throw new Error(`Failed to get agent info for ${target}: invalid response structure from herdr`);
+  }
+  return toAgentInfo(agent);
 }
 
 // herdr は各ペインの環境に HERDR_WORKSPACE_ID / HERDR_TAB_ID / HERDR_PANE_ID を
