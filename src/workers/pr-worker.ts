@@ -12,7 +12,7 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { getHeadroomEnabled, getRunMode } from "../user-config";
+import { getRunMode } from "../user-config";
 import {
   createWorktreeFromBranch,
   deleteLocalBranch,
@@ -94,7 +94,6 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               prompt: `${command} ${pr.number}`,
               model,
               effort,
-              headroom: getHeadroomEnabled(),
             });
             run(
               execution.command,
@@ -143,7 +142,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 }
               },
               cwd,
-              buildClaudeEnv(mode, getHeadroomEnabled()),
+              buildClaudeEnv(mode),
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);

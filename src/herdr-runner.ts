@@ -3,7 +3,6 @@ import type { AgentStatus } from "./herdr";
 import type { TaskResult } from "./task-result";
 // node --experimental-strip-types は実ファイル解決を要求するため、値のimportは
 // .ts 拡張子付きにする（herdr-runner.ts はテストから直接 .ts で読み込まれる）。
-import { stripHeadroomBanner } from "./task-result.ts";
 import { readFinalReport } from "./transcript.ts";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
@@ -85,21 +84,13 @@ export function observeAgentStatus(
  * Slack 通知が切り出す末尾1000文字はほぼ TUI の装飾しか含まないため、通知本文として
  * 使い物にならない（transcript.ts 参照）。transcript を引けなかった場合のみ
  * 従来どおりペイン内容へフォールバックする。
- *
- * `headroom` が有効な場合、ペインには claude の手前に headroom の起動バナーが残りうる。
- * バナーだけのペインを「出力あり」と誤認しないよう、default モードと同じく空判定の前に
- * 取り除く（通知に載せる output は元のペイン内容のままにする）。
  */
-export function buildHerdrTaskResult(
-  paneOutput: string,
-  options?: { headroom?: boolean; report?: string },
-): TaskResult {
+export function buildHerdrTaskResult(paneOutput: string, options?: { report?: string }): TaskResult {
   const report = options?.report?.trim() ?? "";
   if (report !== "") {
     return { status: "completed", output: report };
   }
-  const meaningful = options?.headroom ? stripHeadroomBanner(paneOutput) : paneOutput;
-  if (meaningful.trim() === "") {
+  if (paneOutput.trim() === "") {
     return {
       status: "failed",
       output:
@@ -118,43 +109,37 @@ export interface HerdrTask {
 // タスクタブのルートペインにシェルプロンプトが現れるまで待つ上限。
 export const PANE_READY_TIMEOUT_MS = 30 * 1000;
 export const PANE_READY_POLL_INTERVAL_MS = 200;
-// 起動コマンド送信後、claude が herdr の自動エージェント検出で捕捉されるまで待つ上限。
-// headroom 経由の起動はプロキシ立ち上げ分だけ遅くなるため広めに取る。
-export const AGENT_DETECT_TIMEOUT_MS = 120 * 1000;
-export const AGENT_DETECT_POLL_INTERVAL_MS = 500;
 
 export interface StartTiming {
   paneReadyTimeoutMs?: number;
   paneReadyPollIntervalMs?: number;
-  agentDetectTimeoutMs?: number;
-  agentDetectPollIntervalMs?: number;
+  // `herdr agent start --timeout` へ渡す、claude 検出＋入力待ちまでの待機上限。
+  agentStartReadyTimeoutMs?: number;
 }
 
 /**
  * herdr のタスク専用タブで claude を TUI 起動する（1タスク=1タブ）。
  *
- * `--no-focus` でタスク専用タブを作り、その**ルートペイン（シェル）へ起動コマンドを
- * 流し込んで** claude を起動する（`launchAgentInPane`）。新しい herdr（0.7 系）の
- * `agent start` は `--kind` の正規実行ファイルしか起動できず `headroom wrap claude ...`
- * を起動できない（かつ `--workspace`/`--tab` が廃止され `unknown option: --workspace` で
- * 失敗する）ため、agent start は使わない。claude は herdr の自動エージェント検出で
- * そのまま捕捉されるため、`agentGet(paneId)` で状態・セッションIDを取得できる。
- *
- * ルートペインがそのまま claude のペインになるので、旧実装のような余剰シェルペインの
- * `paneClose` は不要。
+ * `--no-focus` でタスク専用タブを作り、その**ルートペイン（シェル）で** `herdr agent start`
+ * を使って claude を起動する。`agent start <label> --kind claude --pane <id> -- <args>` は、
+ * ペインのシェルで claude を起動し、agent として検出され入力待ちになるまで同期的にブロックする
+ * （旧 send-text 方式の「起動コマンド送信 → 自動検出待ちポーリング」を1コマンドで担う）。
+ * `--kind claude` が実行ファイルを供給するため、`args` には claude のフラグだけを渡す
+ * （実行ファイル名は含めない）。cwd・env は tabCreate の `--cwd` / `--env` でペインへ渡してあり、
+ * そこで起動する claude が継承する。ルートペインがそのまま claude のペインになるので、
+ * 旧実装のような余剰シェルペインの `paneClose` は不要。
  *
  * 手順:
  * 1. tabCreate（`--no-focus`）でユーザーの見ているタブに割り込まないタスク専用タブを作る
- * 2. waitForPaneReady でシェルプロンプトの描画を待つ（未描画で送ると入力が捨てられる）
- * 3. launchAgentInPane で起動コマンドを送る
- * 4. waitForAgentDetected で claude が agent として検出されるまで待つ（旧 agent start が
- *    担っていた「起動確認」の代替）。検出できなければ失敗として確定し、タブを閉じる
- *    （検出前の agent_not_found を waitForHerdrTask が握ると無限待ちになるため）
+ * 2. waitForPaneReady でシェルプロンプトの描画を待つ（未描画で agent start すると起動に失敗しうる）
+ * 3. agentStart で claude を起動し、検出＋入力待ちになるまで待つ。検出できなければ herdr が
+ *    エラーを返して agentStart が throw する（例: 起動失敗・プリアンブル失敗）。その場合は
+ *    シェルだけのタブが残らないよう閉じてから失敗させる
  */
 export async function startHerdrTask({
   label,
   cwd,
-  argv,
+  args,
   env,
   workspaceId,
   herdr,
@@ -162,7 +147,7 @@ export async function startHerdrTask({
 }: {
   label: string;
   cwd: string;
-  argv: string[];
+  args: string[];
   env?: Record<string, string>;
   workspaceId?: string;
   herdr?: typeof HerdrModule;
@@ -173,8 +158,8 @@ export async function startHerdrTask({
 
   try {
     // tabCreate 直後のペインはシェル初期化中でプロンプト未表示のことがある。その状態で
-    // 起動コマンドを送ると入力が捨てられて claude が起動しない（dispatcher の
-    // waitForPaneReady と同じレース）。描画が現れるまで待ってから送る。
+    // agent start を呼ぶと起動に失敗しうる（dispatcher の waitForPaneReady と同じレース）。
+    // 描画が現れるまで待ってから起動する。
     const ready = await waitForPaneReady(paneId, mod, {
       timeoutMs: timing?.paneReadyTimeoutMs,
       pollIntervalMs: timing?.paneReadyPollIntervalMs,
@@ -182,16 +167,7 @@ export async function startHerdrTask({
     if (!ready) {
       console.warn(`[herdr-runner] pane ${paneId} produced no prompt before the timeout, launching anyway`);
     }
-    await mod.launchAgentInPane(paneId, argv);
-    const detected = await waitForAgentDetected(paneId, mod, {
-      timeoutMs: timing?.agentDetectTimeoutMs,
-      pollIntervalMs: timing?.agentDetectPollIntervalMs,
-    });
-    if (!detected) {
-      throw new Error(
-        `claude was not detected in pane ${paneId} after launch (it may have failed to start; e.g. a skill preamble command failed)`,
-      );
-    }
+    await mod.agentStart(paneId, { name: label, args, readyTimeoutMs: timing?.agentStartReadyTimeoutMs });
   } catch (err) {
     // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
     await mod.tabClose(tabId).catch(() => {});
@@ -226,34 +202,6 @@ async function waitForPaneReady(
   }
 }
 
-// 起動コマンド送信後、claude が herdr の自動エージェント検出で捕捉される（agentGet が
-// 成功する）まで待つ。shell だけのペインでは agentGet が agent_not_found を投げるため、
-// それが解消したら検出成功とみなす。ペイン自体が消えた（pane_not_found）場合は起動不能。
-async function waitForAgentDetected(
-  paneId: string,
-  mod: typeof HerdrModule,
-  options?: { timeoutMs?: number; pollIntervalMs?: number },
-): Promise<boolean> {
-  const timeoutMs = options?.timeoutMs ?? AGENT_DETECT_TIMEOUT_MS;
-  const pollIntervalMs = options?.pollIntervalMs ?? AGENT_DETECT_POLL_INTERVAL_MS;
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      await mod.agentGet(paneId);
-      return true;
-    } catch (err) {
-      if (err instanceof mod.HerdrError && err.code === "pane_not_found") return false;
-      // agent_not_found（まだ検出前）は正常な待機継続。それ以外の想定外エラー
-      // （herdr 通信の問題など）は、waitForHerdrTask と同様にログを残してから継続する。
-      if (!(err instanceof mod.HerdrError && err.code === "agent_not_found")) {
-        console.error(`[herdr-runner] unexpected error while waiting for agent detection on pane ${paneId}: ${err}`);
-      }
-    }
-    if (Date.now() >= deadline) return false;
-    await sleep(pollIntervalMs);
-  }
-}
-
 /**
  * agent ステータスをポーリングしてタスクの完了を待ち、完了時の出力を回収する。
  * 出力は transcript の最終レポートを優先し、引けない場合だけペイン内容を使う。
@@ -272,7 +220,6 @@ export async function waitForHerdrTask(
     onBlocked?: () => void;
     onStatus?: (status: AgentStatus) => void;
     signal?: { aborted: boolean };
-    headroom?: boolean;
     // テスト用の差し替え口（既定は transcript.ts の readFinalReport）。
     readReport?: (sessionId: string | undefined) => string;
   },
@@ -319,7 +266,7 @@ export async function waitForHerdrTask(
     if (observed.decision === "completed") {
       const output = await readPaneOutput(paneId, mod);
       const report = (options?.readReport ?? readFinalReport)(sessionId);
-      return buildHerdrTaskResult(output, { headroom: options?.headroom, report });
+      return buildHerdrTaskResult(output, { report });
     }
     if (observed.decision === "blocked-first-seen") {
       options?.onBlocked?.();
