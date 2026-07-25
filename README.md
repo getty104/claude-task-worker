@@ -52,7 +52,7 @@ GitHub Issues/PRを定期ポーリングし、Claude Codeに処理を委譲す�
 | `check-dependabot` | `dependencies` (PR) | `/claude-task-worker:check-dependabot` | 1時間 |
 | `epic-issue` | `cc-epic-issue` (Issue, sub-issues が全て Close) | `/claude-task-worker:create-epic-pr` | 5分 |
 | `create-ui-design` | `cc-create-ui-design` (Issue) | `/claude-task-worker:create-ui-design` | 1分 |
-| `apply-ui-design` | `cc-ui-design-pr-created` (Issue) | `/claude-task-worker:apply-ui-design` | 1分 |
+| `apply-ui-design` | `cc-ui-design-pr-created` (Issue) | `/claude-task-worker:apply-ui-design` | 5分 |
 
 > ℹ️ Issue 系ワーカーはすべて GitHub Issue Dependencies の `-is:blocked` 検索 qualifier でサーバ側絞り込みを行うため、未解決の blockedBy Issue を持つ Issue は対象外となる。
 >
@@ -280,7 +280,7 @@ claude-task-worker init --force   # 既存ファイルを強制上書き
 
 - `.github/ISSUE_TEMPLATE/cc-triage-scope.yml` — `cc-triage-scope` ラベル付きIssue作成用テンプレート
 - `.github/workflows/assign-creator-on-cc-triage-scope.yml` — Issue作成者を自動アサインするワークフロー
-- `claude-task-worker.json` — 設定ファイル（コマンド実行ディレクトリ直下。全ワーカーのデフォルト設定と `uiDesign`（既定は無効）が書き込まれた状態で作成される）
+- `claude-task-worker.json` — 設定ファイル（コマンド実行ディレクトリ直下。`uiDesign`（既定は無効）と空の `workers` だけが書き込まれた状態で作成される）。**ワーカーごとの設定は書き出さない**。未指定のワーカーは[ワーカー別デフォルト値](#ワーカーごとの設定)にフォールバックするため、既定値を写経した設定はプラグイン更新で既定が変わっても古い値に固定され続ける。上書きしたいワーカーだけを手で追記する
 
 CodeGraph のセットアップ:
 
@@ -422,7 +422,7 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 }
 ```
 
-advisor は main モデル以上の能力を持つモデルである必要がある（Claude CLI 側の制約）。そのため `advisorModel` の既定値は、`model` が `sonnet` のワーカーは `opus`、`model` が `opus` のワーカー（`answer-issue-questions`）は空文字（＝advisor なし）にしてある。
+advisor は main モデル以上の能力を持つモデルである必要がある（Claude CLI 側の制約）。そのため `advisorModel` の既定値は、`model` が `sonnet` のワーカーは `opus`、`model` が `opus` のワーカー（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design`）は空文字（＝advisor なし）にしてある。
 
 ### exec-issue
 
@@ -511,7 +511,7 @@ advisor は main モデル以上の能力を持つモデルである必要があ
 
 ### apply-ui-design
 
-`cc-ui-design-pr-created` ラベルが付いたIssueを定期取得し、デザインPRのマージ後に `/claude-task-worker:apply-ui-design` を起動して Issue description へデザイン参照セクション（`## UIデザイン`）を書き戻す。（デフォルト1分間隔）
+`cc-ui-design-pr-created` ラベルが付いたIssueを定期取得し、デザインPRのマージ後に `/claude-task-worker:apply-ui-design` を起動して Issue description へデザイン参照セクション（`## UIデザイン`）を書き戻す。（デフォルト5分間隔）
 
 - `claude-task-worker.json` の `uiDesign.enabled` が `true` の場合のみ起動する
 - `cc-ui-design-ready` / `cc-exec-issue` が付いているIssueは除外
@@ -589,18 +589,19 @@ claude-task-worker -v
 
 | ワーカー名 | デフォルト `skill` | デフォルト `model` | デフォルト `advisorModel` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
 |---|---|---|---|---|---|---|---|
-| `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | (なし) | `xhigh` | 60 | 0 | 1 |
-| `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `sonnet` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
+| `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `update-issue` | `/claude-task-worker:update-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-| `exec-issue` | `/claude-task-worker:exec-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-| `fix-review-point` | `/claude-task-worker:fix-review-point` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `exec-issue` | `/claude-task-worker:exec-issue` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
+| `fix-review-point` | `/claude-task-worker:fix-review-point` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `triage-created-issue` | `/claude-task-worker:triage-created-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
 | `triage-pr` | `/claude-task-worker:triage-pr` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
 | `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
 | `check-dependabot` | `/claude-task-worker:check-dependabot` | `sonnet` | `opus` | `high` | 3600 | 0 | 1 |
 | `epic-issue` | `/claude-task-worker:create-epic-pr` | `sonnet` | `opus` | `high` | 300 | 0 | 1 |
-| `create-ui-design` | `/claude-task-worker:create-ui-design` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-| `apply-ui-design` | `/claude-task-worker:apply-ui-design` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `create-ui-design` | `/claude-task-worker:create-ui-design` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
+| `apply-ui-design` | `/claude-task-worker:apply-ui-design` | `sonnet` | `opus` | `high` | 300 | 0 | 1 |
+| （上記以外・未知のワーカー名） | （なし） | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
 
 各フィールドの値:
 
