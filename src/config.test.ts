@@ -77,19 +77,19 @@ test("advisorModel defaults to opus for sonnet workers and to none for opus work
 
 test("parseWorkerEntry keeps the worker default advisorModel when unspecified", (t) => {
   silenceWarn(t);
-  assert.equal(parseWorkerEntry("exec-issue", {})?.advisorModel, "opus");
-  assert.equal(parseWorkerEntry("answer-issue-questions", {})?.advisorModel, "");
+  assert.equal(parseWorkerEntry("update-issue", {})?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("exec-issue", {})?.advisorModel, "");
 });
 
 test("parseWorkerEntry accepts an empty advisorModel as an explicit opt-out", (t) => {
   silenceWarn(t);
   // 他フィールドと違い空文字は不正値ではなく「advisor を使わない」の明示指定。
-  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: "" })?.advisorModel, "");
-  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: "fable" })?.advisorModel, "fable");
+  assert.equal(parseWorkerEntry("update-issue", { advisorModel: "" })?.advisorModel, "");
+  assert.equal(parseWorkerEntry("update-issue", { advisorModel: "fable" })?.advisorModel, "fable");
 });
 
 test("parseWorkerEntry falls back to the default for a non-string advisorModel", (t) => {
   silenceWarn(t);
-  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: 1 })?.advisorModel, "opus");
-  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: null })?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("update-issue", { advisorModel: 1 })?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: null })?.advisorModel, "");
 });
