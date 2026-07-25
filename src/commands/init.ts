@@ -1,6 +1,6 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
-import { DEFAULT_CONFIG, CONFIG_PATH, WORKER_DEFAULTS } from "../config.js";
+import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
 const LABELS: { name: string; color: string }[] = [
@@ -83,8 +83,15 @@ function logWriteResult(result: "created" | "overwritten" | "skipped", path: str
   else console.log(`[init] Already exists: ${path}`);
 }
 
+// ワーカーごとの設定（workers.<name>）は書き出さない。未指定なら `getWorkerConfig()` が
+// WORKER_DEFAULTS へフォールバックするため、既定値を写経した設定はプラグイン更新で既定が
+// 変わっても古い値に固定され続けるだけで害になる。上書きしたいワーカーだけを人が追記する。
 async function createConfig(force: boolean): Promise<void> {
-  const initialConfig = { ...DEFAULT_CONFIG, workers: { ...WORKER_DEFAULTS } };
+  const initialConfig = {
+    ...DEFAULT_CONFIG,
+    uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
+    workers: {},
+  };
   const result = await writeFileWithMode(CONFIG_PATH, JSON.stringify(initialConfig, null, 2), force);
   logWriteResult(result, CONFIG_PATH);
 }
