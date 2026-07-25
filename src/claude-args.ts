@@ -81,7 +81,10 @@ export const CLAUDE_SPAWN_ENV = {
 // 定義（`plugin/agents/explore-agent.md`）で詳細な手順を持たせてあるが、メインエージェント
 // 自身が探索する場合や、explore-agent 以外のサブエージェントへ委譲する場合には届かないため、
 // 全セッション共通の原則としてシステムプロンプトにも置く。
-export const SYSTEM_PROMPT = `このセッションは \`claude-task-worker\` のワーカーから自動起動されている（応答できるユーザーは常駐していない）。以下の自律実行原則を必ず遵守すること。
+//
+// 本文は「全モデル共通の基底（`SYSTEM_PROMPT_BASE`）＋ opus 実行時のみ足す追補
+// （`OPUS_SYSTEM_PROMPT_ADDENDUM`）」の2段構成にしてある（`systemPromptFor()` 参照）。
+export const SYSTEM_PROMPT_BASE = `このセッションは \`claude-task-worker\` のワーカーから自動起動されている（応答できるユーザーは常駐していない）。以下の自律実行原則を必ず遵守すること。
 
 - ユーザーへの確認・質問は行わず、起動されたスキルのルールに従って自律的に判断する
 - 曖昧な場合は「より安全な側（破壊的でない側）」を選択し、その判断と根拠を最終報告に明記する
@@ -98,6 +101,45 @@ export const SYSTEM_PROMPT = `このセッションは \`claude-task-worker\` �
 - 設定ファイル・ドキュメント・コメント/文字列リテラル・未対応言語など CodeGraph が扱わない対象は、従来どおりテキスト検索で補う
 - 探索をサブエージェントへ委譲する場合は、この方針も委譲プロンプトに明記して伝える`;
 
+// opus 実行時のみ基底プロンプトの末尾に足す追補。
+//
+// Opus 5 は既定で「冗長に書く・スコープを広げる・積極的に委譲する・指示されなくても自己検証する」
+// 方向へ倒れるため、その4点を抑える指示を入れる
+// （https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5）。
+// 同じ調整は opus 実行のスキル/エージェント本文にも入れてあるが、そちらはスキルごとの局所的な
+// 規定であり、(1) サブエージェント（`general-purpose-assistant` 等、モデル指定を持つもの）や
+// (2) スキルを跨いだセッション全体には届かないため、セッション単位の原則としてここにも置く。
+//
+// sonnet には足さない。これらは Opus 5 の既定挙動への逆張りであり、sonnet では逆に
+// 「検証を促す」「委譲を促す」方向の指示が要るケースがあるため、既存の基底プロンプトのまま
+// 挙動を変えない（＝本追補の導入で sonnet ワーカーの振る舞いは一切変わらない）。
+export const OPUS_SYSTEM_PROMPT_ADDENDUM = `成果物の分量とスコープについては以下に従うこと。
+
+- 依頼されたスコープだけを成果物にする。周辺のリファクタ・命名整理・気づいた別の改善を勝手に足さない。気づいた点は実装せず、最終報告に1行で挙げるだけにする
+- 依頼の前提が誤っていると考える場合も、指摘を1-2行添えたうえで**依頼どおりのスコープで**完遂する（黙って縮小・拡大・別物への置き換えをしない）
+- Issueコメント・PRの本文・description・レポート等の書き物は、必要な実質だけを書く。同じ内容の言い換え・埋め草セクション・「該当なし」を並べるだけの節を足さない
+- 最終報告は結論から書く。1文目で「何をしたか / どこで止まったか」を述べ、詳細をその後に置く
+
+サブエージェントへの委譲は以下に従うこと。
+
+- 自分で数回のツール呼び出しで終わる作業は委譲しない（ブリーフィング作成と委譲先の再探索でコストと時間が倍になる）
+- 委譲するのは、独立して並列実行できる作業・探索範囲の広い調査・専門エージェントの前提知識が要る作業に限る
+- 1タスクに1エージェント。1体で完結する作業に複数体を重ねて起動しない
+- **自分の作業の確認・再チェックを目的にサブエージェントを起動しない**。成果物の検証は \`git diff\` やテスト・Lintの実行で自分で行う`;
+
+// モデルに応じて注入するシステムプロンプト本文を返す。
+export function systemPromptFor(model: string): string {
+  return isOpusModel(model) ? `${SYSTEM_PROMPT_BASE}\n\n${OPUS_SYSTEM_PROMPT_ADDENDUM}` : SYSTEM_PROMPT_BASE;
+}
+
+// `--model` に渡す値が opus 系かを判定する。
+// 判定を部分一致にしているのは、`claude-task-worker.json` の `workers.<name>.model` が
+// エイリアス（`opus`）でもフルID（`claude-opus-5`）でも指定できるため。未知の値は
+// 「opus ではない」＝追補なしの基底プロンプトへ倒す（sonnet 側が従来の挙動）。
+export function isOpusModel(model: string): boolean {
+  return model.toLowerCase().includes("opus");
+}
+
 export interface ClaudeInvocation {
   mode: RunMode;
   // スキル呼び出し文字列（例: "/claude-task-worker:exec-issue 123"）
@@ -112,9 +154,11 @@ export interface ClaudeInvocation {
 
 export const CLAUDE_COMMAND = "claude";
 
-let cachedSystemPromptFilePath: string | undefined;
+// バリアント（`opus` / `default`）ごとの書き出し済みファイルパス。
+const cachedSystemPromptFilePaths = new Map<string, string>();
 
-// SYSTEM_PROMPT を絶対パスのファイルへ書き出し、その絶対パスを返す（プロセス内で一度だけ）。
+// システムプロンプト本文を絶対パスのファイルへ書き出し、その絶対パスを返す
+// （バリアントごとにプロセス内で一度だけ）。
 //
 // herdr モードは agent 引数を `herdr agent start ... -- <args>` としてターゲットシェル経由で
 // 起動するが、herdr は**改行を含む引数**を拒否する
@@ -125,18 +169,24 @@ let cachedSystemPromptFilePath: string | undefined;
 // default モード（spawn。シェルを介さないので改行自体は問題ない）でも同じファイル参照を
 // 使い、両モードの引数を一致させておく。
 //
-// 内容はビルドごとに静的なので、プロセス単位の固定パスへ一度だけ書けば十分。file は消さず
-// 残す（claude が起動時に読むまで存在し続ける必要があり、tmpdir は OS が回収する）。
+// 内容はビルドごとに静的なので、バリアントごとにプロセス単位の固定パスへ一度だけ書けば十分。
+// file は消さず残す（claude が起動時に読むまで存在し続ける必要があり、tmpdir は OS が回収する）。
 // 半端な読み取りを避けるため一時ファイル + rename で原子的に書き込む。
-export function systemPromptFilePath(): string {
-  if (cachedSystemPromptFilePath) return cachedSystemPromptFilePath;
+//
+// ファイル名にバリアントを含めるのは、opus と sonnet のワーカーが同一プロセス内で並走する
+// （`all` / `--project` 実行）ため。同一パスを共有すると、後から起動したワーカーの書き込みが
+// 先のワーカー向けの内容を上書きしてしまう。
+export function systemPromptFilePath(model: string): string {
+  const variant = isOpusModel(model) ? "opus" : "default";
+  const cached = cachedSystemPromptFilePaths.get(variant);
+  if (cached) return cached;
   const dir = path.join(os.tmpdir(), "claude-task-worker");
   mkdirSync(dir, { recursive: true });
-  const target = path.join(dir, `append-system-prompt-${process.pid}.txt`);
+  const target = path.join(dir, `append-system-prompt-${process.pid}-${variant}.txt`);
   const tmp = `${target}.tmp`;
-  writeFileSync(tmp, SYSTEM_PROMPT, "utf8");
+  writeFileSync(tmp, systemPromptFor(model), "utf8");
   renameSync(tmp, target);
-  cachedSystemPromptFilePath = target;
+  cachedSystemPromptFilePaths.set(variant, target);
   return target;
 }
 
@@ -154,7 +204,7 @@ export function buildClaudeArgs({ mode, prompt, model, effort, advisorModel }: C
     "--disallowedTools",
     DISALLOWED_TOOLS_ARG,
     "--append-system-prompt-file",
-    systemPromptFilePath(),
+    systemPromptFilePath(model),
     "--model",
     model,
     "--effort",
