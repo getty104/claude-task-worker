@@ -31,6 +31,8 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 ```
 
+> `scripts/fetch-unresolved-comments.sh` は `triage-pr` スキルからも `${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh` として参照される共有スクリプト。パス・ファイル名を変更する場合は `triage-pr` 側の参照も合わせて直すこと。
+
 返却されるJSONから2系統のフィードバックを抽出する。
 
 - **`unresolved_threads[]`**: コード行に紐づく未解決のインラインレビューコメント。各スレッドの `path` / `line` / `body` / `author` / `is_outdated` を保持する。`is_outdated: true` のスレッドは差分が変わっている可能性があるため、対応方針の判断時に注記する。

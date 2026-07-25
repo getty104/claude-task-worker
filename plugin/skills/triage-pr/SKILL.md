@@ -1,6 +1,6 @@
 ---
 name: triage-pr
-description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), generate and evaluate a fix plan via create-review-fix-plan, then take action (add cc-fix-onetime label if fixes are needed; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
+description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), collect unresolved review comments and CI status and judge only whether each item must be fixed, then take action (add cc-fix-onetime label if fixes are needed; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
 argument-hint: "[pr-number]"
 hooks:
   Stop:
@@ -12,19 +12,19 @@ hooks:
 
 # Triage PR
 
-指定されたPR番号のPRに対して、コンフリクト検知から修正プランの評価、最終アクション（ラベル付与またはマージ）までを一貫して実行するスキルです。Instructionsに従って、PRの状態を確認し、適切なアクションを実行してください。
+指定されたPR番号のPRに対して、コンフリクト検知から修正要否の判定、最終アクション（ラベル付与またはマージ）までを一貫して実行するスキルです。Instructionsに従って、PRの状態を確認し、適切なアクションを実行してください。
 
 ## このスキルがやること・やらないこと
 
 **やること**:
 - ステップ1のコンフリクト検知（`gh pr status`で確認し、コンフリクトがあれば`cc-resolve-conflict`ラベル付与のみで終了）
-- ステップ2の修正プラン生成と評価（プランの分析・判定のみ）
+- ステップ2の未解決レビューコメント・CIステータスの収集と、各項目が「修正すべきか」の二分判定のみ
 - ステップ3のアクション: 修正が必要なら`cc-fix-onetime`ラベル付与 / マージ可能な場合は、Epic PR（`cc-epic-issue`付き）なら`cc-release-ready`ラベル付与（マージはしない）、通常PRならマージ
 
 **絶対にやらないこと**:
-- **PRのコード修正・実装**: 修正プランで「対応すべき」と判定された項目があっても、このスキル内では一切コードを変更しない。修正の実行は`cc-fix-onetime`ラベル付与後に別スキル（`fix-review-point`など）の責務
+- **PRのコード修正・実装**: 「対応すべき」と判定された項目があっても、このスキル内では一切コードを変更しない。修正の実行は`cc-fix-onetime`ラベル付与後に別スキル（`fix-review-point`など）の責務
 - **コンフリクト解消の直接実行**: rebase・コンフリクトファイルの編集・force-pushは行わない。検知したら`cc-resolve-conflict`ラベルを付けて終了し、実際の解消は同ラベルをトリガーに別スキル（`resolve-pr-conflict`等）が担当する
-- **`create-review-fix-plan`が返したプランの実行**: プランは判定材料として読むだけで、ファイルを変更してはならない
+- **修正プランの作成**: `create-review-fix-plan` スキルを呼び出してはならない。修正方針・タスク分解・影響範囲の見積もりは `cc-fix-onetime` を拾う `fix-review-point` 側の責務であり、ここで作ると同じ分析をPRごとに二重に行いトークンを無駄に消費する。本スキルは「修正すべきコメントが1件でもあるか」だけを判定する
 - **新規コミットの作成**: コミット・push・commit amendを行わない
 - **テスト追加・Lint修正・リファクタリング**: 評価対象であっても、実行せずラベル付与にとどめる
 
@@ -66,33 +66,84 @@ gh pr status
 gh pr view $ARGUMENTS --json mergeable -q .mergeable
 ```
 
-返却値 `MERGEABLE` / `CONFLICTING` / `UNKNOWN` のうち `CONFLICTING` のときコンフリクトありと判定する。`UNKNOWN` の場合はGitHub側で判定中のため、数秒のスリープ後に1回だけリトライし、それでも `UNKNOWN` ならコンフリクトなし扱いで先に進む。
+返却値 `MERGEABLE` / `CONFLICTING` / `UNKNOWN` のうち `CONFLICTING` のときコンフリクトありと判定する。`UNKNOWN` の場合はGitHub側で判定中のため、数秒のスリープ後に1回だけリトライする。
 
 判定に応じて分岐する。
 
-- **コンフリクトあり（`CONFLICTING`）**: `cc-resolve-conflict` ラベルを付与してこのスキルを終了する。ステップ2・ステップ3には進まない（コンフリクト解消前に修正プラン評価やマージを行っても意味がないため）
+- **マージ可能（`MERGEABLE`）**: ステップ2に進む
+- **コンフリクトあり（`CONFLICTING`）**: `cc-resolve-conflict` ラベルを付与してこのスキルを終了する。ステップ2・ステップ3には進まない（コンフリクト解消前に修正要否の判定やマージを行っても意味がないため）
 
   ```bash
   gh pr edit $ARGUMENTS --add-label "cc-resolve-conflict"
   ```
 
-- **コンフリクトなし（`MERGEABLE` または `UNKNOWN` のリトライ後も判定不能）**: ステップ2に進む
+- **判定不能（`UNKNOWN` のままリトライ後も継続する場合）**: マージ可能性が未確定のまま修正要否判定・マージへ進むのは危険なため、**後続のステップに進まず**、ラベル操作は一切行わずに「判定: エラー」で結果報告を行い終了する（ステップ0の`gh pr checkout`失敗時と同様の扱い）。自前のリトライはこの1回のみとし、それ以上は繰り返さない（ブロッカー解消後のポーリングで自動的に再実行される）
 
-### ステップ2: 修正プランの生成と評価（**判定のみ・実行禁止**）
+### ステップ2: 修正要否の判定（**判定のみ・実行禁止**）
 
-`create-review-fix-plan` skillを用いてPRの修正プランを生成する。
+**修正プラン（`create-review-fix-plan`）は生成しない。** 本スキルが必要とするのは「修正すべき項目が1件でもあるか」という真偽値だけであり、修正方針・タスク分解・依存関係・影響範囲の見積もりは `cc-fix-onetime` を拾った `fix-review-point` が改めて行う。ここでプランを作ると同じ分析（サブエージェントのfan-out探索とタスク定義の生成）をPRごとに二重に走らせることになるため、判定に必要な最小限の情報だけを集める。
 
-**重要**: プランは「PRをマージ可能か」を判定する材料に過ぎない。プランに含まれるタスクをこのスキル内で実装してはならない。対応すべき項目があると判断したら **コードに手を加えず** ステップ3のパターンA（ラベル付与）へ進むこと。判定は内部的な思考にとどめ、ファイルの編集・コマンドの実行は行わない（参照のための`Read`/`Grep`は許容）。
+**重要**: 判定は内部的な思考にとどめ、ファイルの編集・コミット・pushは行わない。対応すべき項目があると判断したら **コードに手を加えず** ステップ3のパターンA（ラベル付与）へ進むこと。裏取りのための`Read`/`Grep`/codegraph参照は許容するが、判定が変わらない範囲では省略する。
 
-修正プランの各項目を以下の評価基準で分析し、対応要否を判定する。
+#### 2-1. 判定材料の収集
+
+以下を **同一メッセージ内で並列に実行** する。
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh"
+```
+
+```bash
+CHECKS_JSON=$(gh pr checks $ARGUMENTS --json state,name,link,workflow 2>&1)
+CHECKS_EXIT=$?
+```
+
+```bash
+gh pr view $ARGUMENTS --json title,body,labels
+```
+
+- 1つ目のスクリプトは未解決のインラインレビューコメント（`unresolved_threads[]`）とConversationタブの一般コメント（`conversation_comments[]`）を返す。インラインだけを見ると行外の指摘を取りこぼすため両方を対象にする。カレントブランチのPRを対象とするため、ステップ0の `gh pr checkout` 済みであることが前提
+- `gh pr checks` は失敗チェックがあると終了コードが非0になるが、これは「失敗チェックが存在する」という正常系の結果であり、認証失敗・通信障害・不正なPR番号等の実行時エラーと区別する必要がある。区別は終了コードではなく **出力がJSONとしてパース可能かどうか** で行う。
+
+  ```bash
+  echo "$CHECKS_JSON" | jq -e . >/dev/null 2>&1
+  ```
+
+  パースに成功した場合のみ、その内容を「失敗チェックの有無」の判定材料として使う（`CHECKS_EXIT` が非0でもJSONとしてパースできていれば、それは失敗チェックの存在を表す正常系として扱う）。パースに失敗した場合（＝実行時エラーで `gh pr checks` 自体が意味のある出力を返せなかった場合）は、**後続のステップに進まず**、ラベル操作は一切行わずに出力内容をそのまま含めて「判定: エラー」で結果報告を行い終了する（「CI失敗なし」には倒さない。ステップ0の`gh pr checkout`失敗時と同様の扱い）
+  - `state` が `FAILURE` / `STARTUP_FAILURE` のチェックについてのみ、`link` から `run-id` を抽出して `gh run view <run-id> --log-failed` で失敗内容を確認する。**全Passなら追加のログ取得は行わない**
+- `gh pr view` の結果は「デザインPRか（`cc-ui-design`）」「Epic PRか（`cc-epic-issue`）」「`Refs #<N>` の有無」の確認に使う。ステップ3で同じ情報を再取得しないよう、ここで取得したラベル一覧を使い回す
+- デザインPR（`cc-ui-design`）と判定した場合のみ、差分ファイル一覧を追加で取得する（実装コードの混入・スナップショットの有無の確認用）
+
+  ```bash
+  gh pr diff $ARGUMENTS --name-only
+  ```
+
+#### 2-2. ノイズの除外
+
+会話コメントには対応不要なノイズが混ざるため、次を判定対象から除外する。
+
+- `is_minimized: true` のコメント（折りたたみ済み＝outdated/resolved/spam等として処理済み）
+- `/gemini review` のようなボット起動コマンドや、CIステータスの自動投稿
+- PR作成者自身の単なる進捗報告・補足など、対応を求めていないチャット
+
+判断に迷う場合は「このコメントは未対応の修正要求か？」を基準にする。
+
+#### 2-3. 各項目の二分判定
+
+残った各コメント・各CI失敗を、下記の評価基準に照らして **「対応すべき」／「対応不要」の二値** に振り分ける。修正方針・修正手順・対象ファイルの列挙は書かない（`fix-review-point` が行う）。
+
+**「対応すべき」が1件見つかった時点で残りの項目の精査を打ち切り、ステップ3のパターンAへ進んでよい**（以降の項目をいくら精査しても付与するラベルは変わらないため）。ただしデザインPRでCI失敗の切り分けが必要な場合（パターンC判定）は、その切り分けを終えてから分岐する。
+
+**ステップ3のパターンB（マージ可能）へ進めるのは、2-1で取得した全チェックが `SUCCESS` 等の明示的な成功状態であることを確認できた場合に限る。** `PENDING` や実行中など未完了のチェックが1件でも残っている場合は、CIが失敗しているわけではなくても「対応不要」の暗黙扱いにせず、パターンBへは進まない。
+
+未完了チェックが残っている場合の分岐は「対応すべき」項目の有無で決まる。
+
+- **「対応すべき」が1件以上ある場合**: CIの完了を待たずステップ3のパターンA（またはデザインPRならパターンC）へ進む。CI結果に関わらず修正は必要であり、待っても付与するラベルは変わらないため
+- **「対応すべき」が1件もない場合**: 判定を確定させず、ステップ3に進まずに「判定: 保留（CI未完了）」として結果報告のみ行い終了する（次回ポーリングで再評価させる。ラベル操作は行わない）
 
 #### デザインPR（`cc-ui-design` ラベル付き）の場合の評価基準
 
-対象PRに `cc-ui-design` ラベルが付いている場合、そのPRは `.pen`（Pencilデザインファイル）とスナップショットPNGのみを変更するデザインPRであり、コードレビューの観点（型安全性・テスト・Lint等）をそのまま適用しても意味がない。以下の観点に差し替えて評価する。
-
-```bash
-gh pr view $ARGUMENTS --json labels -q '.labels[].name'
-```
+2-1で取得したラベル一覧に `cc-ui-design` が含まれる場合、そのPRは `.pen`（Pencilデザインファイル）とスナップショットPNGのみを変更するデザインPRであり、コードレビューの観点（型安全性・テスト・Lint等）をそのまま適用しても意味がない。以下の観点に差し替えて評価する。
 
 - **差分が `.pen` とスナップショットPNGに限定されているか**（実装コードが混入していないか）。混入していれば「対応すべき」
 - **スナップショットが差分に含まれ、デザイン意図がPR bodyから読み取れるか**。スナップショットが無くレビューできない場合は「対応すべき」
@@ -144,15 +195,11 @@ gh pr edit $ARGUMENTS --add-label "cc-need-human-check"
 
 #### パターンB: マージ可能な場合
 
-すべての項目が「対応不要」、または修正プランに項目がない場合、マージ可能（リリース問題なし）と判定する。
+すべての項目が「対応不要」、または対象となるコメント・CI失敗が1件もない場合、マージ可能（リリース問題なし）と判定する。
 
-**まず対象PRが Epic PR（`cc-epic-issue` ラベル付き）かどうかを確認する。**
+**まず対象PRが Epic PR（`cc-epic-issue` ラベル付き）かどうかを、2-1で取得したラベル一覧で確認する**（再取得はしない）。
 
-```bash
-gh pr view $ARGUMENTS --json labels -q '.labels[].name'
-```
-
-- **Epic PR の場合（出力に `cc-epic-issue` を含む）**: このPRをマージするとデフォルトブランチへの集約反映（＝リリース）になるため、**このスキルではマージせず** `cc-release-ready` ラベルのみを付与して終了する。実際のリリース（マージ）は人間の判断に委ねるゲートとして扱う。以降のマージ手順・関連Issueクローズには進まない。
+- **Epic PR の場合（ラベル一覧に `cc-epic-issue` を含む）**: このPRをマージするとデフォルトブランチへの集約反映（＝リリース）になるため、**このスキルではマージせず** `cc-release-ready` ラベルのみを付与して終了する。実際のリリース（マージ）は人間の判断に委ねるゲートとして扱う。以降のマージ手順・関連Issueクローズには進まない。
 
   ```bash
   gh pr edit $ARGUMENTS --add-label "cc-release-ready"
@@ -237,5 +284,5 @@ gh issue close <issue番号> --reason "not planned"
 
 処理結果として以下を報告する：
 
-- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正が必要・`cc-fix-onetime`ラベル付与） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / PRクローズ（関連IssueもClose） / エラー
-- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目の要約、マージ可能と判断した理由、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、またはクローズ理由と連動Closeした関連Issue番号）
+- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正が必要・`cc-fix-onetime`ラベル付与） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / パターンC（デザインPRのCI失敗が解消不能・`cc-need-human-check`ラベル付与） / 保留（CI未完了・ラベル操作なし） / PRクローズ（関連IssueもClose） / エラー
+- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目の要約、マージ可能と判断した理由、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、CI未完了で保留した場合は未完了チェック名、エラー時は`gh pr view`のmergeable判定不能または`gh pr checks`出力のパース失敗など発生箇所、またはクローズ理由と連動Closeした関連Issue番号）
