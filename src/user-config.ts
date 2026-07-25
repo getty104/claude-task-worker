@@ -10,8 +10,14 @@ export type RunMode = "default" | "herdr";
 
 export const DEFAULT_RUN_MODE: RunMode = "default";
 
+// advisor（claude CLI の `--advisor <model>`）を有効にするか。有効時のみ、
+// claude-task-worker.json の workers.<name>.advisorModel を `--advisor` に渡す。
+// 未指定・不正値は「渡さない」側（false）へ倒す。
+export const DEFAULT_ADVISOR_ENABLED = false;
+
 export interface UserConfig {
   mode: RunMode;
+  advisor: boolean;
   projects: Record<string, string>;
   projectGroups: Record<string, string[]>;
 }
@@ -80,6 +86,14 @@ function parseMode(raw: Record<string, unknown>, path: string): RunMode {
   return DEFAULT_RUN_MODE;
 }
 
+function parseAdvisor(raw: Record<string, unknown>, path: string): boolean {
+  if (!("advisor" in raw)) return DEFAULT_ADVISOR_ENABLED;
+  const value = raw["advisor"];
+  if (typeof value === "boolean") return value;
+  console.warn(`[config] invalid advisor: ${JSON.stringify(value)} in ${path}, using ${DEFAULT_ADVISOR_ENABLED}`);
+  return DEFAULT_ADVISOR_ENABLED;
+}
+
 export function loadUserConfig(): UserConfig {
   const path = getUserConfigPath();
   const raw = readRawConfig();
@@ -108,6 +122,7 @@ export function loadUserConfig(): UserConfig {
   }
 
   const mode = parseMode(raw, path);
+  const advisor = parseAdvisor(raw, path);
   const rawProjects = raw["projects"] as Record<string, unknown>;
   const rawProjectGroups = ("projectGroups" in raw ? raw["projectGroups"] : {}) as Record<string, unknown>;
 
@@ -164,7 +179,7 @@ export function loadUserConfig(): UserConfig {
     projectGroups[groupName] = members;
   }
 
-  return { mode, projects, projectGroups };
+  return { mode, advisor, projects, projectGroups };
 }
 
 // mode はプロセス起動時に確定させる。実行中に設定ファイルが書き換わっても、
@@ -182,6 +197,39 @@ export function getRunMode(): RunMode {
 // テスト用。設定ファイルを差し替えて再解決させる。
 export function resetRunModeCache(): void {
   cachedRunMode = undefined;
+}
+
+// advisor も mode と同じくプロセス起動時に確定させる。実行中に設定ファイルが
+// 書き換わっても、同一ワーカーのタスク間で `--advisor` の有無が揺れないようにする。
+let cachedAdvisorEnabled: boolean | undefined;
+
+export function isAdvisorEnabled(): boolean {
+  if (cachedAdvisorEnabled === undefined) {
+    cachedAdvisorEnabled = readAdvisorEnabled();
+  }
+  return cachedAdvisorEnabled;
+}
+
+// テスト用。設定ファイルを差し替えて再解決させる。
+export function resetAdvisorCache(): void {
+  cachedAdvisorEnabled = undefined;
+}
+
+// getRunMode と同様、ワーカーは `--project` 無しでも起動されるため、設定ファイル不在・
+// projects セクション破損で advisor の判定を失敗させない。判定できない場合は既定（無効）。
+function readAdvisorEnabled(): boolean {
+  let raw: Record<string, unknown> | undefined;
+  try {
+    raw = readRawConfig();
+  } catch (err) {
+    console.warn(`[config] failed to read config file, advisor disabled: ${err}`);
+    return DEFAULT_ADVISOR_ENABLED;
+  }
+  if (raw === undefined) return DEFAULT_ADVISOR_ENABLED;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return DEFAULT_ADVISOR_ENABLED;
+  }
+  return parseAdvisor(raw, getUserConfigPath());
 }
 
 // ワーカーは `--project` 無しでも起動されるため、設定ファイルが無い・projects セクションが

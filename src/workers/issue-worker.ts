@@ -6,7 +6,7 @@ import { syncDefaultBranch, ensureEpicBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { getRunMode } from "../user-config";
+import { getRunMode, isAdvisorEnabled } from "../user-config";
 import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../worktree";
 
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
@@ -87,7 +87,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             syncDefaultBranch(defaultBranch);
-            const { model, effort, skill } = getWorkerConfig(config.name);
+            const { model, effort, skill, advisorModel } = getWorkerConfig(config.name);
             const command = skill || config.command;
 
             const parentNumber = issue.parent?.number;
@@ -97,6 +97,8 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               prompt: `${command} ${issue.number}`,
               model,
               effort,
+              // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
+              advisorModel: isAdvisorEnabled() ? advisorModel : "",
             });
 
             // claude CLI の --worktree は locked な worktree を作り、異常終了時に

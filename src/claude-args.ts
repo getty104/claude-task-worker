@@ -104,6 +104,10 @@ export interface ClaudeInvocation {
   prompt: string;
   model: string;
   effort: string;
+  // `--advisor` に渡すモデル。空文字・未指定ならフラグ自体を渡さない。
+  // config.json の `advisor` が false のときは呼び出し側が空文字を渡す
+  // （ワーカー側でゲートする。`buildClaudeArgs` は渡された値をそのまま反映するだけ）。
+  advisorModel?: string;
 }
 
 export const CLAUDE_COMMAND = "claude";
@@ -140,7 +144,8 @@ export function systemPromptFilePath(): string {
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
 // システムプロンプトはファイル経由（`--append-system-prompt-file`）で渡す（理由は
 // `systemPromptFilePath()` を参照）。
-export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocation): string[] {
+export function buildClaudeArgs({ mode, prompt, model, effort, advisorModel }: ClaudeInvocation): string[] {
+  const advisor = advisorModel?.trim() ?? "";
   return [
     ...(mode === "herdr" ? [] : ["-p"]),
     prompt,
@@ -154,6 +159,9 @@ export function buildClaudeArgs({ mode, prompt, model, effort }: ClaudeInvocatio
     model,
     "--effort",
     effort,
+    // advisor 未指定（空文字）ならフラグごと省く。値なしの `--advisor` を渡すと
+    // 後続フラグを値として食われるため、必ずモデル名とセットでのみ付ける。
+    ...(advisor === "" ? [] : ["--advisor", advisor]),
   ];
 }
 
