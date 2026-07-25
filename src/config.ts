@@ -18,6 +18,11 @@ export type WorkerName =
 export interface WorkerRuntimeConfig {
   skill: string;
   model: string;
+  // claude CLI の `--advisor <model>` に渡すモデル。空文字は「advisor を使わない」を意味する
+  // （config.json の `advisor: true` でも `--advisor` を渡さない）。claude 側の制約で
+  // advisor は main モデル以上の能力が必要なため、既定は model が sonnet のワーカーは
+  // "opus"、model が opus のワーカーは ""（＝無効）にしてある。
+  advisorModel: string;
   effort: string;
   pollingIntervalSeconds: number;
   cooldownSeconds: number;
@@ -45,6 +50,7 @@ export const DEFAULT_UI_DESIGN_CONFIG: UiDesignConfig = {
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   skill: "",
   model: "sonnet",
+  advisorModel: "opus",
   effort: "high",
   pollingIntervalSeconds: 60,
   cooldownSeconds: 0,
@@ -55,6 +61,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "answer-issue-questions": {
     skill: "/claude-task-worker:answer-issue-questions",
     model: "opus",
+    advisorModel: "",
     effort: "xhigh",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -63,6 +70,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "create-issue": {
     skill: "/claude-task-worker:create-issue-from-issue-number",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "xhigh",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -71,6 +79,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "update-issue": {
     skill: "/claude-task-worker:update-issue",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -79,6 +88,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "exec-issue": {
     skill: "/claude-task-worker:exec-issue",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -87,6 +97,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "fix-review-point": {
     skill: "/claude-task-worker:fix-review-point",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -95,6 +106,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "triage-created-issue": {
     skill: "/claude-task-worker:triage-created-issue",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -103,6 +115,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "triage-pr": {
     skill: "/claude-task-worker:triage-pr",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -111,6 +124,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "resolve-conflict": {
     skill: "/claude-task-worker:resolve-pr-conflict",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -119,6 +133,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "check-dependabot": {
     skill: "/claude-task-worker:check-dependabot",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
@@ -127,6 +142,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "epic-issue": {
     skill: "/claude-task-worker:create-epic-pr",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
@@ -135,6 +151,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "create-ui-design": {
     skill: "/claude-task-worker:create-ui-design",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -143,6 +160,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   "apply-ui-design": {
     skill: "/claude-task-worker:apply-ui-design",
     model: "sonnet",
+    advisorModel: "opus",
     effort: "high",
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
@@ -162,7 +180,8 @@ function defaultsFor(name: string): WorkerRuntimeConfig {
   return WORKER_DEFAULTS[name] ?? DEFAULT_WORKER_CONFIG;
 }
 
-function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | null {
+// parseUiDesignEntry と同じくテスト可能にするため export する（純粋関数）。
+export function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | null {
   const base = defaultsFor(name);
   if (typeof val !== "object" || val === null || Array.isArray(val)) {
     console.warn(`[config] invalid workers.${name}: expected object, using defaults`);
@@ -182,6 +201,16 @@ function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfig | nul
       result.model = entry.model;
     } else {
       console.warn(`[config] invalid workers.${name}.model: ${String(entry.model)}, using default ${base.model}`);
+    }
+  }
+  // 他のフィールドと違い空文字を有効値として受け付ける（「advisor を使わない」の明示指定）。
+  if ("advisorModel" in entry) {
+    if (typeof entry.advisorModel === "string") {
+      result.advisorModel = entry.advisorModel;
+    } else {
+      console.warn(
+        `[config] invalid workers.${name}.advisorModel: ${String(entry.advisorModel)}, using default ${JSON.stringify(base.advisorModel)}`,
+      );
     }
   }
   if ("effort" in entry) {

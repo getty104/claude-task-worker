@@ -335,6 +335,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 ```json
 {
   "mode": "default",
+  "advisor": false,
   "projects": {
     "app-a": "/Users/me/repos/app-a",
     "app-b": "/Users/me/repos/app-b",
@@ -346,7 +347,7 @@ claude-task-worker yolo --epic 100 --epic 200 --label priority-high
 }
 ```
 
-`mode` については [`mode`（タスクの実行形態）](#modeタスクの実行形態) を参照。
+`mode` については [`mode`（タスクの実行形態）](#modeタスクの実行形態)、`advisor` については [`advisor`（アドバイザーモデル）](#advisorアドバイザーモデル) を参照。
 
 `--project` は繰り返し指定可能で、複数指定した場合は解決後のプロジェクト集合の和集合が対象になる（重複は一意化される）。`--epic` / `--label` と併用でき、ディスパッチ先の各プロジェクトで実行されるコマンドにそのまま引き継がれる。
 
@@ -404,6 +405,24 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
   ```
 
   適用は `herdr server reload-config`。この設定は herdr サーバー全体に効くため、ワーカー以外の対話セッションの完了音も鳴らなくなる（`[ui.sound.agents] claude = "off"` でも実質同じ範囲）。ワーカーだけを無音にしたい場合は、`HERDR_DISABLE_SOUND=1 herdr --session <name>` で別セッションを起動し、その中でディスパッチャーを動かす
+
+### `advisor`（アドバイザーモデル）
+
+`config.json` のトップレベルに `advisor: true` を書くと、ワーカーがタスクを起動する際、Claude CLI へ `--advisor <model>` を渡すようになる。渡すモデルはリポジトリ直下の `claude-task-worker.json` の `workers.<ワーカー名>.advisorModel`（[ワーカーごとの設定](#ワーカーごとの設定)）で指定する。`mode` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位のオン/オフはできない。
+
+| `advisor` | 挙動 |
+|---|---|
+| `false`（既定） | `advisorModel` の指定に関わらず `--advisor` を渡さない |
+| `true` | 各ワーカーの `advisorModel`（未指定時はワーカー既定値）を `--advisor` に渡す。空文字のワーカーには渡さない |
+
+```json
+{
+  "advisor": true,
+  "projects": { "app-a": "/Users/me/repos/app-a" }
+}
+```
+
+advisor は main モデル以上の能力を持つモデルである必要がある（Claude CLI 側の制約）。そのため `advisorModel` の既定値は、`model` が `sonnet` のワーカーは `opus`、`model` が `opus` のワーカー（`answer-issue-questions`）は空文字（＝advisor なし）にしてある。
 
 ### exec-issue
 
@@ -562,26 +581,26 @@ claude-task-worker -v
 |---|---|---|---|
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
 | `uiDesign` | object | `{ "enabled": false, "designDir": "designs" }` | UIデザイン先行ワークフローの設定（詳細は「[UIデザイン先行ワークフロー](#uiデザイン先行ワークフロー)」） |
-| `workers` | object | `{}` | ワーカーごとに Claude CLI に渡すスキル、`--model` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
+| `workers` | object | `{}` | ワーカーごとに Claude CLI に渡すスキル、`--model` / `--advisor` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
 
 ### ワーカーごとの設定
 
-`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI の `-p` に渡すスキル（スラッシュコマンド）、`--model` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間、最大同時実行数を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
+`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI の `-p` に渡すスキル（スラッシュコマンド）、`--model` / `--advisor` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間、最大同時実行数を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
 
-| ワーカー名 | デフォルト `skill` | デフォルト `model` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
-|---|---|---|---|---|---|---|
-| `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | `xhigh` | 60 | 0 | 1 |
-| `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `sonnet` | `xhigh` | 60 | 0 | 1 |
-| `update-issue` | `/claude-task-worker:update-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `exec-issue` | `/claude-task-worker:exec-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `fix-review-point` | `/claude-task-worker:fix-review-point` | `sonnet` | `high` | 60 | 0 | 1 |
-| `triage-created-issue` | `/claude-task-worker:triage-created-issue` | `sonnet` | `high` | 60 | 0 | 1 |
-| `triage-pr` | `/claude-task-worker:triage-pr` | `sonnet` | `high` | 60 | 0 | 1 |
-| `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `sonnet` | `high` | 60 | 0 | 1 |
-| `check-dependabot` | `/claude-task-worker:check-dependabot` | `sonnet` | `high` | 3600 | 0 | 1 |
-| `epic-issue` | `/claude-task-worker:create-epic-pr` | `sonnet` | `high` | 300 | 0 | 1 |
-| `create-ui-design` | `/claude-task-worker:create-ui-design` | `sonnet` | `high` | 60 | 0 | 1 |
-| `apply-ui-design` | `/claude-task-worker:apply-ui-design` | `sonnet` | `high` | 60 | 0 | 1 |
+| ワーカー名 | デフォルト `skill` | デフォルト `model` | デフォルト `advisorModel` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
+|---|---|---|---|---|---|---|---|
+| `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | (なし) | `xhigh` | 60 | 0 | 1 |
+| `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `sonnet` | `opus` | `xhigh` | 60 | 0 | 1 |
+| `update-issue` | `/claude-task-worker:update-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `exec-issue` | `/claude-task-worker:exec-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `fix-review-point` | `/claude-task-worker:fix-review-point` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `triage-created-issue` | `/claude-task-worker:triage-created-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `triage-pr` | `/claude-task-worker:triage-pr` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `check-dependabot` | `/claude-task-worker:check-dependabot` | `sonnet` | `opus` | `high` | 3600 | 0 | 1 |
+| `epic-issue` | `/claude-task-worker:create-epic-pr` | `sonnet` | `opus` | `high` | 300 | 0 | 1 |
+| `create-ui-design` | `/claude-task-worker:create-ui-design` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `apply-ui-design` | `/claude-task-worker:apply-ui-design` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
 
 各フィールドの値:
 
@@ -589,6 +608,7 @@ claude-task-worker -v
 |---|---|---|
 | `skill` | string | Claude CLI の `-p` に渡すスラッシュコマンド（例: `/claude-task-worker:exec-issue`, `/my-plugin:my-skill`）。ワーカーは `"<skill> <issue-or-pr-number>"` の形で Claude を起動する |
 | `model` | string | Claude CLI の `--model` に渡す値（例: `sonnet`, `opus`, `haiku`） |
+| `advisorModel` | string | Claude CLI の `--advisor` に渡す値（例: `opus`）。空文字を指定するとそのワーカーでは advisor を使わない。`config.json` の `advisor` が `true` のときだけ参照される（詳細は「[`advisor`（アドバイザーモデル）](#advisorアドバイザーモデル)」） |
 | `effort` | string | Claude CLI の `--effort` に渡す値（例: `high`, `medium`, `low`） |
 | `pollingIntervalSeconds` | number | GitHub をポーリングする間隔（秒）。正の数を指定する |
 | `cooldownSeconds` | number | タスク完了後に次のポーリングを停止する時間（秒）。`0` でクールダウンなし |
@@ -599,8 +619,8 @@ claude-task-worker -v
 ```json
 {
   "workers": {
-    "exec-issue":        { "skill": "/my-plugin:exec-issue", "model": "opus", "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
-    "fix-review-point":  { "skill": "/claude-task-worker:fix-review-point", "model": "sonnet", "effort": "high", "maxConcurrentTasks": 2 },
+    "exec-issue":        { "skill": "/my-plugin:exec-issue", "model": "opus", "advisorModel": "", "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
+    "fix-review-point":  { "skill": "/claude-task-worker:fix-review-point", "model": "sonnet", "advisorModel": "opus", "effort": "high", "maxConcurrentTasks": 2 },
     "triage-pr":         { "effort": "medium", "pollingIntervalSeconds": 120 },
     "check-dependabot":  { "model": "haiku", "pollingIntervalSeconds": 7200 }
   }

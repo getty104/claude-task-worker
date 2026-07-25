@@ -128,6 +128,22 @@ test("buildClaudeArgs passes the system prompt via a file so no arg carries a ne
   }
 });
 
+test("buildClaudeArgs omits --advisor unless an advisor model is given", () => {
+  for (const advisorModel of [undefined, "", "   "]) {
+    const args = buildClaudeArgs({ mode: "default", prompt: "/skill 1", model: "opus", effort: "high", advisorModel });
+    assert.ok(!args.includes("--advisor"), `--advisor must be omitted for ${JSON.stringify(advisorModel)}`);
+  }
+});
+
+test("buildClaudeArgs passes --advisor with the model in both modes", () => {
+  for (const mode of ["default", "herdr"] as const) {
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "sonnet", effort: "high", advisorModel: "opus" });
+    assert.equal(args[args.indexOf("--advisor") + 1], "opus");
+    // 値なしの --advisor は後続フラグを値として食うため、必ず末尾に値が続くこと。
+    assert.ok(args.indexOf("--advisor") < args.length - 1);
+  }
+});
+
 test("buildClaudeEnv drops the print-only ceiling in herdr mode", () => {
   assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
   assert.deepEqual(buildClaudeEnv("herdr"), {

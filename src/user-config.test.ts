@@ -18,6 +18,8 @@ const {
   getUserConfigPath,
   getRunMode,
   resetRunModeCache,
+  isAdvisorEnabled,
+  resetAdvisorCache,
   findProjectNameByPath,
 } = (await import("./user-config")) as typeof UserConfigModule;
 
@@ -82,6 +84,7 @@ test("loadUserConfig loads a valid config.json normally", () => {
 test("resolveTargetProjects throws UserConfigError for constructor/toString requests", () => {
   const config = {
     mode: "default" as const,
+    advisor: false,
     projects: { alpha: "/tmp/alpha" },
     projectGroups: { mygroup: ["alpha"] },
   };
@@ -93,6 +96,7 @@ test("resolveTargetProjects throws UserConfigError for constructor/toString requ
 test("resolveTargetProjects resolves known projects and groups normally", () => {
   const config = {
     mode: "default" as const,
+    advisor: false,
     projects: { alpha: "/tmp/alpha", beta: "/tmp/beta" },
     projectGroups: { mygroup: ["alpha", "beta"] },
   };
@@ -138,6 +142,7 @@ test("loadUserConfig throws UserConfigError when projects contains a __proto__ k
 test("resolveTargetProjects throws UserConfigError when resolution yields no projects", () => {
   const config = {
     mode: "default" as const,
+    advisor: false,
     projects: {},
     projectGroups: { empty: [] },
   };
@@ -147,6 +152,7 @@ test("resolveTargetProjects throws UserConfigError when resolution yields no pro
 function removeConfigFile(): void {
   rmSync(getUserConfigPath(), { force: true });
   resetRunModeCache();
+  resetAdvisorCache();
 }
 
 test("loadUserConfig defaults mode to default when it is not specified", () => {
@@ -198,6 +204,48 @@ test("getRunMode caches the mode resolved on first call", () => {
   assert.equal(getRunMode(), "herdr");
   resetRunModeCache();
   assert.equal(getRunMode(), "default");
+});
+
+test("loadUserConfig defaults advisor to false when it is not specified", () => {
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().advisor, false);
+});
+
+test("loadUserConfig reads advisor true", () => {
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ advisor: true, projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().advisor, true);
+});
+
+test("loadUserConfig falls back to disabled for a non-boolean advisor", (t) => {
+  t.mock.method(console, "warn", () => {});
+  removeConfigFile();
+  // "true" のような文字列を有効扱いすると、意図せず全ワーカーに --advisor が付く。
+  writeConfigFile(JSON.stringify({ advisor: "true", projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().advisor, false);
+});
+
+test("isAdvisorEnabled returns false when no config file exists", () => {
+  removeConfigFile();
+  assert.equal(isAdvisorEnabled(), false);
+});
+
+test("isAdvisorEnabled does not fail when the projects section is broken", () => {
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ advisor: true, projects: [] }));
+  assert.equal(isAdvisorEnabled(), true);
+});
+
+test("isAdvisorEnabled caches the value resolved on first call", () => {
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ advisor: true, projects: {} }));
+  assert.equal(isAdvisorEnabled(), true);
+  // 実行中に設定ファイルが書き換わっても、同一プロセス内では最初の解決結果を保つ。
+  writeConfigFile(JSON.stringify({ advisor: false, projects: {} }));
+  assert.equal(isAdvisorEnabled(), true);
+  resetAdvisorCache();
+  assert.equal(isAdvisorEnabled(), false);
 });
 
 test("findProjectNameByPath resolves a project name from its path", () => {

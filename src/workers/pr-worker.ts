@@ -12,7 +12,7 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { getRunMode } from "../user-config";
+import { getRunMode, isAdvisorEnabled } from "../user-config";
 import {
   createWorktreeFromBranch,
   deleteLocalBranch,
@@ -86,7 +86,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
             // 削除不能な残骸を残すため使わない。ワーカー自身が worktree を生成して cwd として渡す。
             await createWorktreeFromBranch(worktreeId, defaultBranch);
             const cwd = getWorktreePath(worktreeId);
-            const { model, effort, skill } = getWorkerConfig(config.name);
+            const { model, effort, skill, advisorModel } = getWorkerConfig(config.name);
             const command = skill || config.command;
             const mode = getRunMode();
             const execution = buildClaudeExecution({
@@ -94,6 +94,8 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               prompt: `${command} ${pr.number}`,
               model,
               effort,
+              // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
+              advisorModel: isAdvisorEnabled() ? advisorModel : "",
             });
             run(
               execution.command,

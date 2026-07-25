@@ -2,7 +2,8 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type * as ConfigModule from "./config";
 
-const { parseUiDesignEntry, DEFAULT_UI_DESIGN_CONFIG } = (await import("./config")) as typeof ConfigModule;
+const { parseUiDesignEntry, parseWorkerEntry, DEFAULT_UI_DESIGN_CONFIG, DEFAULT_WORKER_CONFIG, WORKER_DEFAULTS } =
+  (await import("./config")) as typeof ConfigModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
 function silenceWarn(t: TestContext): void {
@@ -61,4 +62,34 @@ test("parseUiDesignEntry warns once per invalid key", (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   parseUiDesignEntry({ enabled: 1, designDir: 2 });
   assert.equal(warn.mock.callCount(), 2);
+});
+
+test("advisorModel defaults to opus for sonnet workers and to none for opus workers", () => {
+  // claude 側の制約: advisor は main モデル以上の能力が必要。opus のワーカーに
+  // opus advisor を付けても意味がないため既定は空文字（＝渡さない）。
+  assert.equal(DEFAULT_WORKER_CONFIG.model, "sonnet");
+  assert.equal(DEFAULT_WORKER_CONFIG.advisorModel, "opus");
+  for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
+    const expected = config.model === "opus" ? "" : "opus";
+    assert.equal(config.advisorModel, expected, `WORKER_DEFAULTS.${name}.advisorModel`);
+  }
+});
+
+test("parseWorkerEntry keeps the worker default advisorModel when unspecified", (t) => {
+  silenceWarn(t);
+  assert.equal(parseWorkerEntry("exec-issue", {})?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("answer-issue-questions", {})?.advisorModel, "");
+});
+
+test("parseWorkerEntry accepts an empty advisorModel as an explicit opt-out", (t) => {
+  silenceWarn(t);
+  // 他フィールドと違い空文字は不正値ではなく「advisor を使わない」の明示指定。
+  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: "" })?.advisorModel, "");
+  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: "fable" })?.advisorModel, "fable");
+});
+
+test("parseWorkerEntry falls back to the default for a non-string advisorModel", (t) => {
+  silenceWarn(t);
+  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: 1 })?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("exec-issue", { advisorModel: null })?.advisorModel, "opus");
 });
