@@ -87,8 +87,8 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "exec-issue": {
     skill: "/claude-task-worker:exec-issue",
-    model: "sonnet",
-    advisorModel: "opus",
+    model: "opus",
+    advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -96,8 +96,8 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "fix-review-point": {
     skill: "/claude-task-worker:fix-review-point",
-    model: "sonnet",
-    advisorModel: "opus",
+    model: "opus",
+    advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -150,8 +150,8 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "create-ui-design": {
     skill: "/claude-task-worker:create-ui-design",
-    model: "sonnet",
-    advisorModel: "opus",
+    model: "opus",
+    advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
