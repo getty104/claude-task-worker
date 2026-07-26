@@ -78,8 +78,8 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "update-issue": {
     skill: "/claude-task-worker:update-issue",
-    model: "sonnet",
-    advisorModel: "opus",
+    model: "opus",
+    advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
@@ -123,8 +123,8 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "resolve-conflict": {
     skill: "/claude-task-worker:resolve-pr-conflict",
-    model: "sonnet",
-    advisorModel: "opus",
+    model: "opus",
+    advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,

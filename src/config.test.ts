@@ -77,7 +77,7 @@ test("advisorModel defaults to opus for sonnet workers and to none for opus work
 
 test("parseWorkerEntry keeps the worker default advisorModel when unspecified", (t) => {
   silenceWarn(t);
-  assert.equal(parseWorkerEntry("update-issue", {})?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("triage-pr", {})?.advisorModel, "opus");
   assert.equal(parseWorkerEntry("exec-issue", {})?.advisorModel, "");
 });
 
@@ -90,6 +90,6 @@ test("parseWorkerEntry accepts an empty advisorModel as an explicit opt-out", (t
 
 test("parseWorkerEntry falls back to the default for a non-string advisorModel", (t) => {
   silenceWarn(t);
-  assert.equal(parseWorkerEntry("update-issue", { advisorModel: 1 })?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("triage-pr", { advisorModel: 1 })?.advisorModel, "opus");
   assert.equal(parseWorkerEntry("exec-issue", { advisorModel: null })?.advisorModel, "");
 });

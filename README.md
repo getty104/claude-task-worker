@@ -591,12 +591,12 @@ claude-task-worker -v
 |---|---|---|---|---|---|---|---|
 | `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `update-issue` | `/claude-task-worker:update-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `update-issue` | `/claude-task-worker:update-issue` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `exec-issue` | `/claude-task-worker:exec-issue` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `fix-review-point` | `/claude-task-worker:fix-review-point` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `triage-created-issue` | `/claude-task-worker:triage-created-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
 | `triage-pr` | `/claude-task-worker:triage-pr` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-| `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
+| `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
 | `check-dependabot` | `/claude-task-worker:check-dependabot` | `sonnet` | `opus` | `high` | 3600 | 0 | 1 |
 | `epic-issue` | `/claude-task-worker:create-epic-pr` | `sonnet` | `opus` | `high` | 300 | 0 | 1 |
 | `create-ui-design` | `/claude-task-worker:create-ui-design` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
