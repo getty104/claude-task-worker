@@ -25,8 +25,12 @@ on:
   issue_comment:
     types: [created]
 
+# The group key includes the event name on purpose. GitHub evaluates `concurrency`
+# before any job-level `if:`, so an `issue_comment` run (e.g. a bot comment that the
+# preflight guard immediately skips) would otherwise take over the group and cancel
+# the in-progress `pull_request` review, leaving the PR without a review.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
