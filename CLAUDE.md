@@ -104,7 +104,7 @@ claude-task-worker all             # Run all workers concurrently
 
 ### Opus 実行スキル/エージェントのプロンプト方針
 
-`WORKER_DEFAULTS`（`src/config.ts`）で `model: "opus"` のワーカー（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue`（`create-issue-from-issue-number`）/ `create-ui-design`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
+`WORKER_DEFAULTS`（`src/config.ts`）で `model: "opus"` のワーカー（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue`（`create-issue-from-issue-number`）/ `create-ui-design` / `update-issue` / `resolve-conflict`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
 
 - **スコープの規律**: 依頼された範囲だけを実装/回答/分解し、気づいた別の改善は成果物に混ぜず報告へ1行で挙げる。依頼が誤っていると考える場合も、指摘を1-2行添えたうえで依頼どおりのスコープで完遂する（黙って縮小・拡大・別物への置き換えをしない）。Issue description・TODOリスト・`.pen` は後段の実装スコープそのものになるため、ここが膨らむと実装まで膨らむ
 - **成果物の分量**: Issueコメント・PR body・description・最終報告は「必要な実質だけ」。同じ内容の言い換え・埋め草セクション・該当なしの節を書かない。最終報告は結論（何をしたか／どこで止まったか）から書く。Opus 5 はディスクに書くドキュメントも会話も既定で長いため、明示的な分量指示が必要
@@ -128,7 +128,7 @@ claude-task-worker all             # Run all workers concurrently
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: "sonnet"` のワーカー（`update-issue` / `triage-created-issue` / `triage-pr` / `resolve-conflict` / `check-dependabot` / `epic-issue` / `apply-ui-design`、および `DEFAULT_WORKER_CONFIG`）と `model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）、`model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`）は、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
+`model: "sonnet"` のワーカー（`triage-created-issue` / `triage-pr` / `check-dependabot` / `epic-issue` / `apply-ui-design`、および `DEFAULT_WORKER_CONFIG`）と `model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）、`model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`）は、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
@@ -168,7 +168,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 1. `advisor: false`（既定）なら `advisorModel` の指定に関わらず渡さない。判定はワーカー側（`issue-worker.ts` / `pr-worker.ts`）で行い、無効時は `buildClaudeExecution()` へ空文字を渡す
 2. `advisorModel` が空文字（または未指定でその既定が空文字）なら `buildClaudeArgs()` が `--advisor` ごと省く。**値なしの `--advisor` を渡すと後続フラグを値として食われる**ため、必ずモデル名とセットでのみ付ける
 
-`advisorModel` のパースは `parseWorkerEntry()` の他フィールドと違い**空文字を有効値として受け付ける**（「advisor を使わない」の明示指定）。既定値は claude 側の制約（advisor は main モデル以上の能力が必要）に合わせ、`model` が `sonnet` のワーカーは `"opus"`、`model` が `opus` のワーカー（`answer-issue-questions`）は `""` にしてある。
+`advisorModel` のパースは `parseWorkerEntry()` の他フィールドと違い**空文字を有効値として受け付ける**（「advisor を使わない」の明示指定）。既定値は claude 側の制約（advisor は main モデル以上の能力が必要）に合わせ、`model` が `sonnet` のワーカーは `"opus"`、`model` が `opus` のワーカーは `""` にしてある。
 
 ### `mode`（タスクの実行形態）
 
