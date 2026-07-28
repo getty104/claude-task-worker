@@ -465,6 +465,7 @@ advisor は main モデル以上の能力を持つモデルである必要があ
 `cc-issue-created` と `cc-triage-scope` の両方のラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
 
 - `cc-pr-created` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
+- `cc-create-ui-design` / `cc-ui-design-pr-created`（UIデザイン先行フローの進行中マーカー）が付いているIssueも除外。トリガーラベルはトリアージ完了後に付き直されるため、除外しないとデザインPRのマージまで再トリアージが走り続け、パターンE-1の前提ゲートが満たされない再実行が `cc-exec-issue` を付けてデザイン合意前に実装を始めてしまう
 - 確認事項の有無に応じて `cc-answer-issue-questions` または `cc-exec-issue` ラベルを付与（または不要ならクローズ）
 
 ### triage-pr
