@@ -94,6 +94,8 @@ cc-triage-scope
 
 **手動オプトイン/オプトアウト**: 人が `cc-create-ui-design` を直接付ければトリアージ判定を経ずにデザインフローへ入れる。逆に `cc-ui-design-ready` を手で付ければ E-1 はスキップされる。
 
+**デザインフロー進行中のトリアージ停止**: `triage-created-issue` の除外ラベルに `cc-create-ui-design` と `cc-ui-design-pr-created` を追加する。トリガーラベル（`cc-issue-created` / `cc-triage-scope`）はトリアージ完了時に付き直されるため、除外しないとデザイン PR の作成〜マージが終わるまで毎ポーリングで再トリアージが走る。さらに再実行では前提ゲート 2（デザイン系ラベルが付いていないこと）を満たさず E-1 がスキップされるため、パターン E に落ちて `cc-exec-issue` が付き、デザイン合意前に実装が始まる。`cc-ui-design-ready` は同時に付く `cc-exec-issue` 側で除外されるため追加しない。
+
 ### 4.3 `create-ui-design` ワーカー（新規）
 
 `createIssuePollingWorker` を使う Issue ワーカー。
