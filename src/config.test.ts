@@ -12,15 +12,16 @@ function silenceWarn(t: TestContext): void {
 
 test("parseUiDesignEntry defaults to disabled with designs/ as the design dir", (t) => {
   silenceWarn(t);
-  assert.deepEqual(parseUiDesignEntry(undefined), { enabled: false, designDir: "designs" });
-  assert.deepEqual(DEFAULT_UI_DESIGN_CONFIG, { enabled: false, designDir: "designs" });
+  assert.deepEqual(parseUiDesignEntry(undefined), { enabled: false, designDir: "designs", yolo: false });
+  assert.deepEqual(DEFAULT_UI_DESIGN_CONFIG, { enabled: false, designDir: "designs", yolo: false });
 });
 
 test("parseUiDesignEntry reads enabled and designDir", (t) => {
   silenceWarn(t);
-  assert.deepEqual(parseUiDesignEntry({ enabled: true, designDir: "docs/designs" }), {
+  assert.deepEqual(parseUiDesignEntry({ enabled: true, designDir: "docs/designs", yolo: true }), {
     enabled: true,
     designDir: "docs/designs",
+    yolo: true,
   });
 });
 
@@ -53,15 +54,22 @@ test("parseUiDesignEntry falls back to the default for a path-traversal designDi
 
 test("parseUiDesignEntry falls back to defaults when uiDesign is not an object", (t) => {
   silenceWarn(t);
-  assert.deepEqual(parseUiDesignEntry("designs"), { enabled: false, designDir: "designs" });
-  assert.deepEqual(parseUiDesignEntry([]), { enabled: false, designDir: "designs" });
-  assert.deepEqual(parseUiDesignEntry(null), { enabled: false, designDir: "designs" });
+  assert.deepEqual(parseUiDesignEntry("designs"), { enabled: false, designDir: "designs", yolo: false });
+  assert.deepEqual(parseUiDesignEntry([]), { enabled: false, designDir: "designs", yolo: false });
+  assert.deepEqual(parseUiDesignEntry(null), { enabled: false, designDir: "designs", yolo: false });
 });
 
 test("parseUiDesignEntry warns once per invalid key", (t) => {
   const warn = t.mock.method(console, "warn", () => {});
-  parseUiDesignEntry({ enabled: 1, designDir: 2 });
-  assert.equal(warn.mock.callCount(), 2);
+  parseUiDesignEntry({ enabled: 1, designDir: 2, yolo: 3 });
+  assert.equal(warn.mock.callCount(), 3);
+});
+
+test("parseUiDesignEntry falls back to the default for a non-boolean yolo", (t) => {
+  silenceWarn(t);
+  // yolo を文字列で有効扱いすると、人のレビューを挟むつもりのデザインPRが
+  // cc-triage-scope 付きで自動マージへ流れる。必ず既定（無効）へ倒す。
+  assert.equal(parseUiDesignEntry({ enabled: true, yolo: "true" }).yolo, false);
 });
 
 test("advisorModel defaults to opus for sonnet workers and to none for opus workers", () => {

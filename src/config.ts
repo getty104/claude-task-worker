@@ -34,6 +34,9 @@ export interface WorkerRuntimeConfig {
 export interface UiDesignConfig {
   enabled: boolean;
   designDir: string;
+  // デザインPRを人のレビュー無しで自動マージまで流すか。false（既定）ではデザインPRに
+  // cc-triage-scope を付けないため、triage-pr が拾わず人がレビュー・マージするまで止まる。
+  yolo: boolean;
 }
 
 interface Config {
@@ -45,6 +48,7 @@ interface Config {
 export const DEFAULT_UI_DESIGN_CONFIG: UiDesignConfig = {
   enabled: false,
   designDir: "designs",
+  yolo: false,
 };
 
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
@@ -267,6 +271,15 @@ export function parseUiDesignEntry(val: unknown): UiDesignConfig {
     } else {
       console.warn(
         `[config] invalid uiDesign.enabled: ${String(entry.enabled)}, using default ${DEFAULT_UI_DESIGN_CONFIG.enabled}`,
+      );
+    }
+  }
+  if ("yolo" in entry) {
+    if (typeof entry.yolo === "boolean") {
+      result.yolo = entry.yolo;
+    } else {
+      console.warn(
+        `[config] invalid uiDesign.yolo: ${String(entry.yolo)}, using default ${DEFAULT_UI_DESIGN_CONFIG.yolo}`,
       );
     }
   }

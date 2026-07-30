@@ -21,7 +21,7 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 ## 実行モードの制約
 
-本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-ui-design` ワーカー（`cc-create-ui-design` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-ui-design-pr-created` の付与、デザインPRへの `cc-triage-scope` / `cc-ui-design` 付与）を進める。処理が未完のままターンを終えると、デザインPR未作成のままトリガーラベルが外れてIssueが停滞したり、デザインなしで実装フェーズへ流れたりする状態壊れが起きる。
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-ui-design` ワーカー（`cc-create-ui-design` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-ui-design-pr-created` の付与、デザインPRへの `cc-ui-design` 付与と、`uiDesign.yolo` が `true` の場合の `cc-triage-scope` 付与）を進める。処理が未完のままターンを終えると、デザインPR未作成のままトリガーラベルが外れてIssueが停滞したり、デザインなしで実装フェーズへ流れたりする状態壊れが起きる。
 
 > **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。`pencil` の疎通確認はフェーズ0の本文で行う。
 
@@ -273,7 +273,7 @@ EOF
 
 **`Closes #$0` / `Fixes #$0` などの closing keyword は絶対に使わない。** デザインPRのマージで実装Issueが閉じてしまい、実装フェーズへ進めなくなるため。参照は必ず `Refs #$0` にする。
 
-ラベルは付与しない（`cc-triage-scope` / `cc-ui-design` はワーカーが `onCompleted` で付与する）。
+ラベルは付与しない（`cc-ui-design` はワーカーが `onCompleted` で付与する。`cc-triage-scope` も同様にワーカー側の担当で、`claude-task-worker.json` の `uiDesign.yolo` が `true` の場合のみ付与される）。
 
 ### PR作成の検証
 
