@@ -1,6 +1,7 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH } from "../config.js";
+import { runAgentBrowserInstall } from "./agent-browser.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
 const LABELS: { name: string; color: string }[] = [
@@ -125,6 +126,11 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
   console.log("[init] Setting up CodeGraph...");
   await ensureCodegraphGitIgnore("init");
   await runCodegraphInit("init");
+
+  // agent-browser にはリポジトリ単位の初期化が無いため、init ではブラウザバイナリの取得だけを担保する
+  // （CLI 自体の導入は `claude-task-worker install` / `update` の担当）
+  console.log("[init] Setting up agent-browser...");
+  await runAgentBrowserInstall("init");
 
   console.log("[init] Done.");
 }

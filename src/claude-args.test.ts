@@ -150,6 +150,17 @@ test("buildClaudeArgs keeps the tool restrictions and the system prompt in both 
   }
 });
 
+test("buildClaudeArgs disables the claude-in-chrome integration in both modes", () => {
+  // Browser automation is consolidated on the agent-browser CLI. Leaving the
+  // integration on would keep mcp__claude-in-chrome__* alongside it and leave
+  // the choice between them up to the model.
+  for (const mode of ["default", "herdr"] as const) {
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "sonnet", effort: "high" });
+    assert.ok(args.includes("--no-chrome"));
+    assert.ok(!args.includes("--chrome"));
+  }
+});
+
 test("buildClaudeArgs passes the system prompt via a file so no arg carries a newline", () => {
   // herdr rejects any agent argument containing a newline with
   // invalid_agent_argument ("agent arguments cannot be encoded safely for the

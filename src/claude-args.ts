@@ -200,7 +200,9 @@ export function buildClaudeArgs({ mode, prompt, model, effort, advisorModel }: C
     ...(mode === "herdr" ? [] : ["-p"]),
     prompt,
     "--dangerously-skip-permissions",
-    "--chrome",
+    // ブラウザ操作は agent-browser CLI に一元化したため、claude-in-chrome 連携は無効化する
+    // （有効なままだと `mcp__claude-in-chrome__*` が併存し、どちらを使うかがモデル任せになる）
+    "--no-chrome",
     "--disallowedTools",
     DISALLOWED_TOOLS_ARG,
     "--append-system-prompt-file",

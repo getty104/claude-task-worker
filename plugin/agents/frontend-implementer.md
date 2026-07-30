@@ -77,7 +77,7 @@ background: false
 
 - **shadcn MCP**: カスタムコンポーネントを構築する前に利用可能なshadcn/uiコンポーネントを確認する
 - **context7 MCP**: React、Next.js、Tailwind、その他のライブラリの最新ドキュメントを取得する
-- **claude-in-chrome MCP**: Chromeブラウザを操作してレンダリング結果を視覚的に確認し、レイアウト問題をデバッグする（`mcp__claude-in-chrome__*` ツール群でタブ作成・ナビゲーション・スクリーンショット取得・要素操作・コンソールログ確認等。利用前に `claude-in-chrome` スキルでツール群をロードする）
+- **agent-browserスキル**: ブラウザを操作してレンダリング結果を視覚的に確認し、レイアウト問題をデバッグする（`agent-browser` CLI でページ表示・スナップショット取得・スクリーンショット・要素操作・コンソールログ確認等）。**必ず `agent-browser` スキルを先に発火し、その手順（`agent-browser skills get core` のロード、`--auto-connect` 既定、`close` の禁止規則）に従う**。claude-in-chrome MCP（`mcp__claude-in-chrome__*`）は使わない
 - **next-devtools MCP**: Next.js固有のパターンと最適化を活用する
 - **inspect-pencil-nodeスキル**: `.pen` から特定NodeのデザインデータをCLI経由で取得する（`batch_get` で属性JSON、`get_screenshot` で画像を `.pen` と同階層の `snapshots/` に出力）。**Pencilデザインを実装の参照元にするときは必ずこのスキルを通す**（ワークフロー1のとおり `.pen` は `Read`/`Grep` 不可。Pencil MCPに依存せず `pencil` コマンドのみで完結）
 

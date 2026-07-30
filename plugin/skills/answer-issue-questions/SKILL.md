@@ -118,10 +118,10 @@ explore-agent サブエージェントで確認事項に関連するコードベ
 - 必要に応じたgit履歴の確認
 - コードベース内の関連パターンの検索
 
-UIや画面挙動に関する確認事項の場合は、`claude-in-chrome` MCP（`mcp__claude-in-chrome__*` ツール群）を使用して実際の画面上での動作を確認する。利用前に `claude-in-chrome` スキルを呼び出してツール群をロードすること。
-- `mcp__claude-in-chrome__tabs_create_mcp` / `navigate` で該当ページにアクセスし、`computer` や `read_page` でレンダリング結果やレイアウトをスクリーンショット・テキストとして確認する
-- `computer` や `form_input` でインタラクション（クリック、入力、遷移など）を実際に操作して検証する
-- `read_page` / `read_console_messages` / `read_network_requests` でDOM構造・コンソールログ・ネットワーク通信を確認して問題の有無を調査する
+UIや画面挙動に関する確認事項の場合は、`agent-browser` CLI で実際の画面上での動作を確認する。**必ず `agent-browser` スキルを先に発火し、その手順（`agent-browser skills get core` のロード、`--auto-connect` 既定、`close` の禁止規則）に従うこと**。claude-in-chrome MCP（`mcp__claude-in-chrome__*`）は使わない。
+- `agent-browser --auto-connect open <url>` で該当ページにアクセスし、`snapshot -i` / `screenshot` / `get text` でレンダリング結果やレイアウトをテキスト・スクリーンショットとして確認する
+- `click` / `fill` / `type` / `press` でインタラクション（クリック、入力、遷移など）を実際に操作して検証する（ref は `snapshot` ごとに振り直されるため、操作前に撮り直す）
+- `get html` / `console` / `network` 系コマンドでDOM構造・コンソールログ・ネットワーク通信を確認して問題の有無を調査する（正確なサブコマンドは `agent-browser skills get core --full` で確認する）
 - 確認結果は回答の根拠として引用する（スクリーンショットやログの抜粋を含める）
 
 ### ステップ4: 回答の作成とコメント編集

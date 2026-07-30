@@ -1,3 +1,4 @@
+import { installAgentBrowserCli, runAgentBrowserInstall } from "./agent-browser.js";
 import { installCodegraphCli } from "./codegraph.js";
 import { runCommand } from "./run-command.js";
 
@@ -47,7 +48,10 @@ export async function install(): Promise<void> {
   const pluginOk = await installPlugin();
   const cliOk = await installCli();
   const codegraphOk = await installCodegraphCli("install");
-  if (!pluginOk || !cliOk || !codegraphOk) {
+  // CLI の導入に失敗した状態で `agent-browser install` を叩いても確実に失敗するため、成功時のみ続ける
+  const agentBrowserCliOk = await installAgentBrowserCli("install");
+  const agentBrowserBinariesOk = agentBrowserCliOk ? await runAgentBrowserInstall("install") : false;
+  if (!pluginOk || !cliOk || !codegraphOk || !agentBrowserCliOk || !agentBrowserBinariesOk) {
     process.exitCode = 1;
   }
   console.log("[install] Done.");

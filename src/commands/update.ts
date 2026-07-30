@@ -1,3 +1,4 @@
+import { runAgentBrowserInstall, upgradeAgentBrowserCli } from "./agent-browser.js";
 import { upgradeCodegraphCli } from "./codegraph.js";
 import { runCommand } from "./run-command.js";
 
@@ -46,7 +47,10 @@ export async function update(): Promise<void> {
   const pluginOk = await updatePlugin();
   const cliOk = await updateCli();
   const codegraphOk = await upgradeCodegraphCli("update");
-  if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk) {
+  const agentBrowserCliOk = await upgradeAgentBrowserCli("update");
+  // 更新後の agent-browser が要求する Chrome が未取得なケースを埋める（取得済みなら no-op）
+  const agentBrowserBinariesOk = agentBrowserCliOk ? await runAgentBrowserInstall("update") : false;
+  if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk || !agentBrowserCliOk || !agentBrowserBinariesOk) {
     process.exitCode = 1;
   }
   console.log("[update] Done.");

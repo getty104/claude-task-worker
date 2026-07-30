@@ -29,12 +29,19 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/gh.ts`** - GitHub CLI (`gh`) ラッパー。全GitHub操作を集約
 - **`src/process-manager.ts`** - 子プロセス管理。リアルタイムステータステーブル表示、プロセスライフサイクル管理
 - **`src/table.ts`** - 端末テーブル描画のヘルパー。`getDisplayWidth()`/`truncateToWidth()`/`padToWidth()`（全角を幅2として扱う桁揃え）、`buildTaskTableLines()`（ステータステーブルの行組み立て）。`buildTaskTableLines()` は副作用を持たない純粋関数で、`process-manager.ts` の `renderTable()` が `console.clear()` + 出力のみを担う。**実行中/完了のセクション振り分けは `TaskTableEntry.status` で行い、表示用の status 文字列では判定しない**。herdr モードの実行中行は `running:working` のように agentStatus を併記した装飾済み文字列になるため、表示値で `=== "running"` を見ると実行中タスクが完了セクション（区切り罫線の下）へ紛れ込む
-- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）も行う
-- **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI のインストールを一括で行うコマンド
-- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI の更新コマンド
+- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）と agent-browser のブラウザバイナリ取得（`agent-browser install`）も行う
+- **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI のインストール・agent-browser CLI のインストールとブラウザバイナリ取得を一括で行うコマンド
+- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI・agent-browser CLI の更新コマンド
 - **`src/commands/codegraph.ts`** - CodeGraph（`@colbymchenry/codegraph`）連携。`installCodegraphCli()`（`npm install -g` によるインストール）、`upgradeCodegraphCli()`（`codegraph upgrade` による更新。CodeGraph 自身の更新機構を使うことで配布方法の変更に追随できる。未インストール環境では `codegraph` コマンドが無く失敗するため `installCodegraphCli()` へフォールバックする）、`runCodegraphInit()`（`codegraph init`）、`ensureCodegraphGitIgnore()`（グローバル gitignore への `.codegraph/` 追記）、`globalGitIgnorePath()`/`appendIgnoreEntry()`（テスト可能な純粋関数）
   - **`codegraph install` はあえて実行しない**。同コマンドは各エージェントの設定ファイルへ MCP サーバー定義を書き込むが、その役割は本プラグインの `plugin/.mcp.json`（`codegraph serve --mcp`）が担っているため、両方走らせると同じサーバーが二重登録される。CLI のインストールだけを `npm install -g` で行う
   - グローバル gitignore（`~/.config/git/ignore`、`XDG_CONFIG_HOME` があればその配下）へ入れるのは、`.codegraph/` がプロジェクトごとのローカルインデックス（SQLite）でコミット対象ではない一方、対象リポジトリの `.gitignore` を汚したくないため。追記は冪等で、`.codegraph/` と `.codegraph` の両方を登録済みとみなす（`!.codegraph/` のような否定パターンは登録済み扱いにしない）
+- **`src/commands/agent-browser.ts`** - agent-browser（[agent-browser.dev](https://agent-browser.dev/)、npm `agent-browser`）連携。`installAgentBrowserCli()`（`npm install -g agent-browser@latest`）、`upgradeAgentBrowserCli()`（`agent-browser upgrade` による更新。agent-browser 自身がインストール方法（npm / Homebrew / Cargo）を検出して適切な更新コマンドを走らせるため、`npm install -g` で外から上書きするより確実。CodeGraph と同じ方針）、`isAgentBrowserInstalled()`（`agent-browser --version` の成否による導入判定）、`runAgentBrowserInstall()`（`agent-browser install`）
+  - **`update` は未導入マシンでは更新ではなくインストールを行う**。`upgradeAgentBrowserCli()` が先に `isAgentBrowserInstalled()` で判定し、未導入なら upgrade を試さず `installAgentBrowserCli()` へ回す。`claude-task-worker update` は agent-browser 導入前のマシンでも実行されうるため、ここで打ち切らずに導入まで済ませる。事前判定を挟むのは、未導入マシンで upgrade を叩くと「更新に失敗した」という誤解を招くエラーログが必ず出るため（実際は未導入なだけ）。導入済みなのに upgrade が失敗した場合（ネットワーク障害・壊れたインストール等）も、復旧手段として `installAgentBrowserCli()` へフォールバックする
+  - 導入判定に **`spawn` の `ENOENT` は使わない**。`runCommand()` は Windows では `shell: true` で起動するため「コマンドが存在しない」がシェルの非0終了として返り `ENOENT` にならない。`--version` の成否で見ればどのプラットフォームでも同じ判定になる
+  - **CLI の導入とブラウザバイナリ（Chrome）の取得は別コマンド**。`npm install -g` だけでは最初のブラウザ操作コマンドが実行時に失敗するため、`install` / `update` / `init` のいずれも `agent-browser install` を続けて呼ぶ（取得済みなら no-op なので冪等）。`install` / `update` では**CLI 側が成功した場合のみ**バイナリ取得へ進む（CLI が無い状態で `agent-browser install` を叩いても確実に失敗し、無意味なエラーログが出るだけのため）
+  - `init` が担うのはブラウザバイナリの取得だけ。agent-browser にはリポジトリ単位の初期化（CodeGraph の `codegraph init` に相当するもの）が無いため
+  - **`npx skills add vercel-labs/agent-browser`（上流のスキル配布）はあえて実行しない**。ブラウザ操作スキルは本プラグインの `plugin/skills/agent-browser/` が配布しており、両方入れると同名スキルが二重登録される。`codegraph install` を実行しないのと同じ理由
+  - **MCP サーバー（`agent-browser mcp`）は `plugin/.mcp.json` に登録していない**。agent-browser の利点は「アクセシビリティツリー + `@eN` ref のコンパクトな**CLI出力**」であり、MCP の型付きツール表面（`--tools all` で CLI 同等）を常時ロードするとコンテキスト削減の効果を相殺する。スキルは `Bash` から CLI を叩く形にしてある
 - **`src/runcat.ts`** - RunCat Neo 用の利用状況スナップショット書き出し。`~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で上書き可）へ一時ファイル + rename で原子的に書き込む。フォーマットは `~/dotfiles/claude/statusline.py` の出力と揃えてある（`buildRuncatSnapshot`/`resetStamp`/`resetHour`）。ただしリセット時刻は `ceilToMinute()` で秒以下を切り上げて分境界に揃える（API は `:59` 秒でリセット時刻を返すため、切り捨て表示だと 1 分手前に見える）。切り上げが日付・時をまたぐ場合はそれぞれ日付付き表示・次の時に繰り上がる。書き出しは `slack.ts` の `buildTokenLimitText()` 経由で行われるため、`usage` コマンド実行時に加えてワーカーのタスク完了/失敗通知のたびに更新される（Slack webhook 未設定でも通知が no-op になるだけでスナップショットは更新される）。ただし利用状況の取得自体は `/tmp/claude-usage-cache.json` の360秒キャッシュを挟むため、値の鮮度は最大6分古くなりうる
 - **`src/workers/`** - 各ワーカー実装
 - **`src/workers/ui-design.ts`** - UIデザイン先行ワークフローの純粋ヘルパー（`create-ui-design` / `apply-ui-design` が共有）。`designBranchName()`（`cc-ui-design-<N>`）、`hasDesignReference()`（description のデザイン参照セクション判定）、`classifyDesignPr()`（デザインPRの状態 → preflight 判定）、各種 Issue コメント本文。gh 依存を持たないため分岐だけをユニットテストできる
@@ -256,6 +263,20 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `apply-ui-design` の `preflight` はデザインPRが `MERGED` のときだけ `proceed`、`OPEN` なら `skip`（マージ待ち）、未マージクローズ・PR不在は `cc-need-human-check` を付与して `skip`。同ラベルは `issue-worker.ts` の共通除外ラベルなので無限リトライしない
 - `exec-issue` は `cc-ui-design-ready` が付いているのに description に `## UIデザイン` セクションが無い状態を検出したら、**デザインなしで実装せず** `cc-need-human-check` に落とす。復旧はデザイン参照を自動で再生成する場合、`cc-need-human-check` と `cc-ui-design-ready` を外して `cc-ui-design-pr-created` を付け直せば `apply-ui-design` が description を再生成する。`cc-need-human-check` を外さずに `cc-ui-design-pr-created` だけ付け直しても、同ラベルは `issue-worker.ts` の共通除外ラベルのため `apply-ui-design` のポーリング候補から外れたままになり再実行されない
 
+### ブラウザ操作（agent-browser）
+
+ブラウザ操作は **agent-browser CLI に一元化**してある（旧: claude-in-chrome MCP `mcp__claude-in-chrome__*`）。Chrome/Chromium を CDP 経由で操作し、アクセシビリティツリーのスナップショットと `@eN` 形式の要素refを返すため、生HTML/スクリーンショットをやり取りするより桁違いに少ないトークンでページを扱える。
+
+入口は `plugin/skills/agent-browser/SKILL.md` の1枚だけで、ブラウザ操作を行う側（`frontend-implementer` / `pencil-design-updater` / `answer-issue-questions`）は**このスキルを発火してから**操作する。
+
+**ワーカーは claude を `--no-chrome` で起動する**（`src/claude-args.ts` の `buildClaudeArgs()`。旧 `--chrome` から反転）。有効なままだと `mcp__claude-in-chrome__*` が agent-browser と併存し、どちらを使うかがモデル任せになる（プロンプト側で「使わない」と書いても、ツールが見えている限り選ばれる余地が残る）。`buildClaudeArgs()` の他のフラグと同じく両モード共通で、`src/claude-args.test.ts` が `--no-chrome` の付与と `--chrome` の不在を検証している。
+
+- **SKILL.md はコマンド仕様を持たない発見用スタブ**。実際の使い方は `agent-browser skills get core`（`--full` で全コマンドリファレンス）を CLI から読ませる。CLI が**インストール済みバージョンと一致する**手順を返すため内容が古くならない一方、スタブへ仕様を書き写すとバージョン更新で嘘になる。上流（`vercel-labs/agent-browser`）のスキルも同じ構造で、この設計を踏襲している。Electron / Slack / 探索的テスト等は `agent-browser skills get <name>` の専用スキルへ委ねる
+- **既定は `--auto-connect`**（サブコマンドの**前**に置くグローバルフラグ）。起動中の Chrome を自動検出して接続し、その Cookie / localStorage / ログイン状態をそのまま使うため、認証が必要な画面をログインし直さずに確認できる。ローカル開発の画面確認はこの形が既定
+- **`--auto-connect` 中は `close` / `close --all` を実行しない**。接続先はユーザー自身が使っている Chrome であり、閉じるとユーザーの作業中タブごと落とす破壊的操作になる。自分で起動した独立セッション（`--auto-connect` なし）に限り作業後に `close` で片付ける
+- `--auto-connect` は起動中の Chrome が無い・リモートデバッグ無効の環境では失敗するため、その場合は同フラグを外して agent-browser 自身にブラウザを起動させる（既定は headless、目視が必要なら `--headed`）
+- `@eN` ref は `snapshot` 時点のページに対する参照で、**ページが変化した瞬間に無効になる**。ref を使う操作の前に必ず `snapshot -i` を撮り直す
+
 ## Conventions
 
 - ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
@@ -273,3 +294,5 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - CodeGraph (`codegraph`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`codegraph serve --mcp`）。`explore-agent` およびワーカー起動セッションは**この MCP ツール経由で** CodeGraph を使う。ツールが無い場合、および未インデックスでエラー・空結果が返る場合は `Glob`/`Grep` にフォールバックする
   - プロジェクトごとのインデックス構築は `claude-task-worker init`（内部で `codegraph init`）。未インストール・未初期化でもワーカーは動作する（探索がテキスト検索に落ちるだけ）
+- agent-browser (`agent-browser`) がインストール済み（`claude-task-worker install` / `update` / `init` が面倒を見る）
+  - ブラウザ操作は**すべてこの CLI 経由**で行う（後述の「ブラウザ操作（agent-browser）」参照）。未インストールでもワーカーは動作する（ブラウザを伴う検証が行えなくなるだけ）
