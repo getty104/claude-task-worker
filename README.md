@@ -74,7 +74,8 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 {
   "uiDesign": {
     "enabled": true,
-    "designDir": "designs"
+    "designDir": "designs",
+    "yolo": false
   }
 }
 ```
@@ -83,6 +84,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 |---|---|---|
 | `uiDesign.enabled` | `false` | 本ワークフローの有効化。`false` の間は `triage-created-issue` がUI判定を行わず、2つのワーカーも起動しない |
 | `uiDesign.designDir` | `"designs"` | `.pen` とスナップショットの配置先（リポジトリルートからの相対パス） |
+| `uiDesign.yolo` | `false` | デザインPRを自動レビュー・自動マージへ流すか。`true` のときだけデザインPRに `cc-triage-scope` を付与する。`false`（既定）ではデザインPRは `cc-ui-design` のみが付いた状態で止まり、人がレビュー・マージするまで `apply-ui-design` は先へ進まない |
 
 フローは以下のとおり。
 
@@ -93,8 +95,9 @@ cc-issue-created + triage-created-issue（ルーティング）
         → create-ui-design ワーカー
            ・.pen を作成/更新 + snapshots/ に PNG 出力
            ・ブランチ cc-ui-design-<N> を push しデザインPRを作成（Refs #N。closing keyword は使わない）
-           ・PR に cc-triage-scope + cc-ui-design、Issue に cc-ui-design-pr-created を付与
-        → triage-pr / fix-review-point / resolve-conflict（既存フローでレビュー・マージ）
+           ・PR に cc-ui-design（uiDesign.yolo が true なら cc-triage-scope も）、Issue に cc-ui-design-pr-created を付与
+        → uiDesign.yolo: true  → triage-pr / fix-review-point / resolve-conflict（既存フローでレビュー・マージ）
+           uiDesign.yolo: false → 人がデザインPRをレビュー・マージ
         → apply-ui-design ワーカー
            ・デザインPRが MERGED になるまで skip
            ・Issue description に「## UIデザイン」セクションを追記
@@ -102,7 +105,7 @@ cc-issue-created + triage-created-issue（ルーティング）
         → exec-issue（デザインを参照元として実装）
 ```
 
-デザインPRは Epic PR ではないため `cc-release-ready` によるマージ保留の対象外で、`triage-pr` が通常どおりレビュー・マージする。`triage-pr` は `cc-ui-design` ラベル付きPRに対してコードレビューではなくデザイン向けの観点（差分が `.pen` とPNGに限定されているか、スナップショットとデザイン意図が読み取れるか、Issue要件を満たしているか）で評価する。
+デザインPRのレビュー・マージ経路は `uiDesign.yolo` で切り替わる。`true` のときはデザインPRに `cc-triage-scope` が付き、Epic PR ではないため `cc-release-ready` によるマージ保留の対象外で、`triage-pr` が通常どおりレビュー・マージする。`false`（既定）では `cc-triage-scope` を付けないためどのワーカーもデザインPRを拾わず、人がレビューしてマージするまで待つ（`apply-ui-design` はデザインPRが `MERGED` になるまでスキップし続ける）。デザインに人が介在したい場合は既定のままにする。`triage-pr` は `cc-ui-design` ラベル付きPRに対してコードレビューではなくデザイン向けの観点（差分が `.pen` とPNGに限定されているか、スナップショットとデザイン意図が読み取れるか、Issue要件を満たしているか）で評価する。
 
 デザインが不要と判明した場合は `create-ui-design` が理由をコメントして `cc-ui-design-ready` + `cc-exec-issue` を付与し、人手を介さず実装へ復帰する。Pencil が使えない環境やデザインPRが却下された場合は `cc-need-human-check` に落ちて停止する（共通除外ラベルのため無限リトライしない）。
 
@@ -506,7 +509,7 @@ advisor は main モデル以上の能力を持つモデルである必要があ
 - `claude-task-worker.json` の `uiDesign.enabled` が `true` の場合のみ起動する（`false` なら1行ログを出して即終了）
 - `cc-ui-design-pr-created` / `cc-ui-design-ready` が付いているIssueは除外
 - デザインPRは `cc-ui-design-<Issue番号>` の固定名ブランチを head とする（後段の `apply-ui-design` が一意に特定するため）
-- 完了後、デザインPRの実在を確認できた場合のみ、PRに `cc-ui-design` と `cc-triage-scope`、Issueに `cc-ui-design-pr-created` を付与する
+- 完了後、デザインPRの実在を確認できた場合のみ、PRに `cc-ui-design`（`uiDesign.yolo` が `true` の場合は `cc-triage-scope` も）、Issueに `cc-ui-design-pr-created` を付与する
 - スキルが「デザイン不要」と判定した場合（`cc-ui-design-ready` 付与済み）は完了扱いとし、そのまま実装フェーズへ流す
 - PRの実在を確認できない場合は `cc-need-human-check` を付与してIssueにコメントを残す
 
@@ -581,7 +584,7 @@ claude-task-worker -v
 | キー | 型 | デフォルト | 説明 |
 |---|---|---|---|
 | `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
-| `uiDesign` | object | `{ "enabled": false, "designDir": "designs" }` | UIデザイン先行ワークフローの設定（詳細は「[UIデザイン先行ワークフロー](#uiデザイン先行ワークフロー)」） |
+| `uiDesign` | object | `{ "enabled": false, "designDir": "designs", "yolo": false }` | UIデザイン先行ワークフローの設定（詳細は「[UIデザイン先行ワークフロー](#uiデザイン先行ワークフロー)」） |
 | `workers` | object | `{}` | ワーカーごとに Claude CLI に渡すスキル、`--model` / `--advisor` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
 
 ### ワーカーごとの設定
