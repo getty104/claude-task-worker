@@ -256,6 +256,18 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `apply-ui-design` の `preflight` はデザインPRが `MERGED` のときだけ `proceed`、`OPEN` なら `skip`（マージ待ち）、未マージクローズ・PR不在は `cc-need-human-check` を付与して `skip`。同ラベルは `issue-worker.ts` の共通除外ラベルなので無限リトライしない
 - `exec-issue` は `cc-ui-design-ready` が付いているのに description に `## UIデザイン` セクションが無い状態を検出したら、**デザインなしで実装せず** `cc-need-human-check` に落とす。復旧はデザイン参照を自動で再生成する場合、`cc-need-human-check` と `cc-ui-design-ready` を外して `cc-ui-design-pr-created` を付け直せば `apply-ui-design` が description を再生成する。`cc-need-human-check` を外さずに `cc-ui-design-pr-created` だけ付け直しても、同ラベルは `issue-worker.ts` の共通除外ラベルのため `apply-ui-design` のポーリング候補から外れたままになり再実行されない
 
+### 要件ルール（`.claude/requirements/`）
+
+対象リポジトリの `.claude/requirements/` に、過去のIssueで確定した**仕様・要件レベルの判断ロジック**を要件タイプ別のマークダウンとして集約する仕組み。ワーカーは介在せず、スキル同士の読み書き契約だけで成立する。
+
+- **書き手**: `update-requirement-rules`（手動起動、`disable-model-invocation: true`）。引数の期間（既定7日）で `cc-triage-scope` / `cc-pr-created` ラベル付きIssueの description とコメントを収集し（`scripts/fetch-recent-requirement-issues.sh`）、複数Issueで反復している判断をルール化して `.claude/requirements/<category>.md` を更新、`commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-coding-guidelines` と同じ経路で、以降のレビュー・マージは `triage-pr` に乗る）
+- **読み手**: `create-issue` / `create-issue-from-issue-number` / `answer-issue-questions`。`README.md`（カテゴリ表）を先に読み、**関係するカテゴリファイルだけ**を読む二段構え（全ファイル読み込みはコンテキストを食うだけで判断材料にならない）
+- **`CODING_GUIDELINES.md` との棲み分け**: 判定は「そのルールを知っていると **Issue の description（要件・実装プラン・影響範囲）の書き分けが変わるか**」の1問。変わるなら要件ルール、コードを書く段階でしか効かないなら `CODING_GUIDELINES.md`。「責務をどの層に置くか」「エラー時のふるまい」は仕様にも作法にも読めて境界が引けないため、この問いで機械的に倒す（両方に載せると片方だけ更新されて食い違う）
+- **採用基準**: 独立した2件以上のIssueでの反復（**同一Epic配下の兄弟Issue群は何件あっても1件と数える** — 同じ設計議論を相互参照しながら繰り返すため、形式的には簡単に2件を満たしてしまう）／一般方針の明示／ラベル語彙・ワーカー間の契約・設定スキーマなど共有語彙に触れる判断は1件でも採用
+- **確認事項との関係**: ルールが結論を与えている論点は確認事項として起こさない（人が既に決着させた判断の再確認は着手を止めるだけ）。逆に**Issue本文がルールと矛盾する場合は常にIssue本文が勝つ** — ルールは過去の一般解であり、今回の明示的な依頼を上書きしない
+- **削除には根拠を要求する**: 「最近言及がない」は陳腐化の根拠にならない（守られているルールほど再言及されない）。逆の結論の確定・対象機能の消滅・他ドキュメントとの重複のいずれかを確認したときだけ削除・上書きする。カテゴリファイルは最大8個・1ファイル20ルールを上限に統合する
+- **原則として分割読みしない**: クラスタリングは全Issueが1つの文脈に載っていないと成立せず、要約だけを受け取るとチャンクをまたいだ同一判断が二重登録される。やむなく分割する場合はサブエージェントに**逐語引用**を返させ、親が引用を突き合わせて再統合する
+
 ## Conventions
 
 - ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
