@@ -3,34 +3,37 @@ import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
-// 全16色を彩度100%（HSL S=100%）に振り切り、色相を 360/16 = 22.5度刻みで均等配置したうえで、
-// リスト上の隣接ラベルが157.5度ずつ離れる順（stride 7）で割り当ててある。そのため意味的な系統
-// （警告=暖色など）ではなく、見分けやすさを優先した並びになっている（cc-need-human-check の赤
-// だけは意味を保持）。明度は色相ごとに、下記の制約下で色差が最大になる値を個別に選んである。
-// - 全ペアの色差: 最小 ΔE(CIE76) ≈ 30。彩度は平均 C* ≈ 86・最小 45（旧配色は ΔE 22 / C* 64）
+// 全16色は「色相・明度・彩度の3軸すべて」を使って散らしてある。旧配色は彩度を100%に固定し色相
+// だけで散らしていたため、色相環上で等間隔でも実際の見分けは付きにくかった（高彩度域では色相差
+// あたりの知覚差が小さく、ΔE(CIE76) 上は離れていても人の目には近い色になる）。そこで下記の制約
+// 下で「全ペアの最小 ΔE(CIE2000) を最大化する16色」を数値最適化して選び直した。
+// - 全ペアの色差: 最小 ΔE(CIE2000) ≈ 21.6（旧配色は 7.4。CIE76 では旧 30.3 / 新 29.0 とほぼ同値
+//   になるが、CIE76 は高彩度域の色差を過大評価するため実際の見分けやすさを反映しない）
+// - 明度 L* は 30〜89、彩度 C* は 32〜120（平均 58）に分布させ、同系色相でも明度・彩度で分離する
 // - 文字とのコントラスト比は全色 4.5:1 以上。GitHub は Primer の perceived-lightness
 //   （= (0.2126R + 0.7152G + 0.0722B) / 255、しきい値 0.6）で文字色を黒/白に自動で振り分ける
 //   ため、その境界（0.50〜0.68）を避けてどちらに転んでも読める側へ寄せてある
-// 一覧を変更するときは、色相を上記の刻みから外さないこと。明度を変える場合は、perceived-
-// lightness が 0.16〜0.50 か 0.68〜0.93 に収まり、かつ自動選択される文字色とのコントラスト比が
-// 4.5:1 以上であることを確認する（境界付近に置くと文字が読めない色になる）。
+// 見分けやすさを優先した結果、意味的な系統（警告=暖色など）は保証しない（cc-need-human-check の
+// 赤だけは意味を保持するため最適化時に固定した）。色を変更するときは、(1) 他の15色すべてとの
+// ΔE(CIE2000) が 20 以上、(2) perceived-lightness が 0.16〜0.50 か 0.68〜0.93 に収まる、
+// (3) 自動選択される文字色とのコントラスト比が 4.5:1 以上、の3点を確認すること。
 const LABELS: { name: string; color: string }[] = [
-  { name: "cc-need-human-check", color: "eb0000" }, // red (hue 0)
-  { name: "cc-fix-onetime", color: "47ffba" }, // aquamarine (hue 158)
-  { name: "cc-resolve-conflict", color: "db00a4" }, // magenta (hue 315)
-  { name: "cc-update-issue", color: "20ff00" }, // green (hue 113)
-  { name: "cc-in-progress", color: "8000ff" }, // violet (hue 270)
-  { name: "cc-release-ready", color: "b3cc00" }, // olive (hue 68)
-  { name: "cc-pr-created", color: "0029a3" }, // navy (hue 225)
-  { name: "cc-issue-created", color: "bd4700" }, // burnt orange (hue 23)
-  { name: "cc-triage-scope", color: "00ffff" }, // cyan (hue 180)
-  { name: "cc-answer-issue-questions", color: "e60056" }, // crimson (hue 338)
-  { name: "cc-exec-issue", color: "52ff7d" }, // spring green (hue 135)
-  { name: "cc-epic-issue", color: "c900e6" }, // purple (hue 293)
-  { name: "cc-create-ui-design", color: "a1ff42" }, // chartreuse (hue 90)
-  { name: "cc-ui-design", color: "6752ff" }, // indigo (hue 248)
-  { name: "cc-ui-design-pr-created", color: "ffbf00" }, // amber (hue 45)
-  { name: "cc-ui-design-ready", color: "0079c2" }, // azure (hue 203)
+  { name: "cc-need-human-check", color: "e10000" }, // red (H0 S100 L44 / L*47 C*95)
+  { name: "cc-fix-onetime", color: "ffb400" }, // amber (H42 S100 L50 / L*78 C*83)
+  { name: "cc-resolve-conflict", color: "c30a78" }, // magenta (H324 S90 L40 / L*43 C*71)
+  { name: "cc-update-issue", color: "00fae6" }, // cyan (H175 S100 L49 / L*89 C*53)
+  { name: "cc-in-progress", color: "7d6ea5" }, // muted violet (H256 S23 L54 / L*50 C*33)
+  { name: "cc-release-ready", color: "00ff00" }, // green (H120 S100 L50 / L*88 C*120)
+  { name: "cc-pr-created", color: "141edc" }, // blue (H237 S83 L47 / L*30 C*112)
+  { name: "cc-issue-created", color: "783732" }, // maroon (H4 S41 L33 / L*32 C*32)
+  { name: "cc-triage-scope", color: "5abeff" }, // sky (H204 S100 L68 / L*74 C*42)
+  { name: "cc-answer-issue-questions", color: "ff91f5" }, // pink (H305 S100 L78 / L*75 C*64)
+  { name: "cc-exec-issue", color: "285023" }, // dark green (H113 S39 L23 / L*30 C*33)
+  { name: "cc-epic-issue", color: "8c6405" }, // dark gold (H42 S93 L28 / L*45 C*52)
+  { name: "cc-create-ui-design", color: "ffa591" }, // salmon (H11 S100 L78 / L*76 C*39)
+  { name: "cc-ui-design", color: "aab478" }, // sage (H70 S29 L59 / L*71 C*32)
+  { name: "cc-ui-design-pr-created", color: "008273" }, // teal (H173 S100 L25 / L*49 C*34)
+  { name: "cc-ui-design-ready", color: "0073a0" }, // azure (H197 S100 L31 / L*45 C*33)
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
