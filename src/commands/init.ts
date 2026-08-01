@@ -3,40 +3,45 @@ import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
-// cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 26〜92 / C* 56〜111、平均
-// C* 75）。その制約下で「全ペアの最小 ΔE(CIE2000) を最大化する15色」を数値最適化して選んである。
-// - 全ペアの色差: 最小 ΔE(CIE2000) ≈ 17.5。彩度を高域に固定すると使える色空間の体積が減るため、
-//   彩度を 32〜120 まで許した旧配色（≈ 21.6）より色差は下がる。見た目のビビッドさを優先した
-//   トレードオフで、17.5 は「隣に並べれば別色と分かる」水準（旧々配色は 7.4 で判別不能だった）
-// - 同系色相は明度で分離する（例: 緑は L*49 の 078834 と L*89 の 3dff64）
+// cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
+// 制約下で「**同時に付きうるラベル同士**の最小 ΔE(CIE2000) を最大化する15色」を数値最適化した。
+// 全ペア一律ではなく共起するペアだけを最大化するのは、Issue にしか付かないラベルと PR にしか
+// 付かないラベルは同じ一覧に並ばないため、そこに色空間を割くと肝心の共起ペアが詰まるから。
+// - 共起ペアの最小 ΔE(CIE2000) ≈ 25.2（全ペア一律で最適化すると ≈ 17.5 までしか取れない）
+// - 非共起ペアにも下限 ΔE ≥ 15 を課す（横断検索など、別スコープのラベルが同じ画面に出る場合に
+//   同色に見えないため）。最小は 15.4（cc-release-ready / cc-create-ui-design）
+// - 共起の判定: (1) Issue 専用ラベル × PR 専用ラベルは共起しない、(2) UIデザインの状態遷移
+//   （cc-create-ui-design → cc-ui-design-pr-created → cc-ui-design-ready）は順に付け替わるため
+//   互いに共起しない、(3) それ以外はすべて共起しうるものとして扱う。cc-in-progress と
+//   cc-need-human-check は実行中／要人手として他のラベルへ重ねて付くため、全色と共起する
 // - 文字とのコントラスト比は全色 4.5:1 以上。GitHub は Primer の perceived-lightness
 //   （= (0.2126R + 0.7152G + 0.0722B) / 255、しきい値 0.6）で文字色を黒/白に自動で振り分ける
 //   ため、その境界（0.50〜0.68）を避けてどちらに転んでも読める側へ寄せてある
-// cc-triage-scope だけは明るいグレー（C* 3）で、ビビッド15色に対する ΔE(CIE2000) が 25 以上ある
-// ことを最適化の制約に入れてある（無彩色を1色だけ置くことで、ラベル一覧上で「まだスコープが
-// 決まっていない」状態が彩度の有無だけで見分けられる）。
-// 見分けやすさを優先した結果、意味的な系統（警告=暖色など）は保証しない（cc-need-human-check の
-// 赤だけは意味を保持するため最適化時に固定した）。色を変更するときは、(1) 他の15色すべてとの
-// ΔE(CIE2000) が 17 以上、(2) perceived-lightness が 0.16〜0.50 か 0.68〜0.93 に収まる、
-// (3) 自動選択される文字色とのコントラスト比が 4.5:1 以上、(4) cc-triage-scope 以外は HSL 彩度
-// 90 以上、の4点を確認すること。
+// 色相は cc-need-human-check（赤）/ cc-fix-onetime（赤系）/ cc-in-progress（緑）/ cc-update-issue
+// （黄）/ cc-exec-issue（紫）を色相帯で固定し、残りを最適化に任せてある。cc-triage-scope だけは
+// 白（C* 0）で、他15色との ΔE が 25 以上あることを制約に入れた（無彩色を1色だけ置くことで、
+// 「まだスコープが決まっていない」状態が彩度の有無だけで見分けられる）。
+// 色を変更するときは、(1) 共起するラベルすべてとの ΔE(CIE2000) が 25 以上、(2) 共起しない
+// ラベルとも 15 以上、(3) perceived-lightness が 0.16〜0.50 か 0.68〜0.93 に収まる、(4) 自動選択
+// される文字色とのコントラスト比が 4.5:1 以上、(5) cc-triage-scope 以外は HSL 彩度 90 以上、の
+// 5点を確認すること。
 const LABELS: { name: string; color: string }[] = [
-  { name: "cc-need-human-check", color: "da0b0b" }, // vivid red (H0 S90 L45 / L*46 C*90)
-  { name: "cc-fix-onetime", color: "f5a542" }, // vivid orange (H33 S90 L61 / L*74 C*64)
-  { name: "cc-resolve-conflict", color: "e90c59" }, // vivid crimson (H339 S90 L48 / L*50 C*79)
-  { name: "cc-update-issue", color: "1af9d8" }, // vivid turquoise (H171 S95 L54 / L*88 C*56)
-  { name: "cc-in-progress", color: "5a3dff" }, // vivid indigo (H249 S100 L62 / L*42 C*111)
-  { name: "cc-release-ready", color: "3dff64" }, // vivid green (H132 S100 L62 / L*89 C*97)
-  { name: "cc-pr-created", color: "0073d1" }, // vivid blue (H207 S100 L41 / L*48 C*57)
-  { name: "cc-issue-created", color: "9e6700" }, // vivid bronze (H39 S100 L31 / L*48 C*58)
-  { name: "cc-triage-scope", color: "d9dde3" }, // light gray (H213 S15 L87 / L*88 C*3)
-  { name: "cc-answer-issue-questions", color: "cb0bd5" }, // vivid magenta (H297 S90 L44 / L*49 C*100)
-  { name: "cc-exec-issue", color: "078834" }, // vivid emerald (H141 S90 L28 / L*49 C*61)
-  { name: "cc-epic-issue", color: "ffeb33" }, // vivid yellow (H54 S100 L60 / L*92 C*84)
-  { name: "cc-create-ui-design", color: "760891" }, // vivid purple (H288 S90 L30 / L*30 C*76)
-  { name: "cc-ui-design", color: "98c70a" }, // vivid lime (H75 S90 L41 / L*75 C*82)
-  { name: "cc-ui-design-pr-created", color: "00398f" }, // vivid navy (H216 S100 L28 / L*26 C*56)
-  { name: "cc-ui-design-ready", color: "9f0459" }, // vivid wine (H327 S95 L32 / L*34 C*60)
+  { name: "cc-need-human-check", color: "eb1700" }, // vivid red (H6 S100 L46 / L*50 C*97)
+  { name: "cc-fix-onetime", color: "960837" }, // vivid wine red (H340 S90 L31 / L*32 C*56)
+  { name: "cc-resolve-conflict", color: "6e7e07" }, // vivid olive (H68 S90 L26 / L*50 C*57)
+  { name: "cc-update-issue", color: "fff700" }, // vivid yellow (H58 S100 L50 / L*95 C*95)
+  { name: "cc-in-progress", color: "14ed0c" }, // vivid green (H118 S90 L49 / L*82 C*112)
+  { name: "cc-release-ready", color: "00328a" }, // vivid navy (H218 S100 L27 / L*24 C*58)
+  { name: "cc-pr-created", color: "df0c7c" }, // vivid magenta (H328 S90 L46 / L*49 C*77)
+  { name: "cc-issue-created", color: "ffa347" }, // vivid orange (H30 S100 L64 / L*75 C*66)
+  { name: "cc-triage-scope", color: "ffffff" }, // white (L*100 C*0)
+  { name: "cc-answer-issue-questions", color: "077e2e" }, // vivid dark green (H140 S90 L26 / L*46 C*58)
+  { name: "cc-exec-issue", color: "74089b" }, // vivid purple (H284 S90 L32 / L*30 C*80)
+  { name: "cc-epic-issue", color: "0fffdf" }, // vivid turquoise (H172 S100 L53 / L*90 C*57)
+  { name: "cc-create-ui-design", color: "002aff" }, // vivid blue (H230 S100 L50 / L*36 C*123)
+  { name: "cc-ui-design", color: "ffc524" }, // vivid amber (H44 S100 L57 / L*83 C*79)
+  { name: "cc-ui-design-pr-created", color: "947100" }, // vivid bronze (H46 S100 L29 / L*50 C*56)
+  { name: "cc-ui-design-ready", color: "0c73e9" }, // vivid azure (H212 S90 L48 / L*50 C*69)
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
