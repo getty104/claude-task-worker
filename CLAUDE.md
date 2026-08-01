@@ -256,6 +256,16 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `apply-ui-design` の `preflight` はデザインPRが `MERGED` のときだけ `proceed`、`OPEN` なら `skip`（マージ待ち）、未マージクローズ・PR不在は `cc-need-human-check` を付与して `skip`。同ラベルは `issue-worker.ts` の共通除外ラベルなので無限リトライしない
 - `exec-issue` は `cc-ui-design-ready` が付いているのに description に `## UIデザイン` セクションが無い状態を検出したら、**デザインなしで実装せず** `cc-need-human-check` に落とす。復旧はデザイン参照を自動で再生成する場合、`cc-need-human-check` と `cc-ui-design-ready` を外して `cc-ui-design-pr-created` を付け直せば `apply-ui-design` が description を再生成する。`cc-need-human-check` を外さずに `cc-ui-design-pr-created` だけ付け直しても、同ラベルは `issue-worker.ts` の共通除外ラベルのため `apply-ui-design` のポーリング候補から外れたままになり再実行されない
 
+### 確認事項の二段エスカレーション（`triage-created-issue` → `answer-issue-questions` → `cc-need-human-check`）
+
+未回答の確認事項をどこで処理するかの契約。`triage-created-issue` は確認事項の調査（コード探索・ドキュメント精査・外部リンク参照）を一切行わないため、**「`gh` で判断できない＝人間判断が必要」ではない**。この同一視をしていたため、実運用では調査すれば決まる項目まで `cc-need-human-check` に落ち、着手が人待ちで止まっていた。
+
+- **一次トリアージ（`triage-created-issue`）**: 未回答の確認事項があれば内容を問わず `cc-answer-issue-questions` へ委任する（パターンC）。`cc-need-human-check`（パターンA）に落ちるのは、(1) 確認事項とは独立に Issue 全体の扱いが決まらない・人間同士の議論が未決着（経路1）、(2) `answer-issue-questions` が回答を試みてなお解消できなかったと**痕跡で確認できる**場合（経路2）に限る
+- **回答（`answer-issue-questions`）**: コメント最終行だけでなく **description 内の確認事項も回答対象**にする（`## 確認事項` セクション、「確認したいこと」「要確認」「TBD」等。実装プラン中の作業手順は対象外）。回答は常にコメントへ書き、description は編集しない（反映は `update-issue` の責務）
+- **引き渡しマーカー**: 調査を尽くしても事実で決まらない項目だけを、回答コメント末尾の固定セクション `## 人間判断が必要な確認事項（自動回答不能）` に列挙する。**このセクションの有無だけが `cc-need-human-check` の根拠**であり、0件ならセクションごと省略する（空セクション・「該当なし」も人の手を止めるため禁止）。セクション名は文字列一致で検出するため変更不可。判定基準は「実際に調査済み」「Issue本文の確定方針でも決まらない」「選好・優先度・不可逆な選択に依存する」の3条件をすべて満たすこと
+- **ループ防止**: `update-issue` は同セクションに列挙済みの項目を `confirmation_items` として再掲しない。`triage-created-issue` 側でも、実質同一の問いが再掲されていたら「未回答の新規項目」ではなく引き渡し済み（経路2の対象）として扱う。両側に置いているのは、回答不能 → 確認事項として再掲 → 再委任の往復を片側の実装漏れで作らないため
+- 委任 → `cc-update-issue` → `update-issue` → 再トリアージ、で往復は1回で決着する
+
 ### 要件ルール（`.claude/requirements/`）
 
 対象リポジトリの `.claude/requirements/` に、過去のIssueで確定した**仕様・要件レベルの判断ロジック**を要件タイプ別のマークダウンとして集約する仕組み。ワーカーは介在せず、スキル同士の読み書き契約だけで成立する。
