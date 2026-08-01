@@ -2,91 +2,303 @@
 
 GitHub Issues/PRを定期ポーリングし、Claude Codeに処理を委譲するCLIツール。
 
-本リポジトリに同梱されている `claude-task-worker` Claude Code プラグイン（`plugin/` ディレクトリ）と組み合わせることで、GitHub Issue の実装からPRのレビュー対応、Dependabot PRの対応までを自動化する。CLI 本体（npm パッケージ）とプラグイン（Claude Code マーケットプレイス）は同じリポジトリ・同じ名前で提供される。
+同梱の `claude-task-worker` Claude Code プラグイン（`plugin/`）と組み合わせることで、Issue の実装からPRのレビュー対応、Dependabot PR の対応までを自動化する。CLI 本体（npm パッケージ）とプラグイン（Claude Code マーケットプレイス）は同じリポジトリ・同じ名前で提供される。
 
 ## アーキテクチャ
 
-`claude-task-worker` CLI がGitHubラベルを検知してタスクを起動し、`claude-task-worker` プラグインのスキルが実際の処理を担う。
+CLI が GitHub ラベルを検知してタスクを起動し、プラグインのスキルが実際の処理を担う。
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                         GitHub                         │
-│                                                        │
-│  Issue (cc-exec-issue)                            ──┐  │
-│  Issue (cc-triage-scope, blockedBy all closed)    ──┤  │
-│  Issue (cc-update-issue)                          ──┤  │
-│  Issue (cc-answer-issue-questions)                ──┤  │
-│  Issue (cc-issue-created + cc-triage-scope)       ──┤  │
-│  Issue (cc-epic-issue, all sub-issues closed)     ──┤  │
-│  PR    (cc-fix-onetime)                           ──┤  │
-│  PR    (cc-triage-scope)                          ──┤  │
-│  PR    (cc-resolve-conflict)                      ──┤  │
-│  PR    (dependencies, Dependabot)                 ──┤  │
-└─────────────────────────────────────────────────────┼──┘
-                                                      │
-                                                      ▼
-                                       ┌────────────────────────┐
-                                       │   claude-task-worker   │
-                                       └───────────┬────────────┘
-                                                   │ invoke
-                                                   ▼
-                                       ┌────────────────────────┐
-                                       │    Claude Code CLI     │
-                                       │  + claude-task-worker  │
-                                       │       plugin           │
-                                       └────────────────────────┘
+   GitHub (Issue / PR + ラベル)
+              │ poll
+              ▼
+     claude-task-worker
+              │ invoke
+              ▼
+       Claude Code CLI
+   + claude-task-worker plugin
 ```
 
-### Worker と claude-task-worker プラグインのスキル対応
+### Worker とスキルの対応
 
-| Worker | トリガーラベル | 呼び出されるスキル | デフォルト間隔 |
+| Worker | トリガー | 呼び出すスキル | 間隔 |
 |---|---|---|---|
-| `exec-issue` | `cc-exec-issue` | `/claude-task-worker:exec-issue` | 1分 |
-| `create-issue` | `cc-triage-scope` (Issue, blockedBy が全て Close) | `/claude-task-worker:create-issue-from-issue-number` | 1分 |
+| `exec-issue` | `cc-exec-issue` (Issue) | `/claude-task-worker:exec-issue` | 1分 |
+| `create-issue` | `cc-triage-scope` (Issue) | `/claude-task-worker:create-issue-from-issue-number` | 1分 |
 | `update-issue` | `cc-update-issue` | `/claude-task-worker:update-issue` | 1分 |
 | `answer-issue-questions` | `cc-answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | 1分 |
-| `fix-review-point` | `cc-fix-onetime` | `/claude-task-worker:fix-review-point` | 1分 |
 | `triage-created-issue` | `cc-issue-created` + `cc-triage-scope` (Issue) | `/claude-task-worker:triage-created-issue` | 1分 |
-| `triage-pr` | `cc-triage-scope` (PR) | `/claude-task-worker:triage-pr` | 1分 |
-| `resolve-conflict` | `cc-resolve-conflict` (PR) | `/claude-task-worker:resolve-pr-conflict` | 1分 |
-| `check-dependabot` | `dependencies` (PR) | `/claude-task-worker:check-dependabot` | 1時間 |
 | `epic-issue` | `cc-epic-issue` (Issue, sub-issues が全て Close) | `/claude-task-worker:create-epic-pr` | 5分 |
 | `create-ui-design` | `cc-create-ui-design` (Issue) | `/claude-task-worker:create-ui-design` | 1分 |
 | `apply-ui-design` | `cc-ui-design-pr-created` (Issue) | `/claude-task-worker:apply-ui-design` | 5分 |
+| `fix-review-point` | `cc-fix-onetime` (PR) | `/claude-task-worker:fix-review-point` | 1分 |
+| `triage-pr` | `cc-triage-scope` (PR) | `/claude-task-worker:triage-pr` | 1分 |
+| `resolve-conflict` | `cc-resolve-conflict` (PR) | `/claude-task-worker:resolve-pr-conflict` | 1分 |
+| `check-dependabot` | `dependencies` (PR) | `/claude-task-worker:check-dependabot` | 1時間 |
 
-> ℹ️ Issue 系ワーカーはすべて GitHub Issue Dependencies の `-is:blocked` 検索 qualifier でサーバ側絞り込みを行うため、未解決の blockedBy Issue を持つ Issue は対象外となる。
->
-> ℹ️ `create-ui-design` / `apply-ui-design` は `claude-task-worker.json` の `uiDesign.enabled` が `true` のときだけ起動する（既定は `false`）。詳細は「[UIデザイン先行ワークフロー](#uiデザイン先行ワークフロー)」を参照。
+共通の挙動:
 
-### Epic（親Issue）連携
+- 処理中は `cc-in-progress` を付与し、同一 Issue/PR の重複実行を防ぐ
+- `cc-need-human-check` が付いた Issue は全ワーカーの対象外
+- Issue 系ワーカーは `-is:blocked` 検索 qualifier で絞り込むため、未解決の blockedBy を持つ Issue は対象外
+- 完了時にトリガーラベルを除去し、次のワーカーへ引き継ぐラベルを付与する
+- `create-ui-design` / `apply-ui-design` は `uiDesign.enabled` が `true` のときだけ起動する（既定 `false`）
 
-親Issue (Issue Dependencies の Parent) を持つサブIssueを処理する場合、ワーカーはデフォルトブランチではなく `cc-epic-<親Issue番号>` ブランチから worktree を作成する。エピック単位でブランチをまとめることで、サブIssueごとのPRを単一の統合ブランチに集約しやすくなる。エピックブランチが remote に無い場合はデフォルトブランチから自動派生して push される。
+### プラグインの構成
 
-`epic-issue` ワーカーは、`cc-epic-issue` ラベル付きの親Issueに紐づくサブIssueがすべて Close されたタイミングで `/claude-task-worker:create-epic-pr` を起動し、エピックブランチからまとめてPRを作成する。
+| ディレクトリ | 内容 |
+|---|---|
+| `plugin/skills/` | ワーカーが呼ぶスキル群と、対話セッション用の補助スキル（`commit-push` / `create-pr` / `breakdown-issues` / `edit-pencil-design` など） |
+| `plugin/agents/` | サブエージェント定義（`explore-agent` / `frontend-implementer` / `general-purpose-assistant` / `lightweight-assistant` / `pencil-design-updater` / `requirement-todo-organizer`） |
+| `plugin/hooks/` | `SessionStart`（worktree セットアップ）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
+| `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs`） |
+| `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `next-devtools` / `shadcn`） |
 
-### UIデザイン先行ワークフロー
+## セットアップ
 
-UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを作り、それを独立したPRとしてマージしてから実装へ進むフロー。デザインの見た目・構成を実装PRとは別に単体でレビュー・合意でき、合意済みデザインがリポジトリに永続化される。
+### 前提条件
 
-`claude-task-worker.json` の `uiDesign.enabled` によるオプトインで、既定（`false`）では2つのワーカーが起動しないため、Pencil を使っていないリポジトリの挙動は本機能の追加前と完全に一致する。
+| 名前 | 用途 |
+|---|---|
+| [Node.js](https://nodejs.org/) >= 22.6.0 | CLI の実行ランタイム |
+| [GitHub CLI (`gh`)](https://cli.github.com/) | 全 GitHub 操作（認証済みであること） |
+| [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) | タスク実行エンジン |
+| [Git](https://git-scm.com/) | worktree の作成・ブランチ操作 |
+| [jq](https://jqlang.org/) | プラグインスキル内での JSON 加工 |
+| [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス。任意（未導入でも探索がテキスト検索に落ちるだけ） |
+| [Pencil CLI](https://docs.pencil.dev/for-developers/pencil-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ |
+| [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
+
+CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に単一バンドルされ、Node.js 標準モジュールのみで動作する）。
+
+### インストール
+
+```bash
+npx claude-task-worker install
+```
+
+マーケットプレイスの追加・プラグインのインストール・CLI 本体のグローバルインストール・CodeGraph CLI のインストールを一括で行う。いずれかが失敗しても処理は継続し、`[install]` プレフィックス付きでログ出力される（失敗時の終了コードは 1）。インストール後、Claude Code のセッションを再起動するとプラグインが有効になる。
+
+個別にやる場合:
+
+```bash
+npm install -g claude-task-worker
+claude plugin marketplace add getty104/claude-task-worker
+claude plugin install claude-task-worker@claude-task-worker
+```
+
+herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
+
+### 更新
+
+```bash
+claude-task-worker update
+```
+
+マーケットプレイス・プラグイン・CLI 本体・CodeGraph CLI をまとめて更新する。プラグインの反映にはセッション再起動が必要。
+
+### 初期化
+
+対象リポジトリで実行すると、GitHub ラベル・Issue テンプレート・GitHub Actions ワークフロー・設定ファイルが作成され、CodeGraph のインデックスが構築される。
+
+```bash
+claude-task-worker init           # 既存ファイルは保護
+claude-task-worker init --force   # 強制上書き
+```
+
+作成されるラベル:
+
+| ラベル | 用途 |
+|---|---|
+| `cc-triage-scope` | トリアージ対象マーク（Issue/PR） |
+| `cc-issue-created` | `create-issue` 由来の Issue マーク（`triage-created-issue` のトリガー） |
+| `cc-update-issue` | Issue 更新トリガー |
+| `cc-answer-issue-questions` | Issue 確認事項への回答トリガー |
+| `cc-exec-issue` | Issue 実行トリガー |
+| `cc-fix-onetime` | PR 修正トリガー（1回） |
+| `cc-resolve-conflict` | PR コンフリクト解消トリガー |
+| `cc-in-progress` | 処理中ステータス |
+| `cc-need-human-check` | 人間の確認が必要（付与中は Issue ワーカーの対象外） |
+| `cc-pr-created` | PR 作成完了マーク |
+| `cc-epic-issue` | エピックマーク（Issue: サブ全 Close で `epic-issue` 起動 / PR: リリースゲート対象） |
+| `cc-release-ready` | エピックPRがリリース可能と判定されたマーク（実際のマージは人間が実施） |
+| `cc-create-ui-design` | UIデザイン作成トリガー |
+| `cc-ui-design-pr-created` | デザインPR作成済み・マージ待ちマーク |
+| `cc-ui-design-ready` | デザイン反映済みマーク（再デザイン抑止） |
+| `cc-ui-design` | デザインPRのマーカー（`triage-pr` のレビュー観点切り替え用） |
+
+作成されるファイル:
+
+- `.github/ISSUE_TEMPLATE/cc-triage-scope.yml` — `cc-triage-scope` 付き Issue 作成用テンプレート
+- `.github/workflows/assign-creator-on-cc-triage-scope.yml` — Issue 作成者の自動アサイン
+- `claude-task-worker.json` — 設定ファイル。**ワーカーごとの既定値は書き出さない**（写経するとプラグイン更新で既定が変わっても古い値に固定されるため）。上書きしたいワーカーだけ手で追記する
+
+CodeGraph のセットアップとして、グローバル gitignore（`~/.config/git/ignore`）へ `.codegraph/` を冪等に追記し、`codegraph init` を実行する。CodeGraph 未インストールでも `init` 全体は失敗しない。
+
+## コマンド
+
+```bash
+claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--project <name>]...
+```
+
+| コマンド | 内容 |
+|---|---|
+| 各ワーカー名 | 単一ワーカーを起動（`exec-issue` / `triage-pr` など。上記 Worker 表を参照） |
+| `all` | 通常ワーカー9つを同時にポーリング（トリアージ系3つを除く） |
+| `yolo` | 全ワーカーを同時にポーリング（`all` + `triage-created-issue` + `triage-pr` + `check-dependabot`） |
+| `init` | ラベル・テンプレート・設定ファイルの作成と CodeGraph セットアップ |
+| `install` / `update` | 上記「セットアップ」を参照 |
+| `usage` | Claude API 使用状況（5時間/7日間の利用率とリセット時刻）を表示し、Slack にも通知 |
+| `version` | CLI のバージョンを表示（`--version` / `-v` も可） |
+
+### `--epic <issue-number>`
+
+指定したエピック Issue のサブ Issue のみを処理対象に絞る。`all` / `yolo` と Issue 系ワーカーで有効。複数指定するといずれかのエピックを親に持つサブ Issue が対象になる（OR）。
+
+```bash
+claude-task-worker all --epic 100 --epic 200
+```
+
+`epic-issue` ワーカーだけはエピック Issue 自体が処理対象なので、指定番号は「エピック Issue 自身の番号」として照合される。
+
+### `--label <label>`
+
+トリガーラベルに加えて指定ラベルが付いた Issue のみに絞る。複数指定すると全ラベルの AND。`--epic` と併用可能。ユーザーのスコープ指定なので、タスク完了時にワーカーが除去することはない。
+
+```bash
+claude-task-worker all --label priority-high --label needs-design
+```
+
+### `--project <name>`
+
+指定したプロジェクト（またはグループ、`all`）へ [herdr](https://herdr.dev) 経由でコマンドをディスパッチする。指定するとCLIはワーカーを直接実行せず、対象プロジェクトごとに独立した herdr ワークスペースを作ってそこでコマンドを実行する。
+
+```bash
+claude-task-worker all --project all
+claude-task-worker all --project frontend
+claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
+```
+
+プロジェクト名・グループ名は `$XDG_CONFIG_HOME/claude-task-worker/config.json`（未設定なら `~/.config/claude-task-worker/config.json`）で定義する。`all` は全プロジェクトを指す予約語。
 
 ```json
 {
-  "uiDesign": {
-    "enabled": true,
-    "designDir": "designs",
-    "yolo": false
+  "mode": "default",
+  "advisor": false,
+  "projects": {
+    "app-a": "/Users/me/repos/app-a",
+    "app-b": "/Users/me/repos/app-b"
+  },
+  "projectGroups": {
+    "frontend": ["app-a", "app-b"]
   }
 }
 ```
 
-| キー | 既定値 | 意味 |
-|---|---|---|
-| `uiDesign.enabled` | `false` | 本ワークフローの有効化。`false` の間は `triage-created-issue` がUI判定を行わず、2つのワーカーも起動しない |
-| `uiDesign.designDir` | `"designs"` | `.pen` とスナップショットの配置先（リポジトリルートからの相対パス） |
-| `uiDesign.yolo` | `false` | デザインPRを自動レビュー・自動マージへ流すか。`true` のときだけデザインPRに `cc-triage-scope` を付与する。`false`（既定）ではデザインPRは `cc-ui-design` のみが付いた状態で止まり、人がレビュー・マージするまで `apply-ui-design` は先へ進まない |
+ディスパッチャーの機能:
 
-フローは以下のとおり。
+- **一斉起動**: プロジェクトごとに `ctw:<プロジェクト名>` ラベルのワークスペースを作り、そこで（`--project` を除いた）同じコマンドを実行する。ワーカーが実際に起動したかを確認し、起動しなければ再送・失敗判定する
+- **稼働一覧**: プロジェクト名・ワークスペースID・ペインID・ステータス・稼働時間をステータステーブルに描画する
+- **一括停止**: SIGTERM/SIGINT で全セッションへ ctrl-c を送り、終了を待ってワークスペースを閉じる。もう一度送ると強制終了
+
+`--project` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
+
+## 設定ファイル
+
+グローバル設定は `config.json`（上記）、リポジトリ設定は実行ディレクトリ直下の `claude-task-worker.json`。
+
+### `config.json`（グローバル）
+
+| キー | 既定 | 説明 |
+|---|---|---|
+| `projects` | - | プロジェクト名 → 絶対パス |
+| `projectGroups` | `{}` | グループ名 → プロジェクト名配列 |
+| `mode` | `"default"` | タスクの実行形態（下記） |
+| `advisor` | `false` | `--advisor` を渡すか（下記） |
+
+#### `mode`（タスクの実行形態）
+
+全ワーカー・全プロジェクトに一括適用される（個別指定は不可）。
+
+| `mode` | 挙動 |
+|---|---|
+| `"default"` | タスクを `claude -p`（非対話 print モード）の子プロセスとして実行 |
+| `"herdr"` | タスクを herdr のタブ内で TUI セッションとして実行。実行中の様子を herdr で覗ける |
+
+`"herdr"` では、worktree 作成後に `ctw:<プロジェクト名>:#<番号>` ラベルのタブを作り、そのルートペインで claude を TUI 起動する。agent ステータスを監視して完了を検知し、セッション transcript から最終レポートを回収して通知に使う。`blocked`（claude が入力待ち）になっても自動失敗にせず待機し、ステータステーブルに `running:blocked` と表示するので herdr のタブを開いて直接対応できる。herdr が未インストール・未起動なら起動時にエラー終了する（`"default"` へフォールバックしない）。
+
+> ℹ️ タスク完了時の通知音はワーカー側から止められない（音を鳴らすのは herdr サーバープロセスで、`HERDR_DISABLE_SOUND` もそのプロセスの環境変数として読まれるため）。無音にするには `~/.config/herdr/config.toml` に `[ui.sound] enabled = false` を書いて `herdr server reload-config` する。ただし herdr サーバー全体に効くため、対話セッションの完了音も鳴らなくなる。
+
+#### `advisor`（アドバイザーモデル）
+
+`true` にすると、タスク起動時に Claude CLI へ `--advisor <model>` を渡す。渡すモデルは `claude-task-worker.json` の `workers.<名前>.advisorModel`。`mode` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位のオン/オフはできない。空文字が指定されたワーカーには渡さない。
+
+advisor は main モデル以上の能力が必要（Claude CLI の制約）。そのため `advisorModel` の既定値は、`model: sonnet` のワーカーが `opus`、`model: opus` のワーカーは空文字（advisor なし）になっている。
+
+### `claude-task-worker.json`（リポジトリ）
+
+| キー | 型 | 既定 | 説明 |
+|---|---|---|---|
+| `fixReviewPointCallbackCommentMessage` | string | - | `fix-review-point` 完了時に PR へ投稿するコメント（未設定なら投稿しない） |
+| `uiDesign` | object | `{ "enabled": false, "designDir": "designs", "yolo": false }` | UIデザイン先行ワークフロー（下記） |
+| `workers` | object | `{}` | ワーカーごとの上書き設定（下記） |
+
+#### ワーカーごとの設定
+
+未指定のワーカー・フィールドは既定値にフォールバックする。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `skill` | string | Claude CLI の `-p` に渡すスラッシュコマンド。`"<skill> <番号>"` の形で起動される |
+| `model` | string | `--model` の値（`sonnet` / `opus` / `haiku`） |
+| `advisorModel` | string | `--advisor` の値。空文字なら advisor なし。`config.json` の `advisor: true` のときだけ参照される |
+| `effort` | string | `--effort` の値（`high` / `medium` / `low`） |
+| `pollingIntervalSeconds` | number | ポーリング間隔（秒） |
+| `cooldownSeconds` | number | タスク完了後にポーリングを止める時間（秒）。`0` でなし |
+| `maxConcurrentTasks` | number | 同時実行できるタスクの最大数 |
+
+既定値（`skill` は「[Worker とスキルの対応](#worker-とスキルの対応)」を参照。`effort` は全て `high`、`cooldownSeconds` は `0`、`maxConcurrentTasks` は `1`）:
+
+| ワーカー | `model` | `advisorModel` | `pollingIntervalSeconds` |
+|---|---|---|---|
+| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `update-issue` / `resolve-conflict` / `create-ui-design` | `opus` | `""`（なし） | 60 |
+| `triage-created-issue` / `triage-pr` | `sonnet` | `opus` | 60 |
+| `epic-issue` / `apply-ui-design` | `sonnet` | `opus` | 300 |
+| `check-dependabot` | `sonnet` | `opus` | 3600 |
+| （未知のワーカー名） | `sonnet` | `opus` | 60 |
+
+設定例:
+
+```json
+{
+  "workers": {
+    "exec-issue":       { "model": "opus", "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
+    "fix-review-point": { "model": "sonnet", "advisorModel": "opus", "maxConcurrentTasks": 2 },
+    "triage-pr":        { "effort": "medium", "pollingIntervalSeconds": 120 },
+    "check-dependabot": { "model": "haiku", "pollingIntervalSeconds": 7200 }
+  }
+}
+```
+
+## ワークフロー
+
+### Epic（親Issue）連携
+
+親 Issue（Issue Dependencies の Parent）を持つサブ Issue を処理する場合、ワーカーはデフォルトブランチではなく `cc-epic-<親Issue番号>` ブランチから worktree を作成する。エピック単位でブランチをまとめることで、サブ Issue ごとのPRを単一の統合ブランチへ集約できる。エピックブランチが remote に無ければデフォルトブランチから自動派生して push される。
+
+サブ Issue がすべて Close されると `epic-issue` ワーカーが `/claude-task-worker:create-epic-pr` を起動し、エピックブランチからまとめてPRを作る。エピックPRは `triage-pr` がマージ可能と判定してもマージせず `cc-release-ready` を付けるだけで、実際のマージ（リリース）は人間に委ねられる。
+
+### UIデザイン先行ワークフロー
+
+UI実装 Issue について、実装の前に Pencil（`.pen`）でデザインを作り、独立したPRとしてマージしてから実装へ進むフロー。デザインを実装PRとは別に単体でレビュー・合意でき、合意済みデザインがリポジトリに永続化される。
+
+`uiDesign.enabled` によるオプトインで、既定（`false`）では2つのワーカーが起動しないため、Pencil を使っていないリポジトリの挙動は本機能の追加前と完全に一致する。
+
+| キー | 既定 | 意味 |
+|---|---|---|
+| `uiDesign.enabled` | `false` | 有効化。`false` の間は `triage-created-issue` がUI判定を行わず、2つのワーカーも起動しない |
+| `uiDesign.designDir` | `"designs"` | `.pen` とスナップショットの配置先（リポジトリルートからの相対パス） |
+| `uiDesign.yolo` | `false` | デザインPRを自動レビュー・自動マージへ流すか。`true` のときだけデザインPRに `cc-triage-scope` を付ける |
 
 ```text
 cc-issue-created + triage-created-issue（ルーティング）
@@ -95,9 +307,9 @@ cc-issue-created + triage-created-issue（ルーティング）
         → create-ui-design ワーカー
            ・.pen を作成/更新 + snapshots/ に PNG 出力
            ・ブランチ cc-ui-design-<N> を push しデザインPRを作成（Refs #N。closing keyword は使わない）
-           ・PR に cc-ui-design（uiDesign.yolo が true なら cc-triage-scope も）、Issue に cc-ui-design-pr-created を付与
-        → uiDesign.yolo: true  → triage-pr / fix-review-point / resolve-conflict（既存フローでレビュー・マージ）
-           uiDesign.yolo: false → 人がデザインPRをレビュー・マージ
+           ・PR に cc-ui-design、Issue に cc-ui-design-pr-created を付与
+        → yolo: true  → triage-pr / fix-review-point / resolve-conflict（既存フローでレビュー・マージ）
+           yolo: false → 人がデザインPRをレビュー・マージ
         → apply-ui-design ワーカー
            ・デザインPRが MERGED になるまで skip
            ・Issue description に「## UIデザイン」セクションを追記
@@ -105,565 +317,41 @@ cc-issue-created + triage-created-issue（ルーティング）
         → exec-issue（デザインを参照元として実装）
 ```
 
-デザインPRのレビュー・マージ経路は `uiDesign.yolo` で切り替わる。`true` のときはデザインPRに `cc-triage-scope` が付き、Epic PR ではないため `cc-release-ready` によるマージ保留の対象外で、`triage-pr` が通常どおりレビュー・マージする。`false`（既定）では `cc-triage-scope` を付けないためどのワーカーもデザインPRを拾わず、人がレビューしてマージするまで待つ（`apply-ui-design` はデザインPRが `MERGED` になるまでスキップし続ける）。デザインに人が介在したい場合は既定のままにする。`triage-pr` は `cc-ui-design` ラベル付きPRに対してコードレビューではなくデザイン向けの観点（差分が `.pen` とPNGに限定されているか、スナップショットとデザイン意図が読み取れるか、Issue要件を満たしているか）で評価する。
+`triage-pr` は `cc-ui-design` 付きPRをコードレビューではなくデザイン向けの観点（差分が `.pen` とPNGに限定されているか、スナップショットからデザイン意図が読み取れるか、Issue 要件を満たしているか）で評価する。
 
-デザインが不要と判明した場合は `create-ui-design` が理由をコメントして `cc-ui-design-ready` + `cc-exec-issue` を付与し、人手を介さず実装へ復帰する。Pencil が使えない環境やデザインPRが却下された場合は `cc-need-human-check` に落ちて停止する（共通除外ラベルのため無限リトライしない）。
-
-### `--project` 指定時（ディスパッチャーモード）
-
-`--project` オプションを指定した場合、CLIは自身でワーカーを起動する代わりに [herdr](https://herdr.dev) 経由のディスパッチャーとして動作する。指定したプロジェクトごとにherdrのワークスペースを作成し、そのルートペインで（`--project` を除いた）同じコマンドを実行させ、稼働状況をステータステーブルで監視する。詳細は「[`--project <name>` オプション](#--project-name-オプション)」を参照。
-
-### claude-task-worker プラグインの構成
-
-| ディレクトリ | 内容 |
-|---|---|
-| `plugin/skills/` | ワーカーが呼び出すスキル群と、対話セッションから使う補助スキル（`commit-push` / `create-pr` / `breakdown-issues` / `edit-pencil-design` など） |
-| `plugin/agents/` | サブエージェント定義（`explore-agent` / `frontend-implementer` / `general-purpose-assistant` / `lightweight-assistant` / `pencil-design-updater` / `requirement-todo-organizer`） |
-| `plugin/hooks/` | `SessionStart`（worktree セットアップ・`git fetch --prune`）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
-| `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs`） |
-| `plugin/.mcp.json` | プラグインが提供する MCP サーバー定義（下記「[プラグインが利用する MCP サーバー](#プラグインが利用する-mcp-サーバー)」） |
-
-ワーカー起動スキルには `Stop` フック（`plugin/scripts/stop-servers.mjs`）が設定されており、スキル終了時に `docker compose down` と、worktree を作業ディレクトリに持つ残留プロセスの `SIGTERM` をベストエフォートで実行する。worktree はスキル完了直後に削除されるため、切り離されたサーバープロセスが残ると削除の妨げになるのを防ぐ。
-
-## 必要なライブラリ
-
-### 実行時に必要なもの
-
-CLI 本体に npm の実行時依存パッケージはない（ビルド時に esbuild で単一ファイル `dist/index.js` にバンドルされ、Node.js 標準モジュールのみで動作する）。代わりに以下の外部ツールが必要。
-
-| 名前 | バージョン | 用途 |
-|---|---|---|
-| [Node.js](https://nodejs.org/) | >= 22.6.0 | CLI の実行ランタイム（`--experimental-strip-types` を使用するテスト実行に必要） |
-| [GitHub CLI (`gh`)](https://cli.github.com/) | - | Issue/PR の取得・ラベル操作など全GitHub操作（認証済みであること） |
-| [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) | - | タスク実行エンジン。各ワーカーが Claude CLI プロセスとして起動する |
-| [Git (`git`)](https://git-scm.com/) | - | worktree の作成・ブランチ操作 |
-| [jq](https://jqlang.org/) | - | プラグインスキル内でのJSON加工（`check-dependabot` / `edit-pencil-design` スキルなどで使用） |
-| [CodeGraph (`codegraph`)](https://www.npmjs.com/package/@colbymchenry/codegraph) | - | コード探索用のインデックス。MCP サーバー（`codegraph serve --mcp`）としてプラグインから起動される。`install` / `update` / `init` が面倒を見る。未インストールでもワーカーは動作する（探索がテキスト検索に落ちるだけ） |
-| [Pencil CLI (`pencil`)](https://docs.pencil.dev/for-developers/pencil-cli) | - | `.pen` デザインファイルの編集・参照・コンフリクト解消（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict` スキルで使用） |
-| [herdr](https://herdr.dev) | - | `--project` 使用時と `mode: "herdr"` 使用時にのみ必要。複数プロジェクトへのディスパッチ・セッション監視・一括停止、タスクのTUI実行に使用 |
-| `claude-task-worker` プラグイン | - | 各ワーカーが呼び出すスキル群（本リポジトリの `plugin/`） |
-
-Slack通知（任意）を使う場合は Slack Incoming Webhook URL が必要。Claude API使用状況の取得には、macOSでは `security` コマンド（Keychain）を使用し、それ以外の環境では `~/.claude/.credentials.json` にフォールバックする。
-
-### 開発時に必要なライブラリ（devDependencies）
-
-| パッケージ | バージョン | 用途 |
-|---|---|---|
-| `typescript` | ^5.7.0 | 型チェック（`tsc --noEmit`） |
-| `esbuild` | ^0.27.4 | `dist/index.js` へのバンドル |
-| `@types/node` | ^22.0.0 | Node.js の型定義 |
-| `eslint` | ^10.3.0 | Lint |
-| `@eslint/js` | ^10.0.1 | ESLint 推奨設定 |
-| `typescript-eslint` | ^8.59.1 | TypeScript 対応の ESLint ルール |
-| `eslint-config-prettier` | ^10.1.8 | ESLint と Prettier の競合ルール無効化 |
-| `prettier` | ^3.8.3 | コードフォーマッタ |
-
-### プラグインが利用する MCP サーバー
-
-`claude-task-worker` プラグイン（`plugin/.mcp.json`）は以下の MCP サーバーを定義しており、プラグイン有効化時に Claude Code から自動的に利用される。
-
-| サーバー | 接続方法 | 用途 |
-|---|---|---|
-| `codegraph` | `codegraph serve --mcp`（stdio） | シンボルの定義元・参照元・呼び出し関係をたどるコード探索。ワーカー起動セッションは `--append-system-prompt` の指示により、`Grep`/`Glob` より優先してこの MCP を使う |
-| `context7` | HTTP（`https://mcp.context7.com/mcp`） | ライブラリの最新ドキュメント取得 |
-| `next-devtools` | `npx -y next-devtools-mcp@latest` | Next.js 開発支援 |
-| `shadcn` | `npx shadcn@latest mcp` | shadcn/ui コンポーネント情報の取得 |
-
-## セットアップ
-
-### 前提条件
-
-- [Node.js](https://nodejs.org/) v22.6 以上がインストール済みであること
-- [GitHub CLI (`gh`)](https://cli.github.com/) がインストール・認証済みであること
-- [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) がインストール済みであること
-- `claude-task-worker` プラグインがインストール済みであること（下記インストール手順を参照）
-- `--project` オプション・`mode: "herdr"` を使う場合のみ、[herdr](https://herdr.dev) がインストール済みであること
-- CodeGraph はコード探索の精度向上のために推奨（`install` / `init` が導入・インデックス構築を行う）。未導入でもワーカーは動作する
-
-詳細は上記「[必要なライブラリ](#必要なライブラリ)」を参照。
-
-### インストール
-
-#### 推奨手順（一発セットアップ）
-
-以下のコマンド一発で、Claude Code マーケットプレイスの追加・プラグインのインストール・CLI本体のグローバルインストール・CodeGraph CLI のインストールをまとめて行える。
-
-```bash
-npx claude-task-worker install
-```
-
-- `claude plugin marketplace add getty104/claude-task-worker` — マーケットプレイスの追加（追加済みの場合のエラーはログのみで無視して続行）
-- `claude plugin install claude-task-worker@claude-task-worker` — プラグインのインストール
-- `npm install -g claude-task-worker@latest` — CLI 本体のグローバルインストール（`npx` 実行時でも `claude-task-worker` コマンドを常設化する）
-- `npm install -g @colbymchenry/codegraph@latest` — CodeGraph CLI のインストール（MCP サーバーの登録はプラグインの `.mcp.json` が担うため、`codegraph install` は実行しない）
-
-インストール後、Claude Code のセッションを再起動するとプラグインが有効化される。
-
-#### 手動手順（代替）
-
-個別にインストールしたい場合は以下の手順でも良い。
-
-CLI（npm パッケージ）:
-
-```bash
-npm install -g claude-task-worker
-```
-
-開発版をローカルから使う場合:
-
-```bash
-npm install
-npm run build
-npm link
-```
-
-Claude Code プラグイン（このリポジトリを Claude Code マーケットプレイスとして追加し、プラグインをインストールする）:
-
-```bash
-claude plugin marketplace add getty104/claude-task-worker
-claude plugin install claude-task-worker@claude-task-worker
-```
-
-インストール後、Claude Code のセッションを再起動するとプラグインが有効化される。
-
-herdr（`--project` オプションを使う場合のみ必要。通常ワーカー実行には不要）:
-
-```bash
-curl -fsSL https://herdr.dev/install.sh | sh
-# または
-brew install herdr
-```
-
-詳細は [herdr インストールドキュメント](https://herdr.dev/docs/install/) を参照。
-
-#### 更新
-
-CLI・プラグイン（マーケットプレイス）・CodeGraph CLI をまとめて更新する。
-
-```bash
-claude-task-worker update
-```
-
-- `claude plugin marketplace update claude-task-worker` — マーケットプレイスの更新
-- `claude plugin update claude-task-worker@claude-task-worker` — プラグインの更新（反映にはセッション再起動が必要）
-- `npm install -g claude-task-worker@latest` — CLI 本体の更新
-- `codegraph upgrade` — CodeGraph CLI の更新（未インストール環境ではコマンドが無く失敗するため、`npm install -g @colbymchenry/codegraph@latest` へフォールバックする）
-
-### 初期化
-
-対象リポジトリで実行すると、必要なGitHubラベル・Issueテンプレート・GitHub Actionsワークフロー・設定ファイルが作成され、CodeGraph のセットアップが行われる。既存ファイルは保護され、`--force` を指定すると上書きされる。
-
-```bash
-claude-task-worker init           # 既存ファイルは保護
-claude-task-worker init --force   # 既存ファイルを強制上書き
-```
-
-作成されるラベル:
-
-| ラベル名 | 用途 |
-|---------|------|
-| `cc-update-issue` | Issue更新トリガー |
-| `cc-answer-issue-questions` | Issue確認事項への回答トリガー |
-| `cc-exec-issue` | Issue実行トリガー |
-| `cc-fix-onetime` | PR修正トリガー（1回） |
-| `cc-triage-scope` | トリアージ対象マーク（Issue/PR） |
-| `cc-resolve-conflict` | PRコンフリクト解消トリガー |
-| `cc-in-progress` | 処理中ステータス |
-| `cc-need-human-check` | 人間の確認が必要なマーク（付与中はIssueワーカーの処理対象から除外される） |
-| `cc-issue-created` | `/claude-task-worker:create-issue` 由来のIssueマーク（triage-created-issue のトリガー条件） |
-| `cc-pr-created` | PR作成完了マーク |
-| `cc-epic-issue` | エピックマーク（Issueではサブ全Closeで `epic-issue` ワーカー起動、PRではリリースゲート対象を示すマーク） |
-| `cc-release-ready` | エピックPRがリリース可能（マージ問題なし）と判定されたマーク。実際のマージ（リリース）は人間が実施 |
-| `cc-create-ui-design` | UIデザイン作成トリガー（`create-ui-design` ワーカー。`uiDesign.enabled` が `true` の場合のみ機能する） |
-| `cc-ui-design-pr-created` | デザインPR作成済み・マージ待ちマーク（`apply-ui-design` ワーカーのトリガー） |
-| `cc-ui-design-ready` | デザイン反映済みマーク（再デザイン抑止。デザイン不要と判定された場合も付与される） |
-| `cc-ui-design` | デザインPRのマーカー（PR。`triage-pr` のレビュー観点切り替えに使う） |
-
-作成されるファイル:
-
-- `.github/ISSUE_TEMPLATE/cc-triage-scope.yml` — `cc-triage-scope` ラベル付きIssue作成用テンプレート
-- `.github/workflows/assign-creator-on-cc-triage-scope.yml` — Issue作成者を自動アサインするワークフロー
-- `claude-task-worker.json` — 設定ファイル（コマンド実行ディレクトリ直下。`uiDesign`（既定は無効）と空の `workers` だけが書き込まれた状態で作成される）。**ワーカーごとの設定は書き出さない**。未指定のワーカーは[ワーカー別デフォルト値](#ワーカーごとの設定)にフォールバックするため、既定値を写経した設定はプラグイン更新で既定が変わっても古い値に固定され続ける。上書きしたいワーカーだけを手で追記する
-
-CodeGraph のセットアップ:
-
-- グローバル gitignore（`$XDG_CONFIG_HOME/git/ignore`、未設定なら `~/.config/git/ignore`）へ `.codegraph/` を追記する（冪等）。`.codegraph/` はプロジェクトごとのローカルインデックスでコミット対象ではないが、対象リポジトリの `.gitignore` を汚さないためグローバル側に入れる
-- `codegraph init` でインデックスを構築する。CodeGraph が未インストールでも `init` 全体は失敗せず、ログにエラーを出して続行する
-
-## コマンド
-
-```bash
-claude-task-worker <command> [--epic <issue-number>]... [--label <label-name>]...
-```
-
-### `--epic <issue-number>` オプション
-
-`all` / `yolo` および Issue 系の各ワーカー（`exec-issue` / `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` / `epic-issue`）で、指定したエピックIssueのサブIssueのみを処理対象に絞り込む。エピック単位でロールアウトしたいときに使用する。
-
-複数指定可能で、複数指定した場合はいずれかのエピックを親に持つサブIssueが対象になる（OR）。
-
-> ℹ️ `epic-issue` ワーカーはエピックIssue自体を処理対象とするため、`--epic` で指定した番号は「サブIssueの親」ではなく「エピックIssue自身の番号」として照合される。`--epic 100` を指定した場合、Epic PR が作成されるのは #100 のみになる。
-
-```bash
-claude-task-worker all --epic 100
-claude-task-worker all --epic 100 --epic 200    # #100 または #200 の sub-issue
-```
-
-### `--label <label-name>` オプション
-
-`all` / `yolo` および Issue 系の各ワーカーで、トリガーラベルに加えて指定したラベルが付いているIssueのみを処理対象に絞り込む。優先度・スプリント・スコープ等で対象を限定したいときに使用する。
-
-複数指定可能で、複数指定した場合は指定したすべてのラベルが付いているIssueが対象になる（AND）。`--epic` と併用すれば両条件のANDで絞り込まれる。
-
-```bash
-claude-task-worker all --label priority-high
-claude-task-worker all --label priority-high --label needs-design   # 両方付いている Issue のみ
-claude-task-worker yolo --epic 100 --epic 200 --label priority-high
-```
-
-> ℹ️ `--label` で指定したラベルはユーザーのスコープ指定なので、タスク完了時にワーカー側で除去されることはない（トリガーラベルだけが除去される）。
-
-### `--project <name>` オプション
-
-指定したプロジェクト（またはプロジェクトグループ、`all`）に対して、[herdr](https://herdr.dev) 経由でコマンドをディスパッチする。指定すると、CLIはワーカーをその場で実行する代わりにディスパッチャーとして動作し、対象プロジェクトごとに独立したherdrワークスペースを作ってコマンドを実行する。
-
-プロジェクト名・グループ名・`all` のいずれかを指定できる。
-
-- プロジェクト名: `config.json` の `projects` に登録された個別プロジェクト名
-- グループ名: `config.json` の `projectGroups` に登録された、複数プロジェクト名をまとめたグループ名
-- `all`: `config.json` の `projects` に登録された全プロジェクトが対象になる予約語（`projects` / `projectGroups` のキーとして使用不可）
-
-`config.json` は `$XDG_CONFIG_HOME/claude-task-worker/config.json`（`XDG_CONFIG_HOME` 未設定の場合は `~/.config/claude-task-worker/config.json`）に配置する。`projects` にプロジェクト名から絶対パスへのマッピングを、`projectGroups` にグループ名からプロジェクト名配列へのマッピングを記述する（`projectGroups` は省略可）。
-
-```json
-{
-  "mode": "default",
-  "advisor": false,
-  "projects": {
-    "app-a": "/Users/me/repos/app-a",
-    "app-b": "/Users/me/repos/app-b",
-    "app-c": "/Users/me/repos/app-c"
-  },
-  "projectGroups": {
-    "frontend": ["app-a", "app-b"]
-  }
-}
-```
-
-`mode` については [`mode`（タスクの実行形態）](#modeタスクの実行形態)、`advisor` については [`advisor`（アドバイザーモデル）](#advisorアドバイザーモデル) を参照。
-
-`--project` は繰り返し指定可能で、複数指定した場合は解決後のプロジェクト集合の和集合が対象になる（重複は一意化される）。`--epic` / `--label` と併用でき、ディスパッチ先の各プロジェクトで実行されるコマンドにそのまま引き継がれる。
-
-以下のコマンドは `--project` と併用できない: `init` / `install` / `update` / `usage` / `version`
-
-ディスパッチャーは以下の3つの機能を持つ。
-
-- **一斉起動**: 対象プロジェクトごとに `ctw:<プロジェクト名>` ラベルのherdrワークスペースを作成し、そのプロジェクトのディレクトリで（`--project` を除いた）同じコマンドを実行する。ペインのシェル初期化が終わるのを待ってからコマンドを送り、送信後はワーカープロセスが実際に起動したかを確認する（シェルのままなら再送し、それでも起動しなければそのプロジェクトは失敗としてタブを閉じる）
-- **稼働一覧**: 各セッションのプロジェクト名・ワークスペースID・ペインID・ステータス・稼働時間をステータステーブルとして定期的に画面へ描画し、対象プロセスが終了したセッションは自動的に一覧から除去する
-- **一括停止**: SIGTERM/SIGINTを受けると、稼働中の全セッションへ ctrl-c を送信して各プロジェクトのコマンドを終了させ、終了を待ってからherdrワークスペースを閉じる（`mode: "herdr"` でワーカーが作ったタスクタブもワークスペースごと片付く）。もう一度シグナルを送ると強制終了する
-
-> ℹ️ herdr はワークスペースを閉じる際、閉じた対象がフォーカスされていなくても別のワークスペースへフォーカスを移す。ディスパッチャーはクローズ直前のフォーカス状態を控えて閉じた後に復元するため、無関係なワークスペースを見ていても表示は勝手に切り替わらない。
-
-```bash
-claude-task-worker all --project all
-claude-task-worker all --project app-a
-claude-task-worker all --project frontend
-claude-task-worker all --project app-a --project app-c    # app-a と app-c の和集合
-claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
-```
-
-### `mode`（タスクの実行形態）
-
-`config.json` のトップレベルに `mode` を書くと、ワーカーが各タスク（Issue/PR ごとの claude 実行）をどう起動するかを切り替えられる。プロジェクト単位の指定はできず、全ワーカー・全プロジェクトに一括で適用される。
-
-| `mode` | 挙動 |
-|--------|------|
-| `"default"`（既定） | タスクを `claude -p`（非対話 print モード）の子プロセスとして実行する |
-| `"herdr"` | タスクを herdr のタブ内で TUI セッションとして実行する。実行中の様子をherdrで覗ける |
-
-```json
-{
-  "mode": "herdr",
-  "projects": { "app-a": "/Users/me/repos/app-a" }
-}
-```
-
-`mode: "herdr"` のときの1タスクの流れ:
-
-1. worktree を作成し、`ctw:<プロジェクト名>:#<Issue/PR番号>` ラベルのタブを作ってから、そのルートペインで `herdr agent start --kind claude` を使って claude を TUI 起動する（タブを先に作ってからその中で起動するため、ユーザーが見ているタブにペインが割り込むことはない）。`agent start` は claude が検出され入力待ちになるまで同期的にブロックするため、起動確認の別ポーリングは不要
-2. herdr が持つ agent ステータスを監視し、`done`（未確認完了）または `working` → `idle` の遷移をタスク完了とみなす。ワーカーのタスクタブは誰も開かないため、完了したタスクは通常 `done` として観測される
-3. 完了したら claude のセッション transcript（`~/.claude/projects/*/<sessionId>.jsonl`）から最終レポートを回収して通知に使い、タブを閉じてラベル・worktree を後片付けする。transcript を引けない場合のみペインの内容にフォールバックする
-
-補足:
-
-- タブは `--project` で起動した場合そのプロジェクトのワークスペース内に作られる（herdrが各ペインへ注入する `HERDR_WORKSPACE_ID` を利用する）
-- `blocked`（claudeが入力待ち）になってもタスクは自動失敗にせず待機し続ける。ステータステーブルに `running:blocked` と表示されるので、herdrのタブを開いて直接対応できる
-- `mode: "herdr"` でherdrが未インストール・未起動の場合、ワーカーは起動時にエラー終了する（`"default"` へ勝手にフォールバックしない）
-- **タスク完了時の通知音はワーカー側から止められない**。herdr のエージェント状態遷移音を再生するのは herdr サーバープロセスで、`HERDR_DISABLE_SOUND` もそのプロセスの環境変数として読まれるため、タスクペインへ渡しても効かない（socket API にもペイン単位のミュートは無い）。無音にしたい場合は herdr 側の設定で行う:
-
-  ```toml
-  # ~/.config/herdr/config.toml
-  [ui.sound]
-  enabled = false
-  ```
-
-  適用は `herdr server reload-config`。この設定は herdr サーバー全体に効くため、ワーカー以外の対話セッションの完了音も鳴らなくなる（`[ui.sound.agents] claude = "off"` でも実質同じ範囲）。ワーカーだけを無音にしたい場合は、`HERDR_DISABLE_SOUND=1 herdr --session <name>` で別セッションを起動し、その中でディスパッチャーを動かす
-
-### `advisor`（アドバイザーモデル）
-
-`config.json` のトップレベルに `advisor: true` を書くと、ワーカーがタスクを起動する際、Claude CLI へ `--advisor <model>` を渡すようになる。渡すモデルはリポジトリ直下の `claude-task-worker.json` の `workers.<ワーカー名>.advisorModel`（[ワーカーごとの設定](#ワーカーごとの設定)）で指定する。`mode` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位のオン/オフはできない。
-
-| `advisor` | 挙動 |
-|---|---|
-| `false`（既定） | `advisorModel` の指定に関わらず `--advisor` を渡さない |
-| `true` | 各ワーカーの `advisorModel`（未指定時はワーカー既定値）を `--advisor` に渡す。空文字のワーカーには渡さない |
-
-```json
-{
-  "advisor": true,
-  "projects": { "app-a": "/Users/me/repos/app-a" }
-}
-```
-
-advisor は main モデル以上の能力を持つモデルである必要がある（Claude CLI 側の制約）。そのため `advisorModel` の既定値は、`model` が `sonnet` のワーカーは `opus`、`model` が `opus` のワーカー（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design`）は空文字（＝advisor なし）にしてある。
-
-### exec-issue
-
-`cc-exec-issue` ラベルが付いた自分にアサインされたIssueを定期取得し、Claude Codeで処理を実行する。（デフォルト1分間隔）
-
-- `cc-in-progress` ラベルを付与
-- `/claude-task-worker:exec-issue <issue番号>` を非同期で実行
-- 親Issueがある場合は `cc-epic-<親Issue番号>` ブランチから worktree を切って実行
-- 完了後、`cc-exec-issue` ラベルを除去し、`cc-pr-created` ラベルを付与
-
-### fix-review-point
-
-`cc-fix-onetime` ラベルが付いたPRを定期取得し、Claude Codeで修正を実行する。（1分間隔）
-
-- CI完了済みで `cc-in-progress` がないPRが対象
-- 完了後、`cc-fix-onetime` ラベルを除去
-- 完了後、設定ファイルに `fixReviewPointCallbackCommentMessage` が設定されていればPRにコメント投稿
-
-### create-issue
-
-`cc-triage-scope` ラベルが付いており、かつ Open な blockedBy Issue を持たないIssueを定期取得し、Claude CodeでIssue作成を実行する。（1分間隔）
-
-`init` コマンドで作成されるIssueテンプレートを使えば、`cc-triage-scope` ラベル付与と作成者アサインが自動で行われる。ブロック中の依存 Issue が残っている間はワーカーが拾わず、依存がすべて Close された時点で処理が開始される。
-
-- 除外ラベル: `cc-issue-created` / `cc-pr-created` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いている Issue は対象外
-- 完了後、`cc-issue-created` ラベルを付与して triage-created-issue ワーカーに引き継ぎ
-
-### update-issue
-
-`cc-update-issue` ラベルが付いたIssueを定期取得し、最新コメントの依頼内容に基づいてClaude CodeでIssue更新を実行する。（1分間隔）
-
-### answer-issue-questions
-
-`cc-answer-issue-questions` ラベルが付いたIssueを定期取得し、Issueに記載された確認事項への回答をClaude Codeで生成する。（1分間隔）
-
-- 完了後、`cc-update-issue` ラベルを付与して update-issue ワーカーに引き継ぎ
-
-### triage-created-issue
-
-`cc-issue-created` と `cc-triage-scope` の両方のラベルが付いたIssueを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
-
-- `cc-pr-created` / `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` のいずれかが付いているIssueは除外
-- `cc-create-ui-design` / `cc-ui-design-pr-created`（UIデザイン先行フローの進行中マーカー）が付いているIssueも除外。トリガーラベルはトリアージ完了後に付き直されるため、除外しないとデザインPRのマージまで再トリアージが走り続け、パターンE-1の前提ゲートが満たされない再実行が `cc-exec-issue` を付けてデザイン合意前に実装を始めてしまう
-- 確認事項の有無に応じて `cc-answer-issue-questions` または `cc-exec-issue` ラベルを付与（または不要ならクローズ）
-
-### triage-pr
-
-`cc-triage-scope` ラベルが付いたPRを定期取得し、Claude Codeでトリアージを実行する。（1分間隔）
-
-- `cc-fix-onetime` が付いているPRは除外
-- `cc-resolve-conflict` が付いているPRは除外
-- `cc-release-ready` が付いているPRは除外（リリースゲート判定済みのため再トリアージしない）
-- マージ可能と判定した際、`cc-epic-issue` が付いたエピックPRはマージせず `cc-release-ready` ラベルを付与する（リリースのためのマージは人間の判断に委ねる）。通常PRは従来どおりマージする
-
-### resolve-conflict
-
-`cc-resolve-conflict` ラベルが付いたPRを定期取得し、`/claude-task-worker:resolve-pr-conflict` を実行してコンフリクト解消を行う。（1分間隔）
-
-- 完了後、`cc-resolve-conflict` ラベルを除去
-
-### check-dependabot
-
-`dependencies` ラベルが付いたDependabot PRを定期取得し、依存ライブラリのバージョンアップ内容を確認する。（1時間間隔）
-
-- `cc-triage-scope` が付いているPRは除外
-- 完了後、`cc-triage-scope` ラベルを付与して triage-pr ワーカーに引き継ぎ
-
-### epic-issue
-
-`cc-epic-issue` ラベルが付いた親Issueを定期取得し、紐づくサブIssueがすべて Close されたタイミングで `/claude-task-worker:create-epic-pr` を起動してエピックPRを作成する。（デフォルト5分間隔）
-
-- `cc-pr-created` が付いているIssueは除外
-- サブIssueが存在しない、または1つでも未Closeのものがあればスキップ
-- 完了後、親Issueに `cc-pr-created` ラベルを付与
-- 完了後、作成されたエピックPR（`cc-epic-<親Issue番号>` ブランチ）に `cc-epic-issue` と `cc-triage-scope` ラベルを付与し、triage-pr のリリースゲート判定に引き継ぐ
-
-### create-ui-design
-
-`cc-create-ui-design` ラベルが付いたIssueを定期取得し、`/claude-task-worker:create-ui-design` を起動して Pencil デザイン（`.pen` + スナップショットPNG）を作成し、デザインのみのPRを作成する。（デフォルト1分間隔）
-
-- `claude-task-worker.json` の `uiDesign.enabled` が `true` の場合のみ起動する（`false` なら1行ログを出して即終了）
-- `cc-ui-design-pr-created` / `cc-ui-design-ready` が付いているIssueは除外
-- デザインPRは `cc-ui-design-<Issue番号>` の固定名ブランチを head とする（後段の `apply-ui-design` が一意に特定するため）
-- 完了後、デザインPRの実在を確認できた場合のみ、PRに `cc-ui-design`（`uiDesign.yolo` が `true` の場合は `cc-triage-scope` も）、Issueに `cc-ui-design-pr-created` を付与する
-- スキルが「デザイン不要」と判定した場合（`cc-ui-design-ready` 付与済み）は完了扱いとし、そのまま実装フェーズへ流す
-- PRの実在を確認できない場合は `cc-need-human-check` を付与してIssueにコメントを残す
-
-### apply-ui-design
-
-`cc-ui-design-pr-created` ラベルが付いたIssueを定期取得し、デザインPRのマージ後に `/claude-task-worker:apply-ui-design` を起動して Issue description へデザイン参照セクション（`## UIデザイン`）を書き戻す。（デフォルト5分間隔）
-
-- `claude-task-worker.json` の `uiDesign.enabled` が `true` の場合のみ起動する
-- `cc-ui-design-ready` / `cc-exec-issue` が付いているIssueは除外
-- preflight でデザインPR（`cc-ui-design-<Issue番号>` を head とするPR）の状態を確認し、`OPEN` の間はスキップしてマージを待つ
-- 未マージのままクローズされた場合・PRが見つからない場合は `cc-need-human-check` を付与してスキップする
-- 完了後、description に `## UIデザイン` セクションと `.pen` パスが載っていることを検証できた場合のみ `cc-ui-design-ready` と `cc-exec-issue` を付与する
-
-### all
-
-通常ワーカー9つ（exec-issue, fix-review-point, create-issue, update-issue, answer-issue-questions, resolve-conflict, epic-issue, create-ui-design, apply-ui-design）を同時にポーリングする。`--epic` / `--label` オプションでIssue系ワーカーの処理対象を絞り込み可能（どちらも複数指定可）。UIデザイン系2ワーカーは `uiDesign.enabled` が `false` なら起動しない。
-
-### yolo
-
-すべてのワーカー（`all` + triage-created-issue + triage-pr + check-dependabot）を同時にポーリングする。`--epic` / `--label` オプションでIssue系ワーカーの処理対象を絞り込み可能（どちらも複数指定可）。
-
-### usage
-
-現在のClaude API使用状況（5時間/7日間の利用率とリセット時刻）を標準出力に表示し、Slack Webhookが設定されていればSlackにも通知する。
-
-### install
-
-`claude-task-worker` マーケットプレイスの追加・プラグインのインストール・CLI本体のグローバルインストール・CodeGraph CLI のインストールを一括で行う。
-
-```bash
-npx claude-task-worker install
-```
-
-- `claude plugin marketplace add getty104/claude-task-worker` — マーケットプレイスの追加（追加済みの場合のエラーはログのみで無視して続行）
-- `claude plugin install claude-task-worker@claude-task-worker` — プラグインのインストール
-- `npm install -g claude-task-worker@latest` — CLI 本体のグローバルインストール
-- `npm install -g @colbymchenry/codegraph@latest` — CodeGraph CLI のインストール
-
-いずれかのステップが失敗しても処理は継続し、`[install]` プレフィックス付きでエラー内容がログ出力される（失敗があった場合の終了コードは 1）。
-
-### update
-
-`claude-task-worker` プラグイン/マーケットプレイス・CLI本体・CodeGraph CLI を更新する。
-
-```bash
-claude-task-worker update
-```
-
-- `claude plugin marketplace update claude-task-worker` — マーケットプレイスの更新
-- `claude plugin update claude-task-worker@claude-task-worker` — プラグインの更新（反映にはセッション再起動が必要）
-- `npm install -g claude-task-worker@latest` — CLI 本体の更新
-- `codegraph upgrade` — CodeGraph CLI の更新（失敗時は `npm install -g @colbymchenry/codegraph@latest` へフォールバック）
-
-いずれかのステップが失敗しても処理は継続し、`[update]` プレフィックス付きでエラー内容がログ出力される（失敗があった場合の終了コードは 1）。
-
-### version
-
-インストールされている `claude-task-worker` CLI のバージョンを表示する。
-
-```bash
-claude-task-worker version
-claude-task-worker --version
-claude-task-worker -v
-```
-
-`package.json` の `version` を出力する（例: `0.34.0`）。
-
-## 設定ファイル
-
-コマンドを実行したディレクトリ直下の `claude-task-worker.json` を読み込む。
-
-| キー | 型 | デフォルト | 説明 |
-|---|---|---|---|
-| `fixReviewPointCallbackCommentMessage` | string | - | fix-review-point 完了時にPRへ投稿するコメント（未設定の場合は投稿しない） |
-| `uiDesign` | object | `{ "enabled": false, "designDir": "designs", "yolo": false }` | UIデザイン先行ワークフローの設定（詳細は「[UIデザイン先行ワークフロー](#uiデザイン先行ワークフロー)」） |
-| `workers` | object | `{}` | ワーカーごとに Claude CLI に渡すスキル、`--model` / `--advisor` / `--effort`、ポーリング間隔、クールダウン時間、最大同時実行数を上書きする設定（詳細は下記） |
-
-### ワーカーごとの設定
-
-`workers` キーにワーカー名ごとの設定オブジェクトを指定することで、Claude CLI の `-p` に渡すスキル（スラッシュコマンド）、`--model` / `--advisor` / `--effort`、ポーリング間隔、タスク完了後のクールダウン時間、最大同時実行数を個別に上書きできる。未指定のワーカー・フィールドは下記のワーカー別デフォルト値が使用される。
-
-| ワーカー名 | デフォルト `skill` | デフォルト `model` | デフォルト `advisorModel` | デフォルト `effort` | デフォルト `pollingIntervalSeconds` | デフォルト `cooldownSeconds` | デフォルト `maxConcurrentTasks` |
-|---|---|---|---|---|---|---|---|
-| `answer-issue-questions` | `/claude-task-worker:answer-issue-questions` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `create-issue` | `/claude-task-worker:create-issue-from-issue-number` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `update-issue` | `/claude-task-worker:update-issue` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `exec-issue` | `/claude-task-worker:exec-issue` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `fix-review-point` | `/claude-task-worker:fix-review-point` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `triage-created-issue` | `/claude-task-worker:triage-created-issue` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-| `triage-pr` | `/claude-task-worker:triage-pr` | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-| `resolve-conflict` | `/claude-task-worker:resolve-pr-conflict` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `check-dependabot` | `/claude-task-worker:check-dependabot` | `sonnet` | `opus` | `high` | 3600 | 0 | 1 |
-| `epic-issue` | `/claude-task-worker:create-epic-pr` | `sonnet` | `opus` | `high` | 300 | 0 | 1 |
-| `create-ui-design` | `/claude-task-worker:create-ui-design` | `opus` | `""`（なし） | `high` | 60 | 0 | 1 |
-| `apply-ui-design` | `/claude-task-worker:apply-ui-design` | `sonnet` | `opus` | `high` | 300 | 0 | 1 |
-| （上記以外・未知のワーカー名） | （なし） | `sonnet` | `opus` | `high` | 60 | 0 | 1 |
-
-各フィールドの値:
-
-| フィールド | 型 | 説明 |
-|---|---|---|
-| `skill` | string | Claude CLI の `-p` に渡すスラッシュコマンド（例: `/claude-task-worker:exec-issue`, `/my-plugin:my-skill`）。ワーカーは `"<skill> <issue-or-pr-number>"` の形で Claude を起動する |
-| `model` | string | Claude CLI の `--model` に渡す値（例: `sonnet`, `opus`, `haiku`） |
-| `advisorModel` | string | Claude CLI の `--advisor` に渡す値（例: `opus`）。空文字を指定するとそのワーカーでは advisor を使わない。`config.json` の `advisor` が `true` のときだけ参照される（詳細は「[`advisor`（アドバイザーモデル）](#advisorアドバイザーモデル)」） |
-| `effort` | string | Claude CLI の `--effort` に渡す値（例: `high`, `medium`, `low`） |
-| `pollingIntervalSeconds` | number | GitHub をポーリングする間隔（秒）。正の数を指定する |
-| `cooldownSeconds` | number | タスク完了後に次のポーリングを停止する時間（秒）。`0` でクールダウンなし |
-| `maxConcurrentTasks` | number | そのワーカーが同時に実行できるタスクの最大数。正の整数を指定する |
-
-設定例:
-
-```json
-{
-  "workers": {
-    "exec-issue":        { "skill": "/my-plugin:exec-issue", "model": "opus", "advisorModel": "", "effort": "high", "pollingIntervalSeconds": 60, "cooldownSeconds": 600, "maxConcurrentTasks": 3 },
-    "fix-review-point":  { "skill": "/claude-task-worker:fix-review-point", "model": "sonnet", "advisorModel": "opus", "effort": "high", "maxConcurrentTasks": 2 },
-    "triage-pr":         { "effort": "medium", "pollingIntervalSeconds": 120 },
-    "check-dependabot":  { "model": "haiku", "pollingIntervalSeconds": 7200 }
-  }
-}
-```
+デザインが不要と判明した場合は `create-ui-design` が理由をコメントして `cc-ui-design-ready` + `cc-exec-issue` を付与し、人手を介さず実装へ復帰する。Pencil が使えない環境やデザインPRが却下された場合は `cc-need-human-check` で停止する。
 
 ## Slack通知
 
-環境変数 `CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL` にSlack Incoming Webhook URLを設定すると、各ワーカーのタスク完了時・失敗時にSlackへ通知が送信される。
+環境変数 `CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL` に Slack Incoming Webhook URL を設定すると、各ワーカーのタスク完了時・失敗時に通知が送られる。未設定なら送信されない。
 
 ```bash
 export CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx/yyy/zzz
 claude-task-worker all
 ```
 
-通知にはClaude APIの使用状況（5時間/7日間の利用率とリセット時刻）も含まれる。未設定の場合、通知は送信されない。
-
-使用状況を組み立てる際、[RunCat Neo](https://kyome.io/runcat/) 用のスナップショットを `~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で変更可）へ一時ファイル + rename で原子的に書き出す。Webhook 未設定でも通知が no-op になるだけでスナップショットは更新される。使用状況の取得自体は `/tmp/claude-usage-cache.json` の360秒キャッシュを挟むため、値は最大6分古くなりうる。
+通知には Claude API の使用状況（5時間/7日間の利用率とリセット時刻）も含まれる。使用状況の取得は macOS では `security`（Keychain）、それ以外では `~/.claude/.credentials.json` を使う。あわせて [RunCat Neo](https://kyome.io/runcat/) 用のスナップショットを `~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で変更可）へ原子的に書き出す（Webhook 未設定でも更新される）。取得結果は360秒キャッシュされるため、値は最大6分古くなりうる。
 
 ## プロセス管理
 
 実行中のタスクはリアルタイムのステータステーブルで表示される。
 
 - タスクID・タイトル・ステータス（running/completed/failed）・開始時刻・経過時間を表示
-- `mode: "herdr"` では実行中の行に agent ステータスが併記される（`running:working` / `running:blocked` など）
-- 同一Issue/PRの重複実行を自動防止
-- SIGTERM/SIGINTで全子プロセスをgraceful shutdown（もう一度送ると強制終了し、ラベル・worktree の後片付けを試みる）
-- 前回の異常終了で残った worktree はワーカー起動時に自動回収される（実行中タスク・対話セッションが掴んでいる worktree は保護される）
+- `mode: "herdr"` では実行中の行に agent ステータスが併記される（`running:working` / `running:blocked`）
+- 同一 Issue/PR の重複実行を自動防止
+- SIGTERM/SIGINT で全子プロセスを graceful shutdown（もう一度送ると強制終了し、ラベル・worktree の後片付けを試みる）
+- 前回の異常終了で残った worktree はワーカー起動時に自動回収される（実行中タスク・対話セッションが掴んでいるものは保護される）
 
 ### タスク実行のガード
 
 ワーカーは応答するユーザーがいない状態でスキルを起動するため、処理が未完のままセッションが終了してラベルだけ進む事故を防ぐガードを持つ。
 
-- **バックグラウンド実行の無効化**: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` を全タスクの環境変数として注入し、Bash の `run_in_background` やサブエージェントの自動バックグラウンド化を止める
-- **ツールの無効化**: `--disallowedTools` で `Monitor` / `ScheduleWakeup` / `AskUserQuestion` / `EnterPlanMode` / `Cron*` / `RemoteTrigger` / `EnterWorktree` を無効化する（後続ウェイクアップ前提のもの、応答者が必要なもの、ワーカーの worktree 管理と競合するもの）
+- **バックグラウンド実行の無効化**: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` を全タスクへ注入し、Bash の `run_in_background` やサブエージェントの自動バックグラウンド化を止める
+- **ツールの無効化**: `--disallowedTools` で `Monitor` / `ScheduleWakeup` / `AskUserQuestion` / `EnterPlanMode` / `Cron*` / `RemoteTrigger` / `EnterWorktree` を無効化する
 - **自律実行原則の注入**: `--append-system-prompt` で「ユーザーに質問しない・全ステップを完遂してから終了する・曖昧なら安全側を選ぶ・サブエージェントの完了報告を検証する」および CodeGraph 優先のコード探索方針を注入する
-- **完了検証**: exec-issue / epic-issue は PR の実在（または Issue のクローズ）を確認できるまで `cc-pr-created` を付けず、確認できない場合は `cc-need-human-check` を付けて Issue にコメントを残す
+- **完了検証**: `exec-issue` / `epic-issue` は PR の実在（または Issue のクローズ）を確認できるまで `cc-pr-created` を付けず、確認できなければ `cc-need-human-check` を付けて Issue にコメントを残す
 - **空振り検知**: 正常終了しても出力が空のセッションは失敗として分類し、失敗通知（stderr の末尾を含む）を送る
+- **起動プロセスの後片付け**: スキル終了時に `Stop` フックが `docker compose down` と、worktree を作業ディレクトリに持つ残留プロセスの `SIGTERM` をベストエフォートで実行する（worktree はスキル完了直後に削除されるため、残留プロセスが削除の妨げになるのを防ぐ）
 
 ## 開発
 
@@ -672,17 +360,13 @@ npm install
 npm run build         # 型チェック（tsc --noEmit）+ esbuild で dist/index.js にバンドル
 npm run dev           # 型チェックの watch モード
 npm test              # ユニットテスト（node --experimental-strip-types --test）
-npm run lint          # ESLint
-npm run lint:fix      # ESLint（自動修正）
-npm run format        # Prettier で整形
-npm run format:check  # Prettier のチェックのみ
+npm run lint          # ESLint（--fix で自動修正）
+npm run format        # Prettier で整形（format:check でチェックのみ）
 ```
 
-コントリビューションを歓迎します。開発環境のセットアップ・PRの出し方は [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。バグ報告・機能要望は [Issue テンプレート](https://github.com/getty104/claude-task-worker/issues/new/choose) から作成してください。
+開発版をローカルから使う場合は `npm install && npm run build && npm link`。
 
-セキュリティ上の脆弱性は公開Issueではなく [SECURITY.md](./SECURITY.md) の手順で報告してください。
-
-本プロジェクトへの参加にあたっては [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)（Contributor Covenant）を遵守してください。
+コントリビューションを歓迎します。開発環境のセットアップ・PRの出し方は [CONTRIBUTING.md](./CONTRIBUTING.md)、バグ報告・機能要望は [Issue テンプレート](https://github.com/getty104/claude-task-worker/issues/new/choose) から。セキュリティ上の脆弱性は公開Issueではなく [SECURITY.md](./SECURITY.md) の手順で報告してください。参加にあたっては [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)（Contributor Covenant）を遵守してください。
 
 ## ライセンス
 
