@@ -268,6 +268,14 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - **削除には根拠を要求する**: 「最近言及がない」は陳腐化の根拠にならない（守られているルールほど再言及されない）。逆の結論の確定・対象機能の消滅・他ドキュメントとの重複のいずれかを確認したときだけ削除・上書きする。カテゴリファイルは最大8個・1ファイル20ルールを上限に統合する
 - **原則として分割読みしない**: クラスタリングは全Issueが1つの文脈に載っていないと成立せず、要約だけを受け取るとチャンクをまたいだ同一判断が二重登録される。やむなく分割する場合はサブエージェントに**逐語引用**を返させ、親が引用を突き合わせて再統合する
 
+### 外部リンクの参照（分析系スキルの調査範囲）
+
+`create-issue` / `create-issue-from-issue-number` / `answer-issue-questions` の調査範囲は `gh` とローカルファイルで閉じない。Issue本文・コメント・`docs/`・README・`.claude/requirements/`・コード内コメントに貼られた URL の先（仕様書・API仕様・ライブラリ公式ドキュメント・別リポジトリのIssue/PR・Figma）に答えがある論点を、リンク先を読まずに「不明」「確認事項」へ倒すと、リンク先に書いてある答えを人へ差し戻すことになる（確認事項コメントは `cc-answer-issue-questions` の回答待ちを発生させ、着手が止まる）。
+
+3スキル共通で「外部リンクの参照」節を持ち、規定は同じ: **収集 → 結論を左右するものだけに絞る → 種類別の手段（一般URLは `WebFetch`、ライブラリ公式ドキュメントは `check-library`（context7 MCP）、GitHubのURLは `gh` の各 view、Figma は Figma MCP、リンク切れは `WebSearch`）→ 辿るのは1段まで → 使ったURLと要点を「参照情報」／回答の「根拠」に残す → 取得不能なら推測で埋めず理由を明記**。確認事項の取捨選択にも「リンク先を読めば一意に決まる論点は外す」を入れてある。
+
+`explore-agent` 側にも同じ方針をステップ4.5として置いている。同エージェントの「一切の変更を行わない」原則が読み取り専用の外部参照まで禁じていると読めたため、`WebFetch` / `WebSearch` / context7 は禁止に含まないことを明記した（禁止されるのは投稿・書き込み）。委譲元の3スキルもプロンプトで同方針を伝える。
+
 ## Conventions
 
 - ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
