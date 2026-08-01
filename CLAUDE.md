@@ -30,11 +30,12 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/process-manager.ts`** - 子プロセス管理。リアルタイムステータステーブル表示、プロセスライフサイクル管理
 - **`src/table.ts`** - 端末テーブル描画のヘルパー。`getDisplayWidth()`/`truncateToWidth()`/`padToWidth()`（全角を幅2として扱う桁揃え）、`buildTaskTableLines()`（ステータステーブルの行組み立て）。`buildTaskTableLines()` は副作用を持たない純粋関数で、`process-manager.ts` の `renderTable()` が `console.clear()` + 出力のみを担う。**実行中/完了のセクション振り分けは `TaskTableEntry.status` で行い、表示用の status 文字列では判定しない**。herdr モードの実行中行は `running:working` のように agentStatus を併記した装飾済み文字列になるため、表示値で `=== "running"` を見ると実行中タスクが完了セクション（区切り罫線の下）へ紛れ込む
 - **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）も行う
-- **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI のインストールを一括で行うコマンド
-- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI の更新コマンド
+- **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI / DESIGN.md CLI のインストールを一括で行うコマンド
+- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI / DESIGN.md CLI の更新コマンド
 - **`src/commands/codegraph.ts`** - CodeGraph（`@colbymchenry/codegraph`）連携。`installCodegraphCli()`（`npm install -g` によるインストール）、`upgradeCodegraphCli()`（`codegraph upgrade` による更新。CodeGraph 自身の更新機構を使うことで配布方法の変更に追随できる。未インストール環境では `codegraph` コマンドが無く失敗するため `installCodegraphCli()` へフォールバックする）、`runCodegraphInit()`（`codegraph init`）、`ensureCodegraphGitIgnore()`（グローバル gitignore への `.codegraph/` 追記）、`globalGitIgnorePath()`/`appendIgnoreEntry()`（テスト可能な純粋関数）
   - **`codegraph install` はあえて実行しない**。同コマンドは各エージェントの設定ファイルへ MCP サーバー定義を書き込むが、その役割は本プラグインの `plugin/.mcp.json`（`codegraph serve --mcp`）が担っているため、両方走らせると同じサーバーが二重登録される。CLI のインストールだけを `npm install -g` で行う
   - グローバル gitignore（`~/.config/git/ignore`、`XDG_CONFIG_HOME` があればその配下）へ入れるのは、`.codegraph/` がプロジェクトごとのローカルインデックス（SQLite）でコミット対象ではない一方、対象リポジトリの `.gitignore` を汚したくないため。追記は冪等で、`.codegraph/` と `.codegraph` の両方を登録済みとみなす（`!.codegraph/` のような否定パターンは登録済み扱いにしない）
+- **`src/commands/design-md.ts`** - DESIGN.md CLI（[`@google/design.md`](https://github.com/google-labs-code/design.md)）連携。`installDesignMdCli()` の1関数のみで、`install` / `update` の**どちらからも同じ関数を呼ぶ**（CodeGraph と違い self-upgrade 機構を持たないため、更新手段が `npm install -g <pkg>@latest` しかない。冪等なので分岐する意味がない）。同パッケージは bin として `design.md` と `designmd` の2つを提供するが、`.` を含む前者は環境によって解決に失敗するためスキル側は **`designmd` を既定**にしている
 - **`src/runcat.ts`** - RunCat Neo 用の利用状況スナップショット書き出し。`~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で上書き可）へ一時ファイル + rename で原子的に書き込む。フォーマットは `~/dotfiles/claude/statusline.py` の出力と揃えてある（`buildRuncatSnapshot`/`resetStamp`/`resetHour`）。ただしリセット時刻は `ceilToMinute()` で秒以下を切り上げて分境界に揃える（API は `:59` 秒でリセット時刻を返すため、切り捨て表示だと 1 分手前に見える）。切り上げが日付・時をまたぐ場合はそれぞれ日付付き表示・次の時に繰り上がる。書き出しは `slack.ts` の `buildTokenLimitText()` 経由で行われるため、`usage` コマンド実行時に加えてワーカーのタスク完了/失敗通知のたびに更新される（Slack webhook 未設定でも通知が no-op になるだけでスナップショットは更新される）。ただし利用状況の取得自体は `/tmp/claude-usage-cache.json` の360秒キャッシュを挟むため、値の鮮度は最大6分古くなりうる
 - **`src/workers/`** - 各ワーカー実装
 - **`src/workers/ui-design.ts`** - UIデザイン先行ワークフローの純粋ヘルパー（`create-ui-design` / `apply-ui-design` が共有）。`designBranchName()`（`cc-ui-design-<N>`）、`hasDesignReference()`（description のデザイン参照セクション判定）、`classifyDesignPr()`（デザインPRの状態 → preflight 判定）、各種 Issue コメント本文。gh 依存を持たないため分岐だけをユニットテストできる
@@ -278,6 +279,20 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - **削除には根拠を要求する**: 「最近言及がない」は陳腐化の根拠にならない（守られているルールほど再言及されない）。逆の結論の確定・対象機能の消滅・他ドキュメントとの重複のいずれかを確認したときだけ削除・上書きする。カテゴリファイルは最大8個・1ファイル20ルールを上限に統合する
 - **原則として分割読みしない**: クラスタリングは全Issueが1つの文脈に載っていないと成立せず、要約だけを受け取るとチャンクをまたいだ同一判断が二重登録される。やむなく分割する場合はサブエージェントに**逐語引用**を返させ、親が引用を突き合わせて再統合する
 
+### デザインシステム定義（`DESIGN.md`）
+
+対象リポジトリのルート `DESIGN.md` に、マージ済みUIデザインPRで確定したビジュアルアイデンティティを集約する仕組み。フォーマットは [google-labs-code/design.md](https://github.com/google-labs-code/design.md)（`@google/design.md`）の仕様に従い、YAML フロントマターの機械可読トークン（`colors` / `typography` / `spacing` / `rounded` / `components`）とマークダウン本文の設計意図の2層構成。要件ルールと同じく**ワーカーは介在せず、スキル/エージェント同士の読み書き契約だけで成立する**。
+
+- **書き手**: `update-design-md`（手動起動、`disable-model-invocation: true`）。引数の期間（既定7日）で `cc-ui-design` ラベル付きの**マージ済み**PRを収集し（`scripts/fetch-recent-ui-design-prs.sh`）、レビューコメントと `.pen` の実データからトークン・原則を抽出して `DESIGN.md` を更新、`designmd lint` を通してから `commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-requirement-rules` / `update-coding-guidelines` と同じ経路）
+- **読み手**: `pencil-design-updater` エージェント。作業プロセスのステップ1で `DESIGN.md` を読み、色・フォント・余白・角丸を定義済みトークンの値で指定する（Pencil はトークン参照を解決しないため、`{colors.primary}` ではなく `#1A1C1E` のように実値まで落として `--prompt` / `batch_design` に渡す）
+- **`.pen` の中身は diff から読めない**。暗号化バイナリのため `Read` / `Grep` が効かず、変更ファイル一覧だけでは何が変わったか分からない。そこで収集スクリプトは変更ファイルを `pen_files` / `snapshot_files`（`snapshots/` のPNG）/ `other_files` に仕分けて返し、スキルは (1) スナップショット画像を `Read` で見て傾向を掴み、(2) `inspect-pencil-node`（読み取り専用）で Node 属性から正確なトークン値を取る、の2経路で実データに当たる。**推測値は書かない** — 一度書くと次のデザインがそれに合わせて作られ、事後的に「正」になってしまうため
+- **収集対象はマージ済みPRのみ**。マージ後なら `.pen` もスナップショットも現在のワークツリーに存在するので、head ブランチが削除済みでも実データを読める（未マージPRを含めると、後で却下された値をトークン化しうる）
+- **自分が作るPRに `cc-ui-design` を付けない**。付けると次回実行時に自分自身を収集対象にする（`DESIGN.md` 更新PRはデザインPRではない）
+- **採用基準**: 2つ以上のデザインPRまたは2つ以上の独立した画面での反復／「今後は〜」のような適用範囲の明示／`primary` カラー・本文タイポグラフィのような基盤トークン（欠けると後続のデザインが判断できなくなるもの）。いずれにも当てはまらなければ採用しない
+- **近い値は統合を疑う**: `#1A1C1E` と `#1A1C1F` が別トークンとして並ぶのはデザインシステムの分岐そのもの。lint の orphaned token 警告（未参照トークン）は削除の合図として使う
+- **WCAG コントラスト警告で値を書き換えない**: lint の警告どおりに色を変えるとデザインの実態と `DESIGN.md` が食い違う。デザインの是非は人が決めるため、報告に挙げるだけにする
+- **`designmd lint` の終了コードは `error` の有無のみを表す**（`0` = error なし、`1` = error あり、`2` = ファイルが読めない。既定の出力形式は JSON）。error/warning の件数そのものや残 warning の扱いは終了コードに現れないため、常に出力 JSON の `summary.errors` / `summary.warnings` で判断する
+
 ### 外部リンクの参照（分析系スキルの調査範囲）
 
 `create-issue` / `create-issue-from-issue-number` / `answer-issue-questions` の調査範囲は `gh` とローカルファイルで閉じない。Issue本文・コメント・`docs/`・README・`.claude/requirements/`・コード内コメントに貼られた URL の先（仕様書・API仕様・ライブラリ公式ドキュメント・別リポジトリのIssue/PR・Figma）に答えがある論点を、リンク先を読まずに「不明」「確認事項」へ倒すと、リンク先に書いてある答えを人へ差し戻すことになる（確認事項コメントは `cc-answer-issue-questions` の回答待ちを発生させ、着手が止まる）。
@@ -303,3 +318,5 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - CodeGraph (`codegraph`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`codegraph serve --mcp`）。`explore-agent` およびワーカー起動セッションは**この MCP ツール経由で** CodeGraph を使う。ツールが無い場合、および未インデックスでエラー・空結果が返る場合は `Glob`/`Grep` にフォールバックする
   - プロジェクトごとのインデックス構築は `claude-task-worker init`（内部で `codegraph init`）。未インストール・未初期化でもワーカーは動作する（探索がテキスト検索に落ちるだけ）
+- DESIGN.md CLI (`designmd`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
+  - `update-design-md` スキルが `designmd lint DESIGN.md` で使う。未インストールでも同スキルは動作するが lint を実行できないため、その旨を報告とPR本文に明記して続行する（フォールバックとして `npx -y -p @google/design.md designmd` も試す。パッケージ名兼bin名の `.` を含む `@google/design.md` を直接bin名として呼ぶとWindowsの拡張子関連付けと衝突しうるため、`-p` でパッケージを指定しdotフリーの `designmd` を明示的に呼ぶ）
