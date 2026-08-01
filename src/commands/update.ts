@@ -1,4 +1,5 @@
 import { upgradeCodegraphCli } from "./codegraph.js";
+import { installDesignMdCli } from "./design-md";
 import { runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
@@ -46,7 +47,9 @@ export async function update(): Promise<void> {
   const pluginOk = await updatePlugin();
   const cliOk = await updateCli();
   const codegraphOk = await upgradeCodegraphCli("update");
-  if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk) {
+  // DESIGN.md CLI は self-upgrade 機構を持たないため、更新もインストールと同じ npm install -g @latest。
+  const designMdOk = await installDesignMdCli("update");
+  if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk || !designMdOk) {
     process.exitCode = 1;
   }
   console.log("[update] Done.");

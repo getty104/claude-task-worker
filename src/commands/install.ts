@@ -1,4 +1,5 @@
 import { installCodegraphCli } from "./codegraph.js";
+import { installDesignMdCli } from "./design-md";
 import { runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
@@ -47,7 +48,8 @@ export async function install(): Promise<void> {
   const pluginOk = await installPlugin();
   const cliOk = await installCli();
   const codegraphOk = await installCodegraphCli("install");
-  if (!pluginOk || !cliOk || !codegraphOk) {
+  const designMdOk = await installDesignMdCli("install");
+  if (!pluginOk || !cliOk || !codegraphOk || !designMdOk) {
     process.exitCode = 1;
   }
   console.log("[install] Done.");
