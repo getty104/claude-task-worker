@@ -3,32 +3,32 @@ import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
-// 色は「色相を最低でも約20度ずつ離す」か「同系色相なら明度を大きく離す（明ラベル=黒文字 /
-// 暗ラベル=白文字）」のどちらかを満たすように選んである。GitHub はラベル色の明度から文字色を
-// 自動で決めるため、中間の明度に固めると文字が読みにくいラベルが増える。淡すぎる色
-// （旧 c5def5 / bfd4f2 など）と、同系色に密集していた紫3色・黄2色・ピンク4色は解消済み。
-// 一覧を変更するときは、既存色と色相・明度の両方が近くならないかを確認すること。
+// 全16色を「彩度95%・明度58〜80%（HSL）」の高彩度・高明度帯に揃え、色相を 360/16 = 22.5度
+// 刻みで均等配置したうえで、リスト上の隣接ラベルが157.5度ずつ離れる順（stride 7）で割り当てて
+// ある。そのため意味的な系統（警告=暖色など）ではなく、見分けやすさを優先した並びになっている
+// （cc-need-human-check の赤だけは意味を保持）。
+// - 全ペアの色差: 最小 ΔE(CIE76) ≈ 22（隣接ペアは ≈ 67）。同系色に見えるペアは無い
+// - 黒文字とのコントラスト比は全色 7:1 以上。GitHub はラベル色の明度から文字色を自動決定する
+//   ため、全ラベルが黒文字で統一され、白文字/黒文字が混在してちらつくことがない
+// 一覧を変更するときは、色相を上記の刻みから外さず、明度も 58〜80% に収めること（明度を上げ
+// すぎると旧 c5def5 のように淡く沈み、下げすぎると白文字に切り替わってコントラストが落ちる）。
 const LABELS: { name: string; color: string }[] = [
-  // 警告・修正系（暖色）
-  { name: "cc-need-human-check", color: "b60205" }, // dark red
-  { name: "cc-fix-onetime", color: "e8590c" }, // orange
-  { name: "cc-resolve-conflict", color: "ffc53d" }, // amber
-  { name: "cc-update-issue", color: "cddc39" }, // lime
-  // 進行・完了系（緑〜青緑）
-  { name: "cc-in-progress", color: "0e8a16" }, // dark green
-  { name: "cc-release-ready", color: "4ade80" }, // bright green
-  { name: "cc-pr-created", color: "006b75" }, // dark teal
-  // Issueライフサイクル（シアン〜紫）
-  { name: "cc-issue-created", color: "67e8f9" }, // cyan
-  { name: "cc-triage-scope", color: "1f6feb" }, // blue
-  { name: "cc-answer-issue-questions", color: "3730a3" }, // indigo
-  { name: "cc-exec-issue", color: "7c3aed" }, // violet
-  { name: "cc-epic-issue", color: "c4b5fd" }, // light lavender
-  // UIデザイン系（フクシア〜ピンク〜コーラル）
-  { name: "cc-create-ui-design", color: "a21caf" }, // dark fuchsia
-  { name: "cc-ui-design", color: "db2777" }, // magenta
-  { name: "cc-ui-design-pr-created", color: "f9a8d4" }, // light pink
-  { name: "cc-ui-design-ready", color: "ff8a80" }, // coral
+  { name: "cc-need-human-check", color: "fb6565" }, // red (hue 0)
+  { name: "cc-fix-onetime", color: "7efccc" }, // mint (hue 158)
+  { name: "cc-resolve-conflict", color: "fb56d1" }, // magenta (hue 315)
+  { name: "cc-update-issue", color: "48fa2e" }, // green (hue 113)
+  { name: "cc-in-progress", color: "ba79fc" }, // violet (hue 270)
+  { name: "cc-release-ready", color: "e8fb60" }, // yellow (hue 68)
+  { name: "cc-pr-created", color: "9cb4fc" }, // periwinkle (hue 225)
+  { name: "cc-issue-created", color: "fcbd97" }, // apricot (hue 23)
+  { name: "cc-triage-scope", color: "3dfafa" }, // cyan (hue 180)
+  { name: "cc-answer-issue-questions", color: "fc83b0" }, // pink (hue 338)
+  { name: "cc-exec-issue", color: "65fb8a" }, // spring green (hue 135)
+  { name: "cc-epic-issue", color: "e656fb" }, // fuchsia (hue 293)
+  { name: "cc-create-ui-design", color: "9cfa3d" }, // chartreuse (hue 90)
+  { name: "cc-ui-design", color: "a397fc" }, // lavender (hue 248)
+  { name: "cc-ui-design-pr-created", color: "fce292" }, // light amber (hue 45)
+  { name: "cc-ui-design-ready", color: "74c9fb" }, // sky (hue 203)
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
