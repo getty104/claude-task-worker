@@ -133,11 +133,11 @@ git show "<merge_commit>:<path>" > "$TMPDIR_DESIGN/<pr_number>/$(basename <path>
 
 2-0 で復元した `pen_files` を対象に、`Skill` ツールで `inspect-pencil-node` を起動して読み取り専用で属性を取得する（`merge_commit` 時点の内容をそのまま復元しているだけなので Pencil CLI で通常どおり開ける）。
 
-取得すべきもの（`inspect-pencil-node` の `batch_get` の指定方法を使い分ける）:
+取得すべきもの（`inspect-pencil-node` の `execute` + `Get` visitor の指定方法を使い分ける。CLI 0.3.x で `batch_get` は廃止され、読み取りは `execute` に一本化されている）:
 
-- **再利用可能コンポーネント**（`patterns: [{ reusable: true }]`）— デザインシステムのコンポーネント定義そのもの。最優先
-- **テキストNode**（`patterns: [{ type: "text" }]`）— `fontFamily` / `fontSize` / `fontWeight` / `lineHeight` / `letterSpacing` の実値
-- **トップレベル / フレーム**（引数なし、または `patterns: [{ type: "frame" }]`）— 背景色・枠線・角丸（`rounded`）・パディング（`spacing`）の実値
+- **再利用可能コンポーネント**（`Get(n => n.reusable && Print(...))`）— デザインシステムのコンポーネント定義そのもの。最優先
+- **テキストNode**（`Get(n => n.type === "text" && Print(...))`）— `fontFamily` / `fontSize` / `fontWeight` / `lineHeight` / `letterSpacing` の実値
+- **トップレベル / フレーム**（`Get((n, c) => { c.skipChildren(); Print(...) })`、または `Get(n => n.type === "frame" && Print(...))`）— 背景色・枠線・角丸（`rounded`）・パディング（`spacing`）の実値
 
 `pencil` CLI が未インストール・未認証で調査できない場合は、そこで打ち切って 2-1 のスナップショットから読み取れた範囲だけを使い、**「`.pen` の属性値は未取得」であることを報告に明記する**（推測値でトークンを埋めない）。
 
