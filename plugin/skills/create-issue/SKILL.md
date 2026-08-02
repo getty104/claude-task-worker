@@ -223,4 +223,4 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 - 作成する Issue には常に `cc-triage-scope` と `cc-issue-created` の2ラベルを付与する。`post-issue-body` への YAML から `labels` キーを落とさず、2件とも入っていることを毎回確認すること
 - Open な既存Issueとの依存関係は「依存関係の特定」に従い `blocked_by` / `blocking` で渡す（本文に `## 依存関係` は書かない。根拠が明確な依存のみ、無ければ省略）
 - 確認事項として渡すのは「確認事項の取捨選択」を通過した項目のみ（0件ならコメントは投稿しない）
-- `.pen` の読み込みは `inspect-pencil-node` スキル経由のみ（暗号化バイナリのため `Read`/`Grep` は使えない）。編集は本スキルでは**絶対に行わず**、`pencil-design-updater` エージェントで対応する旨を `post-issue-body` 経由で「実装プラン」または「確認事項」に明記して後続タスクへ委譲する（`.pen` 編集は `pencil-design-updater` 専任・`edit-pencil-design` スキル経由の運用に集約されており、手で `pencil` コマンドを直接組み立てたり frontend-implementer/general-purpose-assistant 等で代用したりしない）
+- `.pen` の読み込みは `inspect-pencil-node` スキル経由のみ（暗号化バイナリのため `Read`/`Grep` は使えない）。編集は本スキルでは**絶対に行わず**、`cc-create-ui-design` のデザイン先行フロー（`create-ui-design` → デザインPRのマージ → `apply-ui-design`）で対応する旨を `post-issue-body` 経由で「実装プラン」に明記する。`.pen` の新規作成・編集は同フローの専任であり、実装PR（`exec-issue`）では行わないため、**「実装と同じPRで `.pen` を更新する」「`pencil-design-updater` エージェントで更新する」といった実装セッション向けの指示は書かない**

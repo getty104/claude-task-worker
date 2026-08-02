@@ -118,7 +118,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - `design/`配下のPencilファイル（`.pen`）: `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得する（`.pen` は暗号化バイナリのため `Read`/`Grep` は使えない）
 - Issue本文・コメント・上記ドキュメントに現れる**外部リンク**: 後述の「外部リンクの参照」に従って内容まで読む
 
-本スキルはコードを変更しない（コメント編集のみ）。回答過程で `.pen` の編集が必要と判明した場合も編集せず、回答内で「対応には `pencil-design-updater` エージェントによる `<対象 .pen>` の更新が必要」と明示して後続タスクへ委譲する。`.pen` 編集は `pencil-design-updater` 専任で、手で `pencil` コマンドを組み立てたり frontend-implementer / general-purpose-assistant 等で代用したりしない（`edit-pencil-design` スキルに集約された運用ルール — 同パス上書き・差分Node特定・`snapshots/` 出力 — を逸脱させないため）。
+本スキルはコードを変更しない（コメント編集のみ）。回答過程で `.pen` の編集が必要と判明した場合も編集せず、回答内で「対応には `<対象 .pen>` の更新が必要であり、`cc-create-ui-design` のデザイン先行フローで行う」と明示する。`.pen` の新規作成・編集は同フローの専任であり、実装PR（`exec-issue`）では行わないため、実装セッションに `.pen` を編集させる回答は書かない。
 
 #### 外部リンクの参照（`gh` とローカルファイルで完結させない）
 

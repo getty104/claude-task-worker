@@ -316,7 +316,7 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 - 確認事項として渡すのは「確認事項の取捨選択」を通過した項目のみ（0件ならコメントは投稿しない）
 - 依頼内容は必ず `<details><summary>依頼内容</summary>` の**折りたたみ**で書き出す。裸の `## 依頼内容` 見出しは使わない。中身は「原文の verbatim 保持」が目的なので、要約・整形しない。再分析の結果は必ず `概要` `要件` `実装プラン` 側に反映する
 - 依頼内容ブロック先頭の `**元のタイトル**: <原文>` 行は、Issue の title 自体を書き換えても絶対に書き換えない（「人が最初に書いた依頼」の保存領域）
-- `.pen` の読み込みは `inspect-pencil-node` スキル経由のみ（暗号化バイナリのため `Read`/`Grep` は使えない）。編集は本スキルでは**絶対に行わず**、`pencil-design-updater` エージェントで対応する旨を `post-issue-body` 経由で「実装プラン」または「確認事項」に明記して後続タスクへ委譲する（`.pen` 編集は `pencil-design-updater` 専任・`edit-pencil-design` スキル経由の運用に集約されており、手で `pencil` コマンドを直接組み立てたり frontend-implementer/general-purpose-assistant 等で代用したりしない）
+- `.pen` の読み込みは `inspect-pencil-node` スキル経由のみ（暗号化バイナリのため `Read`/`Grep` は使えない）。編集は本スキルでは**絶対に行わず**、`cc-create-ui-design` のデザイン先行フロー（`create-ui-design` → デザインPRのマージ → `apply-ui-design`）で対応する旨を `post-issue-body` 経由で「実装プラン」に明記する。`.pen` の新規作成・編集は同フローの専任であり、実装PR（`exec-issue`）では行わないため、**「実装と同じPRで `.pen` を更新する」「`pencil-design-updater` エージェントで更新する」といった実装セッション向けの指示は書かない**
 - 入力は既存の title/body のみ。コメント由来の更新は `/update-issue` の責務であり、本スキルでは取り込まない
 - `.claude/requirements/` の要件ルールは再分析の前提として読み込むが、編集はしない（「要件ルールの参照」参照）
 - 結論を左右する外部リンクは「外部リンクの参照」に従って中身まで読み、使ったURLと要点を「参照情報」に残す
