@@ -12,7 +12,7 @@ hooks:
 
 # Check Dependabot
 
-Dependabot PRに対して、依存ライブラリのバージョンアップに伴う破壊的変更や注意点を確認し、既存コードへの影響有無を判定・修正するスキルです。Instructionsに従って、対象PRの情報取得・バージョン差分の分析・コード修正を行ってください。
+Dependabot PRに対して、依存ライブラリのバージョンアップに伴う破壊的変更や注意点を確認し、既存コードへの影響有無を判定・修正するスキルです。
 
 # Instructions
 
@@ -47,12 +47,7 @@ gh pr checkout $ARGUMENTS
 gh pr view $ARGUMENTS --json number,title,body,headRefName
 ```
 
-取得したPRのタイトル・bodyから以下を抽出する。
-
-- **ライブラリ名（パッケージ名）**
-- **変更前のバージョン（from）**
-- **変更後のバージョン（to）**
-- **エコシステム**（npm / pip / go modules / GitHub Actions など）
+PRのタイトル・bodyから、**ライブラリ名（パッケージ名）**・**変更前のバージョン（from）**・**変更後のバージョン（to）**・**エコシステム**（npm / pip / go modules / GitHub Actions など）を抽出する。
 
 Dependabotの標準タイトル形式: `Bump <package> from <old-version> to <new-version>`
 
@@ -105,7 +100,7 @@ gh api repos/<owner>/<repo>/contents/CHANGELOG.md --jq '.content' | base64 -d
 
 #### 2-3. context7 MCP
 
-上記で十分な情報が得られない場合、または公式ドキュメントのマイグレーションガイドを確認したい場合は、context7 MCPを使用する。
+上記で十分な情報が得られない場合、または公式ドキュメントのマイグレーションガイドを確認したい場合に使用する。
 
 ```text
 # ライブラリIDの解決
@@ -122,20 +117,15 @@ mcp__plugin_claude-task-worker_context7__query-docs
 
 取得した変更差分をもとに、以下の観点でリポジトリ内コードへの影響を確認する。
 
-#### 確認すべき項目
 - **破壊的変更（Breaking Changes）**: 削除・リネームされたAPI、シグネチャ変更、挙動変更
 - **非推奨化（Deprecations）**: 警告対象のAPI使用箇所
 - **デフォルト値の変更**: 設定値やオプションのデフォルト変更
 - **ピア依存関係の変更**: peerDependenciesやminimum version要件の変更
 - **型定義の変更**: TypeScriptの型変更による型エラーの可能性
 
-#### 調査方法
-
 破壊的変更や非推奨APIがある場合、Grepツールで対象のシンボル・関数・設定名を検索し、使用箇所があるかを確認する。
 
 ### ステップ4: CIステータスの確認
-
-PRのCIステータスを取得し、判定材料にする。
 
 ```bash
 gh pr checks $ARGUMENTS

@@ -12,7 +12,7 @@ hooks:
 
 # Resolve PR Conflict
 
-指定されたPR番号のPRがターゲットブランチ（`baseRefName`）とコンフリクトしていないかを確認し、コンフリクトがあればrebaseで解消したうえで`--force-with-lease`でpushするスキルです。レビュー指摘の対応・修正プランの評価・ラベル付与・マージ判定といった他の責務には立ち入らない。
+指定されたPR番号のPRがターゲットブランチ（`baseRefName`）とコンフリクトしていないかを確認し、コンフリクトがあればrebaseで解消したうえで`--force-with-lease`でpushするスキル。レビュー指摘の対応・修正プランの評価・ラベル付与・マージ判定といった他の責務には立ち入らない。
 
 ## このスキルがやること・やらないこと
 
@@ -37,7 +37,7 @@ hooks:
 
 ## ステップ0: 作業ディレクトリの安全確認
 
-このスキルは単独でも `triage-pr` 等からの委譲でも起動される。いずれのケースでも、呼び出し元が用意した作業コンテキストを尊重するため、現在地を変更しない・新規worktreeを作らないことを徹底する。
+このスキルは単独でも `triage-pr` 等からの委譲でも起動される。いずれのケースでも、呼び出し元が用意した作業コンテキストを尊重するため、現在地を変更しない・新規worktreeを作らない。
 
 ```bash
 pwd
@@ -45,14 +45,12 @@ pwd
 
 判定:
 
-- **`.claude/worktrees/` 配下にいる場合**: そのworktree内で全ての作業（`gh pr checkout` / `git rebase` / `git push`）を完結させる。`cd`でworktreeの外やリポジトリのルートに移動しない。新規worktreeも作らない
+- **`.claude/worktrees/` 配下にいる場合**: そのworktree内で全ての作業（`gh pr checkout` / `git rebase` / `git push`）を完結させる。`cd`でworktreeの外やリポジトリのルートに移動しない
 - **`.claude/worktrees/` 配下にいない場合（リポジトリのルート・通常のクローン等）**: その場で作業する。`.claude/worktrees/` 配下への移動や新規worktree作成はしない
 
 加えて、デフォルトブランチで直接rebase / force-pushを行う事故を避けるため、`gh pr checkout` の **直後**（ステップ1）で現在ブランチがデフォルトブランチと一致しないことを確認する（一致した場合は中断する）。
 
 ## ステップ1: PRの存在確認とチェックアウト
-
-まずPRが存在し、コンフリクト解消の対象として妥当な状態かを確認する。
 
 ```bash
 gh pr view $ARGUMENTS --json number,state,baseRefName,headRefName
@@ -80,7 +78,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 ## ステップ2: ターゲットブランチとのコンフリクト判定
 
-PRのターゲットブランチを`baseRefName`から動的に取得する。デフォルトブランチではなく、PRが実際にマージされる先のブランチを基準にすること（Epic PRなど、デフォルトブランチ以外をターゲットにするケースに対応するため）。
+ターゲットブランチは`baseRefName`から動的に取得する。デフォルトブランチではなく、PRが実際にマージされる先のブランチを基準にすること（Epic PRなど、デフォルトブランチ以外をターゲットにするケースに対応するため）。
 
 コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`cc-resolve-conflict`ラベルの付与と除去が繰り返される無限ループになる。
 
@@ -113,8 +111,6 @@ MERGEABLE=$(gh pr view $ARGUMENTS --json mergeable -q .mergeable)
 
 ## ステップ3: rebaseによるコンフリクト解消
 
-ターゲットブランチに対してrebaseを実行する。
-
 ```bash
 git rebase "origin/$TARGET_BRANCH"
 ```
@@ -144,8 +140,6 @@ git rebase --continue
 
 ## ステップ4: force-push
 
-rebase完了後、リモートに反映する。
-
 ```bash
 git push origin HEAD --force-with-lease
 ```
@@ -164,10 +158,6 @@ git push origin HEAD --force-with-lease
 
 ## 注意事項
 
-- このスキルは **コンフリクト解消のみ** を目的とする。スコープ外の修正（Lint対応、テスト追加、リファクタリング、レビュー指摘対応）は行わない
-- ステップ3のrebase中の`Edit` / `Write`以外でコードを変更しない。コンフリクトと無関係な「ついで修正」を入れると、後続のレビューと履歴が複雑になる
-- **作業ディレクトリを動かさない**: ステップ0の判定に従い、worktree内で起動されたら外に出ず、worktree外で起動されたら勝手にworktreeへ移動しない。新規worktreeも作らない
-- **デフォルトブランチで作業しない**: `gh pr checkout` 後にHEADがデフォルトブランチと一致する場合は中断する
+- スコープは **コンフリクト解消のみ**。ステップ3のrebase中の`Edit` / `Write`以外でコードを変更しない。コンフリクトと無関係な「ついで修正」を入れると、後続のレビューと履歴が複雑になる
 - PRに付与されているラベル（`cc-triage-scope`等を含む）は一切操作しない。ラベル管理は上位スキルの責務
 - `git push --force`は使わず、必ず`--force-with-lease`を使う
-- コンフリクトなしの場合は何もせず終了する。不要なrebase / force-pushを発生させない

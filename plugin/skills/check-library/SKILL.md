@@ -8,11 +8,11 @@ context: fork
 
 # Check Library
 
-ライブラリの情報確認のために適切なMCPサーバーを選択して利用するスキル。Next.js、shadcn/ui、その他のライブラリの最新ドキュメントと使用方法を取得する。
+適切なMCPサーバーを選択してライブラリの最新ドキュメントと使用方法を取得するスキル。
 
 # Instructions
 
-ライブラリ名に応じて、以下の優先順位でMCPサーバーを使用してください。
+ライブラリ名に応じて、以下の優先順位でMCPサーバーを使用する。
 
 ## 実行ルール
 
@@ -61,5 +61,4 @@ examples.mdを参照してください。
 ## 注意事項
 
 - ライブラリ名が曖昧な場合は問い返さず、`package.json` の依存関係に一致するライブラリを優先して選ぶ。それでも複数候補が残る場合は、`resolve-library-id` の検索結果上位の候補で調べたうえで「どのライブラリとして解釈したか」を結果に明記する
-- Next.jsとshadcnは専用のMCPがあるため優先的に使用する
-- context7を使用する場合は、必ず `resolve-library-id` でライブラリIDを解決してから `get-library-docs` を使用する
+- context7では必ず `resolve-library-id` でライブラリIDを解決してから `get-library-docs` を使用する

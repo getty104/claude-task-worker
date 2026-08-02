@@ -1,6 +1,6 @@
 ---
 name: create-ui-design
-description: "Create or update the Pencil (`.pen`) design for a UI implementation Issue before any code is written, then open a design-only PR. Takes the Issue number as argument, extracts the design requirements from the Issue description and comments, delegates `.pen` edits to the pencil-design-updater agent, exports snapshot PNGs, pushes them on the fixed `cc-ui-design-<Issue number>` branch, and opens a PR that references the Issue with `Refs #<N>` (never a closing keyword)."
+description: "Create or update the Pencil (`.pen`) design for a UI implementation Issue before any code is written, then open a design-only PR. Takes the Issue number as argument, delegates `.pen` edits to the pencil-design-updater agent, pushes `.pen` and snapshot PNGs on the fixed `cc-ui-design-<Issue number>` branch, and opens a PR referencing the Issue with `Refs #<N>` (never a closing keyword)."
 argument-hint: "[issue-number]"
 disable-model-invocation: true
 hooks:
@@ -13,9 +13,9 @@ hooks:
 
 # Create UI Design
 
-UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン（`.pen`）を作成・更新し、デザインのみの独立したPRを作るスキルです。Instructionsに従って順に実行し、各フェーズの「完了条件」を満たさないまま次のフェーズに進まないこと。
+UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン（`.pen`）を作成・更新し、デザインのみの独立したPRを作るスキル。各フェーズの「完了条件」を満たさないまま次のフェーズに進まないこと。
 
-**このスキルはコードを実装しない**。差分は `.pen` とスナップショット PNG のみに限定する。実装は本デザインPRのマージ後に `exec-issue` が担当する。
+**このスキルはコードを実装しない**。差分は `.pen` とスナップショット PNG のみ。実装は本デザインPRのマージ後に `exec-issue` が担当する。
 
 # Instructions
 
@@ -27,14 +27,12 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 ## スコープと出力の規律
 
-- **Issueが要求している画面・状態だけをデザインする**: 「あると良さそう」で画面・セクション・状態バリエーションを足さない。デザインが増えるとそのまま実装スコープの膨張になる。気づいた提案は `.pen` に入れず、デザインPRの本文に1行で挙げるだけにする
-- **成果物は `.pen` とスナップショットPNGのみ**（コード実装は `exec-issue` の責務）
-- **PR本文・Issueコメント・最終報告は必要な実質だけ**: 各セクション1〜3行を目安にし、同じ内容の言い換えや埋め草を書かない。該当がない項目は「なし」の1語で済ませる
+- **Issueが要求している画面・状態だけをデザインする**: 「あると良さそう」で画面・セクション・状態バリエーションを足さない（デザインの膨張はそのまま実装スコープの膨張になる）。気づいた提案は `.pen` に入れず、デザインPRの本文に1行で挙げるだけにする
+- **成果物は `.pen` とスナップショットPNGのみ**
+- **PR本文・Issueコメント・最終報告は必要な実質だけ**: 各セクション1〜3行を目安にし、言い換え・埋め草を書かない。該当がない項目は「なし」の1語で済ませる
 - **委譲は `pencil-design-updater` 1体**。検証目的で別のサブエージェントを起動せず、成果物の確認は `git status --short` とスナップショットの確認でメインが自分で行う
 
 ## フェーズ0: 事前チェック
-
-以下を順に確認し、判断は自動で行う。ユーザーには質問しない。
 
 ### 0-1. 作業ディレクトリとIssueの確認
 
@@ -75,7 +73,7 @@ pencil status
 
 ### 0-3. デザイン配置先の解決
 
-リポジトリ直下の `claude-task-worker.json` の `uiDesign.designDir` を読む。既定値 `designs` を使ってよいのは「ファイルが存在しない」場合、または「ファイルは存在するがキー未設定（`jq` が `null` を返す）」場合のみに限る。`jq` がexit code非0で終わる場合（JSON構文エラー・権限エラーなどでファイルを読めない場合）は、意図した `designDir` と異なる場所へデザイン成果物を作ってしまう危険があるため、既定値へフォールバックせず安全側に倒す。
+リポジトリ直下の `claude-task-worker.json` の `uiDesign.designDir` を読む。既定値 `designs` を使ってよいのは「ファイルが存在しない」場合、または「ファイルは存在するがキー未設定（`jq` が `null` を返す）」場合のみ。`jq` がexit code非0で終わる場合（JSON構文エラー・権限エラーなど）は、意図した `designDir` と異なる場所へ成果物を作る危険があるため、既定値へフォールバックせず安全側に倒す。
 
 ```bash
 if [ ! -f claude-task-worker.json ]; then
@@ -89,7 +87,7 @@ else
 fi
 ```
 
-`DESIGN_DIR` が空文字列のまま（=上記の `jq` 失敗）の場合は、デザインを作らずフェーズ0-2と同じ手順（Issueへの理由コメント + `cc-need-human-check` 付与）でスキルを終了する。この場合デザインPRは作らない。
+`DESIGN_DIR` が空文字列のまま（=上記の `jq` 失敗）の場合は、デザインを作らずフェーズ0-2と同じ手順（Issueへの理由コメント + `cc-need-human-check` 付与。デザインPRは作らない）でスキルを終了する。以降「フェーズ0-2と同じ手順」はこの手順を指す。
 
 **完了条件**: worktree内・Issue OPEN・`pencil` 疎通OK・`DESIGN_DIR` が空文字列でなく確定していること。
 
@@ -104,7 +102,7 @@ fi
 
 ### デザイン不要と判明した場合
 
-抽出の結果「このIssueはUI変更を伴わない」と判断した場合（サーバーサイドのみ、文言差し替えのみ、レイアウトに影響しない微修正など）は、デザインを作らずに以下を実行して終了する。
+「このIssueはUI変更を伴わない」と判断した場合（サーバーサイドのみ、文言差し替えのみ、レイアウトに影響しない微修正など）は、デザインを作らずに以下を実行して終了する。
 
 1. Issue に判断理由をコメントする
    ```bash
@@ -172,7 +170,7 @@ ls -1 "${DESIGN_DIR}"/*.pen 2>/dev/null || echo "(no existing .pen)"
 <worktreeの絶対パス>
 ```
 
-サブエージェントの完了報告を鵜呑みにせず、`git status --short` で `.pen` とスナップショット PNG が実際に生成・更新されていることを検証する。生成されていなければ再委譲する（最大2回）。2回試行しても生成できない場合は、フェーズ0-2と同じ手順で `cc-need-human-check` を付与し、失敗ログを含めて終了する。
+サブエージェントの完了報告を鵜呑みにせず、`git status --short` で `.pen` とスナップショット PNG が実際に生成・更新されていることを検証する。生成されていなければ再委譲する（最大2回）。2回試行しても生成できない場合は、失敗ログを含めフェーズ0-2と同じ手順で終了する。
 
 **完了条件**: `.pen` とスナップショット PNG が `git status --short` に現れており、他のファイルに差分がないこと。
 
@@ -194,13 +192,13 @@ git status --short | awk '{print $2}' | grep -E '\.pen$|/snapshots/.+\.png$' | x
 git status --short
 ```
 
-**ステージするのは `.pen` ファイルと `snapshots/` 配下のPNGファイルのallowlistのみ**とし、`git add "${DESIGN_DIR}"` のようなディレクトリ丸ごとaddは行わない。ステージ後、`git status --short` を再確認し、allowlist外のファイル（ステージされずに残っている変更・元々trackedな変更として存在していたもの、いずれも含む）が1件でも残っている場合は、**それらを `git restore --staged` / `git checkout --` で破棄してはならない**。ユーザーの意図しないtracked変更まで巻き込んで消し去る危険があるため、破棄せず以下を実行して終了する。
+**ステージするのは `.pen` ファイルと `snapshots/` 配下のPNGファイルのallowlistのみ**とし、`git add "${DESIGN_DIR}"` のようなディレクトリ丸ごとaddは行わない。ステージ後、`git status --short` を再確認し、allowlist外のファイル（ステージされずに残っている変更・元々trackedな変更として存在していたもの、いずれも含む）が1件でも残っている場合は、**それらを `git restore --staged` / `git checkout --` で破棄してはならない**（ユーザーの意図しないtracked変更まで巻き込んで消し去る危険があるため）。破棄せず以下を実行して終了する。
 
 ```bash
 NON_ALLOWED=$(git status --short | awk '{print $2}' | grep -vE '\.pen$|/snapshots/.+\.png$' || true)
 ```
 
-`NON_ALLOWED` が空でない場合は、フェーズ0-2と同じ手順（Issueへの理由コメント + `cc-need-human-check` 付与）でスキルを終了する。この場合デザインPRは作らない。`NON_ALLOWED` が空の場合のみフェーズ4の続き（コミット・push）へ進む。
+`NON_ALLOWED` が空でない場合は、フェーズ0-2と同じ手順でスキルを終了する。空の場合のみコミット・pushへ進む。
 
 `cc-ui-design-$0` は本スキルの実行だけが書き込むブランチのため、リモートに同名ブランチが残っていても `--force-with-lease` で上書きして安全に収束させる。
 
@@ -222,7 +220,7 @@ fi
 
 `git ls-remote --exit-code` は「リモートに一致する参照がない」場合のみ exit code 2 を返す（認証・ネットワーク失敗など他の異常は 2 以外）。exit 2 ならリモート未存在と確定できるため素の `push -u` に進み、それ以外は原因不明のエラーとして即座に失敗させる。
 
-push（またはリモート存在確認）に失敗した場合はエラー出力を最終報告に含め、フェーズ0-2と同じ手順で `cc-need-human-check` を付与して終了する。
+push（またはリモート存在確認）に失敗した場合はエラー出力を最終報告に含め、フェーズ0-2と同じ手順で終了する。
 
 **完了条件**: `cc-ui-design-$0` ブランチが remote に存在すること。
 
@@ -282,7 +280,7 @@ gh pr list --head "cc-ui-design-$0" --state open --json number,url
 ```
 
 - PRが実在する場合: そのURLを最終報告に含めて正常終了する
-- PRが実在しない場合: フェーズ0-2と同じ手順で Issue にPR未作成の旨と原因をコメントし、`cc-need-human-check` を付与して終了する
+- PRが実在しない場合: フェーズ0-2と同じ手順（コメントにはPR未作成の旨と原因を書く）で終了する
 
 **完了条件**: `cc-ui-design-$0` を head とするOpen PRの実在が確認できていること。
 
@@ -305,8 +303,8 @@ gh pr list --head "cc-ui-design-$0" --state open --json number,url
 
 ## 注意事項
 
-- **コードを実装しない**: 本スキルの差分は `.pen` とスナップショット PNG のみ。実装は `exec-issue` の責務
-- **`.pen` を直接編集しない**: 暗号化バイナリのため、編集は `pencil-design-updater` エージェント（`edit-pencil-design` スキル）経由に限る。読み取りは `inspect-pencil-node` スキル
+- **コードを実装しない**: 差分は `.pen` とスナップショット PNG のみ
+- **`.pen` を直接編集しない**: 編集は `pencil-design-updater` エージェント（`edit-pencil-design` スキル）経由、読み取りは `inspect-pencil-node` スキルに限る
 - **closing keyword を使わない**: PR本文の Issue 参照は `Refs #$0` のみ
-- **未完の処理を残したまま完了報告してターンを終えない**: ターンを終えるとプロセスが正常終了し、ワーカーがデザインPR未作成のまま完了扱いでラベル遷移を進めてしまう
+- **未完の処理を残したまま完了報告してターンを終えない**: ワーカーがデザインPR未作成のまま完了扱いでラベル遷移を進めてしまう
 - **ユーザーに判断を求めない**: 中断条件以外はすべて本スキル内のルールで自動決定し、曖昧な場合は安全側（デザインを作らず `cc-need-human-check` に落とす側）を選んで根拠を最終報告に明記する

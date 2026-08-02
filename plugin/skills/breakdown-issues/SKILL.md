@@ -8,7 +8,7 @@ effort: high
 
 # Breakdown Issues
 
-依頼された内容を requirement-todo-organizer エージェントで要件・TODOに分解し、各タスクをGitHub Issueとして作成するスキルです。
+依頼された内容を requirement-todo-organizer エージェントで要件・TODOに分解し、各タスクをGitHub Issueとして作成するスキル。
 
 # Instructions
 
@@ -28,19 +28,19 @@ $ARGUMENTS
 
 ### 3. タスクの不明点のブラッシュアップ
 
-ステップ2で分解した要件・TODOに不明点や曖昧な点があれば、`AskUserQuestion`ツールを使用してユーザーに質問する。
+ステップ2で分解した要件・TODOに不明点や曖昧な点があれば、`AskUserQuestion`ツールでユーザーに質問する。
 
-- 回答を受けて要件・TODOを更新し、不明点がなくなるまでこのプロセスを繰り返す
-- 不明点がない場合はこのステップをスキップする
+- 回答を受けて要件・TODOを更新し、不明点がなくなるまで繰り返す
+- 不明点がない場合はスキップする
 
 ### 4. 親（Epic）Issue の作成
 
-子Issueを作る前に、ステップ2で分解した全TODOを束ねる「親Issue（Epic）」を1つ作成する。子Issueは後段でこの親Issueの sub-issue として作成するため、先に親番号を確定させる。親Issueは「この一連のタスク群が何を達成するためのものか」のサマリとして機能し、全体像と進捗を1つの番号で追えるようにする。
+子Issueを作る前に、ステップ2で分解した全TODOを束ねる「親Issue（Epic）」を1つ作成する。子Issueは後段でこの親Issueの sub-issue として作成するため、先に親番号を確定させる。親Issueは全体像と進捗を1つの番号で追えるようにするサマリとして機能する。
 
 - **ラベル**: `cc-epic-issue`（親 Epic Issue であることを示す。必ず付与）
-- **タイトル**: ステップ2で取りまとめた「依頼内容全体」のサマリを短くまとめたもの（例：「ユーザー認証機能の実装」「決済フローのリファクタ」）
+- **タイトル**: 依頼内容全体のサマリを短くまとめたもの（例：「ユーザー認証機能の実装」）
 - **アサイン**: 自分（`$ME`）
-- **本文**: 依頼内容の全体像（背景・ゴール）を1-3段落で簡潔に。この時点では子Issue番号のリンクは含めない（必要なら最終ステップで `gh issue edit` で追記してもよいが、GitHub UI の sub-issue 表示で十分追えるので必須ではない）
+- **本文**: 依頼内容の全体像（背景・ゴール）を1-3段落で簡潔に。この時点では子Issue番号のリンクは含めない（GitHub UI の sub-issue 表示で十分追える。必要なら最終ステップで `gh issue edit` で追記してもよい）
 
 `post-scope-issue-body` のフォーマットは個別TODO用のスコープIssue向け（要件・参照情報・優先度・見積もり規模）であり、Epicサマリには合わないため、親Issueはこのスキル内で直接 `gh issue create` する。
 
@@ -63,7 +63,7 @@ EOF
 EPIC_ISSUE_NUMBER=$(basename "$EPIC_ISSUE_URL")
 ```
 
-`gh issue create` が失敗した場合は本ステップでそのまま中断する（親Issueが無い状態で子Issueだけ作っても sub-issue 関係が貼れず、本スキルの趣旨を満たさないため）。
+`gh issue create` が失敗した場合はそのまま中断する（親Issueが無い状態で子Issueだけ作っても sub-issue 関係が貼れず、本スキルの趣旨を満たさないため）。
 
 ### 5. 子IssueをサブIssueとして一括作成（post-scope-issue-body へ委譲）
 
@@ -71,7 +71,7 @@ EPIC_ISSUE_NUMBER=$(basename "$EPIC_ISSUE_URL")
 
 #### 責務の分担
 
-本文整形・投稿前チェック・`gh issue create` の実行は `post-scope-issue-body` スキルに委譲する。本文テンプレート・投稿前チェックリスト・heredoc 投稿コマンドはすべて `post-scope-issue-body` 側に集約されているため、本スキル内では再記述しない。本スキルでは「TODOの整理」「作成順序の制御」「親Issue番号と依存先Issue番号の確定と YAML への受け渡し」のみを担う。
+本文整形・投稿前チェック・`gh issue create` の実行は `post-scope-issue-body` スキルに委譲する。本文テンプレート・投稿前チェックリスト・heredoc 投稿コマンドは `post-scope-issue-body` 側に集約されており、本スキル内では再記述しない。本スキルでは「TODOの整理」「作成順序の制御」「親Issue番号と依存先Issue番号の確定と YAML への受け渡し」のみを担う。
 
 #### 依存関係の表現方法
 
@@ -105,13 +105,13 @@ parent: <EPIC_ISSUE_NUMBER>
 blocked_by: [<先行TODOで確定済みのIssue番号>, ...]
 ```
 
-Skill tool 呼び出しは `Skill(skill='post-scope-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-scope-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。完了後、作成された Issue URL と Issue 番号が返ってくるので、番号は次以降のTODOの `blocked_by:` に入れる用途で保持する。
+Skill tool 呼び出しは `Skill(skill='post-scope-issue-body', args=<上記YAML文字列>)`（必要なら plugin namespace 付きで `claude-task-worker:post-scope-issue-body`）。args は改行を含む複数行文字列としてそのまま渡す。返ってきた Issue 番号は後続TODOの `blocked_by:` 用に保持する。
 
-`post-scope-issue-body` の失敗（gh コマンド失敗・本文チェック不通過・`--parent`/`--blocked-by` の検証エラー等）はそのまま本ステップの中断条件となる。エラーメッセージを最終報告に含め、既に作成済みのIssue（親Issueと作成済みの子Issue）は残したまま中断する。
+`post-scope-issue-body` の失敗（gh コマンド失敗・本文チェック不通過・`--parent`/`--blocked-by` の検証エラー等）はそのまま中断条件となる。エラーメッセージを最終報告に含め、既に作成済みのIssue（親Issueと作成済みの子Issue）は残したまま中断する。
 
 ### 6. 作成結果の報告
 
-全Issueの作成が完了したら、以下を報告する。結論（親Issue番号と子Issue件数）から書き、各項目は1行に収める。分解内容の再掲・同じ内容の言い換えは書かない。
+全Issueの作成が完了したら、以下を報告する。結論（親Issue番号と子Issue件数）から書き、各項目は1行に収める。分解内容の再掲・言い換えは書かない。
 
 - 作成した親Issue（Epic）の番号・タイトル・URL
 - 作成した子Issueの一覧（番号・タイトル・blocked-by先）

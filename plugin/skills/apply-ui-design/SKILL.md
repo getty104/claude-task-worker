@@ -1,6 +1,6 @@
 ---
 name: apply-ui-design
-description: "Write the merged Pencil design reference back into a UI implementation Issue's description so the implementation session can use it as input. Takes the Issue number as argument, resolves the merged design PR on the `cc-ui-design-<Issue number>` branch, collects the `.pen` and snapshot paths it added, and appends (or replaces) the `## UIデザイン` section at the end of the Issue body using a lost-update-safe edit."
+description: "Write the merged Pencil design reference back into a UI implementation Issue's description. Takes the Issue number as argument, resolves the merged design PR on the `cc-ui-design-<Issue number>` branch, collects the `.pen` and snapshot paths it added, and appends (or replaces) the `## UIデザイン` section at the end of the Issue body using a lost-update-safe edit."
 argument-hint: "[issue-number]"
 disable-model-invocation: true
 hooks:
@@ -13,7 +13,7 @@ hooks:
 
 # Apply UI Design
 
-マージ済みのデザインPRの内容を、実装Issue `$0` の description に「デザイン参照セクション」として書き戻すスキルです。`exec-issue` は description を唯一の入力として実装するため、ここで参照を残さないと合意済みデザインが実装セッションに届かない。
+マージ済みのデザインPRの内容を、実装Issue `$0` の description に「デザイン参照セクション」として書き戻すスキル。`exec-issue` は description を唯一の入力として実装するため、ここで参照を残さないと合意済みデザインが実装セッションに届かない。
 
 **このスキルはコードも `.pen` も変更しない**。行うのはIssue description の更新のみ。
 
@@ -40,10 +40,10 @@ hooks:
 gh pr list --head "cc-ui-design-$0" --state all --json number,url,state,mergedAt
 ```
 
-`--limit 1` は付けない。同一headブランチに未マージPRとMERGED PRが混在しうるため、まず全件取得したうえで `state == "MERGED"` のものだけを選別する。
+`--limit 1` は付けない。同一headブランチに未マージPRとMERGED PRが混在しうるため、全件取得したうえで `state == "MERGED"` のものだけを選別する。
 
 - 選別結果が **0件** または **複数件** の場合は **中断** する（0件はマージ待ちや head 不一致、複数件はブランチの再利用・運用ミスの疑いがあり、いずれも自動判断すべきでない）。理由を出力し、ワーカー側での `cc-need-human-check` 付与を促す旨を最終報告に含めて終了する
-- 選別結果が1件のみの場合に限り、その `number` と `url` を最終報告と description に使うため保持する
+- 1件のみの場合に限り、その `number` と `url` を最終報告と description に使うため保持する
 
 ### 1-2. マージされた成果物のパス取得
 
@@ -84,7 +84,7 @@ gh pr diff <デザインPR番号> --name-only
 
 ### 2-2. ロスト・アップデート対策付きの書き戻し
 
-既存本文は必ず保持する。すでに `## UIデザイン` セクションがある場合は、**重複追記せず置換**する（セクション見出しから、次の同レベル見出し（行頭が `##` で始まる見出し）の直前まで、または自セクションが生成した定型内容（上記2-1のフォーマット）の終端までを差し替える。セクション末尾に人間が追記したコメント等はこの定型内容の外側とみなし、置換対象に含めず保持する）。
+既存本文は必ず保持する。すでに `## UIデザイン` セクションがある場合は、**重複追記せず置換**する（セクション見出しから、次の同レベル見出し（行頭が `##` で始まる見出し）の直前まで、または自セクションが生成した定型内容（上記2-1のフォーマット）の終端までを差し替える。セクション末尾に人間が追記したコメント等は定型内容の外側とみなし、置換対象に含めず保持する）。
 
 固定パスは同一Issueへの並行実行で衝突しうるため `mktemp` で一意な一時ファイルを確保する。さらに、本文の取得（`view`）と書き戻し（`edit`）の間に人間または別プロセスが本文を更新している可能性があるため、`edit` 直前に本文を再取得して差分を検証する。
 
@@ -157,7 +157,7 @@ gh issue view $0 --json body --jq .body | grep -F '.pen'
 ## 注意事項
 
 - **既存の description を消さない**: 追記・置換のいずれでも、`## UIデザイン` セクション以外の本文は完全に保持する
-- **ラベルを操作しない**: `cc-ui-design-ready` / `cc-exec-issue` の付与はワーカーの責務。本スキルは description の更新のみを行う
+- **ラベルを操作しない**: `cc-ui-design-ready` / `cc-exec-issue` の付与はワーカーの責務
 - **`.pen` を読まない・編集しない**: パスの取得は `gh pr diff --name-only` で行い、ファイル自体には触れない
 - **未完の処理を残したまま完了報告してターンを終えない**: description 未更新のまま終了すると、デザインなしで実装が始まる状態壊れにつながる
 - **ユーザーに判断を求めない**: 中断条件以外はすべて本スキル内のルールで自動決定する

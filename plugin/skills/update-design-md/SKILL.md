@@ -1,6 +1,6 @@
 ---
 name: update-design-md
-description: 直近N日（デフォルト7日）にマージされた `cc-ui-design` ラベル付きPR（UIデザインPR）のレビューコメントと `.pen` デザインの更新内容を横断し、確定したビジュアルアイデンティティ（カラー・タイポグラフィ・スペーシング・コンポーネント）をリポジトリルートの `DESIGN.md`（[google-labs-code/design.md](https://github.com/google-labs-code/design.md) フォーマット）へ集約・更新し、`design.md` CLI の lint が通る状態にしてから commit-push + create-pr でPRを作成する（`cc-triage-scope` ラベル + 自分自身をAssignee）。作成した `DESIGN.md` は pencil-design-updater がデザイン時の前提として読み込む。
+description: 直近N日（デフォルト7日）にマージされた `cc-ui-design` ラベル付きPR（UIデザインPR）から確定したビジュアルアイデンティティ（カラー・タイポグラフィ・スペーシング・コンポーネント）をリポジトリルートの `DESIGN.md`（google-labs-code/design.md フォーマット）へ集約・更新し、`design.md` CLI の lint を通してから commit-push + create-pr でPRを作成する（`cc-triage-scope` ラベル + 自分自身をAssignee）。`DESIGN.md` は pencil-design-updater がデザイン時の前提として読み込む。
 disable-model-invocation: true
 argument-hint: "[期間（日数、省略時は7）] [関連Issue番号（任意）]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
@@ -8,34 +8,21 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*)
 
 # Update DESIGN.md
 
-直近N日にマージされたUIデザインPR（`cc-ui-design`）から**確定したビジュアルアイデンティティ**を抽出し、リポジトリルートの `DESIGN.md` へ集約するスキルです。収集 → デザイン判断の抽出 → `DESIGN.md` の作成・更新 → lint 通過 → PR作成まで一貫して実行してください。
-
-`DESIGN.md` のフォーマットは [google-labs-code/design.md](https://github.com/google-labs-code/design.md) の仕様（YAML フロントマターのデザイントークン + マークダウン本文の設計意図）に従います。
+収集 → デザイン判断の抽出 → `DESIGN.md` の作成・更新 → lint 通過 → PR作成まで一貫して実行する。フォーマットは [google-labs-code/design.md](https://github.com/google-labs-code/design.md) の仕様（YAML フロントマターのデザイントークン + マークダウン本文の設計意図）に従う。
 
 ## なぜこれをやるのか
 
-UIデザイン先行ワークフロー（`create-ui-design` → `apply-ui-design`）では、デザインPRごとに配色・タイポグラフィ・余白が個別に決まります。決定がPRのレビューコメントと `.pen` の中身にしか残らないと、(1) 次のデザインが過去の決定を知らずに別の色・別のフォントサイズを使い、(2) デザインシステムが画面ごとに分岐し、(3) 実装側もどれが正なのか判断できません。
-
-`DESIGN.md` は**エージェントが読める単一の正**です。ここにトークンと原則が固定されていれば、`pencil-design-updater` は次のデザインをその前提の上で作れます。
-
-裏を返すと、**`DESIGN.md` が肥大化・陳腐化すると逆効果**です。読み込みコストが上がり、現実と食い違うトークンが誤ったデザインを生みます。だからこのスキルは「追加」と同じ重みで「統合・上書き・削除」を行います。
+デザインPRごとの決定がレビューコメントと `.pen` の中身にしか残らないと、次のデザインが過去の決定を知らずに別の値を使い、デザインシステムが画面ごとに分岐し、実装側もどれが正か判断できない。`DESIGN.md` は**エージェントが読める単一の正**で、`pencil-design-updater` は次のデザインをその前提の上で作る。裏を返すと、**肥大化・陳腐化すると逆効果**（読み込みコストが上がり、現実と食い違うトークンが誤ったデザインを生む）ため、「追加」と同じ重みで「統合・上書き・削除」を行う。
 
 ## このスキルがやること・やらないこと
 
-**やること**:
-- 直近N日にマージされた `cc-ui-design` ラベル付きPRの収集（レビューコメント・会話コメント・変更ファイル一覧）
-- `.pen` デザインの実データ（トークン値）の読み取り専用調査（`inspect-pencil-node`）とスナップショット画像の確認
-- リポジトリルート `DESIGN.md` の作成・更新（トークンと設計意図の両方）
-- `design.md` CLI（`designmd lint`）のエラー・警告解消
-- `commit-push` skill でのコミット・push（必要なら専用feature branchへ切替）
-- `create-pr` skill でのPR作成 + Assignee（自分自身）と `cc-triage-scope` ラベルの付与
-- 追加・上書き・削除の差分サマリ報告
+**やること**: 直近N日にマージされた `cc-ui-design` ラベル付きPRの収集（レビューコメント・会話コメント・変更ファイル一覧）／`.pen` の実データ（トークン値）の読み取り専用調査（`inspect-pencil-node`）とスナップショット画像の確認／リポジトリルート `DESIGN.md` の作成・更新（トークンと設計意図）／`designmd lint` のエラー・警告解消／`commit-push` でのコミット・push（必要なら専用feature branchへ切替）／`create-pr` でのPR作成 + Assignee（自分自身）と `cc-triage-scope` ラベルの付与／追加・上書き・削除の差分サマリ報告
 
 **絶対にやらないこと**:
 - **収集対象の** PR / Issue への書き込み（コメント・ラベル・再オープンなど。収集は読み取りのみ。フェーズ7で自分が作成したPRへラベル・Assigneeを付けるのはこの制限の対象外）
 - `DESIGN.md` 以外のファイルの編集（`.pen`・ソースコード・`CODING_GUIDELINES.md`・`.claude/requirements/` を含む）
-- **`.pen` の編集**（`save()` を呼ぶ操作）。調査は `inspect-pencil-node` の読み取り専用手順のみ
-- 実データの裏付けがない値の記載（「よくある値」で埋めない。読み取れなかった項目は書かない）
+- **`.pen` の編集**（`save()` を呼ぶ操作）。調査は `inspect-pencil-node` の読み取り専用手順のみ。デザイン側の修正が必要と判断した場合も、報告に1行挙げるだけにする
+- 実データの裏付けがない値の記載（「よくある値」で埋めない。読み取れなかった項目は書かない。推測値は、次のデザインがそれに合わせて作られた時点で「正」になってしまう）
 - 1つのPRでしか使われていない画面固有の装飾のトークン化（後述の採用基準）
 - デフォルトブランチ上での直接コミット（必ずfeature branchに切り替えてから `commit-push` を呼ぶ）
 
@@ -47,8 +34,8 @@ UIデザイン先行ワークフロー（`create-ui-design` → `apply-ui-design
 
 ### リポジトリと既存ファイルの確認
 
-- `git rev-parse --show-toplevel` の出力とカレントディレクトリが一致することを確認する。一致しない場合は「リポジトリルートで実行してください」と返して終了する
-- リポジトリルートの `DESIGN.md` の有無を確認する。存在すれば `Read` で全文読み込み、現在のトークン構成・セクション構成・記法を把握する（以降これを「既存 DESIGN.md」と呼ぶ）
+- `git rev-parse --show-toplevel` の出力とカレントディレクトリの一致を確認する。一致しなければ「リポジトリルートで実行してください」と返して終了する
+- リポジトリルートの `DESIGN.md` が存在すれば `Read` で全文読み込み、現在のトークン構成・セクション構成・記法を把握する（以降「既存 DESIGN.md」）
 - `claude-task-worker.json` があれば `uiDesign.designDir` を読み（未設定なら `designs`）、`.pen` の探索先として控える
 
 ### `design.md` CLI の解決（フェーズ5で必ず使う）
@@ -63,8 +50,8 @@ else
 fi
 ```
 
-- `designmd` はグローバルインストール（`claude-task-worker install` / `update` が `npm install -g @google/design.md@latest` を実行する）で入る。同パッケージは bin として `design.md` と `designmd` の2つを提供するが、`.` を含む前者は環境（特にWindowsの拡張子関連付け）と衝突しうるため **`designmd` を既定で使う**。npx フォールバックも `-p @google/design.md designmd` の形でパッケージ名とbin名を分離し、dotフリーの `designmd` だけを呼び出す（`npx -y @google/design.md` はパッケージ名兼bin名に `.` を含むため同じ理由で避ける）
-- どちらも使えない場合（`DESIGN_MD_CMD` が空）でも作業は続行してよいが、フェーズ5の lint は実行できない。その場合はフォーマット仕様（下記フェーズ4）に手作業で厳密に従い、**「lint 未実行」であることをフェーズ8の報告とPR本文に必ず明記する**（lint 済みと誤認されると、壊れた `DESIGN.md` が後続のデザインの前提になる）
+- `designmd` はグローバルインストール（`claude-task-worker install` / `update` が `npm install -g @google/design.md@latest` を実行する）で入る。同パッケージの bin は `design.md` と `designmd` の2つだが、`.` を含む前者は環境（特にWindowsの拡張子関連付け）と衝突しうるため **`designmd` を既定で使う**。npx フォールバックも `-p @google/design.md designmd` の形でパッケージ名とbin名を分離し、dotフリーの `designmd` だけを呼ぶ
+- どちらも使えない場合（`DESIGN_MD_CMD` が空）も作業は続行してよいが、フェーズ5の lint は実行できない。その場合はフォーマット仕様（フェーズ4）に手作業で厳密に従い、**「lint 未実行」をフェーズ8の報告とPR本文に必ず明記する**（lint 済みと誤認されると、壊れた `DESIGN.md` が後続のデザインの前提になる）
 
 ### 引数パース
 
@@ -73,10 +60,7 @@ fi
 - 1番目: 期間（日数）。省略時または非数値の場合は `7`
 - 2番目: 関連Issue番号（任意）。`#` プレフィックスは除去して数値部分のみ保持
 
-例:
-- `/update-design-md` → 日数=7, Issue番号=なし
-- `/update-design-md 14` → 日数=14, Issue番号=なし
-- `/update-design-md 14 #123` → 日数=14, Issue番号=123
+例: `/update-design-md` → 日数=7, Issue番号=なし ／ `/update-design-md 14 #123` → 日数=14, Issue番号=123
 
 Issue番号はフェーズ7で `create-pr` に渡す。指定なしの場合はPR本文の `Closes #N` 行を省略する。
 
@@ -117,11 +101,11 @@ jq -r '.prs[] | select(.pr_number | IN(101,102,103)) |
 
 ## フェーズ2: `.pen` の更新内容の調査
 
-`.pen` は暗号化バイナリのため `Read` / `Grep` では中身が見えない。**diff からは何も読み取れない**ので、必ず以下の2経路で実データに当たる。
+`.pen` は暗号化バイナリのため `Read` / `Grep` では中身が見えず、**diff からは何も読み取れない**。必ず以下の2経路で実データに当たる。
 
 ### 2-0. マージコミット時点のファイルを一時ディレクトリへ復元する
 
-**現在のワークツリーの内容をそのまま調査対象にしてはいけない**。ワークツリーは「対象期間の最後の状態」でしかなく、あるPRがマージされた後に別のPRが同じ `.pen` / スナップショットを変更していれば、古いPRの出典に新しいPRの値を誤って紐づけてしまう。各PRの調査は必ずそのPRの `merge_commit` 時点の内容に対して行う。
+**現在のワークツリーの内容をそのまま調査対象にしてはいけない**。ワークツリーは「対象期間の最後の状態」でしかなく、あるPRのマージ後に別のPRが同じ `.pen` / スナップショットを変更していれば、古いPRの出典に新しいPRの値を誤って紐づけてしまう。各PRの調査は必ずそのPRの `merge_commit` 時点の内容に対して行う。
 
 `merge_commit`（`mergeCommit.oid`）はインデックスJSONには含まれず、フェーズ1の `output_file`（完全版）にのみ含まれる。
 
@@ -139,15 +123,15 @@ mkdir -p "$TMPDIR_DESIGN/<pr_number>"
 git show "<merge_commit>:<path>" > "$TMPDIR_DESIGN/<pr_number>/$(basename <path>)"
 ```
 
-`pen_files` / `snapshot_files` に挙がっている各パスに対してこれを繰り返す。`git show` が失敗する場合（マージコミットが取得できない・shallow cloneで対象コミットが無い・その後のPRでファイル自体が削除された等）は、そのファイルの復元をスキップし、失敗した旨と理由をフェーズ8の報告に残す。以降の 2-1 / 2-2 は、この一時ディレクトリに復元できたファイルだけを対象にする（現在のワークツリー上のパスは調査対象にしない）。
+`pen_files` / `snapshot_files` の各パスに対してこれを繰り返す。`git show` が失敗する場合（マージコミットが取得できない・shallow cloneで対象コミットが無い・その後のPRでファイル自体が削除された等）はそのファイルの復元をスキップし、失敗した旨と理由をフェーズ8の報告に残す。以降の 2-1 / 2-2 は、復元できたファイルだけを対象にする（現在のワークツリー上のパスは調査対象にしない）。
 
 ### 2-1. スナップショット画像（まず最初に見る）
 
-2-0 で復元した `snapshot_files`（Pencilのエクスポート結果PNG）を `Read` で**画像として**開き、全体の配色・タイポグラフィの雰囲気・レイアウトの粒度を把握する。ここで得られるのは「傾向」であり、正確なトークン値は次の 2-2 で取る。復元できなかったファイルはスキップする。
+2-0 で復元した `snapshot_files`（Pencilのエクスポート結果PNG）を `Read` で**画像として**開き、全体の配色・タイポグラフィの雰囲気・レイアウトの粒度を把握する。ここで得られるのは「傾向」であり、正確なトークン値は 2-2 で取る。
 
 ### 2-2. Node属性の読み取り（正確なトークン値の取得元）
 
-2-0 で復元した `pen_files` を対象に、`Skill` ツールで `inspect-pencil-node` を起動して読み取り専用で属性を取得する。`.pen` は暗号化バイナリだが、`merge_commit` 時点の内容をそのまま復元しているだけなので Pencil CLI で通常どおり開ける。
+2-0 で復元した `pen_files` を対象に、`Skill` ツールで `inspect-pencil-node` を起動して読み取り専用で属性を取得する（`merge_commit` 時点の内容をそのまま復元しているだけなので Pencil CLI で通常どおり開ける）。
 
 取得すべきもの（`inspect-pencil-node` の `batch_get` の指定方法を使い分ける）:
 
@@ -174,7 +158,7 @@ git show "<merge_commit>:<path>" > "$TMPDIR_DESIGN/<pr_number>/$(basename <path>
 
 - そのPR固有の実装事実（Node ID・ファイルパス・PR番号そのもの）
 - まだ決着していない議論・保留になったコメント
-- 1画面にしか出てこない装飾（後述の採用基準を満たさないもの）
+- 1画面にしか出てこない装飾（採用基準を満たさないもの）
 - レビューの経緯（`DESIGN.md` は設計基準であって議事録ではない）
 
 ### 採用基準
@@ -280,7 +264,7 @@ components:
 
 本文の書き方:
 
-- **トークンが正、本文は根拠**。本文には「なぜその値なのか」「どういう場面で使うのか」を書く。値の羅列を本文で繰り返さない
+- **トークンが正、本文は根拠**。本文には「なぜその値なのか」「どういう場面で使うのか」を書く。値の羅列を本文で繰り返さない（両方に書くと片方だけ更新されて食い違う）
 - **各セクション本文は最大6文**。超えるならデザインシステムではなく画面仕様を書いている
 - **「Do's and Don'ts」にはレビューで確定した禁止事項を書く**（フェーズ3で拾った一般則の置き場所）。指摘の引用ではなく規則の形（「〜する」「〜しない」）で書く
 - 出典PR番号は本文に散らさず、末尾の HTML コメントに1行でまとめる（lint の対象外で、次回実行時の突き合わせに使える）:
@@ -290,14 +274,14 @@ components:
 
 ### 整理・圧縮（既存 `DESIGN.md` がある場合は**毎回必ず適用**）
 
-- **近似トークンの統合**: 知覚できない差の色・1px差のサイズは1つに寄せる。寄せた側を全参照元から差し替える
+- **近似トークンの統合**: 知覚できない差の色・1px差のサイズは1つに寄せ、寄せた側を全参照元から差し替える
 - **未参照トークンの削除**: どのコンポーネント・本文からも参照されていないトークンは削除する（lint の orphaned token 警告と一致させる）
 - **陳腐化の上書き**: より新しいPRで**同じ役割に違う値**が確定していれば上書きする。「最近使われていない」は削除理由にならない（安定して守られている値ほど再言及されない）
 - **本文の圧縮**: 前置き・言い換え・「なお」「また」での継ぎ足しを削る
 
 **完了条件**: `DESIGN.md` が更新され、追加・統合・上書き・削除したトークン数を把握できていること。
 
-`git status` で差分が発生していなければ「DESIGN.md 更新差分なし」と報告してこのスキルを終了する（フェーズ5以降は実行しない）。
+`git status` で差分が発生していなければ「DESIGN.md 更新差分なし」と報告してこのスキルを終了する（フェーズ5以降は実行せず、空コミット・空PRを作らない）。
 
 ## フェーズ5: lint 通過（`DESIGN_MD_CMD` が使える場合は**必須**）
 
@@ -305,7 +289,7 @@ components:
 $DESIGN_MD_CMD lint --format json DESIGN.md
 ```
 
-出力は `findings[]`（`severity` / `path` / `message` / `rule`）と `summary`（`errors` / `warnings` / `infos`）。終了コードは `error` の有無だけを表す（`0` = error なし、`1` = error あり、`2` = ファイルが読めない）ため、error/warning が0件かどうかの判定そのものには `jq '.summary'` で `summary.errors` / `summary.warnings` を見る（warning は終了コードに現れないため、残 warning の扱いは常に `summary.warnings` で判断する）。
+出力は `findings[]`（`severity` / `path` / `message` / `rule`）と `summary`（`errors` / `warnings` / `infos`）。終了コードは `error` の有無だけを表す（`0` = error なし、`1` = error あり、`2` = ファイルが読めない）ため、error/warning が0件かどうかの判定は `jq '.summary'` で `summary.errors` / `summary.warnings` を見る（warning は終了コードに現れないため、残 warning の扱いは常に `summary.warnings` で判断する）。
 
 - **error は1件残らず解消する**（壊れた/循環したトークン参照、未知のコンポーネントサブトークン）
 - **warning も原則すべて解消する**。解消手段は2つ: 実データに基づいて値・構成を直すか、意図的な省略なら `omitted` に理由付きで登録する。**「実データが無いので埋められない」項目を warning 潰しのためだけに捏造しない** — その場合は `omitted` を使う
@@ -427,11 +411,6 @@ gh pr view "$PR_NUMBER" --json body --jq '.body' \
 
 ## 注意事項
 
-- **値は必ず実データ由来**: `.pen` の Node 属性かスナップショット画像から読み取った値だけを書く。読み取れなかった項目は書かない（推測値は、次のデザインがそれに合わせて作られた時点で「正」になってしまう）
-- **トークンが正、本文は根拠**: 同じ値を本文とフロントマターの両方に書くと、片方だけ更新されて食い違う
+- **値は必ず実データ由来**: `.pen` の Node 属性かスナップショット画像から読み取った値だけを書く
 - **統合を追加より優先**: トークン数の単調増加はデザインシステムの分岐そのもの。近い値は疑ってかかる
-- **`.pen` は絶対に編集しない**: 本スキルは `DESIGN.md` の更新のみ。デザイン側の修正が必要と判断した場合も、報告に1行挙げるだけにする
-- **PR/Issueへ書き込まない**: 収集は読み取りのみ。コメント・ラベル変更を行わない
-- **自分のPRに `cc-ui-design` を付けない**: 次回実行の収集対象に自分自身が入る
-- **デフォルトブランチでの直コミット禁止**: `commit-push` の前にフェーズ6で必ずfeature branchへ切り替える
-- **差分なしならPR作成をスキップ**: フェーズ4で差分がなければフェーズ5以降を実行しない（空コミット・空PRを作らない）
+- **自分のPRに `cc-ui-design` を付けない**（フェーズ7-3参照）
