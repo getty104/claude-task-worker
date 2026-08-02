@@ -1,6 +1,6 @@
 ---
 name: triage-created-issue
-description: Triage a GitHub issue that already has the cc-issue-created label and is assumed ready to start. Inspect the comment history first to decide whether human confirmation is needed (cc-need-human-check, highest priority — reserved for issue-level deadlock, or for confirmation items answer-issue-questions already investigated and explicitly marked unanswerable); otherwise close the issue as not needed, delegate unanswered confirmation items in the last comment or the description to answer-issue-questions (cc-answer-issue-questions), refresh a description stale relative to settled comment-history content (cc-update-issue), or move to execution (cc-exec-issue). Any UI-changing issue that needs a Pencil design file created or edited is routed to the design-first flow (cc-create-ui-design) before execution; design files are never edited in the implementation PR. Dependency checks are out of scope.
+description: Triage a GitHub issue that already has the cc-issue-created label and is assumed ready to start. Inspect the comment history first to decide whether human confirmation is needed (cc-need-human-check, highest priority — reserved for issue-level deadlock, or for confirmation items answer-issue-questions already investigated and explicitly marked unanswerable); otherwise close the issue as not needed, delegate unanswered confirmation items in the last comment or the description to answer-issue-questions (cc-answer-issue-questions), refresh a description stale relative to settled comment-history content (cc-update-issue), or move to execution (cc-exec-issue). Any UI-changing issue is routed to the design-first flow (cc-create-ui-design) before execution; the only exception is an issue whose description already names the .pen design to implement against. Design files are never edited in the implementation PR. Dependency checks are out of scope.
 argument-hint: "[Issue number]"
 hooks:
   Stop:
@@ -23,7 +23,7 @@ hooks:
 
 ## 責務
 
-後述のパターンA〜E（E-1含む）の判定と、対応する処理のみを行う: `cc-need-human-check`の付与（**確認事項が未回答であること自体は付与理由にしない**。「確認事項の委任原則」参照）／クローズ判断／`cc-answer-issue-questions`の付与／`cc-update-issue`の付与／UI変更タスクのデザイン先行フローへの振り分け（`cc-create-ui-design`の付与）／`cc-exec-issue`の付与。
+後述のパターンA〜E（E-1含む）の判定と、対応する処理のみを行う: `cc-need-human-check`の付与（**確認事項が未回答であること自体は付与理由にしない**。「確認事項の委任原則」参照）／クローズ判断／`cc-answer-issue-questions`の付与／`cc-update-issue`の付与／UI変更タスクのデザイン先行フローへの振り分け（`cc-create-ui-design`の付与。デザイン参照が明示済みのIssueのみ例外として実装へ進める）／`cc-exec-issue`の付与。
 
 ## 注意事項
 
@@ -67,7 +67,7 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
 - 該当しない場合、パターンB（対応不要判断）を評価する。該当すればクローズして終了
 - どちらにも該当しない場合、最後のコメントおよびdescriptionの**確認事項を項目ごとに個別評価**する。反証シグナルで解消済みの項目を除外したうえで（「反証シグナルで解消した項目の『未回答』集合からの除外」参照）、**未回答の項目が1つでも残っていれば原則パターンC（`cc-answer-issue-questions`）**であり、人間判断を要しそうに見えてもパターンAには倒さない（「確認事項の委任原則」参照）。該当すればそこで終了
 - 確認事項がない、または全て回答済みなら、着手（パターンE）の前にパターンD（コメント履歴のdescription反映チェック）を評価する。未反映なら`cc-update-issue`を付与して終了し、反映済みで整合している場合に限りパターンE-1の評価へ進む
-- パターンD通過後、パターンE（`cc-exec-issue`）の前にパターンE-1（UI変更タスクの扱い）を評価する。デザインファイル（`.pen`）の新規作成・編集を伴うUI変更タスクは、`cc-exec-issue`を付けずに`cc-create-ui-design`のみを付与して終了する（デザイン先行フロー一本。実装PRでの`.pen`編集経路は存在しない）。UI変更に該当しない場合、およびデザイン先行フローの前提ゲートを満たさない場合に限り、パターンEへ進む
+- パターンD通過後、パターンE（`cc-exec-issue`）の前にパターンE-1（UI変更タスクの扱い）を評価する。UI変更タスクは、**すでにデザインが作成済みでdescriptionの`## UIデザイン`にその参照（`.pen`の実パス）が明示されている場合のみ**パターンEへ進み、それ以外は`cc-exec-issue`を付けずに`cc-create-ui-design`を付与して終了する（デザイン先行フロー一本。実装PRでの`.pen`編集経路は存在しない）。UI変更に該当しないIssueはそのままパターンEへ進む
 - 各トリアージ実行で付与する遷移ラベル（`cc-need-human-check` / `cc-answer-issue-questions` / `cc-update-issue` / `cc-create-ui-design` / `cc-exec-issue`）は同一Issueに複数付与しない。特に`cc-need-human-check`と`cc-answer-issue-questions`は同時に付与しない
 
 #### 判定の前提: 確認事項の委任原則（`cc-need-human-check` の濫用防止）
@@ -291,10 +291,7 @@ description側にのみ確認事項が残っている場合も同じ処理で構
 
 **`.pen` の新規作成・編集は、必ず `cc-create-ui-design` のデザイン先行フローで行う。** 実装PR（`exec-issue`）で `.pen` を編集する経路は存在しない。デザインのみのPRを作ってレビュー・マージしたうえで実装へ進ませることで、デザインの合意と実装が常に分離された状態を保つ。
 
-したがってUI変更タスクの処理は次の2択になる。
-
-- **デザイン先行フローへ振り分ける（既定）**: `cc-create-ui-design` を付与して終了する（`cc-exec-issue` は付与しない）
-- **そのままパターンEへ進む**: 前提ゲート（E-1-b）を満たさない場合のみ。この場合、実装セッションは `.pen` を編集しない
+したがってUI変更タスクは、**既にデザインが作成済みで description にその参照が明示されている場合を除き、すべてデザイン先行フローへ振り分ける**（`cc-create-ui-design` を付与して終了。`cc-exec-issue` は付与しない）。例外の定義と、例外に該当しない場合の分岐は E-1-b に定める。
 
 ##### E-1-a. UI変更タスクかの判定
 
@@ -312,38 +309,56 @@ description側にのみ確認事項が残っている場合も同じ処理で構
 
 **UI変更かどうかの判定が割れる場合は「UI変更である」側に倒す。** デザインPRが空振りだった場合のコストはリードタイム1PR分にとどまる一方、UI変更を素通しするとデザインファイルが更新されないまま実装だけが進み、以降のデザインの正しさが失われる。
 
-##### E-1-b. デザイン先行フローの前提ゲート
+##### E-1-b. デザイン先行フローへ移行しない唯一の例外
 
-以下を**すべて**満たす場合にデザイン先行フロー（E-1-c）へ振り分ける。1つでも満たさない場合は下記「前提ゲートを満たさない場合」に従う。
+**UI変更タスクがデザイン先行フローへ移行しないのは、「すでにデザインが作成済みで、descriptionにどのデザインを参照して実装するかが明示されている」場合だけである。** 具体的には、descriptionの `## UIデザイン` セクション内に、`<`/`>` を含まない `.pen` で終わる**実パス行**が存在すること（`src/workers/ui-design.ts` の `hasDesignReference()` と同一のテキスト判定基準。見出しのみ・未置換プレースホルダー行しか無いセクションは「実パス行なし」として扱い、例外に該当しない）。
 
-1. worktree直下の `claude-task-worker.json` に `uiDesign.enabled === true` がある
-   ```bash
-   jq -r '.uiDesign.enabled // false' claude-task-worker.json 2>/dev/null || printf 'false\n'
-   ```
-   （ワーカー側の`config.ts`が起動時に読むファイルと同一の真実源にするため、必ずworktree内のローカルファイルを読む。リモートを`gh api`で読み直すと二重化して食い違いうるため行わない。ファイルが無い・読めない・不正JSONで`jq`が非ゼロ終了する場合も、フォールバックの`printf`で確実に`false`扱いとする）
-2. Issueに `cc-ui-design-ready` / `cc-ui-design-pr-created` / `cc-create-ui-design` のいずれも付いていない（デザイン済み・進行中の再デザインを防ぐ）
-3. descriptionの`## UIデザイン`セクション内に、`<`/`>`を含まない`.pen`で終わる実パス行が存在しない（`src/workers/ui-design.ts`の`hasDesignReference()`と同一のテキスト判定基準。見出しのみ・未置換プレースホルダー行しか無いセクションは「実パス行なし」として扱い、この条件を満たす）
+この場合は既に合意済みデザインが実装の参照元として届いているため、追加処理なしでそのままパターンEへ進む（実装セッションは `.pen` を編集せず、デザインを参照元として実装する）。
 
-**前提ゲートを満たさない場合の扱い**
+**上記に該当しない場合は、下記の分岐に従って処理する。** 「デザイン検討の余地が無い（descriptionが既に具体的なUI仕様を持つ）」「既存デザインの微修正にとどまる」「リードタイムを伸ばしたくない」はいずれも例外の理由にならない。`.pen` の編集経路が他に無いため、ここで例外を作るとデザインファイルが更新されないまま実装だけが進む。
 
-- **条件2または3を満たさない場合**（デザイン済み・デザイン進行中）: そのデザインが実装の参照元になるため、追加処理なしでそのままパターンEへ進む
-- **条件1を満たさない場合**（`uiDesign.enabled !== true`）: このリポジトリではデザイン先行フローのワーカーが起動しないため、`cc-create-ui-design` を付けても誰も拾わない。そのままパターンEへ進む。ただし `git ls-files '*.pen'` の出力が1件以上ある場合（＝デザインファイルは持っているが先行フローが無効）は、`.pen` が更新されないまま実装が進むことになるため、パターンEのラベル付与に加えて次のコメントを残す（実装PRで `.pen` を編集させる指示は**書かない**）
+**分岐1: デザイン先行フローが既に進行中の場合**
 
-  ```bash
-  gh issue comment $0 --body-file - <<'EOF'
-  ## デザインファイルは更新されません（UIデザイン先行フローが無効）
+Issueに `cc-create-ui-design` または `cc-ui-design-pr-created` が付いている場合、フローは既に走っている。**ラベルを一切付与せず**（`cc-exec-issue` も `cc-create-ui-design` も付けない）、その旨を報告して終了する。
 
-  本IssueはUIを変更するタスクですが、`claude-task-worker.json` の `uiDesign.enabled` が `true` ではないため、デザイン先行フロー（`cc-create-ui-design`）へ振り分けられません。`.pen` の編集は同フロー専任であり実装PRでは行わないため、このまま実装するとコードのみが変更されデザインファイルは現状のままになります。
+**分岐2: `cc-ui-design-ready` が付いているのにデザイン参照が無い場合**
 
-  デザインファイルも更新する場合は、`claude-task-worker.json` の `uiDesign.enabled` を `true` にしたうえで、`cc-exec-issue` を外して `cc-create-ui-design` を付け直してください。
-  EOF
-  ```
+デザイン合意済みを示すラベルがあるのに description の `## UIデザイン` が実パス行を持たない状態は、人が description を書き換えて参照を消した、`apply-ui-design` が途中で壊れた等の異常であり、自動では復旧できない（再デザインさせると合意済みデザインと二重になる）。パターンAの人間確認フロー（`cc-need-human-check`）で処理し、「自動で進められない理由」に本状況を、「確認・判断していただきたいこと」に次の復旧手順を書く。
 
-デザイン検討の余地が無い（descriptionが既に具体的なUI仕様を持つ）場合や、既存デザインの微修正にとどまる場合も、**前提ゲートを満たす限りデザイン先行フローへ振り分ける**。`.pen` の編集経路が他に無いため、ここで例外を作るとデザインファイルが更新されないまま実装だけが進む。
+- デザイン参照を自動で再生成する場合: `cc-need-human-check` と `cc-ui-design-ready` を外し、`cc-ui-design-pr-created` を付け直す（`apply-ui-design` がデザインPRを再検出してdescriptionを再生成する）
+- デザインなしで実装を進めてよい場合: descriptionの `## UIデザイン` セクションに参照する `.pen` の実パスを記入する
 
-##### E-1-c. デザイン先行フローの処理
+**分岐3: それ以外（デザイン未作成 / 参照未記載）**
 
-1. 判定理由をIssueにコメントする（人が事後に判断を追えるようにする）
+E-1-c の処理でデザイン先行フロー（`cc-create-ui-design`）へ振り分ける。この際、worktree直下の `claude-task-worker.json` の `uiDesign.enabled` を確認する。
+
+```bash
+jq -r '.uiDesign.enabled // false' claude-task-worker.json 2>/dev/null || printf 'false\n'
+```
+
+（ワーカー側の`config.ts`が起動時に読むファイルと同一の真実源にするため、必ずworktree内のローカルファイルを読む。リモートを`gh api`で読み直すと二重化して食い違いうるため行わない。ファイルが無い・読めない・不正JSONで`jq`が非ゼロ終了する場合も、フォールバックの`printf`で確実に`false`扱いとする）
+
+`true` でない場合も**振り分け自体は変えず** `cc-create-ui-design` を付与する（`.pen` の編集経路は他に無く、`cc-exec-issue` を付けるとデザイン未更新のまま実装が走るため）。ただしこのリポジトリではデザイン先行フローのワーカーが起動せず、ラベルを付けても誰も拾わない。人が気づけるよう、E-1-c のコメントに代えて次のコメントを残す。
+
+```bash
+gh issue comment $0 --body-file - <<'EOF'
+## UIデザイン先行フローへ振り分けました（cc-create-ui-design / フロー無効）
+
+## 判定理由
+<UI変更タスクと判断した根拠。対象画面・変更内容を具体的に>
+
+## 注意: このリポジトリではデザイン先行フローが無効です
+
+`claude-task-worker.json` の `uiDesign.enabled` が `true` ではないため、`cc-create-ui-design` を拾うワーカーが起動しません。本Issueはこのラベルが付いた状態で停止します。
+
+- デザインから作る場合: `uiDesign.enabled` を `true` にしてください（有効化後、既に付いている `cc-create-ui-design` を `create-ui-design` が拾います）
+- 既存デザインを参照して実装する場合: descriptionの `## UIデザイン` セクションに参照する `.pen` の実パスを記入し、`cc-create-ui-design` を外して `cc-exec-issue` を付け直してください
+EOF
+```
+
+##### E-1-c. デザイン先行フローの処理（E-1-b 分岐3）
+
+1. 判定理由をIssueにコメントする（人が事後に判断を追えるようにする）。`uiDesign.enabled` が `true` でない場合は、このコメントに代えて E-1-b 分岐3に示したフロー無効版のコメントを使う
    ```bash
    gh issue comment $0 --body-file - <<'EOF'
    ## UIデザイン先行フローへ振り分けました（cc-create-ui-design）
@@ -368,7 +383,7 @@ description側にのみ確認事項が残っている場合も同じ処理で構
 ##### 手動オプトイン/オプトアウト
 
 - 人が `cc-create-ui-design` を直接付ければ、トリアージ判定を経ずにデザイン先行フローへ入れる
-- 人が `cc-ui-design-ready` を手で付ければ、E-1-b の前提ゲート2によりデザイン先行フローはスキップされる（デザイン合意済みとみなしてパターンEへ進む。この場合も実装PRでの `.pen` 編集は行われない）
+- デザイン先行フローを通さずに実装へ進めたい場合は、descriptionの `## UIデザイン` セクションに参照する `.pen` の実パスを記入する（E-1-b の例外に該当し、そのままパターンEへ進む）。`cc-ui-design-ready` ラベルだけを手で付けても例外にはならず、分岐2により `cc-need-human-check` になる
 
 #### パターンE: 着手準備が整っている場合
 
@@ -378,4 +393,4 @@ description側にのみ確認事項が残っている場合も同じ処理で構
 gh issue edit $0 --add-label "cc-exec-issue"
 ```
 
-ただしパターンE-1でUI変更タスクと判定し、E-1-bの前提ゲートをすべて満たす場合は、デザイン先行フロー（`cc-create-ui-design`付与で終了）へ振り分けるため本パターンには進まない。前提ゲートを満たさずに本ラベルを付与する場合も、descriptionへ実装PRで `.pen` を編集させる指示を追記してはならない（`.pen` の編集経路はデザイン先行フローのみ）。
+ただしパターンE-1でUI変更タスクと判定した場合、本パターンへ進めるのは **E-1-b の例外に該当する場合（descriptionの `## UIデザイン` セクションに `.pen` の実パス行があり、参照すべきデザインが明示されている）だけ**である。例外に該当しない場合は E-1-b の分岐1〜3で処理し、本ラベルは付与しない。また、本ラベルを付与する場合も、descriptionへ実装PRで `.pen` を編集させる指示を追記してはならない（`.pen` の編集経路はデザイン先行フローのみ）。
