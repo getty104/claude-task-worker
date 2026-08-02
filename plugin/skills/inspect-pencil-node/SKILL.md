@@ -27,8 +27,8 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 # 前提条件の確認
 
-1. `pencil version` — 未インストールなら `npm install -g @pencil.dev/cli` を案内（Node.js 18以上必要）
-2. `pencil status` — 未認証なら `pencil login`、または `PENCIL_CLI_KEY` 環境変数の設定を案内
+1. `pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。パッケージ名は 0.3.x で `@pencil.dev/cli` から改称され、`pen` / `pencil` の両方のbinを提供する。旧パッケージしか無い環境は 0.2.x の旧ツール構成のため必ず更新する）
+2. `pencil status` — 未認証なら `pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内（0.2.x での名称は `PENCIL_CLI_KEY`）
 3. 対象の `.pen` ファイルが存在するか
 4. ユーザーの取得対象指定を上記5系統（＋サブツリー限定）のどれかにマップする。どれも曖昧な場合だけトップレベル走査で候補を提示
 
@@ -337,8 +337,8 @@ done
 
 # トラブルシューティング
 
-- **`pencil: command not found`**: `npm install -g @pencil.dev/cli` を案内（Node.js 18以上必要）
-- **認証エラー**: `pencil login`、または `PENCIL_CLI_KEY` 環境変数を設定
+- **`pencil: command not found`**: `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要）
+- **認証エラー**: `pencil login`、または `PEN_CLI_KEY` 環境変数を設定
 - **`-o` が必須エラー**: ヘッドレス実行では `-o` 必須。入力と同じパスを指定し、`save()` を呼ばなければ変更されない
 - **`Unknown tool: batch_get` / `get_editor_state`**: CLI 0.3.x で廃止済み。`execute` の `Get` と `get_app_state` に読み替える（早見表の「廃止済み」参照）
 - **`get_screenshot` に `out` を渡しても画像ファイルができない**: 現行の `get_screenshot` はファイル出力パラメータを持たず base64 を返すだけ。ルール5のデコード手順を使うか `export_nodes` を使う

@@ -77,7 +77,7 @@ background: false
 - **context7 MCP**: React、Next.js、Tailwind、その他のライブラリの最新ドキュメントを取得する
 - **claude-in-chrome MCP**: Chromeブラウザを操作してレンダリング結果を視覚的に確認し、レイアウト問題をデバッグする（`mcp__claude-in-chrome__*` ツール群。利用前に `claude-in-chrome` スキルでツール群をロードする）
 - **next-devtools MCP**: Next.js固有のパターンと最適化を活用する
-- **inspect-pencil-nodeスキル**: `.pen` から特定NodeのデザインデータをCLI経由で取得する（`batch_get` で属性JSON、`get_screenshot` で画像を `.pen` と同階層の `snapshots/` に出力）。**Pencilデザインを実装の参照元にするときは必ずこのスキルを通す**（Pencil MCPに依存せず `pencil` コマンドのみで完結）
+- **inspect-pencil-nodeスキル**: `.pen` から特定NodeのデザインデータをCLI経由で取得する（`execute` の `Get` で属性、`export_nodes` / `get_screenshot` で画像を `.pen` と同階層の `snapshots/` に出力）。**Pencilデザインを実装の参照元にするときは必ずこのスキルを通す**（Pencil MCPに依存せず `pencil` コマンドのみで完結）
 
 ## 他スキルを呼び出す場合の必須ルール
 

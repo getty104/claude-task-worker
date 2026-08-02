@@ -21,12 +21,12 @@ gitコンフリクト状態になった `.pen` デザインファイルを「**�
 
 - **テキストマージは絶対禁止**: `.pen` は暗号化バイナリのため、コンフリクトマーカー（`<<<<<<<` 等）の手編集や `git mergetool` によるテキストマージはファイルを破損させ、開けなくする
 - **両側の変更を1ファイルに機械的にマージする手段は存在しない**: 解消は必ず「どちらか一方のバージョンをそのまま採用し、採用しなかった側の変更内容をPencilの編集として再適用する」方針で行う
-- `.pen` は `Read` / `Grep` では読めない。中身の確認はすべて `pencil interactive` の `get_editor_state()` / `get_screenshot()` 経由で行う
+- `.pen` は `Read` / `Grep` では読めない。中身の確認はすべて `pencil interactive` 経由（`execute` の `Get` によるツリーダンプ、`get_screenshot` / `export_nodes` による画像）で行う。**CLI 0.3.x で `get_editor_state` / `batch_get` / `batch_design` は廃止**され、Nodeの読み書きは `execute` に一本化されている
 
 # 前提条件の確認
 
-1. `pencil version` — **Pencil CLIが使えない場合は本スキルのフローを実行できないため、無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、セットアップ手順（`npm install -g @pencil.dev/cli`、Node.js 18以上必要）を報告に含めて終了する**
-2. `pencil status` — 未認証の場合も同様に中断し、認証手順（`pencil login`、または `PENCIL_CLI_KEY` 環境変数の設定）を報告に含めて終了する
+1. `pencil version` — **Pencil CLIが使えない場合は本スキルのフローを実行できないため、無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、セットアップ手順（`npm install -g @pen.dev/cli`、Node.js 18以上必要。0.2.x の旧パッケージ `@pencil.dev/cli` では以降の手順が動かないため 0.3.x であることも確認する）を報告に含めて終了する**
+2. `pencil status` — 未認証の場合も同様に中断し、認証手順（`pencil login`、または `PEN_CLI_KEY` 環境変数の設定。0.2.x での名称は `PENCIL_CLI_KEY`）を報告に含めて終了する
 3. `git status --short` — 対象の `.pen` が実際にコンフリクト状態（`UU` / `AA` / `UD` / `DU`）であることを確認する
 
 # 解消手順
@@ -64,8 +64,8 @@ git show :3:path/to/design.pen > "${WORK_DIR}/theirs.pen"  # theirs 側
 ```bash
 for v in base ours theirs; do
   [ "$v" = "base" ] && [ ! -s "${WORK_DIR}/base.pen" ] && continue   # AA: 共通祖先なしはスキップ
-  pencil interactive -i "${WORK_DIR}/${v}.pen" -o "${WORK_DIR}/${v}.pen" <<'EOF' > "${WORK_DIR}/${v}.json"
-get_editor_state()
+  pencil interactive -i "${WORK_DIR}/${v}.pen" -o "${WORK_DIR}/${v}.pen" 2>/dev/null <<'EOF' | sed -n 's/^TREE //p' > "${WORK_DIR}/${v}.json"
+execute({ input: 'Print("TREE", JSON.stringify(Get((n,c)=>({d:c.depth,id:n.id,name:n.name,type:n.type,x:n.x,y:n.y,w:c.bounds.width,h:c.bounds.height,fill:n.fill,content:n.content}))))' })
 exit()
 EOF
 done
@@ -88,7 +88,17 @@ else
 fi
 ```
 
-必要に応じて `get_screenshot` で両側の見た目も確認する（出力先は `${WORK_DIR}` 配下でよい）。
+ツリーダンプは `[{"d":0,"id":"...",...}, ...]` の1行JSONとして返る。行頭マーカー `TREE ` を付けて `sed` で抜くのは、`[INFO] Starting pen.dev (headless)...` のような起動ログも `[` で始まるため。属性を増やしたいときは visitor の返すオブジェクトに足す。
+
+必要に応じて両側の見た目も確認する。`get_screenshot({ nodeId })` は base64 を返すだけなのでデコードして保存し（`${WORK_DIR}` 配下でよい）、複数Nodeなら `export_nodes({ nodeIds, outputDir })` を使う。
+
+```bash
+pencil interactive -i "${WORK_DIR}/ours.pen" -o "${WORK_DIR}/ours.pen" <<'EOF' > "${WORK_DIR}/ours-shot.txt"
+get_screenshot({ nodeId: "document" })
+exit()
+EOF
+grep -o '"image": "[^"]*"' "${WORK_DIR}/ours-shot.txt" | sed 's/.*: "//; s/"$//' | base64 -d > "${WORK_DIR}/ours.png"
+```
 
 ## ステップ4: ベースの選択と採用
 
@@ -101,11 +111,11 @@ git add path/to/design.pen
 
 ## ステップ5: 採用しなかった側の変更を再適用する
 
-ステップ3で特定した「採用しなかった側のNode差分」を具体的な編集指示に落とし込み、**`edit-pencil-design` スキルの手順**（エージェントモード `--prompt`、または heredoc 安全規則に従った `batch_design`）で再適用する。編集前スナップショットは採用したベースのツリーになる。
+ステップ3で特定した「採用しなかった側のNode差分」を具体的な編集指示に落とし込み、**`edit-pencil-design` スキルの手順**（エージェントモード `--prompt`、または heredoc 安全規則に従った `execute` の `Insert` / `Update` / `Delete` ＋ `save()`）で再適用する。編集前スナップショットは採用したベースのツリーになる。
 
 ## ステップ6: 両側の変更が揃ったことの検証とスクリーンショット
 
-再適用後の `get_editor_state()` に「ours側の変更Node」「theirs側の変更Node」の両方が反映されていることをNodeツリー差分で確認し、`edit-pencil-design` の手順どおり影響Nodeのスクリーンショットを `.pen` と同階層の `snapshots/` に残す。検証の基準は、base があるケースはステップ3の base.norm.json との差分、base が無い（AA）ケースは ours.norm.json と theirs.norm.json の直接比較で洗い出した差分が、両方反映されているか。
+再適用後のツリーダンプ（ステップ3と同じ `execute` の `Print("TREE", ...)`）に「ours側の変更Node」「theirs側の変更Node」の両方が反映されていることをNodeツリー差分で確認し、`edit-pencil-design` の手順どおり影響Nodeのスクリーンショットを `.pen` と同階層の `snapshots/` に残す。検証の基準は、base があるケースはステップ3の base.norm.json との差分、base が無い（AA）ケースは ours.norm.json と theirs.norm.json の直接比較で洗い出した差分が、両方反映されているか。
 
 ## ステップ7: git操作の続行
 
@@ -129,6 +139,7 @@ git add path/to/design.pen
 - **`AA`（両側追加）コンフリクトで `git show :1:` が失敗する**: 共通祖先が存在しないため想定内。ステップ2〜3のガードにより自動的に base 無し（ours/theirs 直接比較）として扱われるため、そのままステップ4以降を進めてよい
 - **どちらの変更か判別できない**: `git log --oneline -- <path>` で両ブランチの該当コミットとメッセージを確認し、変更の出所を特定する。それでも判断できなければ無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、確認した事実（両側のコミット・スクリーンショット）を添えて報告して終了する
 - **`pencil` コマンドが使えない環境**: 本スキルのフローは実行不可。「前提条件の確認」どおり `git rebase --abort` / `git merge --abort` で中断し、セットアップと認証を案内する
+- **`Unknown tool: get_editor_state` / `batch_design`**: CLI 0.3.x で廃止済み。ツリー取得は `execute` の `Get`、再適用は `execute` の変更系関数に読み替える（`pencil version` が 0.2.x なら旧パッケージを掴んでいるので 0.3.x を入れ直す）
 
 # 実行結果の報告
 
