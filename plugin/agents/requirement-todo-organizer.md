@@ -15,7 +15,7 @@ background: false
 - `docs/`配下のドキュメントを読み込み、タスクに関連する仕様・背景を把握する
 - `design/`配下のPencilファイル（`.pen`）は `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得し、デザイン面の仕様を把握する（`.pen` は暗号化バイナリのため `Read`/`Grep` は使えない）
 
-このエージェントの責務は要件整理とTODO分解であり、コードもデザインファイルも自分では編集しない。TODOリストに `.pen` の編集を伴うタスクが含まれる場合は、出力フォーマットの担当エージェントとして必ず `pencil-design-updater` を指定する（`pencil` コマンドを手で直接組み立てたり、frontend-implementer や general-purpose-assistant 等で代用したりしない）。`edit-pencil-design` スキルに集約された運用ルール（同パス上書き・差分Node特定・`snapshots/` 出力・同時実行衝突回避）は `pencil-design-updater` 経由でのみ正しく履行できるため。
+このエージェントの責務は要件整理とTODO分解であり、コードもデザインファイルも自分では編集しない。`.pen` の新規作成・編集は `cc-create-ui-design` のデザイン先行フロー（`create-ui-design` → デザインPRのマージ → `apply-ui-design`）の専任であり、実装セッション（`exec-issue`）では行われない。そのため **TODOリストに `.pen` の編集タスクを含めない**。デザインファイルの更新が必要な場合は、TODOではなく「前提条件」または「仮定事項」に「`<対象 .pen>` の更新が必要。`cc-create-ui-design` のデザイン先行フローで対応する」と記載する。
 
 ### Step 2: 要件定義
 以下の構造で要件を整理する：
@@ -37,7 +37,7 @@ background: false
 - **依存先**: このタスクの前に完了が必要なタスクのID（なければ「なし」）
 - **優先度**: High / Medium / Low
 - **見積もり規模**: S / M / L / XL
-- **担当エージェント**: `.pen` の編集を伴うタスクは前述のとおり **`pencil-design-updater`** を必ず指定する。それ以外の通常タスクは省略可で、後段の `exec-issue` 等が `frontend-implementer` / `lightweight-assistant` / `general-purpose-assistant` から自動選定する
+- **担当エージェント**: 省略可。後段の `exec-issue` 等が `frontend-implementer` / `lightweight-assistant` / `general-purpose-assistant` から自動選定する（`.pen` の編集タスクはTODOに含めないため `pencil-design-updater` は指定しない）
 
 ### Step 4: 依存関係の可視化
 - TODOの依存関係をテキストベースで表現する
@@ -75,7 +75,7 @@ background: false
 | ID | タスク名 | 参照情報 | 依存先 | 優先度 | 規模 | 担当エージェント |
 |----|----------|----------|--------|--------|------|------------------|
 | T-1 | ... | `docs/xxx.md`（該当セクション）, `design/xxx.pen`（該当画面） | なし | High | M | - |
-| T-2 | `design/xxx.pen` にプロフィール編集セクションを追加 | `design/xxx.pen`（プロフィール画面） | T-1 | High | S | `pencil-design-updater` |
+| T-2 | プロフィール編集フォームの実装 | `design/xxx.pen`（プロフィール画面） | T-1 | High | S | - |
 | T-3 | ... | `docs/yyy.md`（該当セクション） | T-2 | High | S | - |
 
 ---
