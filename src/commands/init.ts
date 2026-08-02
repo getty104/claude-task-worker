@@ -21,10 +21,20 @@ import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 // （黄）/ cc-exec-issue（紫）を色相帯で固定し、残りを最適化に任せてある。cc-triage-scope だけは
 // 白（C* 0）で、他15色との ΔE が 25 以上あることを制約に入れた（無彩色を1色だけ置くことで、
 // 「まだスコープが決まっていない」状態が彩度の有無だけで見分けられる）。
+// **ΔE だけでは「同じ色に見える」という体感を拾いきれない**。ΔE は明度差も距離に算入するため、
+// 明度の違う同系色（例: 濃い緑と明るい緑）を十分離れていると評価するが、ラベル一覧に並ぶと
+// どちらも「緑」としか読めず見分けられない。実際 cc-answer-issue-questions は当初 H140 の濃い緑
+// で、cc-in-progress（H118）との ΔE は 32.5 と基準を満たしていたのに、運用では取り違えが起きた
+// （現在の H258 では ΔE 55.2 / 色相差 140°）。そのため共起する有彩色ラベルとの**色相差**も併せて
+// 見る。ただし共起する有彩色ラベルが10色あり色相環はほぼ埋まっているので、どの色を選んでも
+// 最寄りとの色相差は最大30°しか取れない。色相差を稼ぐこと自体より、**最寄りの色相が「見分け
+// たい相手」にならないこと**を優先する（H88 は色相差30°を取れるが最寄りが cc-in-progress
+// になるため、緑との混同を解消したい用途では不適格）。
 // 色を変更するときは、(1) 共起するラベルすべてとの ΔE(CIE2000) が 25 以上、(2) 共起しない
 // ラベルとも 15 以上、(3) perceived-lightness が 0.16〜0.50 か 0.68〜0.93 に収まる、(4) 自動選択
-// される文字色とのコントラスト比が 4.5:1 以上、(5) cc-triage-scope 以外は HSL 彩度 90 以上、の
-// 5点を確認すること。
+// される文字色とのコントラスト比が 4.5:1 以上、(5) cc-triage-scope 以外は HSL 彩度 90 以上、
+// (6) 共起する有彩色ラベルとの色相差が確保でき、最寄りの色相が混同を避けたい相手でない、の
+// 6点を確認すること。
 const LABELS: { name: string; color: string }[] = [
   { name: "cc-need-human-check", color: "eb1700" }, // vivid red (H6 S100 L46 / L*50 C*97)
   { name: "cc-fix-onetime", color: "960837" }, // vivid wine red (H340 S90 L31 / L*32 C*56)
@@ -35,7 +45,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-pr-created", color: "df0c7c" }, // vivid magenta (H328 S90 L46 / L*49 C*77)
   { name: "cc-issue-created", color: "ffa347" }, // vivid orange (H30 S100 L64 / L*75 C*66)
   { name: "cc-triage-scope", color: "ffffff" }, // white (L*100 C*0)
-  { name: "cc-answer-issue-questions", color: "077e2e" }, // vivid dark green (H140 S90 L26 / L*46 C*58)
+  { name: "cc-answer-issue-questions", color: "c5adff" }, // vivid pale violet (H258 S100 L84 / L*75 C*45)
   { name: "cc-exec-issue", color: "74089b" }, // vivid purple (H284 S90 L32 / L*30 C*80)
   { name: "cc-epic-issue", color: "0fffdf" }, // vivid turquoise (H172 S100 L53 / L*90 C*57)
   { name: "cc-create-ui-design", color: "002aff" }, // vivid blue (H230 S100 L50 / L*36 C*123)
