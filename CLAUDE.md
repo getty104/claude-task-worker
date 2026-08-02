@@ -105,7 +105,7 @@ claude-task-worker all             # Run all workers concurrently
 
 ### Opus 実行スキル/エージェントのプロンプト方針
 
-`WORKER_DEFAULTS`（`src/config.ts`）で `model: "opus"` のワーカー（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue`（`create-issue-from-issue-number`）/ `create-ui-design` / `update-issue` / `resolve-conflict`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
+`WORKER_DEFAULTS`（`src/config.ts`）の**全ワーカー**（既定 `model: "opus"`。`DEFAULT_WORKER_CONFIG` も含む）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
 
 - **スコープの規律**: 依頼された範囲だけを実装/回答/分解し、気づいた別の改善は成果物に混ぜず報告へ1行で挙げる。依頼が誤っていると考える場合も、指摘を1-2行添えたうえで依頼どおりのスコープで完遂する（黙って縮小・拡大・別物への置き換えをしない）。Issue description・TODOリスト・`.pen` は後段の実装スコープそのものになるため、ここが膨らむと実装まで膨らむ
 - **成果物の分量**: Issueコメント・PR body・description・最終報告は「必要な実質だけ」。同じ内容の言い換え・埋め草セクション・該当なしの節を書かない。最終報告は結論（何をしたか／どこで止まったか）から書く。Opus 5 はディスクに書くドキュメントも会話も既定で長いため、明示的な分量指示が必要
@@ -129,7 +129,7 @@ claude-task-worker all             # Run all workers concurrently
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: "sonnet"` のワーカー（`triage-created-issue` / `triage-pr` / `check-dependabot` / `epic-issue` / `apply-ui-design`、および `DEFAULT_WORKER_CONFIG`）と `model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）、`model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`）は、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
+`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
@@ -139,7 +139,9 @@ claude-task-worker all             # Run all workers concurrently
 - **サブエージェントは人に質問できない**: opus 側と同じ理由で、`general-purpose-assistant` / `lightweight-assistant` / `check-library` の「ユーザーに確認する」を「安全側の既定を選んで前提を報告する」「差し戻す」へ置き換えた
 - **探索手段の指示を CodeGraph 優先へ統一**: `general-purpose-assistant` に残っていた「LSPツールを最優先」は、システムプロンプトおよび `explore-agent` の CodeGraph 優先方針と矛盾していたため、CodeGraph → LSP → `Grep`/`Glob` の順に修正した
 
-effort は全 sonnet ワーカーで `high` のまま（Sonnet 5 の既定）。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
+上記のうち `triage-created-issue` / `triage-pr` のスキル本文の調整は、**既定モデルを全ワーカー opus に揃えた後もそのまま残してある**。「主観語で判定を分けない」「例示リストに判定基準を併記する」はモデルに依らず判定を安定させる書き方であり、`model` を `sonnet` へ下げ直した場合にも効き続ける必要があるため。
+
+effort は全ワーカーで `high` のまま（Sonnet 5 の既定）。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
 
 ### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
 
@@ -169,7 +171,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 1. `advisor: false`（既定）なら `advisorModel` の指定に関わらず渡さない。判定はワーカー側（`issue-worker.ts` / `pr-worker.ts`）で行い、無効時は `buildClaudeExecution()` へ空文字を渡す
 2. `advisorModel` が空文字（または未指定でその既定が空文字）なら `buildClaudeArgs()` が `--advisor` ごと省く。**値なしの `--advisor` を渡すと後続フラグを値として食われる**ため、必ずモデル名とセットでのみ付ける
 
-`advisorModel` のパースは `parseWorkerEntry()` の他フィールドと違い**空文字を有効値として受け付ける**（「advisor を使わない」の明示指定）。既定値は claude 側の制約（advisor は main モデル以上の能力が必要）に合わせ、`model` が `sonnet` のワーカーは `"opus"`、`model` が `opus` のワーカーは `""` にしてある。
+`advisorModel` のパースは `parseWorkerEntry()` の他フィールドと違い**空文字を有効値として受け付ける**（「advisor を使わない」の明示指定）。既定値は claude 側の制約（advisor は main モデル以上の能力が必要）に合わせ、全ワーカー `""`（＝渡さない）にしてある（既定 `model` が全て `opus` のため、opus advisor を付けても意味がない）。`model` を `sonnet` 等へ下げたワーカーには `"opus"` を指定できる。
 
 ### `mode`（タスクの実行形態）
 
@@ -250,7 +252,9 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを作り、独立したPRとしてマージしてから実装へ進むフロー。`claude-task-worker.json` の `uiDesign.enabled`（boolean、既定 `false`）・`uiDesign.designDir`（既定 `"designs"`）・`uiDesign.yolo`（boolean、既定 `false`）で制御する。設定は `src/config.ts` の `parseUiDesignEntry()`（不正値は警告して既定値）／`getUiDesignConfig()`（読み込み失敗時は既定＝無効へ倒す）で解決する。
 
 - **`uiDesign.enabled: false` のときは2つのワーカーを起動しない**。判定は `index.ts` ではなくワーカー実装側（`create-ui-design.ts` / `apply-ui-design.ts`）の先頭に置き、`all` / `yolo` からの一括起動でも個別コマンドでも同じ経路を通す。ラベルを消費するワーカーが存在しないため、無効なリポジトリでは人が手動で `cc-create-ui-design` を付けても何も起きず、本機能の追加前と完全に同一の挙動になる
-- 経路は `triage-created-issue` のパターンE-1（パターンD通過後・パターンEの手前）で分岐する。UI実装タスクと判定した場合は `cc-exec-issue` を付けずに `cc-create-ui-design` のみを付与する。判定が割れる場合は**デザインを作らない側（パターンE）に倒す**
+- 経路は `triage-created-issue` のパターンE-1（パターンD通過後・パターンEの手前）で分岐する。**UI変更タスクは必ず2経路のどちらかへ振り分ける**: 経路1（デザイン先行 = `cc-exec-issue` を付けず `cc-create-ui-design` のみを付与）か、経路2（description 末尾に `## デザインファイルの更新` セクションを追記し、実装と同じPRで `.pen` とスナップショットを更新させたうえで `cc-exec-issue` を付与）。**UI変更なのにどちらにも振り分けずパターンEへ素通しすることを禁止する**（例外は `git ls-files '*.pen'` が空かつ経路1の前提ゲートも満たさない、＝デザインファイルでUIを管理していないリポジトリのみ）。判定の倒し方は2段階で、「UI変更かどうか」が割れたら**UI変更である側**へ、「経路1か経路2か」が割れたら**経路2**へ倒す（旧「デザインを作らない側＝パターンEに倒す」は、UI変更がデザインファイル更新なしで実装される穴になっていたため撤去した）
+- 経路2の受け手は `exec-issue` の「デザインファイル更新セクション（`## デザインファイルの更新`）がある場合の扱い」。`.pen` の更新は `pencil-design-updater` へ**無条件委譲**（委譲要否の判定対象外）し、更新した `.pen` とスナップショットをコード変更と同じPRに含める。`## UIデザイン`（デザイン先行）と同時に存在する場合は `## UIデザイン` が優先され、実装PRでの `.pen` 編集は行わない
+- `post-issue-body` は `mode=edit` で `## UIデザイン` / `## デザインファイルの更新` を **verbatim 保持**する（テンプレート外見出しの例外）。同スキルは本文をテンプレートの6セクションで丸ごと上書きするため、保持ルールが無いと `update-issue` の再実行でデザイン参照・デザイン更新指示が消える
 - デザインPRの head は `cc-ui-design-<Issue番号>` の固定名ブランチ（`cc-epic-<N>` と同じ考え方で、後段が head ref から一意に特定できるようにするため）。ベースブランチは実装PRと揃える（`parent` があれば `cc-epic-<親>`、なければ default）。揃えないと epic 配下でデザインが実装ブランチに存在しない状態になる
 - **デザインPRの Issue 参照は `Refs #N` 固定で closing keyword を禁止する**。`Closes` を使うとデザインPRのマージで実装Issueが閉じ、実装フェーズへ進めなくなる
 - **`uiDesign.yolo` はデザインPRへ `cc-triage-scope` を付けるかだけを切り替える**（`create-ui-design.ts` の `onCompleted`）。`true` のときだけ付与し、デザインPRのレビュー・マージを既存の `triage-pr` / `fix-review-point` / `resolve-pr-conflict` にそのまま乗せる（新しいマージ機構を作らない）。`.pen` のコンフリクトは `resolve-pr-conflict` → `resolve-pencil-conflict` の既存の委譲が効く。Epic PR ではないため `cc-release-ready` によるマージ保留の対象外。`false`（既定）では `cc-triage-scope` を付けないためどのワーカーもデザインPRを拾わず、人がレビュー・マージするまで `apply-ui-design` の `preflight` が `skip`（マージ待ち）を返し続ける（＝デザインに人が介在する既定）。`cc-ui-design` は yolo に関わらず常に付ける（PRの種別マーカーであり、自動処理の入口ではないため）
