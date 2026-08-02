@@ -25,8 +25,8 @@ gitコンフリクト状態になった `.pen` デザインファイルを「**�
 
 # 前提条件の確認
 
-1. `pencil version` — 未インストールなら `npm install -g @pencil.dev/cli` を案内（Node.js 18以上必要）。**Pencil CLIが使えない場合は本スキルのフローを実行できないため、無理に解消せず `git rebase --abort` / `git merge --abort` で中断してユーザーに報告する**
-2. `pencil status` — 未認証なら `pencil login`、または `PENCIL_CLI_KEY` 環境変数の設定を案内
+1. `pencil version` — **Pencil CLIが使えない場合は本スキルのフローを実行できないため、無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、セットアップ手順（`npm install -g @pencil.dev/cli`、Node.js 18以上必要）を報告に含めて終了する**
+2. `pencil status` — 未認証の場合も同様に中断し、認証手順（`pencil login`、または `PENCIL_CLI_KEY` 環境変数の設定）を報告に含めて終了する
 3. `git status --short` — 対象の `.pen` が実際にコンフリクト状態（`UU` / `AA` / `UD` / `DU`）であることを確認する
 
 # 解消手順
@@ -37,7 +37,7 @@ gitコンフリクト状態になった `.pen` デザインファイルを「**�
 git status --short   # UU = 両側変更、AA = 両側追加、UD/DU = 片側削除
 ```
 
-- `UD` / `DU`（片側がファイルを削除している）の場合は、ファイルを残すべきか自体が仕様判断になるため、無理に解消せずユーザーに確認する
+- `UD` / `DU`（片側がファイルを削除している）の場合は、ファイルを残すべきか自体が仕様判断になるため、無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、どちら側が削除しているか・双方のブランチと該当コミットを含めて中断理由を報告して終了する（呼び出し元・人間がその報告を基に判断する）
 
 ## ステップ2: 作業ディレクトリの確保と3バージョンの取り出し
 
@@ -111,7 +111,7 @@ git add path/to/design.pen
 
 `git add path/to/design.pen` 済みであることを確認して `git rebase --continue` / `git merge --continue` で続行する。
 
-両側の変更意図が両立できない（同じNodeを異なる方針で変更している等）と判明した場合は、無理に解消せず両側のスクリーンショットを提示してユーザーに確認する。
+両側の変更意図が両立できない（同じNodeを異なる方針で変更している等）と判明した場合は、無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、両側のスクリーンショットのパスと両立できない理由（対象Node・双方の変更内容）を報告して終了する（呼び出し元・人間がその報告を基に判断する）。
 
 # 予防策
 
@@ -127,7 +127,7 @@ git add path/to/design.pen
 
 - **コンフリクトマーカーの混入等で `.pen` が破損して開けない**: テキストマージを実行してしまった典型的な事故。破損ファイルの修復は不可能なので、`git checkout --ours -- <path>` / `--theirs` で正常な側のバージョンに戻す（コンフリクト状態からやり直したい場合は `git checkout -m -- <path>` で3-way状態を復元できる）。その後、本スキルの手順で解消し直し、再発防止として `.gitattributes` への `*.pen binary` 追加を提案する
 - **`AA`（両側追加）コンフリクトで `git show :1:` が失敗する**: 共通祖先が存在しないため想定内の挙動。ステップ2〜3のガードにより自動的に base 無し（ours/theirs 直接比較）として扱われるため、そのままステップ4以降を進めてよい
-- **どちらの変更か判別できない**: `git log --oneline -- <path>` で両ブランチの該当コミットとメッセージを確認し、変更の出所を特定する。それでも判断できなければユーザーに確認する
+- **どちらの変更か判別できない**: `git log --oneline -- <path>` で両ブランチの該当コミットとメッセージを確認し、変更の出所を特定する。それでも判断できなければ無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、確認した事実（両側のコミット・スクリーンショット）を添えて報告して終了する
 - **`pencil` コマンドが使えない環境**: 本スキルのフローは実行不可。`git rebase --abort` / `git merge --abort` で中断し、Pencil CLIのセットアップ（`npm install -g @pencil.dev/cli` と認証）を案内する
 
 # 実行結果の報告
