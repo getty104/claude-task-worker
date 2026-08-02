@@ -9,7 +9,7 @@ context: fork
 
 # Create Pull Request
 
-GitHubでPull Request（PR）を作成するスキルです。呼び出された際には、Instructionsに従ってPRの作成を行ってください。
+GitHubでPull Request（PR）を作成するスキルです。Instructionsに従ってPRを作成してください。
 
 # Instructions
 
@@ -32,7 +32,7 @@ GitHubでPull Request（PR）を作成するスキルです。呼び出された
 
 ### 1. Epicブランチの確定的導出
 
-サブIssue（parentを持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生しているため、PRも同ブランチへ向ける。後述のmerge-base推定は、epicブランチ作成直後（デフォルトブランチと同一コミットを指す状態）に複数の候補ブランチが同点になり、アルファベット順のタイブレークで**誤ったepicブランチ**を選ぶことがある。そのためparentからの確定的導出を必ず先に試す。
+サブIssue（parentを持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生しているため、PRも同ブランチへ向ける。後述のmerge-base推定は同点タイブレークで**誤ったepicブランチ**を選ぶことがあるため、parentからの確定的導出を必ず先に試す。
 
 ```bash
 git fetch origin --prune
@@ -102,7 +102,7 @@ if [ -z "${BASE_BRANCH}" ]; then
 fi
 ```
 
-距離が同点の場合はデフォルトブランチ → refname のアルファベット順の優先度で採用する。期待しないブランチがベースに選ばれた場合は `--base` を明示的に指定して上書きする。
+同点時の優先度はデフォルトブランチ → refname のアルファベット順。期待しないブランチがベースに選ばれた場合は `--base` を明示的に指定して上書きする。
 
 ## Command Examples
 

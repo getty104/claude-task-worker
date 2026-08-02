@@ -105,7 +105,7 @@ git add path/to/design.pen
 
 ## ステップ6: 両側の変更が揃ったことの検証とスクリーンショット
 
-再適用後の `get_editor_state()` に「ours側の変更Node」「theirs側の変更Node」の両方が反映されていることをNodeツリー差分で確認し、`edit-pencil-design` の手順どおり影響Nodeのスクリーンショットを `.pen` と同階層の `snapshots/` に残す。base があるケース（ステップ3で base.norm.json との差分を確認済み）はその差分が両方反映されているかで検証し、base が無い（AA）ケースはours.norm.jsonとtheirs.norm.jsonの直接比較で洗い出した差分が両方反映されているかで検証する。
+再適用後の `get_editor_state()` に「ours側の変更Node」「theirs側の変更Node」の両方が反映されていることをNodeツリー差分で確認し、`edit-pencil-design` の手順どおり影響Nodeのスクリーンショットを `.pen` と同階層の `snapshots/` に残す。検証の基準は、base があるケースはステップ3の base.norm.json との差分、base が無い（AA）ケースは ours.norm.json と theirs.norm.json の直接比較で洗い出した差分が、両方反映されているか。
 
 ## ステップ7: git操作の続行
 
@@ -125,10 +125,10 @@ git add path/to/design.pen
 
 # トラブルシューティング
 
-- **コンフリクトマーカーの混入等で `.pen` が破損して開けない**: テキストマージを実行してしまった典型的な事故。破損ファイルの修復は不可能なので、`git checkout --ours -- <path>` / `--theirs` で正常な側のバージョンに戻す（コンフリクト状態からやり直したい場合は `git checkout -m -- <path>` で3-way状態を復元できる）。その後、本スキルの手順で解消し直し、再発防止として `.gitattributes` への `*.pen binary` 追加を提案する
-- **`AA`（両側追加）コンフリクトで `git show :1:` が失敗する**: 共通祖先が存在しないため想定内の挙動。ステップ2〜3のガードにより自動的に base 無し（ours/theirs 直接比較）として扱われるため、そのままステップ4以降を進めてよい
+- **コンフリクトマーカーの混入等で `.pen` が破損して開けない**: テキストマージを実行してしまった典型的な事故。破損ファイルの修復は不可能なので、`git checkout --ours -- <path>` / `--theirs` で正常な側のバージョンに戻す（コンフリクト状態からやり直したい場合は `git checkout -m -- <path>` で3-way状態を復元できる）。その後、本スキルの手順で解消し直し、`.gitattributes` への `*.pen binary` 追加を提案する
+- **`AA`（両側追加）コンフリクトで `git show :1:` が失敗する**: 共通祖先が存在しないため想定内。ステップ2〜3のガードにより自動的に base 無し（ours/theirs 直接比較）として扱われるため、そのままステップ4以降を進めてよい
 - **どちらの変更か判別できない**: `git log --oneline -- <path>` で両ブランチの該当コミットとメッセージを確認し、変更の出所を特定する。それでも判断できなければ無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、確認した事実（両側のコミット・スクリーンショット）を添えて報告して終了する
-- **`pencil` コマンドが使えない環境**: 本スキルのフローは実行不可。`git rebase --abort` / `git merge --abort` で中断し、Pencil CLIのセットアップ（`npm install -g @pencil.dev/cli` と認証）を案内する
+- **`pencil` コマンドが使えない環境**: 本スキルのフローは実行不可。「前提条件の確認」どおり `git rebase --abort` / `git merge --abort` で中断し、セットアップと認証を案内する
 
 # 実行結果の報告
 

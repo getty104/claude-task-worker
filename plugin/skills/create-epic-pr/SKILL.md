@@ -13,7 +13,7 @@ hooks:
 
 # Create Epic Pull Request
 
-引数の Epic Issue 番号 `$0` に対応する `cc-epic-$0` ブランチから、デフォルトブランチへの集約PR（Epic PR）を作成するスキル。epic ブランチは複数サブIssueの実装PRをまとめてマージする集約用ブランチで、本スキル呼び出し時点でサブPRはすべて epic ブランチへマージ済みが前提（本スキルは epic ブランチも個別コミットも作らない）。ベースブランチとの差分コミットログからPR descriptionを自動生成し、`gh pr create` で投稿する。
+引数の Epic Issue 番号 `$0` に対応する `cc-epic-$0` ブランチ（複数サブIssueの実装PRをまとめてマージする集約用ブランチ）から、デフォルトブランチへの集約PR（Epic PR）を作成するスキル。呼び出し時点でサブPRはすべて epic ブランチへマージ済みが前提（本スキルは epic ブランチも個別コミットも作らない）。ベースブランチとの差分コミットログからPR descriptionを自動生成し、`gh pr create` で投稿する。
 
 ユーザーへの確認は行わず、判断はすべて本スキル内のルールで自動決定する。中断条件に該当した場合のみ、理由を出力して終了する。
 
@@ -69,9 +69,7 @@ git fetch origin --prune
 2. ローカルのみに存在する場合（リモートに無く、`git rev-parse --verify cc-epic-$0` が成功）: `git checkout cc-epic-$0`
 3. どちらにも存在しない場合は中断する。サブPRマージ前の早すぎる呼び出しを防ぐため、自動作成せず止める
 
-**完了条件**: `git rev-parse --abbrev-ref HEAD` が `cc-epic-$0` を返すこと。
-
-`git pull` は ff-only でのみ実行する。マージコンフリクトが発生した場合は手動解決を促す。
+**完了条件**: `git rev-parse --abbrev-ref HEAD` が `cc-epic-$0` を返すこと。`git pull` は ff-only でのみ実行し、マージコンフリクトが発生した場合は手動解決を促す。
 
 ---
 

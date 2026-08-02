@@ -14,7 +14,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 3. `gh issue create` または `gh issue edit` の実行
 4. 確認事項が渡されていればコメントとして投稿
 
-ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args に無い場合は、親スキル（create-issue 等）の使用を促して終了する。
+親スキル内のステップから Skill tool 経由で起動される想定。直接ユーザーから呼ばれ、入力 YAML が args に無い場合は、親スキル（create-issue 等）の使用を促して終了する。
 
 # Instructions
 
@@ -22,7 +22,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 ### 呼び出し規約
 
-呼び出し元の親スキル（`create-issue` / `create-issue-from-issue-number` / `update-issue`）は、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡す**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
+呼び出し元の親スキルは、**本スキル起動時の `args` に以下の YAML ブロックを文字列として渡す**こと。本スキルは受け取った入力を YAML として機械的にパースして扱う。
 
 ```yaml
 mode: create  # create または edit
@@ -60,7 +60,7 @@ blocked_by: [<Issue番号>, ...]   # 省略可。この新Issueをブロック�
 blocking: [<Issue番号>, ...]     # 省略可。この新Issueがブロックする（後続で待たせる）Open な既存Issue番号。--blocking で貼る
 ```
 
-assignee は呼び出し元から指定不要。本スキルが `gh api user --jq '.login'` で取得した「呼び出し時の gh ログインユーザー」を `mode=create` で自動的に `--assignee` として紐づける。
+assignee は呼び出し元から指定不要。本スキルが `gh api user --jq '.login'` で取得した「呼び出し時の gh ログインユーザー」を `mode=create` で自動的に `--assignee` として紐づける（`mode=edit` では assignee を変更しない）。
 
 args に渡す YAML は上記の通り**トップレベルから直接書く**（ラッパキーなし）。
 
@@ -77,9 +77,7 @@ args に渡す YAML は上記の通り**トップレベルから直接書く**�
 
 ### 本文テンプレート
 
-「依頼内容」セクションは**任意**、かつ**折りたたみ（`<details><summary>依頼内容</summary>`）ブロック**で描画する。呼び出し元が args の `sections.依頼内容` を渡した、または mode=edit で既存bodyに `<details><summary>依頼内容</summary>` ブロックが既に存在する場合のみ、本文の**先頭**（`## 概要` の前）に追加する。それ以外の場合は本文に含めない（基本の6セクション構成のまま）。
-
-折りたたみにするのは、Issue を開いた直後に見えるべきは「explore-agent 再分析結果（概要・要件・実装プラン）」で、原文の依頼はデフォルト非表示・必要時に展開できる形が実用的なため。**注意**: 本文中に `<details>` ブロックは依頼内容と変更ログの2つ並び得るため、`<summary>` テキスト（`依頼内容` / `変更ログ`）で区別し、抽出・verbatim 比較の際は `<summary>依頼内容</summary>` を含むブロックだけを対象にする。
+「依頼内容」セクションは**任意**、かつ**折りたたみ（`<details><summary>依頼内容</summary>`）ブロック**で描画し、含める場合は本文の**先頭**（`## 概要` の前）に置く。含める条件と保持ルールは後述の「『依頼内容』折りたたみブロックの verbatim 保持ルール」に従う（折りたたみにするのは、開いた直後に見えるべきは再分析結果で、原文の依頼はデフォルト非表示が実用的なため）。**注意**: 本文中に `<details>` ブロックは依頼内容と変更ログの2つ並び得るため、`<summary>` テキスト（`依頼内容` / `変更ログ`）で区別し、抽出・verbatim 比較の際は `<summary>依頼内容</summary>` を含むブロックだけを対象にする。
 
 ```markdown
 <details>
@@ -122,13 +120,13 @@ args に渡す YAML は上記の通り**トップレベルから直接書く**�
 
 ### 変更ログ（折りたたみ）の追記ルール
 
-本文末尾の `<details><summary>変更ログ</summary>` は、Issueの作成・更新履歴を時系列で残す折りたたみセクション。「いつ・何を変えたか」を追えるようにするのが目的で、他セクションと混同されないよう必ず折りたたみに入れる。
+本文末尾の `<details><summary>変更ログ</summary>` は、Issueの作成・更新履歴（いつ・何を変えたか）を時系列で残すセクション。他セクションと混同されないよう必ず折りたたみに入れる。
 
 - **日付**は `date +%Y-%m-%d` で取得する（実行時に1回だけ取得すればよい）。
 - **`mode=create`** では、初版エントリを1行だけ記載する（例: `- 2026-06-02: 初版作成 — <タスクの概要を一言>`）。
 - **`mode=edit`** では、既存本文（`gh issue view --json body` で取得）の `<details>` ブロック内エントリを**1行も削らず verbatim で再掲**し、その末尾に今回の変更を1行追記する。heredocは本文全体を上書きするため、既存エントリを書き写さないとログが消える点に注意する。
 - 既存本文に変更ログブロックが無い（旧フォーマット）場合は、新たにブロックを作り、初回エントリとして今回の更新内容を1行記載する（過去分は遡及しない）。
-- 1エントリは1行・簡潔に。何を変えたかが分かる粒度にとどめ（例: `要件に〇〇を追加`、`explore-agent再分析で実装プランを見直し`）、差分全文や冗長な説明は書かない。
+- 1エントリは1行・簡潔に。何を変えたかが分かる粒度にとどめ（例: `要件に〇〇を追加`）、差分全文や冗長な説明は書かない。
 
 ### 「依頼内容」折りたたみブロックの verbatim 保持ルール
 
@@ -177,7 +175,7 @@ $ARGUMENTS
 
 `labels` は配列。空 / 未指定なら `--label` フラグを一切付けない（空文字を渡すと `gh` が引数エラーで落ちる）。`mode=edit` ではラベル指定を**無視する**（既存ラベルの剥がし合いを避けるため。ラベル付け替えは呼び出し元が `gh issue edit --add-label` / `--remove-label` で明示的に行う方針）。
 
-`blocked_by` / `blocking` も配列。同じく `mode=create` でのみ反映し、`mode=edit` では**無視する**（既存Issueへの relationship 追加は呼び出し元が `gh issue edit --add-blocked-by` / `--add-blocking` で行う）。空 / 未指定ならフラグを付けない。
+`blocked_by` / `blocking` も配列。同じく `mode=create` でのみ反映し、`mode=edit` では**無視する**。空 / 未指定ならフラグを付けない。
 
 ### 2. (mode=edit のみ) 既存本文の取得
 
@@ -195,7 +193,7 @@ gh issue view <issue_number> --json body
 2. 1が無く、裸の `## 依頼内容` セクションがある場合（旧フォーマット）は、その見出し直後から次の `## ` 見出しまたはEOF直前までを verbatim で切り出す。
 3. どちらも無ければ「依頼内容」は無しとして扱う。
 
-args の `sections.依頼内容` が未指定 or 空で、上記1または2で中身を抽出できた場合は、その内容を新しい本文の `<details><summary>依頼内容</summary>` ブロックに**verbatim 再掲**する（args 指定があればそちらを優先）。旧フォーマット（2）で抽出した場合も、書き出しは必ず折りたたみブロックに詰め替える。
+抽出した中身は「『依頼内容』折りたたみブロックの verbatim 保持ルール」に従って再掲する（args の `sections.依頼内容` 指定があればそちらを優先。旧フォーマット（2）で抽出した場合も書き出しは必ず折りたたみブロックに詰め替える）。
 
 対象 Issue の state が `CLOSED` の場合は、その旨を出力して中断する。
 
@@ -332,11 +330,6 @@ EOF
 ## 注意事項
 
 - 本スキルは**コードを一切変更しない**。Issue の作成・更新・コメントのみを行う
-- `gh` の本文渡しは**必ず `--body-file -` + heredoc**（`<<'EOF' ... EOF`）を使う
-- 本文のセクションが空でも省略せず「なし」「該当なし」で埋める
-- 変更ログの既存エントリ保持は **mode=edit の最重要ポイント**。verbatim 再掲を怠ると履歴が消える
-- 既存bodyの依頼内容ブロック（新フォーマットの `<details><summary>依頼内容</summary>` / 旧フォーマットの裸の `## 依頼内容`）の verbatim 再掲も同様に重要。argsで上書き指定がなければ既存の依頼内容を消してはいけない。旧フォーマットで読み込んだ場合でも書き出しは折りたたみで統一する
-- `mode=create` では `--assignee "$ME"` で gh ログインユーザーを assignee に自動付与する。`mode=edit` では assignee を変更しない
-- `labels` 引数は `mode=create` でのみ反映し、`mode=edit` では無視する
-- `blocked_by` / `blocking` 引数も `mode=create` でのみ反映する（`gh issue create --blocked-by` / `--blocking`）。存在しない Issue 番号・権限不足・`gh` バージョン未達などで relationship 検証が失敗すると `gh issue create` 自体が失敗し Issue も作成されないため（fail-fast）、中断条件に従う。`mode=edit` では無視し、既存Issueへの relationship 追加は呼び出し元が `gh issue edit --add-blocked-by` / `--add-blocking` で行う
+- 変更ログ・既存依頼内容ブロック（新フォーマットの `<details><summary>依頼内容</summary>` / 旧フォーマットの裸の `## 依頼内容`）の verbatim 再掲は **mode=edit の最重要ポイント**。怠ると履歴・依頼原文が消える。argsで上書き指定がなければ既存の依頼内容を消してはいけない。旧フォーマットで読み込んだ場合でも書き出しは折りたたみで統一する
+- `blocked_by` / `blocking` は `mode=create` でのみ反映する（`gh issue create --blocked-by` / `--blocking`）。存在しない Issue 番号・権限不足・`gh` バージョン未達などで relationship 検証が失敗すると `gh issue create` 自体が失敗し Issue も作成されないため（fail-fast）、中断条件に従う
 - このスキルを編集する際は、フォーマットの変更が `create-issue` / `create-issue-from-issue-number` / `update-issue` の3スキル全体に効くことを意識する（このスキルが3スキル共通の唯一の format source）

@@ -1,15 +1,15 @@
 ---
 name: inspect-pencil-node
-description: "Pencil CLI（`pencil`コマンド）だけを使って、.penファイル（Pencilで作成されたデザインファイル）の中のNodeのデザインデータ（属性・構造）とスクリーンショット画像を読み取り専用で取得するスキル。Node IDが分かっているケースだけでなく、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / image など）、再利用可能コンポーネント、特定フレーム配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。インタラクティブモード（`pencil interactive`）で `batch_get` の `nodeIds` / `patterns` / `parentId` を使い分けてNode属性をJSONで取得し、`get_screenshot` / `export_nodes` で画像を`.pen`と同階層の`snapshots/`にPNG出力する。編集はしない（`save()`を呼ばない）ため、対象ファイルは絶対に書き換わらない。Pencil MCPには依存せず`pencil`コマンドのみで完結。"
+description: "Pencil CLI（`pencil`コマンド）だけを使って、.penファイル（Pencilで作成されたデザインファイル）の中のNodeのデザインデータ（属性・構造）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / image など）、再利用可能コンポーネント、特定フレーム配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。インタラクティブモード（`pencil interactive`）で `batch_get` の `nodeIds` / `patterns` / `parentId` を使い分けてNode属性をJSONで取得し、`get_screenshot` / `export_nodes` で画像を`.pen`と同階層の`snapshots/`にPNG出力する。編集はしない（`save()`を呼ばない）ため、対象ファイルは絶対に書き換わらない。Pencil MCPには依存せず`pencil`コマンドのみで完結。"
 ---
 
 # Inspect Pencil Node
 
-Pencil CLI（`pencil`コマンド）**のみ**で `.pen` デザインファイル内のNodeのデータと画像を**読み取り専用**で取得するスキル。MCPサーバーには依存しません。公式ドキュメント: [docs.pencil.dev/for-developers/pencil-cli](https://docs.pencil.dev/for-developers/pencil-cli)
+Pencil CLI（`pencil`コマンド）**のみ**で `.pen` デザインファイル内のNodeのデータと画像を**読み取り専用**で取得するスキル。MCPサーバーには依存しない。公式ドキュメント: [docs.pencil.dev/for-developers/pencil-cli](https://docs.pencil.dev/for-developers/pencil-cli)
 
-姉妹スキル `edit-pencil-design` が「編集 + 編集Nodeのスクショ」を担当するのに対し、こちらは「Nodeを覗き見るだけ」を担当し、`.pen` の中身は一切書き換えません。
+姉妹スキル `edit-pencil-design` が「編集 + 編集Nodeのスクショ」を担当するのに対し、こちらは「Nodeを覗き見るだけ」で `.pen` の中身は一切書き換えない。
 
-Nodeの指定方法は5系統に対応し、併用も可能です。`parentId` で検索範囲を特定Nodeのサブツリーに絞れます。
+Nodeの指定方法は5系統に対応し、併用も可能。`parentId` で検索範囲を特定Nodeのサブツリーに絞れる。
 
 1. **Node ID指定** — `nodeIds: ["..."]`
 2. **名前パターン検索（Regex）** — `patterns: [{ name: "Header.*" }]`
@@ -19,9 +19,9 @@ Nodeの指定方法は5系統に対応し、併用も可能です。`parentId` �
 
 # 設計思想
 
-Pencil CLI のうち、このスキルで使うのは**インタラクティブモード**（`pencil interactive -i -o`）のみ。`batch_get` / `get_screenshot` / `get_editor_state` / `exit` を heredoc で呼びます。エージェントモード（`pencil --in --out --prompt`）はAI編集用なので使いません。
+本スキルで使うのは**インタラクティブモード**（`pencil interactive -i -o`）のみ。`batch_get` / `get_screenshot` / `get_editor_state` / `exit` を heredoc で呼ぶ。エージェントモード（`pencil --in --out --prompt`）はAI編集用なので使わない。
 
-`.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node属性の取得・スクリーンショット出力はすべてインタラクティブモード経由で行います。
+`.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node属性の取得・スクリーンショット出力はすべてインタラクティブモード経由で行う。
 
 # 前提条件の確認
 
@@ -34,18 +34,11 @@ Pencil CLI のうち、このスキルで使うのは**インタラクティブ�
 
 ## ルール1: 読み取り目的では `save()` を絶対に呼ばない
 
-ヘッドレス実行では `-o` の指定が必須なので、入力と同じパスを `-o` に渡します。**`save()` を呼ばない限りディスクへの書き込みは発生しません** — これがファイル不変性の担保です。heredocの末尾は必ず `exit()` で締めます。
-
-```bash
-pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF'
-batch_get({ nodeIds: ["<node-id>"] })
-exit()
-EOF
-```
+ヘッドレス実行では `-o` の指定が必須なので、入力と同じパスを `-o` に渡す。**`save()` を呼ばない限りディスクへの書き込みは発生しない** — これがファイル不変性の担保。heredocの末尾は必ず `exit()` で締める。
 
 ## ルール2: インタラクティブモードを heredoc で非対話的に呼び出す
 
-スクリプトから安定して呼ぶため、heredoc で固定のコマンド列を流し、結果を `${WORK_DIR}` 配下に保存します。
+heredoc で固定のコマンド列を流し、結果を `${WORK_DIR}` 配下に保存する。
 
 ```bash
 pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/out.json"
@@ -54,22 +47,13 @@ exit()
 EOF
 ```
 
-**未確定な仕様**: 各シェル内ツールの完全な引数仕様（出力先パラメータ名、scale、padding 等）は公式ドキュメント未記載。`pencil interactive --help` でローカル実装を確認し、引数名が違えば調整してください。
+**未確定な仕様**: 各シェル内ツールの完全な引数仕様（出力先パラメータ名、scale、padding 等）は公式ドキュメント未記載。`pencil interactive --help` でローカル実装を確認し、引数名が違えば調整する。
 
 ### heredoc / シェルの改行展開を正しく扱う（重要）
 
-長いJSON引数（特に `patterns: [{ name: "..." }]` の Regex/動的注入）を heredoc で流すとき、シェルが `\n` を実改行に展開するとJSONが壊れ、Pencilがパースエラーをサイレントに無視して「**結果が空**」「**想定と違うNodeセットが返る**」という失敗が起きます。読み取り専用なのでファイルは壊れませんが、調査結果が壊れて後続の判断を狂わせます。姉妹スキル `edit-pencil-design` と同じ改行ルールを必ず守ります。
+長いJSON引数（特に `patterns: [{ name: "..." }]` の Regex/動的注入）を heredoc で流すとき、シェルが `\n` を実改行に展開するとJSONが壊れ、Pencilがパースエラーをサイレントに無視して「**結果が空**」「**想定と違うNodeセットが返る**」という失敗が起きる。読み取り専用なのでファイルは壊れないが、調査結果が壊れて後続の判断を狂わせる。姉妹スキル `edit-pencil-design` と同じ改行ルール（シェル別の `\n` 展開挙動の表を含む）を必ず守る。
 
-| シェル / コマンド | `"a\nb"` の扱い |
-|---|---|
-| zsh の組み込み `echo` | **`\n` を実改行に展開**（デフォルト挙動） |
-| bash の組み込み `echo` | デフォルトでは展開しない（`-e` で展開） |
-| `printf '%s' "..."` | 移植性ありで `\n` を2文字のまま出力 |
-| `print -r -- "..."` (zsh) | エスケープ解釈なし |
-| heredoc `<<'EOF'`（クォート付） | **本文をリテラルのまま渡す**（`\n` は2文字のまま、変数展開も無し） |
-| heredoc `<<EOF`（クォート無） | 変数展開・コマンド置換は行うが、リテラル `\n` は2文字のまま |
-
-原則は「**JSON文字列リテラル内の `\n` は2文字（バックスラッシュ + n）のままPencilに届けること**」。
+原則は「**JSON文字列リテラル内の `\n` は2文字（バックスラッシュ + n）のままPencilに届けること**」。`<<'EOF'`（クォート付）は本文をリテラルのまま渡し、`<<EOF`（クォート無）は変数展開するがリテラル `\n` は2文字のまま。zsh の組み込み `echo` は `\n` を実改行に展開する（デフォルト挙動）ため使わない。
 
 #### 改行を確実に2文字のまま渡すための4原則
 
@@ -107,7 +91,7 @@ EOF
 
 #### 失敗を早く検出するセルフチェック
 
-Pencilに流す前に「シェルが解釈した最終文字列」を `cat` で目視します。
+Pencilに流す前に「シェルが解釈した最終文字列」を `cat` で目視する。
 
 ```bash
 cat > "${WORK_DIR}/cmds.txt" <<'EOF'
@@ -118,22 +102,22 @@ cat "${WORK_DIR}/cmds.txt"   # \n やバックスラッシュが2文字のまま
 pencil interactive -i path/to/design.pen -o path/to/design.pen < "${WORK_DIR}/cmds.txt" > "${WORK_DIR}/nodes.json"
 ```
 
-`\n` が実改行に化けていたら即失敗。`<<'EOF'` に修正してやり直します。
+`\n` が実改行に化けていたら即失敗。`<<'EOF'` に修正してやり直す。
 
 ## ルール3: 同時実行で競合しない一時ディレクトリを毎回確保する
 
-中間ファイルの保存先を固定パスにすると、同じ `.pen` の同時 inspect で上書き衝突が起きます。開始時に `mktemp -d` で実行ごとに一意なディレクトリを確保します（ディレクトリ名の一意性がカーネル側で保証され、`trap` で途中失敗時も自動後始末される）。
+中間ファイルの保存先を固定パスにすると、同じ `.pen` の同時 inspect で上書き衝突が起きる。開始時に `mktemp -d` で実行ごとに一意なディレクトリを確保する（`trap` で途中失敗時も自動後始末される）。
 
 ```bash
 WORK_DIR="$(mktemp -d -t pencil-inspect-XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 ```
 
-中間JSONは必ず `${WORK_DIR}` 配下に置き、`/tmp/out.json` のような固定パスは使いません。
+中間JSONは必ず `${WORK_DIR}` 配下に置き、`/tmp/out.json` のような固定パスは使わない。
 
 ## ルール4: `batch_get` で対象Nodeを決定・取得する（ID指定にこだわらない）
 
-`batch_get` は「IDで取る」「パターンで検索する」「親配下を取る」「トップレベルを取る」を1ツールでこなせるので、依頼の解像度に合わせて引数を組み立てます。
+`batch_get` は「IDで取る」「パターンで検索する」「親配下を取る」「トップレベルを取る」を1ツールでこなせるので、依頼の解像度に合わせて引数を組み立てる。
 
 | ユーザーの依頼 | 使う引数 |
 |---|---|
@@ -157,7 +141,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 | `resolveInstances` | `true` で `ref` コンポーネントインスタンスを実体展開 |
 | `includePathGeometry` | `true` で `path` Nodeの幾何データを省略せず返す |
 
-それでも候補が絞れない（「あのヘッダー的なやつ」のように曖昧）場合だけ、`get_editor_state()` でツリーを取ってから3〜5件の候補をユーザーに提示します。**ID必須ではない**のがポイントです。
+それでも候補が絞れない（「あのヘッダー的なやつ」のように曖昧）場合だけ、`get_editor_state()` でツリーを取ってから3〜5件の候補をユーザーに提示する。**ID必須ではない**のがポイント。
 
 ```bash
 pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/tree.json"
@@ -166,15 +150,13 @@ exit()
 EOF
 ```
 
-呼び出しの形はすべて同じで、`batch_get({ ... })` の引数だけ上表に従って差し替えます。既知のIDやbash変数を埋め込む場合は `<<EOF`（クォート無し）+ `jq` エンコード、固定リテラルなら `<<'EOF'` を使います（ルール2）。
+呼び出しの形はすべて同じで、`batch_get({ ... })` の引数だけ上表に従って差し替える（変数埋め込みの扱いはルール2）。得られたJSONは、報告で重要な属性（type / name / geometry / style / content / 子Nodeの id と name など）を要約して提示し、フルダンプが必要なら `${WORK_DIR}/nodes.json` の絶対パスも併記する。
 
-得られたJSONは、報告で重要な属性（type / name / geometry / style / content / 子Nodeの id と name など）を要約して提示します。フルダンプが必要なら `${WORK_DIR}/nodes.json` の絶対パスも併記します。
-
-**注意**: `patterns` 検索や大きい `readDepth` は返却JSONがコンテキストを溢れさせることがあります。最初は `readDepth: 1〜2`、`searchDepth: 3〜4` で軽く取り、必要に応じて深掘りします。
+**注意**: `patterns` 検索や大きい `readDepth` は返却JSONがコンテキストを溢れさせることがある。最初は `readDepth: 1〜2`、`searchDepth: 3〜4` で軽く取り、必要に応じて深掘りする。
 
 ## ルール5: `get_screenshot` / `export_nodes` で画像を取得し `snapshots/` に保存する
 
-画像は `.pen` と同階層の `snapshots/` に保存し、ファイル名にタイムスタンプを必ず含めます（同時実行・繰り返し実行での衝突回避）。
+画像は `.pen` と同階層の `snapshots/` に保存し、ファイル名にタイムスタンプを必ず含める（同時実行・繰り返し実行での衝突回避）。
 
 - 単一Node → `get_screenshot`。**`nodeId: "document"` でドキュメント全体**もレンダリング可能
 - 複数Node → `export_nodes` が効率的。`batch_get` の `patterns` で見つかったIDをそのまま渡す
@@ -182,12 +164,6 @@ EOF
 ```bash
 mkdir -p "$(dirname path/to/design.pen)/snapshots"
 TS="$(date +%Y%m%d-%H%M%S)"
-
-# 単一Node
-pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF
-get_screenshot({ nodeId: "${NODE_ID}", out: "path/to/snapshots/<file>-<node>-${TS}.png", scale: 2 })
-exit()
-EOF
 
 # 複数Node
 pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF
@@ -201,23 +177,17 @@ exit()
 EOF
 ```
 
+単一Nodeは `get_screenshot({ nodeId: "${NODE_ID}", out: "path/to/snapshots/<file>-<node>-${TS}.png", scale: 2 })` を同様の heredoc で呼ぶ（使用例参照）。
+
 ファイル命名規則: `<.penファイル名のステム>-<Node名 or Node ID短縮>-<YYYYMMDD-HHMMSS>.png`（例: `login.pen` の `header` Node → `snapshots/login-header-20260627-160500.png`）。スケールは視認性のため `scale: 2` を推奨。
 
 ## ルール6: データとスクリーンショットを同一heredocでまとめて取得してもよい
 
-`batch_get` と `get_screenshot` は同じセッションで連続実行できます。標準出力に両者の結果が混ざるため、分離が容易な簡単なケースでは1回にまとめ、複雑なケースでは別々に呼びます。
-
-```bash
-pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF > "${WORK_DIR}/combined.txt"
-batch_get({ nodeIds: ["${NODE_ID}"] })
-get_screenshot({ nodeId: "${NODE_ID}", out: "path/to/snapshots/<file>-<node>-${TS}.png", scale: 2 })
-exit()
-EOF
-```
+`batch_get` と `get_screenshot` は同じセッションで連続実行できる（コード例は使用例の例1参照）。標準出力に両者の結果が混ざるため、分離が容易な簡単なケースでは1回にまとめ、複雑なケースでは別々に呼ぶ。
 
 ## ルール7: 実行結果をユーザーに伝える
 
-`.pen` の中身は直接確認できないため、最終報告に含めます:
+`.pen` の中身は直接確認できないため、最終報告に含める:
 
 - 何をクエリしたか（Node ID指定 / 名前パターン / type / reusable / parentId / トップレベル のいずれか）
 - ヒットしたNode一覧（id / name / type を簡潔に。パターン検索の場合は件数も）
@@ -225,12 +195,12 @@ EOF
 - 生データJSONの保存パス（`${WORK_DIR}` 配下 — trap によりセッション終了で消える旨も一言添える）
 - 出力したスクリーンショット画像の絶対パス（`snapshots/` に永続化）
 
-ユーザーがJSONを永続的に欲しがった場合は `cp "${WORK_DIR}/nodes.json" <希望パス>` を案内します。
+ユーザーがJSONを永続的に欲しがった場合は `cp "${WORK_DIR}/nodes.json" <希望パス>` を案内する。
 
 # 標準ワークフロー
 
 1. **前提確認**: `pencil version`、`pencil status`、対象 `.pen` の存在
-2. **作業ディレクトリ確保**: `WORK_DIR="$(mktemp -d -t pencil-inspect-XXXXXX)"` と `trap 'rm -rf "$WORK_DIR"' EXIT`
+2. **作業ディレクトリ確保**（ルール3）
 3. **`snapshots/` 準備**: `mkdir -p <.penと同じディレクトリ>/snapshots`
 4. **取得スコープの決定**: 依頼を「ID / 名前Regex / type / reusable / parentId / トップレベル」にマップ。曖昧なときだけ `get_editor_state()` で候補を提示
 5. **属性取得**: heredoc で `batch_get({ ... })` → `${WORK_DIR}/nodes.json`（必要なら `readDepth` / `searchDepth` / `resolveVariables` を調整）
@@ -241,21 +211,7 @@ EOF
 
 ## 例1: ログイン画面のヘッダーNodeを覗き見る（ID未知 → ツリーから特定）
 
-```bash
-pencil status
-mkdir -p designs/snapshots
-
-WORK_DIR="$(mktemp -d -t pencil-inspect-XXXXXX)"
-trap 'rm -rf "$WORK_DIR"' EXIT
-
-# Node ID が分からない → まずツリーを取る
-pencil interactive -i designs/login.pen -o designs/login.pen <<'EOF' > "${WORK_DIR}/tree.json"
-get_editor_state()
-exit()
-EOF
-```
-
-返却JSONから type=Frame, name="Header" のNode（仮に id="header-01"）を特定したあと:
+標準ワークフローどおり準備し、Node ID が分からないのでまず `get_editor_state()` でツリーを `${WORK_DIR}/tree.json` に取る。返却JSONから type=Frame, name="Header" のNode（仮に id="header-01"）を特定したあと:
 
 ```bash
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -275,13 +231,6 @@ EOF
 ユーザー: 「`system.pen` にどんな再利用可能コンポーネントが入ってる？ 全部教えて」
 
 ```bash
-mkdir -p design-system/snapshots
-
-WORK_DIR="$(mktemp -d -t pencil-inspect-XXXXXX)"
-trap 'rm -rf "$WORK_DIR"' EXIT
-
-TS="$(date +%Y%m%d-%H%M%S)"
-
 # 再利用可能コンポーネントを一括検索
 pencil interactive -i design-system/system.pen -o design-system/system.pen <<'EOF' > "${WORK_DIR}/components.json"
 batch_get({ patterns: [{ reusable: true }], readDepth: 2, searchDepth: 4 })
@@ -299,17 +248,13 @@ exit()
 EOF
 ```
 
-報告では検出したコンポーネントの type / name / 主要プロパティを表形式で、画像パスと生データJSONパスを併記します。パターン検索でヒットが多い場合は一覧を提示し、ユーザーが選んだものに対して画像取得を続行します。
+報告では検出したコンポーネントの type / name / 主要プロパティを表形式で、画像パスと生データJSONパスを併記する。パターン検索でヒットが多い場合は一覧を提示し、ユーザーが選んだものに対して画像取得を続行する。
 
 # 主要オプション/コマンド早見表
 
 ## インタラクティブモード起動オプション
 
-| オプション | 用途 |
-|---|---|
-| `--in / -i <path>` | 入力 `.pen` ファイル |
-| `--out / -o <path>` | 出力 `.pen` ファイル（ヘッドレス時必須。`save()`を呼ばないため書き換わらない） |
-| `--help / -h` | ツールリファレンスを表示 |
+`--in / -i <path>`（入力 `.pen`）、`--out / -o <path>`（出力 `.pen`。ヘッドレス時必須、`save()`を呼ばないため書き換わらない）、`--help / -h`（ツールリファレンス表示）
 
 ## シェル内ツール
 
@@ -335,8 +280,4 @@ EOF
 - **`.pen` ファイルが見つからない**: パスを再確認
 - **大きいNodeで画像取得が遅い/タイムアウト**: `scale: 1` に下げて再試行。それでも遅ければ子Nodeに絞る
 - **誤ってファイルを書き換えた気がする**: `save()` を呼ばない限り原則変わらない。心配なら git diff で確認（事前に `git status` で clean を確認しておくとよい）
-- **`batch_get` の結果が空 / 想定と違うNodeセット**: heredoc/シェルの改行展開でJSON引数（特に Regex 文字列）が壊れた可能性が高い。ルール2を再確認:
-  1. `<<EOF` で開いていないか → `<<'EOF'` に切り替える
-  2. `echo` で組み立てた値を埋め込んでいないか → `jq -Rs .` か `printf '%s'` に置き換える
-  3. 実改行を含むテキストを直接書いていないか → リテラル `\n` の2文字で書く
-  4. セルフチェックの `cat` で `\n` やバックスラッシュが2文字のまま残っていることを目視する
+- **`batch_get` の結果が空 / 想定と違うNodeセット**: heredoc/シェルの改行展開でJSON引数（特に Regex 文字列）が壊れた可能性が高い。ルール2の4原則（`<<'EOF'` / `jq -Rs .`・`printf '%s'` / リテラル `\n`）とセルフチェックの `cat` 目視を順に再確認する

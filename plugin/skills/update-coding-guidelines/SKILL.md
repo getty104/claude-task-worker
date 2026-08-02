@@ -8,19 +8,11 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bas
 
 # Update Coding Guidelines
 
-直近N日（デフォルト1日）のPRレビューコメントを収集し、繰り返し指摘されているかつ対応すべきと判断できる観点をリポジトリルートの`CODING_GUIDELINES.md`に集約するスキルです。Instructionsに従って、収集→クラスタリング→ガイドライン更新→PR作成まで一貫して実行してください。
+直近N日（デフォルト1日）のPRレビューコメントを収集し、繰り返し指摘されているかつ対応すべきと判断できる観点をリポジトリルートの`CODING_GUIDELINES.md`に集約するスキル。Instructionsに従い、収集→クラスタリング→ガイドライン更新→PR作成まで一貫して実行する。
 
 ## このスキルがやること・やらないこと
 
-**やること**:
-- 直近N日に更新されたPRのレビューコメント・会話コメントを横断収集（解決済みも含む）
-- 同種の指摘を意味的にクラスタリングし、2回以上出現するものを抽出
-- 「実際に修正すべき」と判断できる観点だけをルール化対象とする
-- リポジトリルート`CODING_GUIDELINES.md`への追記・既存ルールとの統合・圧縮
-- `commit-push` skillで変更をコミット・push（必要なら専用feature branchへ切替）
-- `create-pr` skillでPRを作成し、PR URLを返却
-- 作成したPRに`gh api user`で取得した自分自身をAssigneeとして付与し、`cc-triage-scope`ラベルを付与
-- 編集差分のサマリ報告
+**やること**: 直近N日に更新されたPRのレビューコメント・会話コメントの横断収集（解決済みも含む）／同種の指摘の意味的クラスタリングと2回以上出現するものの抽出／「実際に修正すべき」観点だけのルール化／`CODING_GUIDELINES.md`への追記・既存ルールとの統合・圧縮／`commit-push`でコミット・push（必要なら専用feature branchへ切替）／`create-pr`でPR作成とPR URL返却／作成したPRに`gh api user`の自分自身をAssignee・`cc-triage-scope`ラベルを付与／編集差分のサマリ報告
 
 **絶対にやらないこと**:
 - レビューコメントへの返信・Resolve・既存PRへの編集（読み取りのみ）
@@ -34,7 +26,7 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bas
 
 ## フェーズ0: 事前チェック・引数パース
 
-- カレントディレクトリがgitリポジトリのルートであることを確認する（`git rev-parse --show-toplevel`の出力と一致するか）。一致しない場合は呼び出し元に「リポジトリルートで実行してください」と返して終了する
+- カレントディレクトリがgitリポジトリのルートであることを確認する（`git rev-parse --show-toplevel`の出力と一致するか）。一致しない場合は「リポジトリルートで実行してください」と返して終了する
 - 既存の`CODING_GUIDELINES.md`があれば全文を`Read`で読み込み、現在のルール構成・項目数・トーンを把握する
 
 ### 引数パース
@@ -44,11 +36,7 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bas
 - 1番目: 期間（日数）。省略時または非数値の場合は`1`
 - 2番目: 関連Issue番号（任意）。`#`プレフィックスは除去して数値部分のみ保持
 
-例:
-- `/update-coding-guidelines` → 日数=1, Issue番号=なし
-- `/update-coding-guidelines 7` → 日数=7, Issue番号=なし
-- `/update-coding-guidelines 7 123` → 日数=7, Issue番号=123
-- `/update-coding-guidelines 7 #123` → 日数=7, Issue番号=123
+例: `/update-coding-guidelines` → 日数=1, Issue番号=なし ／ `/update-coding-guidelines 7 #123` → 日数=7, Issue番号=123
 
 Issue番号はフェーズ5でcreate-prに渡す。指定なしの場合はPR本文の`Closes #N`行を省略する。
 
@@ -56,13 +44,11 @@ Issue番号はフェーズ5でcreate-prに渡す。指定なしの場合はPR本
 
 ## フェーズ1: レビューコメント収集
 
-以下のスクリプトで、直近N日に更新されたPRのレビューコメント・会話コメントを一括取得する。
-
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0で確定した日数>
 ```
 
-第1引数には日数のみを渡す（`$ARGUMENTS`をそのまま渡すとIssue番号トークンが余計な引数として渡ってしまう）。引数なしの場合はスクリプト側の`DAYS="${1:-1}"`でデフォルト1日が使われる。
+第1引数には日数のみを渡す（`$ARGUMENTS`をそのまま渡すとIssue番号トークンが余計な引数になる）。引数なしの場合はスクリプト側の`DAYS="${1:-1}"`でデフォルト1日が使われる。
 
 返却されるJSONの構造:
 
@@ -78,7 +64,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 
 ### ノイズ除外
 
-スクリプト側で`isMinimized: true`の会話コメントは除外済みだが、以下も**ルール化対象から外す**こと（クラスタリング対象には含めるが、抽出条件の判断時に除外する）:
+スクリプト側で`isMinimized: true`の会話コメントは除外済みだが、以下も**ルール化対象から外す**（クラスタリング対象には含めるが、抽出条件の判断時に除外する）:
 
 - PR作成者自身のコメント（セルフコメント・進捗報告）
 - ボット起動コマンド（`/gemini review`等）やCIの自動投稿
@@ -89,11 +75,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 
 ## フェーズ2: クラスタリングと対応要否判定
 
-収集したコメント群を**意味ベース**でクラスタリングする。字面が違っても同種の指摘は同じクラスタにまとめる:
-
-- 「nullチェックが漏れている」「`undefined`の可能性がある」「optional chainingを使うべき」 → 「null/undefined安全性」クラスタ
-- 「テストが足りない」「エッジケースが未検証」「異常系のテストを追加して」 → 「テストカバレッジ」クラスタ
-- 「any型を使うな」「型を明示して」「ジェネリクスで縛るべき」 → 「型安全性」クラスタ
+収集したコメント群を**意味ベース**でクラスタリングする。字面が違っても同種の指摘は同じクラスタにまとめ（例: 「nullチェックが漏れている」「`undefined`の可能性がある」「optional chainingを使うべき」→「null/undefined安全性」クラスタ）、逆に同じキーワードでも文脈が違えば別クラスタにする。
 
 ### クラスタ採用基準（**両方を満たすもののみ採用**）
 
@@ -118,6 +100,8 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 - まだ必要のない抽象化提案（過剰設計）
 - スコープ外のリファクタ提案
 - 既存規約と矛盾する提案
+
+出現1回の指摘は重要そうでも採用しない（再発時に改めて拾う）。「対応すべき類型」に含まれない繰り返し指摘も採用しない。
 
 **完了条件**: クラスタごとに「何の問題か」「何回出現したか」「採用/不採用とその理由」「代表的なコメントURL（2件まで）」が言語化できていること。
 
@@ -153,15 +137,13 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 
 ### 既存ファイルがある場合
 
-採用クラスタごとに以下のいずれかを行う:
+採用クラスタごとに以下のいずれかを行う（ルール数の単調増加はドキュメントを死蔵させるため、意味重複があれば必ず統合する）:
 
 1. **既存ルールと意味重複**: 既存ルールの本文を一般化して内包させる。本文を書き換え、参考リンクを追記する。**新規ルールとして追加しない**
 2. **既存カテゴリに収まる新規ルール**: 該当カテゴリの末尾に新ルールを追加する
 3. **新規カテゴリが必要**: ファイル末尾に新カテゴリを追加し、その下に新ルールを書く
 
 ### サイズ圧縮ルール（**毎回必ず適用**）
-
-更新後に以下をチェックし、必要なら整理する:
 
 - **全体行数**: 300行を超えたら最も似ているルール同士を統合する（具体的な指摘より「何を守るべきか」を抽象化する方向で）
 - **重複表現**: 同一カテゴリ内に「Aすべき」「Aを忘れない」「Aし忘れていないか」のような表現重複があれば1つにまとめる
@@ -181,16 +163,14 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 
 ## フェーズ4: feature branch への切替
 
-`commit-push`はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチに直コミットが入る。これを避けるため、PR作成用のfeature branchに必ず切り替える。
+`commit-push`はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチに直コミットが入る。必ずfeature branchへ切り替える。
 
 ```bash
 DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
-- `CURRENT_BRANCH = DEFAULT_BRANCH`の場合: 新しいfeature branchを作成して切り替える
-  - ブランチ名は`chore/update-coding-guidelines-$(date +%Y%m%d-%H%M%S)`形式で、`git checkout -b <ブランチ名>` で作成
-  - 既に同名ブランチが存在する場合は末尾にサフィックスを足してユニーク化
+- `CURRENT_BRANCH = DEFAULT_BRANCH`の場合: `chore/update-coding-guidelines-$(date +%Y%m%d-%H%M%S)`形式のブランチを`git checkout -b`で作成して切り替える（同名が存在する場合は末尾サフィックスでユニーク化）
 - `CURRENT_BRANCH ≠ DEFAULT_BRANCH`の場合: そのまま使用する（既に作業ブランチ上にいると判断）
 
 切替後にもう一度`git status`で`CODING_GUIDELINES.md`が変更ファイルとして見えていることを確認する（ブランチ切替で差分が消えていないこと）。
@@ -201,20 +181,20 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 ### 5-1. commit-push skillの呼び出し
 
-`Skill`ツールで`commit-push` skillを引数なしで呼び出す（commit-push側がカレントブランチの差分とコミット履歴を自分で確認して戦略を選ぶ）。
+`Skill`ツールで`commit-push`を引数なしで呼び出す（commit-push側がカレントブランチの差分とコミット履歴を自分で確認して戦略を選ぶ）。
 
 ### 5-2. create-pr skillの呼び出し
 
-`Skill`ツールで`create-pr` skillを呼び出す。`create-pr`は`context: fork`のサブエージェントとして起動され本スキルの会話文脈は引き継がれないため、引数として渡せるのはIssue番号文字列のみ。
+`Skill`ツールで`create-pr`を呼び出す。`create-pr`は`context: fork`のサブエージェントとして起動され本スキルの会話文脈は引き継がれないため、引数として渡せるのはIssue番号文字列のみ。
 
 - フェーズ0でIssue番号が指定されていた場合: そのIssue番号を引数として渡す（`$0`に展開され、PR本文に`Closes #<Issue番号>`が記載される）
-- Issue番号が指定されていない場合: 引数なしで呼び出す。ただし`create-pr`のテンプレートは無条件で`Closes #$0`を本文に入れるため、空展開で生成された`Closes #`行が本文に残る。これは5-3で後処理する
+- 指定されていない場合: 引数なしで呼び出す。`create-pr`のテンプレートは無条件で`Closes #$0`を本文に入れるため、空展開の`Closes #`行が本文に残る（5-4で後処理する）
 
 PR作成後、create-prが返却するPR URLを記録しておく。
 
 ### 5-3. Assignee・ラベルの付与確認（**毎回必ず実行**）
 
-`create-pr`側でもAssignee（`gh api user`のログインユーザー）と`cc-triage-scope`ラベルを付ける手順になっているが、`create-pr`は`context: fork`のサブエージェントで実行され結果を検証できないため、本スキル側で実際に付いているかを確認し、欠けていれば`gh pr edit`で補う。
+`create-pr`側でもAssignee（`gh api user`のログインユーザー）と`cc-triage-scope`ラベルを付ける手順になっているが、`context: fork`で結果を検証できないため、本スキル側で実際に付いているかを確認し、欠けていれば`gh pr edit`で補う。
 
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')
@@ -229,12 +209,12 @@ gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
 ```
 
 - `--add-assignee` / `--add-label` は既に付与済みでもエラーにならないため、確認結果によらず実行してよい
-- `cc-triage-scope`ラベルがリポジトリに存在せず`gh pr edit`が失敗する場合は、`gh label create cc-triage-scope` で作成してから再実行する
-- Assignee付与が権限等で失敗した場合はPR作成自体は成功しているため、フェーズ6の出力に「Assignee付与失敗」と明記して続行する
+- `cc-triage-scope`ラベルがリポジトリに存在せず`gh pr edit`が失敗する場合は、`gh label create cc-triage-scope`で作成してから再実行する
+- Assignee付与が権限等で失敗してもPR作成自体は成功しているため、フェーズ6の出力に「Assignee付与失敗」と明記して続行する
 
 ### 5-4. Issue番号なしのケースの後処理（**Issue番号が未指定の場合のみ実行**）
 
-`create-pr`が残した`Closes #`（数字なし）行を`gh pr edit`で削除する。
+`create-pr`が残した`Closes #`（数字なし）行を削除する。
 
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')
@@ -243,10 +223,7 @@ gh pr view "$PR_NUMBER" --json body --jq '.body' \
   | gh pr edit "$PR_NUMBER" --body-file -
 ```
 
-- `sed -E '/^Closes #[[:space:]]*$/d'`: 数字なしの`Closes #`行（末尾に空白が混じるケースを含む）を削除する
-- 数字付きの`Closes #123`が誤って削除されないよう、正規表現は必ず行末（`$`）まで`#`の後ろに数字がないことを確認する
-
-Issue番号が指定されていたケースでは正常な`Closes #<Issue番号>`が入っているのでこのステップはスキップする。
+正規表現は行末（`$`）まで`#`の後ろに数字がないことを条件にしているため、数字付きの`Closes #123`は削除されない。Issue番号が指定されていたケースではこのステップはスキップする。
 
 **完了条件**: PRが作成されており、PR URLが手元にあり、Assignee（自分自身）と`cc-triage-scope`ラベルが付与済みで、Issue番号未指定ケースでは本文の`Closes #`空行が削除されていること。
 
@@ -281,10 +258,5 @@ Issue番号が指定されていたケースでは正常な`Closes #<Issue番号
 
 ## 注意事項
 
-- **クラスタリングは意味ベース**: 同じキーワードでも文脈が違えば別クラスタ、表現が違っても本質が同じなら同一クラスタ
-- **採用基準は厳密に**: 出現1回の指摘は重要そうでも採用しない（再発時に改めて拾う）。「対応すべき類型」に含まれない繰り返し指摘も採用しない
-- **既存ルールへの統合を優先**: ルール数の単調増加はドキュメントを死蔵させるため、意味重複があれば必ず統合する
-- **編集対象は`CODING_GUIDELINES.md`のみ**: 他のソースコード・設定ファイル・別ドキュメントを編集しない
-- **デフォルトブランチでの直コミット禁止**: `commit-push`を呼ぶ前にフェーズ4で必ずfeature branchへ切り替える
 - **差分なしならPR作成スキップ**: フェーズ3完了時点で差分がなければフェーズ4以降を実行しない（空コミット・空PRを作らない）
 - **作業対象はリポジトリルートのみ**: worktreeで実行する場合、対象は当該worktreeのルートにある`CODING_GUIDELINES.md`とする

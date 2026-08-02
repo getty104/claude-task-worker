@@ -32,11 +32,11 @@ Users can now update their display name, email, and bio.
 Closes #234
 ```
 
-バグ修正の場合も同様に、`fix:` タイプで「何を直したか・なぜ必要か・テスト追加」をbodyに記述する（例: `fix: correct email validation regex`）。
+バグ修正の場合も同様に、`fix:` タイプで「何を直したか・なぜ必要か・テスト追加」をbodyに記述する。
 
 ## 例2: レビュー指摘への対応（Squash）
 
-PR作成後、レビュー指摘（例: バリデーションロジックの改善）を受けて修正するケース。
+PR作成後、レビュー指摘を受けて修正するケース。
 
 ```bash
 # 1. 現在のコミット確認
@@ -48,7 +48,7 @@ git log --oneline --graph "origin/$(gh repo view --json defaultBranchRef -q .def
 # 3. 戦略判断: 既存コミットと同じテーマ → Squash
 git add -A
 git commit --amend
-# メッセージに改善内容（例: Validation improvements の詳細）を追記
+# メッセージに改善内容を追記
 
 # 4. 強制push（PRを更新）
 git push --force-with-lease
@@ -56,20 +56,13 @@ git push --force-with-lease
 
 ## 例3: 独立した機能追加（新規コミット）
 
-既存コミット（プロフィール編集）とは別の機能（画像アップロード）を追加するケース。
+既存コミット（プロフィール編集）とは別の機能（画像アップロード）を追加するケースは、Squashせず新規コミットにする。大きな機能を Model → API → UI の順で段階的に実装する場合も、段階ごとに対象ファイルをステージングして新規コミット・pushする（各コミットが独立してレビュー・ビルド・テスト可能になる）。
 
 ```bash
-# 1. 現在のコミット確認
-git log --oneline --graph "origin/$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)..HEAD"
-# * a1b2c3d feat: add user profile editing feature
-
-# 2. 機能を実装...
-
-# 3. 戦略判断: 既存コミットとは独立した機能 → 新規コミット
+# 戦略判断: 既存コミットとは独立した機能 → 新規コミット
 git add -A
 git commit
 
-# 4. 結果確認
 git log --oneline --graph "origin/$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)..HEAD"
 # * e4f5g6h feat: add profile picture upload
 # * a1b2c3d feat: add user profile editing feature
@@ -110,33 +103,3 @@ git log --oneline --graph "origin/$(gh repo view --json defaultBranchRef -q .def
 # * m1n2o3p feat: add profile editing form
 # * j4k5l6m feat: add user profile model
 ```
-
-## 例5: 複数機能の段階的実装（段階ごとに新規コミット）
-
-大きな機能（例: 認証システム）を Model → API → UI の順で段階的に実装するケース。段階ごとに対象ファイルをステージングしてコミット・pushする。
-
-```bash
-# ステップ1: モデル実装
-git add src/models/
-git commit -m "feat: add authentication model"
-git push
-
-# ステップ2: API実装
-git add src/api/auth.ts
-git commit -m "feat: add authentication API endpoints"
-git push
-
-# ステップ3: UI実装
-git add src/components/auth/
-git commit -m "feat: add authentication UI components"
-git push
-```
-
-各コミットメッセージには例1と同様にbody（実装内容の箇条書きと理由）を含める。各コミットが独立してレビュー・ビルド・テスト可能になる。
-
-## まとめ
-
-1. **適切な戦略選択**: シナリオに応じてSquash/新規gitコミット/Rebaseを使い分け
-2. **明確なメッセージ**: 「なぜ」その変更が必要だったのかを記述
-3. **論理的な単位**: 各gitコミットが独立して理解できる粒度
-4. **継続的な改善**: レビューフィードバックを反映して品質向上

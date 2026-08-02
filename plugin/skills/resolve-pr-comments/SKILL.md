@@ -8,13 +8,11 @@ context: fork
 
 # Resolve PR Comments
 
-GitHubのプルリクエスト（PR）における未解決のレビューコメントを一括でResolveします。
-
 # Instructions
 
 ## ステップ1: 未解決Review threadsを一括Resolve
 
-以下のコマンドを実行する。カレントブランチに紐づくOpen PRの未解決Review threadsをすべて取得し、`resolveReviewThread` mutation でResolveする。
+以下のコマンドで、カレントブランチに紐づくOpen PRの未解決Review threadsをすべて取得し、`resolveReviewThread` mutation でResolveする。
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/resolve-pr-comments.sh

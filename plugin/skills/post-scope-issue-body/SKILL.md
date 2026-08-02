@@ -7,13 +7,9 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 # Post Scope Issue Body
 
-呼び出し元スキル（`breakdown-issues`）から委譲され、スコープIssue本文の整形と投稿を担う共有スキル。親スキルのタスク分解結果を受け取り、以下を一括実行する。
+呼び出し元スキル（`breakdown-issues`）から委譲され、スコープIssue本文の整形と投稿を担う共有スキル。親スキルのタスク分解結果を受け取り、「スコープIssue」の正規フォーマットへの整形・投稿前チェック・`gh issue create` を一括実行する。
 
-1. 「スコープIssue」の正規フォーマットに整形
-2. 投稿前チェックの実施
-3. `gh issue create` の実行
-
-ユーザーから直接呼び出される想定ではない（親スキル内のステップから Skill tool 経由で起動される）。直接呼ばれ、入力 YAML が args に無い場合は、親スキル（breakdown-issues）の使用を促して終了する。
+親スキル内のステップから Skill tool 経由で起動される想定。直接ユーザーから呼ばれ、入力 YAML が args に無い場合は、親スキル（breakdown-issues）の使用を促して終了する。
 
 **親Project紐付けや複数Issueの作成順序・依存関係Issue番号の確定は呼び出し側の責務**。本スキルは1回の呼び出しで1つのIssueを作成して URL を返すのみ。複数作成したい場合は呼び出し側がループする。
 
@@ -156,7 +152,7 @@ EOF
 
 ### 4. 呼び出し元への返却
 
-以下を出力して、呼び出し元の親スキルが「最終報告」「親Project紐付け」「次のIssue作成」で使えるようにする。親Project紐付けや複数Issue作成のループは本スキルの責務外で、呼び出し側が URL/番号を受け取って続きを処理する。
+以下を出力して、呼び出し元の親スキルが「最終報告」「親Project紐付け」「次のIssue作成」で使えるようにする（親Project紐付けや複数Issue作成のループは呼び出し側が続きを処理する）。
 
 - 作成された Issue の URL
 - 作成された Issue の番号（後続Issueの `blocked_by` 入力に使える）
@@ -172,7 +168,5 @@ EOF
 ## 注意事項
 
 - 本スキルは**コードを一切変更しない**。Issue の作成のみを行う
-- `gh issue create` の本文渡しは**必ず `--body-file -` + heredoc**（`<<'EOF' ... EOF`）を使う
-- 本文のセクションが空でも省略せず「なし」で埋める
 - `cc-triage-scope` ラベルは Issue ライフサイクル上の重要ラベル。本スキルは付与のみ行い、削除は一切行わない（呼び出し側でも `gh issue edit --remove-label` の対象に含めてはならない）
 - このスキルを編集する際は、フォーマットの変更が `breakdown-issues` に効くことを意識する（このスキルが `breakdown-issues` の唯一の format source）
