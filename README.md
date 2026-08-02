@@ -233,7 +233,7 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 
 `true` にすると、タスク起動時に Claude CLI へ `--advisor <model>` を渡す。渡すモデルは `claude-task-worker.json` の `workers.<名前>.advisorModel`。`mode` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位のオン/オフはできない。空文字が指定されたワーカーには渡さない。
 
-advisor は main モデル以上の能力が必要（Claude CLI の制約）。そのため `advisorModel` の既定値は、`model: sonnet` のワーカーが `opus`、`model: opus` のワーカーは空文字（advisor なし）になっている。
+advisor は main モデル以上の能力が必要（Claude CLI の制約）。全ワーカーの既定 `model` が `opus` なので、`advisorModel` の既定値はすべて空文字（advisor なし）。`model` を `sonnet` 等へ下げたワーカーには `advisorModel: "opus"` を指定できる。
 
 ### `claude-task-worker.json`（リポジトリ）
 
@@ -261,11 +261,10 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。�
 
 | ワーカー | `model` | `advisorModel` | `pollingIntervalSeconds` |
 |---|---|---|---|
-| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `update-issue` / `resolve-conflict` / `create-ui-design` | `opus` | `""`（なし） | 60 |
-| `triage-created-issue` / `triage-pr` | `sonnet` | `opus` | 60 |
-| `epic-issue` / `apply-ui-design` | `sonnet` | `opus` | 300 |
-| `check-dependabot` | `sonnet` | `opus` | 3600 |
-| （未知のワーカー名） | `sonnet` | `opus` | 60 |
+| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `update-issue` / `resolve-conflict` / `create-ui-design` / `triage-created-issue` / `triage-pr` | `opus` | `""`（なし） | 60 |
+| `epic-issue` / `apply-ui-design` | `opus` | `""`（なし） | 300 |
+| `check-dependabot` | `opus` | `""`（なし） | 3600 |
+| （未知のワーカー名） | `opus` | `""`（なし） | 60 |
 
 設定例:
 

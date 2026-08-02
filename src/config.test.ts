@@ -72,20 +72,20 @@ test("parseUiDesignEntry falls back to the default for a non-boolean yolo", (t) 
   assert.equal(parseUiDesignEntry({ enabled: true, yolo: "true" }).yolo, false);
 });
 
-test("advisorModel defaults to opus for sonnet workers and to none for opus workers", () => {
+test("every worker defaults to opus without an advisor", () => {
   // claude 側の制約: advisor は main モデル以上の能力が必要。opus のワーカーに
   // opus advisor を付けても意味がないため既定は空文字（＝渡さない）。
-  assert.equal(DEFAULT_WORKER_CONFIG.model, "sonnet");
-  assert.equal(DEFAULT_WORKER_CONFIG.advisorModel, "opus");
+  assert.equal(DEFAULT_WORKER_CONFIG.model, "opus");
+  assert.equal(DEFAULT_WORKER_CONFIG.advisorModel, "");
   for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
-    const expected = config.model === "opus" ? "" : "opus";
-    assert.equal(config.advisorModel, expected, `WORKER_DEFAULTS.${name}.advisorModel`);
+    assert.equal(config.model, "opus", `WORKER_DEFAULTS.${name}.model`);
+    assert.equal(config.advisorModel, "", `WORKER_DEFAULTS.${name}.advisorModel`);
   }
 });
 
 test("parseWorkerEntry keeps the worker default advisorModel when unspecified", (t) => {
   silenceWarn(t);
-  assert.equal(parseWorkerEntry("triage-pr", {})?.advisorModel, "opus");
+  assert.equal(parseWorkerEntry("triage-pr", {})?.advisorModel, "");
   assert.equal(parseWorkerEntry("exec-issue", {})?.advisorModel, "");
 });
 
@@ -98,6 +98,9 @@ test("parseWorkerEntry accepts an empty advisorModel as an explicit opt-out", (t
 
 test("parseWorkerEntry falls back to the default for a non-string advisorModel", (t) => {
   silenceWarn(t);
-  assert.equal(parseWorkerEntry("triage-pr", { advisorModel: 1 })?.advisorModel, "opus");
+  // 既定は全ワーカー ""（advisor なし）なので、不正値は既定へ落ちて advisor が付かない。
+  assert.equal(parseWorkerEntry("triage-pr", { advisorModel: 1 })?.advisorModel, "");
   assert.equal(parseWorkerEntry("exec-issue", { advisorModel: null })?.advisorModel, "");
+  // 有効値の指定は残る（不正値だけが弾かれることの確認）。
+  assert.equal(parseWorkerEntry("triage-pr", { advisorModel: "opus" })?.advisorModel, "opus");
 });

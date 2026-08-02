@@ -106,7 +106,7 @@ cc-triage-scope
 | トリガーラベル | `cc-create-ui-design` |
 | 除外ラベル | `cc-ui-design-pr-created`, `cc-ui-design-ready`（基盤が付ける `cc-in-progress` / `cc-need-human-check` に加えて） |
 | 起動スキル | `/claude-task-worker:create-ui-design`（新規スキル） |
-| model / effort | `sonnet` / `high`（既定。`claude-task-worker.json` で上書き可） |
+| model / effort | `opus` / `high`（既定。`claude-task-worker.json` で上書き可） |
 | ポーリング間隔 | 60 秒 |
 
 **worktree のベースブランチ**
@@ -175,7 +175,7 @@ Issue が sub-issue（`parent` あり）の場合、実装 PR のベースは `c
 | トリガーラベル | `cc-ui-design-pr-created` |
 | 除外ラベル | `cc-ui-design-ready`, `cc-exec-issue` |
 | 起動スキル | `/claude-task-worker:apply-ui-design`（新規スキル） |
-| model / effort | `sonnet` / `high` |
+| model / effort | `opus` / `high` |
 | ポーリング間隔 | 60 秒 |
 
 **`preflight`（既存の `PreflightResult` を使用）**
