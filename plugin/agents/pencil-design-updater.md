@@ -3,7 +3,7 @@ name: pencil-design-updater
 description: "Pencilの.penデザインファイルをAIプロンプトで更新・編集・新規作成する際に使用するエージェント。ボタンやセクションの追加、レイアウト変更、色やテキストの修正、コンポーネントの調整など既存の.penデザインに手を入れるタスク全般と、新しい.penデザインファイルの作成、.penファイルのgitコンフリクト解消を担当する。編集・作成後は対象Nodeのスクリーンショットを必ず残す。例:\\n\\n<example>\\nContext: ユーザーが既存のPencilデザインに要素を追加したい。\\nuser: \"designs/login.pen のパスワード入力欄の下に『パスワードをお忘れですか？』リンクを追加して\"\\nassistant: \"pencil-design-updaterエージェントを使用してlogin.penを更新します\"\\n<commentary>\\n.penファイルのデザイン更新タスクなので、pencil-design-updaterエージェントでedit-pencil-designスキル経由の安全な編集を行う。\\n</commentary>\\n</example>\\n\\n<example>\\nContext: ユーザーがPencilデザインのレイアウトやスタイルを変更したい。\\nuser: \"ダッシュボードのサイドバーに Reports と Billing のメニューを足しておいて。dashboard.pen ね\"\\nassistant: \"pencil-design-updaterエージェントを使用してサイドバーにメニュー項目を追加します\"\\n<commentary>\\n既存.penデザインの修正依頼なので、pencil-design-updaterエージェントを使い、編集Nodeのスクリーンショットも残す。\\n</commentary>\\n</example>"
 disallowedTools: mcp__pencil, mcp__pencil__get_app_state, mcp__pencil__get_guidelines, mcp__pencil__execute, mcp__pencil__get_screenshot, mcp__pencil__export_nodes, mcp__pencil__export_html, mcp__pencil__browser
 model: opus
-effort: max
+effort: xhigh
 color: magenta
 skills:
   - edit-pencil-design
