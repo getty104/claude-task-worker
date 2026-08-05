@@ -53,11 +53,15 @@ export const createUiDesignWorker = async (
         console.log(`[create-ui-design] #${issueNumber}: cc-need-human-check present, skip cc-ui-design-pr-created`);
         return false;
       }
-      // 「デザイン不要」と判定されたパスではスキルが cc-ui-design-ready + cc-exec-issue を
-      // 付けて終了する。デザインPRが無いのが正しい状態なので完了扱いにする。
-      if (await hasLabel("issue", issueNumber, "cc-ui-design-ready")) {
-        console.log(`[create-ui-design] #${issueNumber}: design not needed (cc-ui-design-ready), completing`);
-        return;
+      // 「デザイン不要」と判定されたパスではスキルが description に不要マーカーを書いたうえで
+      // cc-exec-issue（過去の版では cc-ui-design-ready も）を付けて終了する。デザインPRが
+      // 無いのが正しい状態なので完了扱いにする。どちらもポーリングの excludeLabels なので、
+      // 起動時点では付いておらず「今回のセッションが付けた」と確定できる。
+      for (const label of ["cc-ui-design-ready", "cc-exec-issue"]) {
+        if (await hasLabel("issue", issueNumber, label)) {
+          console.log(`[create-ui-design] #${issueNumber}: design not needed (${label}), completing`);
+          return;
+        }
       }
       const branch = designBranchName(issueNumber);
       // "open" 限定にすることで、過去ラウンドの closed/merged デザインPRを
