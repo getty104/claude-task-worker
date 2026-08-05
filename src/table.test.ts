@@ -5,8 +5,16 @@ import type * as TableModule from "./table";
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { getDisplayWidth, truncateToWidth, padToWidth, buildTaskTableLines, selectRecentTasks, buildLogTableLines } =
-  (await import("./table")) as typeof TableModule;
+const {
+  getDisplayWidth,
+  truncateToWidth,
+  padToWidth,
+  buildTaskTableLines,
+  selectRecentTasks,
+  buildLogTableLines,
+  captureConsole,
+  logLines,
+} = (await import("./table")) as typeof TableModule;
 
 test("getDisplayWidth returns 0 for empty string", () => {
   assert.equal(getDisplayWidth(""), 0);
@@ -419,4 +427,35 @@ test("buildLogTableLines keeps every row the same display width with wide charac
 
   const widths = new Set(lines.map((l) => getDisplayWidth(l)));
   assert.equal(widths.size, 1);
+});
+
+// --- captureConsole ---
+
+test("captureConsole keeps console output in the log buffer instead of the terminal", () => {
+  const originalError = console.error;
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  let wroteToTerminal = false;
+  process.stdout.write = (() => {
+    wroteToTerminal = true;
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    captureConsole();
+    const start = logLines.length;
+    console.error("[worker] boom %s", "happened");
+
+    const pushed = logLines.slice(start);
+    assert.equal(pushed.length, 1);
+    assert.equal(pushed[0].stream, "stderr");
+    assert.equal(pushed[0].text, "[worker] boom happened");
+    assert.equal(pushed[0].id, undefined);
+    assert.equal(wroteToTerminal, false);
+    // id を持たない行も他の行と桁が揃う
+    const widths = new Set(buildLogTableLines(pushed).map((l) => getDisplayWidth(l)));
+    assert.equal(widths.size, 1);
+  } finally {
+    process.stdout.write = originalWrite;
+    console.error = originalError;
+  }
 });
