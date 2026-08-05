@@ -12,7 +12,7 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
-import { getRunMode, isAdvisorEnabled } from "../user-config";
+import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
 import {
   createWorktreeFromBranch,
   deleteLocalBranch,
@@ -96,6 +96,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               effort,
               // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
               advisorModel: isAdvisorEnabled() ? advisorModel : "",
+              permissionMode: getPermissionMode(),
             });
             run(
               execution.command,
