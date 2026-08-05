@@ -185,6 +185,7 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 {
   "mode": "default",
   "advisor": false,
+  "permission": "bypassPermissions",
   "projects": {
     "app-a": "/Users/me/repos/app-a",
     "app-b": "/Users/me/repos/app-b"
@@ -215,6 +216,7 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 | `projectGroups` | `{}` | グループ名 → プロジェクト名配列 |
 | `mode` | `"default"` | タスクの実行形態（下記） |
 | `advisor` | `false` | `--advisor` を渡すか（下記） |
+| `permission` | `"bypassPermissions"` | Claude CLI の権限モード（下記） |
 
 #### `mode`（タスクの実行形態）
 
@@ -234,6 +236,21 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 `true` にすると、タスク起動時に Claude CLI へ `--advisor <model>` を渡す。渡すモデルは `claude-task-worker.json` の `workers.<名前>.advisorModel`。`mode` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位のオン/オフはできない。空文字が指定されたワーカーには渡さない。
 
 advisor は main モデル以上の能力が必要（Claude CLI の制約）。全ワーカーの既定 `model` が `opus` なので、`advisorModel` の既定値はすべて空文字（advisor なし）。`model` を `sonnet` 等へ下げたワーカーには `advisorModel: "opus"` を指定できる。
+
+#### `permission`（権限モード）
+
+タスク起動時に Claude CLI へ渡す[権限モード](https://code.claude.com/docs/ja/permission-modes)。`mode` / `advisor` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位の指定はできない。
+
+| `permission` | 挙動 |
+|---|---|
+| `"bypassPermissions"`（既定） | 全許可。承認するユーザーが常駐しない自律実行のため既定 |
+| `"dontAsk"` | 許可されていない操作は確認せずスキップする |
+| `"auto"` | 安全な操作は自動承認、危険な操作のみ確認 |
+| `"acceptEdits"` | ファイル編集は自動承認、それ以外は都度確認 |
+| `"manual"` | 標準の権限確認 |
+| `"plan"` | 読み取りのみ。変更は行わない |
+
+値は Claude CLI の `--permission-mode` にそのまま渡される（choices と同じ綴り）。ワーカーには承認するユーザーがいないため、`bypassPermissions` / `dontAsk` 以外ではタスクが承認待ちで止まりうる（`mode: "herdr"` なら herdr のタブを開いて手動で承認できる）。
 
 ### `claude-task-worker.json`（リポジトリ）
 

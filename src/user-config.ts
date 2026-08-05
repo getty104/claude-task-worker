@@ -15,9 +15,27 @@ export const DEFAULT_RUN_MODE: RunMode = "default";
 // 未指定・不正値は「渡さない」側（false）へ倒す。
 export const DEFAULT_ADVISOR_ENABLED = false;
 
+// claude CLI の権限モード（https://code.claude.com/docs/ja/permission-modes）。
+// 既定は bypassPermissions（＝従来どおり全許可）。ワーカーは応答するユーザーが
+// 常駐しない自律実行なので、既定を絞ると承認待ちで止まる。
+// 値は claude CLI の `--permission-mode` の choices と一致させる。
+export type PermissionMode = "manual" | "auto" | "acceptEdits" | "dontAsk" | "plan" | "bypassPermissions";
+
+export const PERMISSION_MODES: readonly PermissionMode[] = [
+  "manual",
+  "auto",
+  "acceptEdits",
+  "dontAsk",
+  "plan",
+  "bypassPermissions",
+];
+
+export const DEFAULT_PERMISSION_MODE: PermissionMode = "bypassPermissions";
+
 export interface UserConfig {
   mode: RunMode;
   advisor: boolean;
+  permission: PermissionMode;
   projects: Record<string, string>;
   projectGroups: Record<string, string[]>;
 }
@@ -94,6 +112,14 @@ function parseAdvisor(raw: Record<string, unknown>, path: string): boolean {
   return DEFAULT_ADVISOR_ENABLED;
 }
 
+function parsePermission(raw: Record<string, unknown>, path: string): PermissionMode {
+  if (!("permission" in raw)) return DEFAULT_PERMISSION_MODE;
+  const value = raw["permission"];
+  if (typeof value === "string" && PERMISSION_MODES.includes(value as PermissionMode)) return value as PermissionMode;
+  console.warn(`[config] invalid permission: ${JSON.stringify(value)} in ${path}, using "${DEFAULT_PERMISSION_MODE}"`);
+  return DEFAULT_PERMISSION_MODE;
+}
+
 export function loadUserConfig(): UserConfig {
   const path = getUserConfigPath();
   const raw = readRawConfig();
@@ -123,6 +149,7 @@ export function loadUserConfig(): UserConfig {
 
   const mode = parseMode(raw, path);
   const advisor = parseAdvisor(raw, path);
+  const permission = parsePermission(raw, path);
   const rawProjects = raw["projects"] as Record<string, unknown>;
   const rawProjectGroups = ("projectGroups" in raw ? raw["projectGroups"] : {}) as Record<string, unknown>;
 
@@ -179,7 +206,7 @@ export function loadUserConfig(): UserConfig {
     projectGroups[groupName] = members;
   }
 
-  return { mode, advisor, projects, projectGroups };
+  return { mode, advisor, permission, projects, projectGroups };
 }
 
 // mode はプロセス起動時に確定させる。実行中に設定ファイルが書き換わっても、
@@ -215,39 +242,45 @@ export function resetAdvisorCache(): void {
   cachedAdvisorEnabled = undefined;
 }
 
-// getRunMode と同様、ワーカーは `--project` 無しでも起動されるため、設定ファイル不在・
-// projects セクション破損で advisor の判定を失敗させない。判定できない場合は既定（無効）。
-function readAdvisorEnabled(): boolean {
-  let raw: Record<string, unknown> | undefined;
-  try {
-    raw = readRawConfig();
-  } catch (err) {
-    console.warn(`[config] failed to read config file, advisor disabled: ${err}`);
-    return DEFAULT_ADVISOR_ENABLED;
+// permission も mode / advisor と同じくプロセス起動時に確定させる。
+let cachedPermissionMode: PermissionMode | undefined;
+
+export function getPermissionMode(): PermissionMode {
+  if (cachedPermissionMode === undefined) {
+    cachedPermissionMode = readTopLevel(parsePermission, DEFAULT_PERMISSION_MODE, "permission");
   }
-  if (raw === undefined) return DEFAULT_ADVISOR_ENABLED;
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return DEFAULT_ADVISOR_ENABLED;
-  }
-  return parseAdvisor(raw, getUserConfigPath());
+  return cachedPermissionMode;
+}
+
+// テスト用。設定ファイルを差し替えて再解決させる。
+export function resetPermissionModeCache(): void {
+  cachedPermissionMode = undefined;
 }
 
 // ワーカーは `--project` 無しでも起動されるため、設定ファイルが無い・projects セクションが
-// 壊れているといった理由で実行形態の判定に失敗させない。mode だけを取り出し、
-// 判定できない場合は "default" を返す。設定ファイルが無い・壊れている場合は既定へ倒す。
-function readRunMode(): RunMode {
+// 壊れているといった理由でトップレベル設定の判定に失敗させない。該当キーだけを取り出し、
+// 設定ファイルが無い・壊れている場合は既定へ倒す。
+function readTopLevel<T>(parse: (raw: Record<string, unknown>, path: string) => T, fallback: T, label: string): T {
   let raw: Record<string, unknown> | undefined;
   try {
     raw = readRawConfig();
   } catch (err) {
-    console.warn(`[config] failed to read config file, using "${DEFAULT_RUN_MODE}" mode: ${err}`);
-    return DEFAULT_RUN_MODE;
+    console.warn(`[config] failed to read config file, using default ${label}: ${err}`);
+    return fallback;
   }
-  if (raw === undefined) return DEFAULT_RUN_MODE;
+  if (raw === undefined) return fallback;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return DEFAULT_RUN_MODE;
+    return fallback;
   }
-  return parseMode(raw, getUserConfigPath());
+  return parse(raw, getUserConfigPath());
+}
+
+function readAdvisorEnabled(): boolean {
+  return readTopLevel(parseAdvisor, DEFAULT_ADVISOR_ENABLED, "advisor");
+}
+
+function readRunMode(): RunMode {
+  return readTopLevel(parseMode, DEFAULT_RUN_MODE, "mode");
 }
 
 // herdr モードのタブラベル（ctw:<project>:#<n>）に使うプロジェクト名を、

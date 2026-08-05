@@ -1,7 +1,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { RunMode } from "./user-config";
+import { DEFAULT_PERMISSION_MODE, type PermissionMode, type RunMode } from "./user-config";
 
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
 // herdr モードは herdr タブ内の TUI セッション。どちらも応答するユーザーは常駐しない）。
@@ -150,6 +150,8 @@ export interface ClaudeInvocation {
   // config.json の `advisor` が false のときは呼び出し側が空文字を渡す
   // （ワーカー側でゲートする。`buildClaudeArgs` は渡された値をそのまま反映するだけ）。
   advisorModel?: string;
+  // claude CLI の権限モード。config.json の `permission`（既定 bypassPermissions）。
+  permissionMode?: PermissionMode;
 }
 
 export const CLAUDE_COMMAND = "claude";
@@ -194,12 +196,21 @@ export function systemPromptFilePath(model: string): string {
 // ツール制限・システムプロンプト・モデル指定は両モードで共通にする。
 // システムプロンプトはファイル経由（`--append-system-prompt-file`）で渡す（理由は
 // `systemPromptFilePath()` を参照）。
-export function buildClaudeArgs({ mode, prompt, model, effort, advisorModel }: ClaudeInvocation): string[] {
+export function buildClaudeArgs({
+  mode,
+  prompt,
+  model,
+  effort,
+  advisorModel,
+  permissionMode,
+}: ClaudeInvocation): string[] {
   const advisor = advisorModel?.trim() ?? "";
+  const permission = permissionMode ?? DEFAULT_PERMISSION_MODE;
   return [
     ...(mode === "herdr" ? [] : ["-p"]),
     prompt,
-    "--dangerously-skip-permissions",
+    "--permission-mode",
+    permission,
     "--chrome",
     "--disallowedTools",
     DISALLOWED_TOOLS_ARG,

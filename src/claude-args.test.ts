@@ -138,7 +138,7 @@ test("buildClaudeArgs uses -p only in default mode", () => {
 test("buildClaudeArgs keeps the tool restrictions and the system prompt in both modes", () => {
   for (const mode of ["default", "herdr"] as const) {
     const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "xhigh" });
-    assert.ok(args.includes("--dangerously-skip-permissions"));
+    assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
     assert.equal(args[args.indexOf("--disallowedTools") + 1], DISALLOWED_TOOLS_ARG);
     // The system prompt is passed via a file (see below); the inline flag must not be used.
     assert.ok(!args.includes("--append-system-prompt"));
@@ -164,6 +164,18 @@ test("buildClaudeArgs passes the system prompt via a file so no arg carries a ne
       assert.ok(path.isAbsolute(promptPath), "system prompt file path must be absolute");
       assert.equal(readFileSync(promptPath, "utf8"), systemPromptFor(model));
     }
+  }
+});
+
+test("buildClaudeArgs passes the permission mode via --permission-mode", () => {
+  for (const mode of ["default", "herdr"] as const) {
+    for (const permissionMode of ["manual", "auto", "acceptEdits", "dontAsk", "plan", "bypassPermissions"] as const) {
+      const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "high", permissionMode });
+      assert.equal(args[args.indexOf("--permission-mode") + 1], permissionMode);
+    }
+    // 未指定は既定（bypassPermissions）になる。
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "high" });
+    assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
   }
 });
 

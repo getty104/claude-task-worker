@@ -20,6 +20,8 @@ const {
   resetRunModeCache,
   isAdvisorEnabled,
   resetAdvisorCache,
+  getPermissionMode,
+  resetPermissionModeCache,
   findProjectNameByPath,
 } = (await import("./user-config")) as typeof UserConfigModule;
 
@@ -85,6 +87,7 @@ test("resolveTargetProjects throws UserConfigError for constructor/toString requ
   const config = {
     mode: "default" as const,
     advisor: false,
+    permission: "bypassPermissions" as const,
     projects: { alpha: "/tmp/alpha" },
     projectGroups: { mygroup: ["alpha"] },
   };
@@ -97,6 +100,7 @@ test("resolveTargetProjects resolves known projects and groups normally", () => 
   const config = {
     mode: "default" as const,
     advisor: false,
+    permission: "bypassPermissions" as const,
     projects: { alpha: "/tmp/alpha", beta: "/tmp/beta" },
     projectGroups: { mygroup: ["alpha", "beta"] },
   };
@@ -143,6 +147,7 @@ test("resolveTargetProjects throws UserConfigError when resolution yields no pro
   const config = {
     mode: "default" as const,
     advisor: false,
+    permission: "bypassPermissions" as const,
     projects: {},
     projectGroups: { empty: [] },
   };
@@ -153,6 +158,7 @@ function removeConfigFile(): void {
   rmSync(getUserConfigPath(), { force: true });
   resetRunModeCache();
   resetAdvisorCache();
+  resetPermissionModeCache();
 }
 
 test("loadUserConfig defaults mode to default when it is not specified", () => {
@@ -204,6 +210,45 @@ test("getRunMode caches the mode resolved on first call", () => {
   assert.equal(getRunMode(), "herdr");
   resetRunModeCache();
   assert.equal(getRunMode(), "default");
+});
+
+test("loadUserConfig defaults permission to bypassPermissions", () => {
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().permission, "bypassPermissions");
+});
+
+test("loadUserConfig reads a valid permission mode", () => {
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ permission: "acceptEdits", projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().permission, "acceptEdits");
+});
+
+test("loadUserConfig falls back to bypassPermissions for an unknown permission mode", (t) => {
+  t.mock.method(console, "warn", () => {});
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ permission: "yolo", projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().permission, "bypassPermissions");
+});
+
+test("loadUserConfig falls back to bypassPermissions for a non-string permission value", (t) => {
+  t.mock.method(console, "warn", () => {});
+  removeConfigFile();
+  writeConfigFile(JSON.stringify({ permission: 42, projects: { alpha: process.cwd() } }));
+  assert.equal(loadUserConfig().permission, "bypassPermissions");
+});
+
+test("getPermissionMode reads the config and caches the first resolution", () => {
+  removeConfigFile();
+  resetPermissionModeCache();
+  assert.equal(getPermissionMode(), "bypassPermissions");
+  resetPermissionModeCache();
+  writeConfigFile(JSON.stringify({ permission: "plan", projects: [] }));
+  assert.equal(getPermissionMode(), "plan");
+  writeConfigFile(JSON.stringify({ permission: "manual", projects: [] }));
+  assert.equal(getPermissionMode(), "plan");
+  resetPermissionModeCache();
+  assert.equal(getPermissionMode(), "manual");
 });
 
 test("loadUserConfig defaults advisor to false when it is not specified", () => {
