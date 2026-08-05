@@ -1,3 +1,5 @@
+import { format } from "node:util";
+
 export function getDisplayWidth(str: string): number {
   let width = 0;
   for (const char of str) {
@@ -191,12 +193,65 @@ function taskRow(
     : [`#${t.id}`, title, t.workerName, status, time, duration];
 }
 
-/** ログテーブル1行分。実行中タスクの標準出力/エラー出力の1行に対応する。 */
+/** ログテーブル1行分。実行中タスクの標準出力/エラー出力、またはワーカー自身の console 出力の1行。 */
 export interface LogTableEntry {
-  id: number;
+  /** タスクの Issue/PR 番号。ワーカー自身の console 出力には無い。 */
+  id?: number;
   stream: string;
   text: string;
   time: Date;
+}
+
+/**
+ * 実行中タスクのログとワーカー自身の console 出力を混ぜたローリングバッファ。
+ * 直近 LOG_DISPLAY_LIMIT 行だけ残す。
+ */
+export const logLines: LogTableEntry[] = [];
+
+export function pushLogLine(entry: LogTableEntry): void {
+  if (entry.text.trim().length === 0) return;
+  logLines.push(entry);
+  if (logLines.length > LOG_DISPLAY_LIMIT) {
+    logLines.splice(0, logLines.length - LOG_DISPLAY_LIMIT);
+  }
+}
+
+// captureConsole() でパッチする前の console を握っておく。テーブル描画自身が
+// パッチ済みの console を呼ぶと、描画結果がバッファへ流れ込んで無限に自己増殖する。
+const rawLog = console.log.bind(console);
+const rawClear = console.clear.bind(console);
+
+/** 画面全体をテーブルで差し替える。captureConsole() の影響を受けない。 */
+export function writeScreen(lines: string[]): void {
+  rawClear();
+  rawLog(lines.join("\n"));
+}
+
+/**
+ * console 出力をログテーブルへ流し込む。毎秒の再描画（console.clear）で
+ * エラーログが一瞬しか見えない問題を、テーブルの一部として残すことで解消する。
+ * 端末への直接出力は行わない（どのみち次の再描画で消えるため）。
+ */
+let consoleCaptured = false;
+
+export function captureConsole(): void {
+  if (consoleCaptured) return;
+  consoleCaptured = true;
+
+  // 描画される前にプロセスが終了しても（設定エラーで即 exit する等）ログが消えないよう、
+  // 終了時に残っているログをそのまま端末へ書き出す。
+  process.on("exit", () => {
+    if (logLines.length > 0) rawLog(buildLogTableLines(logLines).join("\n"));
+  });
+
+  const streams = { log: "stdout", info: "stdout", warn: "stderr", error: "stderr" } as const;
+  for (const [method, stream] of Object.entries(streams) as [keyof typeof streams, string][]) {
+    console[method] = (...args: unknown[]) => {
+      for (const line of format(...args).split("\n")) {
+        pushLogLine({ stream, text: line, time: new Date() });
+      }
+    };
+  }
 }
 
 // ANSI エスケープ・制御文字はテーブルの桁揃えを壊すため除去する。
@@ -216,7 +271,7 @@ export function buildLogTableLines(entries: LogTableEntry[]): string[] {
     const text = sanitizeLogText(e.text);
     return [
       formatTime(e.time),
-      `#${e.id}`,
+      e.id === undefined ? "-" : `#${e.id}`,
       e.stream,
       getDisplayWidth(text) > maxTextWidth ? truncateToWidth(text, maxTextWidth) : text,
     ];

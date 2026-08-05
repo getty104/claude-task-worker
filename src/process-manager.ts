@@ -6,13 +6,14 @@ import { getWorkerConfig } from "./config";
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
 import {
-  LOG_DISPLAY_LIMIT,
   TASK_DISPLAY_LIMIT,
   buildLogTableLines,
   buildTaskTableLines,
+  logLines,
+  pushLogLine,
   selectRecentTasks,
+  writeScreen,
 } from "./table";
-import type { LogTableEntry } from "./table";
 import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result";
 import type { TaskResult } from "./task-result";
 import { findProjectNameByPath, getRunMode } from "./user-config";
@@ -41,18 +42,13 @@ export interface TaskEntry {
 
 const tasks = new Map<number, TaskEntry>();
 
-// 実行中タスクの標準出力/エラー出力の直近ログ（全タスク横断のローリングバッファ）。
-// default モードの子プロセスの stdout/stderr を行単位で溜め、直近 LOG_DISPLAY_LIMIT 行だけ残す。
+// 実行中タスクの標準出力/エラー出力の直近ログ（ワーカー自身の console 出力と同じ
+// ローリングバッファを共有する）。default モードの子プロセスの stdout/stderr を行単位で溜める。
 // herdr モードは TUI 起動で stdout をストリームしないため、ここには載らない。
-export const logLines: LogTableEntry[] = [];
+export { logLines };
 
-function pushLogLine(id: number, stream: "stdout" | "stderr", text: string): void {
-  const trimmed = text.replace(/\r$/, "");
-  if (trimmed.trim().length === 0) return;
-  logLines.push({ id, stream, text: trimmed, time: new Date() });
-  if (logLines.length > LOG_DISPLAY_LIMIT) {
-    logLines.splice(0, logLines.length - LOG_DISPLAY_LIMIT);
-  }
+function pushTaskLogLine(id: number, stream: "stdout" | "stderr", text: string): void {
+  pushLogLine({ id, stream, text: text.replace(/\r$/, ""), time: new Date() });
 }
 
 // chunk 境界が行の途中で割れても正しく1行ずつ拾えるよう、未確定の末尾を持ち越す。
@@ -66,12 +62,12 @@ export function makeLogFeeder(id: number, stream: "stdout" | "stderr") {
       partial += decoder.write(chunk);
       const parts = partial.split("\n");
       partial = parts.pop() ?? "";
-      for (const part of parts) pushLogLine(id, stream, part);
+      for (const part of parts) pushTaskLogLine(id, stream, part);
     },
     flush(): void {
       partial += decoder.end();
       if (partial.length > 0) {
-        pushLogLine(id, stream, partial);
+        pushTaskLogLine(id, stream, partial);
         partial = "";
       }
     },
@@ -132,13 +128,14 @@ function renderTable(): void {
     lines.push("Logs", ...logTableLines);
   }
 
-  console.clear();
-  console.log(lines.join("\n"));
+  writeScreen(lines);
 }
 
 let renderInterval: ReturnType<typeof setInterval> | undefined;
 
-function ensureRenderInterval(): void {
+// タスク起動前の console 出力（起動時のエラー等）もテーブルに載せるため、
+// ワーカー起動時にも呼ぶ。多重呼び出しは無視される。
+export function ensureRenderInterval(): void {
   if (renderInterval) return;
   renderInterval = setInterval(renderTable, 1000);
   renderInterval.unref();

@@ -15,7 +15,7 @@ async function loadTable(): Promise<typeof TableModule> {
   return (await import("./table")) as typeof TableModule;
 }
 
-const { getDisplayWidth, truncateToWidth, padToWidth } = await loadTable();
+const { getDisplayWidth, truncateToWidth, padToWidth, buildLogTableLines, logLines, writeScreen } = await loadTable();
 
 export const POLL_INTERVAL_MS = 7 * 1000;
 export const SHUTDOWN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -325,7 +325,12 @@ export function formatUptime(start: Date, now: Date): string {
 
 export function renderSessionTable(sessions: SessionRegistry): void {
   const entries = [...sessions.values()];
-  if (entries.length === 0) return;
+  const logTableLines = buildLogTableLines(logLines);
+  if (entries.length === 0) {
+    // セッションがまだ無くても、captureConsole が拾ったログは表示する。
+    if (logTableLines.length > 0) writeScreen(["Logs", ...logTableLines]);
+    return;
+  }
 
   const maxProjectWidth = 20;
 
@@ -361,8 +366,9 @@ export function renderSessionTable(sessions: SessionRegistry): void {
   }
   lines.push(line("└", "┴", "┘", "─"));
 
-  console.clear();
-  console.log(lines.join("\n"));
+  if (logTableLines.length > 0) lines.push("", "Logs", ...logTableLines);
+
+  writeScreen(lines);
 }
 
 export function monitorSessions(

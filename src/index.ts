@@ -12,7 +12,14 @@ import { checkDependabotWorker } from "./workers/check-dependabot";
 import { epicIssueWorker } from "./workers/epic-issue";
 import { createUiDesignWorker } from "./workers/create-ui-design";
 import { applyUiDesignWorker } from "./workers/apply-ui-design";
-import { shutdown, waitForAllProcesses, setShuttingDown, isShuttingDown } from "./process-manager";
+import {
+  shutdown,
+  waitForAllProcesses,
+  setShuttingDown,
+  isShuttingDown,
+  ensureRenderInterval,
+} from "./process-manager";
+import { captureConsole } from "./table";
 import { removeStaleWorktrees } from "./worktree";
 import { init } from "./commands/init";
 import { install } from "./commands/install";
@@ -177,6 +184,10 @@ async function assertRunModeAvailable(): Promise<void> {
 
 // 起動前の前提チェックをまとめて実行する。
 async function assertRunPrerequisites(): Promise<void> {
+  // 毎秒のテーブル再描画（画面クリア）でエラーログが一瞬しか見えないため、
+  // console 出力をステータステーブル下のログテーブルへ流し込む。
+  captureConsole();
+  ensureRenderInterval();
   await assertRunModeAvailable();
 }
 
@@ -224,6 +235,9 @@ if (hasProjectFilter()) {
     // dispatcher.ts / herdr.ts は --project 使用時にのみ必要なモジュールで、この分岐内で読込む。
     const herdr = (await import("./herdr")) as typeof HerdrModule;
     const dispatcher = (await import("./dispatcher")) as typeof DispatcherModule;
+
+    // セッションテーブルの再描画で消えないよう、console 出力をログテーブルへ流す。
+    captureConsole();
 
     // 起動処理（runDispatcher/monitorSessions）が完了する前にシグナルを受けても
     // タブ・セッションが放置されないよう、起動処理より前にハンドラを登録する。
