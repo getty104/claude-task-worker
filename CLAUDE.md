@@ -247,6 +247,15 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 | create-ui-design | `cc-create-ui-design` | PR に `cc-ui-design` + `cc-triage-scope`、Issue に `cc-ui-design-pr-created` を付与 |
 | apply-ui-design | `cc-ui-design-pr-created` | Issue に `cc-ui-design-ready` + `cc-exec-issue` を付与 |
 
+### `cc-need-human-check`（PR側）と解けないコンフリクトのループ遮断
+
+PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリング候補から除外する（`src/workers/triage-pr.ts` の `excludeLabels`）。同ラベルが付く経路は2つ:
+
+1. **`triage-pr` のパターンC**: CI失敗の原因が**このPRの差分をどう変更しても解消しない種類**（APIコスト/使用量の上限超過、クレジット枯渇、外部サービス障害・レート制限、シークレット/権限不足、CIランナー障害）の場合のみ。型チェック・テスト・Lint・ビルドの失敗や、ベースブランチ由来のテスト失敗は**リポジトリ内の変更（コード・`.pen`・リベース）で直せる余地がある**のでパターンA（`cc-fix-onetime`）へ倒す。デザインPR（`cc-ui-design`）でも基準は同じで、CI失敗を理由に `cc-fix-onetime` を回避しない
+2. **`resolve-conflict` ワーカーの `onCompleted`**: `resolve-pr-conflict` は解消困難（人間の仕様判断が必要・Pencil CLI 不在など）の場合 `git rebase --abort` して「判定: `aborted`」を報告し**正常終了**する。`pr-worker` はこれを完了とみなして `cc-resolve-conflict` を外し `cc-triage-scope` を戻すため、そのままだと `triage-pr` が同じコンフリクトを再検知してラベルを付け直し、解けないコンフリクトを永久にリトライする（毎周Slack通知＋2セッション分のトークンを焼く）。`onCompleted` は出力が `aborted` かつ `getPrMergeable()` が **`CONFLICTING` を返した場合だけ** `cc-need-human-check` を付けてループを断つ（`shouldFlagUnresolvedConflict()`）。`UNKNOWN`（GitHub が再計算中）では付けない。判定にスキルの報告本文だけを使わないのは、abort 後に別経路で解消済みの可能性を排除できないため。この検証のため `PrWorkerConfig.onCompleted` はスキルの stdout を第2引数で受け取る
+
+`.pen` のコンフリクトを `triage-pr` が判別する必要はない（`.pen` は暗号化バイナリで差分から中身が読めないうえ、`resolve-pr-conflict` が `git status` で検出して `resolve-pencil-conflict` スキルへ内部委譲するため）。PR側の `cc-need-human-check` を外すと `triage-pr` のポーリングが再開する。
+
 ### UIデザイン先行ワークフロー（`uiDesign`）
 
 UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを作り、独立したPRとしてマージしてから実装へ進むフロー。`claude-task-worker.json` の `uiDesign.enabled`（boolean、既定 `false`）・`uiDesign.designDir`（既定 `"designs"`）・`uiDesign.yolo`（boolean、既定 `false`）で制御する。設定は `src/config.ts` の `parseUiDesignEntry()`（不正値は警告して既定値）／`getUiDesignConfig()`（読み込み失敗時は既定＝無効へ倒す）で解決する。

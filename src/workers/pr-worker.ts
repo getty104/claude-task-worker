@@ -30,7 +30,7 @@ interface PrWorkerConfig {
   command: string;
   triggerLabel: string;
   excludeLabels?: string[];
-  onCompleted?: (pr: PullRequestWithChecks) => Promise<void>;
+  onCompleted?: (pr: PullRequestWithChecks, output: string) => Promise<void>;
   onFinally?: (pr: PullRequestWithChecks) => Promise<void>;
 }
 
@@ -109,7 +109,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 lastCompletionAt = Date.now();
                 try {
                   if (status === "completed") {
-                    await config.onCompleted?.(pr);
+                    await config.onCompleted?.(pr, output);
                     await notifyTaskCompleted(config.name, name, pr.number, pr.title, prUrl, output);
                   } else {
                     await notifyTaskFailed(config.name, name, pr.number, pr.title, prUrl, output);

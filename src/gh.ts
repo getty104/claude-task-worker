@@ -186,6 +186,15 @@ export async function findPrStateByHeadRef(headRefName: string): Promise<PullReq
   return { number: prs[0].number, state: prs[0].state, mergedAt: prs[0].mergedAt ?? null };
 }
 
+// PR のマージ可能性（MERGEABLE / CONFLICTING / UNKNOWN）を取得する。GitHub 側が再計算中は UNKNOWN を返すため、
+// 呼び出し側は CONFLICTING だけを「コンフリクトあり」として扱うこと。判定基準は triage-pr / resolve-pr-conflict の
+// 両スキルと揃えてある（食い違うとラベルの付与・除去が繰り返される）。
+export async function getPrMergeable(prNumber: number): Promise<string> {
+  const output = await execGh(["pr", "view", String(prNumber), "--json", "mergeable"]);
+  const parsed = JSON.parse(output);
+  return typeof parsed?.mergeable === "string" ? parsed.mergeable : "UNKNOWN";
+}
+
 export async function getIssueBody(issueNumber: number): Promise<string> {
   const output = await execGh(["issue", "view", String(issueNumber), "--json", "body"]);
   const parsed = JSON.parse(output);
