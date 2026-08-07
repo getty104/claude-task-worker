@@ -262,12 +262,15 @@ function sanitizeLogText(text: string): string {
   return text.replace(CONTROL_CHARS, " ").replace(/\t/g, " ");
 }
 
-/** 実行中タスクの標準出力/エラー出力のログをテーブルに組み立てる純粋関数。 */
+/**
+ * 実行中タスクの標準出力/エラー出力のログをテーブルに組み立てる純粋関数。
+ * 新しい行ほど上に来るよう時刻の降順で並べる（テーブル下端はステータス表示に隠れやすいため）。
+ */
 export function buildLogTableLines(entries: LogTableEntry[]): string[] {
   if (entries.length === 0) return [];
 
   const maxTextWidth = 100;
-  const rows = entries.map((e) => {
+  const rows = [...entries].reverse().map((e) => {
     const text = sanitizeLogText(e.text);
     return [
       formatTime(e.time),

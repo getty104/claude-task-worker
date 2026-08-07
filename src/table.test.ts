@@ -422,6 +422,15 @@ test("buildLogTableLines strips ANSI/control chars so the table stays aligned", 
   assert.equal(widths.size, 1);
 });
 
+test("buildLogTableLines lists newer entries first", () => {
+  const lines = buildLogTableLines([
+    log({ id: 1, text: "older", time: at("2026-07-20T12:00:01") }),
+    log({ id: 2, text: "newer", time: at("2026-07-20T12:00:02") }),
+  ]).join("\n");
+
+  assert.ok(lines.indexOf("newer") < lines.indexOf("older"));
+});
+
 test("buildLogTableLines keeps every row the same display width with wide characters", () => {
   const lines = buildLogTableLines([log({ id: 1, text: "ascii line" }), log({ id: 2, text: "日本語のログ行" })]);
 
