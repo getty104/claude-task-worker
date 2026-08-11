@@ -13,11 +13,30 @@ GitHubでPull Request（PR）を作成するスキルです。Instructionsに従
 
 # Instructions
 
+## ステップ0: Issue番号の確定
+
+引数（`$ARGUMENTS`）から Issue 番号を取り出し、以降のすべてのステップで `${ISSUE_NUMBER}` を使う。
+
+```bash
+ISSUE_NUMBER=$(printf '%s' "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
+```
+
+**先頭トークンを指すプレースホルダを直接使わないこと**。呼び出し元が
+`Issue #1948 の実装PRを作成してください。ブランチ: ...` のような自然文を渡すと
+先頭トークンは `Issue` になり、`Closes #Issue` という壊れた本文が生成されて
+マージしてもIssueが自動クローズされない（セッションログの実測で 392 件中 15 件発生し、
+`Closes` 行が欠落したPRが実際に作られている）。呼び出し元はIssue番号だけを渡す規約だが、
+本スキル側で数字を抽出して壊れないようにする。
+
+数字が1つも取れない場合は `ISSUE_NUMBER` を空のままにし、後続のステップは
+「Issue番号が渡されなかった場合」として扱う（ベースブランチはステップ2以降で決定し、
+`Closes` 行は書かない）。
+
 ## PR作成ルール
 
 - PRのdescriptionのテンプレートは`.github/PULL_REQUEST_TEMPLATE.md`を参照し、それに従うこと
 - テンプレート内でコメントアウトされている箇所は必ず削除すること
-- PRのdescriptionには`Closes #$0`と記載すること
+- PRのdescriptionには`Closes #${ISSUE_NUMBER}`と記載すること（`ISSUE_NUMBER` が空の場合は `Closes` 行を書かない）
 - `gh api user --jq '.login'`で取得したユーザーをAssigneesに追加すること
 - PRのベースブランチは「ベースブランチの決定」の手順で決定したブランチにすること
 - PRに`cc-triage-scope`ラベルを付与すること
@@ -26,7 +45,7 @@ GitHubでPull Request（PR）を作成するスキルです。Instructionsに従
 
 ベースブランチは以下の優先順で決定する。必ず 1 → 2 → 3 の順に試すこと。
 
-1. **Epicブランチの確定的導出**: Issue `$0` が parent（Epic Issue）を持つ場合、`cc-epic-<parent番号>` をベースにする
+1. **Epicブランチの確定的導出**: Issue `${ISSUE_NUMBER}` が parent（Epic Issue）を持つ場合、`cc-epic-<parent番号>` をベースにする
 2. **upstream（追跡ブランチ）からの確定的導出**: 現在のブランチの upstream が origin の別ブランチを指している場合、それをベースにする（ワーカーが worktree 作成時に `--track` で分岐元を記録している）
 3. **分岐元ブランチの推定（fallback）**: 1・2 のいずれでも決まらない場合のみ、merge-base距離で分岐元を推定する
 
@@ -39,11 +58,11 @@ git fetch origin --prune
 
 BASE_BRANCH=""
 
-# Issue 番号が指定されている場合のみ実行
-if [ -n "$0" ]; then
+# Issue 番号を取り出せた場合のみ実行
+if [ -n "${ISSUE_NUMBER}" ]; then
   # gh issue view が失敗した場合はエラーを報告して中断
-  PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty') || {
-    echo "Error: Failed to retrieve Issue #$0" >&2
+  PARENT=$(gh issue view "${ISSUE_NUMBER}" --json parent --jq '.parent.number // empty') || {
+    echo "Error: Failed to retrieve Issue #${ISSUE_NUMBER}" >&2
     exit 1
   }
   if [ -n "${PARENT}" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
@@ -52,7 +71,7 @@ if [ -n "$0" ]; then
 fi
 ```
 
-引数のIssue番号が渡されていない場合（`$0`が空）は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。Issue番号が指定されているが `gh issue view` の実行に失敗した場合（ネットワークエラー・権限不足等）はエラーメッセージを出力して処理を中断する。
+Issue番号を取り出せなかった場合（`ISSUE_NUMBER` が空）は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。Issue番号が指定されているが `gh issue view` の実行に失敗した場合（ネットワークエラー・権限不足等）はエラーメッセージを出力して処理を中断する。
 
 ### 2. upstream（追跡ブランチ）からの確定的導出
 
@@ -109,7 +128,7 @@ fi
 ```bash
 gh pr create \
   --title "PRタイトル" \
-  --body "$(printf 'Closes #%s\n\nPRの本文' "$0")" \
+  --body "$(printf 'Closes #%s\n\nPRの本文' "${ISSUE_NUMBER}")" \
   --base "${BASE_BRANCH}" \
   --assignee "$(gh api user --jq '.login')" \
   --label "cc-triage-scope"

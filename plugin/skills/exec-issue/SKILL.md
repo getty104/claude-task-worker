@@ -347,7 +347,7 @@ git diff "origin/${BASE_BRANCH}..HEAD" --stat
 ## フェーズ7: コミットとPR作成
 
 1. `commit-push` skill を呼び出し、変更をコミット・push
-2. `create-pr` skill を `$0` で呼び出し、PRを作成
+2. `create-pr` skill を呼び出し、PRを作成。**args には Issue 番号だけを渡す**（`Skill(skill='claude-task-worker:create-pr', args='$0')`）。ブランチ名や変更内容を添えた自然文を渡さないこと（`create-pr` は数字を抽出して動くが、番号以外を渡す必要はない）
 3. **PR作成の成否を必ず検証する**。現在ブランチに対応するOpen PRが実在するかを確認する：
    ```bash
    HEAD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
