@@ -20,9 +20,10 @@ export interface WorkerRuntimeConfig {
   model: string;
   // claude CLI の `--advisor <model>` に渡すモデル。空文字は「advisor を使わない」を意味する
   // （config.json の `advisor: true` でも `--advisor` を渡さない）。claude 側の制約で
-  // advisor は main モデル以上の能力が必要なため、既定は model が opus のワーカーは
-  // ""（＝無効）にしてある。全ワーカーの既定 model が opus なので既定はすべて ""。
-  // model を sonnet 等へ下げる場合は "opus" を指定できる。
+  // advisor は main モデル以上の能力が必要なため、model が opus のワーカーの既定は
+  // ""（＝無効）。sonnet へ下げたワーカーも既定は "" にしてある（opus advisor を付けると
+  // 下げたぶんのコスト削減を打ち消すため）。品質が落ちた場合の調整弁として
+  // claude-task-worker.json で "opus" を指定できる。
   advisorModel: string;
   effort: string;
   pollingIntervalSeconds: number;
@@ -83,7 +84,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "update-issue": {
     skill: "/claude-task-worker:update-issue",
-    model: "opus",
+    model: "sonnet",
     advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
@@ -110,7 +111,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "triage-created-issue": {
     skill: "/claude-task-worker:triage-created-issue",
-    model: "opus",
+    model: "sonnet",
     advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
@@ -128,7 +129,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "resolve-conflict": {
     skill: "/claude-task-worker:resolve-pr-conflict",
-    model: "opus",
+    model: "sonnet",
     advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 60,
@@ -137,7 +138,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "check-dependabot": {
     skill: "/claude-task-worker:check-dependabot",
-    model: "opus",
+    model: "sonnet",
     advisorModel: "",
     effort: "high",
     pollingIntervalSeconds: 3600,
@@ -146,9 +147,9 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "epic-issue": {
     skill: "/claude-task-worker:create-epic-pr",
-    model: "opus",
+    model: "sonnet",
     advisorModel: "",
-    effort: "high",
+    effort: "medium",
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
@@ -164,9 +165,9 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
   "apply-ui-design": {
     skill: "/claude-task-worker:apply-ui-design",
-    model: "opus",
+    model: "sonnet",
     advisorModel: "",
-    effort: "high",
+    effort: "medium",
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,

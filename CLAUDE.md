@@ -116,9 +116,32 @@ claude-task-worker all             # Run all workers concurrently
 
 分離した2タスクは同一コンポーネントファイルを編集するため**逐次**（マークアップ → 配線）に置く。マークアップ側が数行で収まる場合（表示条件追加・文言差し替え・既存トークンでのスタイル微修正）は分割コストが上回るため分離せず、担当は配線側にする。`exec-issue` / `fix-review-point` は上流が分離していない場合に備え、フェーズ2で同じ基準の分割ルールを持つ。
 
+### ワーカーのモデル選定（セッションログ実測による）
+
+`WORKER_DEFAULTS`（`src/config.ts`）の `model` は、`~/.claude/projects/**/*.jsonl` の全セッション（sonnet期 2026-07-12〜07-25 / opus期 07-25〜08-11、同一スキルで両モデルの実績あり）を集計して決めてある。**単セッションのコストだけで判断してはいけない**。
+
+- **トークン効率は全スキルで opus が勝つ**（同一タスクの出力トークンが6〜66%少なく、ターン数も少ない）。ただし単価が 1.67x（$5/$25 対 $3/$15）なので、トークン削減がそれを超えないと単セッションのコストでは負ける。超えたのは `exec-issue` だけ（opus $11.72 対 sonnet $13.17、サブエージェント込み中央値）
+- **決定的なのは手戻り率**。同一期間で `fix-review-point`/`exec-issue` 比が sonnet 1.16 → opus 0.72、`triage-pr`/`exec-issue` 比が 5.48 → 3.23。Issue 1件を届けるまでの合計は opus $20.94 対 sonnet $25.95 で **opus が19%安い**
+- そのため**成果物の品質が下流の手戻りに直結するワーカーは opus に据え置く**: `exec-issue` / `fix-review-point` / `triage-pr` / `create-issue` / `answer-issue-questions` / `create-ui-design`。この不変条件は `src/config.test.ts` の「workers on the delivery critical path stay on opus」で固定してある
+- **手順が一意で誤りが下流で回収されるワーカーは sonnet へ下げる**: `update-issue`（テンプレート固定の再構成）/ `triage-created-issue`（分岐がスキル本文に書き切ってある。誤ルートは再トリアージで回復）/ `check-dependabot` / `resolve-conflict`（機械的な rebase。解消ミスは `triage-pr` の CI/レビューで捕まり、`.pen` は `model: opus` の `resolve-pencil-conflict` へ委譲される）/ `epic-issue`（コミットログからPR本文生成、`effort: medium`）/ `apply-ui-design`（descriptionへの書き戻し、`effort: medium`）。単セッションで opus の 1.2〜1.5x 安い
+- 交絡: sonnet期と opus期は重なっておらず、その間にプロンプト調整も入っている。手戻り率の差の全部がモデル差とは言い切れない（方向は一貫している）
+- sonnet-5 は 2026-08-31 まで導入価格 $2/$10。その価格では sonnet の方が11%安くなるが、恒久設定は list 価格で判断する
+
+### スキルの `model:` / `effort:` は `context: fork` が無いと効かない
+
+モデルは会話の途中で切り替わらないため、スキルのフロントマターに書いた `model:` / `effort:` が実際に適用されるのは **`context: fork`（別コンテキストのサブエージェントとして起動）を併記した場合だけ**。fork が無いスキルは呼び出し元のモデルでそのまま走り、宣言は黙って無視される。
+
+実測での裏付け: opus の `exec-issue` セッション244件すべてでメインスレッドのモデルが単一だった。同スキルは毎回 `commit-push`（当時 `model: sonnet` / fork 無し）を呼んでいるのに、sonnet のターンが1つも現れない。fork 済みの `create-pr` は別コンテキストなのでそもそも同一セッションに現れない。
+
+効かない宣言を残すと「このスキルは sonnet で動いている」という誤った前提でコスト試算やモデル調整をしてしまうため、`src/skill-frontmatter.test.ts` の「a skill declaring model/effort also declares context: fork」で機械的に固定してある。あわせて**ワーカー起動スキル（12個）には `model:` も `context:` も書かない**ことも同ファイルで固定している（ワーカーのモデルは `claude-task-worker.json` の `workers.<name>.model` が決めるため、スキル側に書くとその設定を上書きしてしまう）。
+
+fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict` / `breakdown-issues` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`。
+
+**`context: fork` へ Skill ツール経由の args は届く**。かつて Claude Code のバグ（anthropics/claude-code#34164）で届かず argsファイルの二重チャネルで回避していたが、上流で修正済み。実運用のPRで `create-pr` に渡した Issue 番号が `Closes #<N>` とベースブランチ（`cc-epic-<N>`）の両方に正しく反映されていることを確認している。
+
 ### Opus 実行スキル/エージェントのプロンプト方針
 
-`WORKER_DEFAULTS`（`src/config.ts`）の**全ワーカー**（既定 `model: "opus"`。`DEFAULT_WORKER_CONFIG` も含む）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
+`WORKER_DEFAULTS`（`src/config.ts`）の **`model: opus` のワーカー**（`exec-issue` / `fix-review-point` / `triage-pr` / `create-issue` / `answer-issue-questions` / `create-ui-design` / `resolve-conflict`。`DEFAULT_WORKER_CONFIG` の既定も `opus`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
 
 - **スコープの規律**: 依頼された範囲だけを実装/回答/分解し、気づいた別の改善は成果物に混ぜず報告へ1行で挙げる。依頼が誤っていると考える場合も、指摘を1-2行添えたうえで依頼どおりのスコープで完遂する（黙って縮小・拡大・別物への置き換えをしない）。Issue description・TODOリスト・`.pen` は後段の実装スコープそのものになるため、ここが膨らむと実装まで膨らむ
 - **成果物の分量**: Issueコメント・PR body・description・最終報告は「必要な実質だけ」。同じ内容の言い換え・埋め草セクション・該当なしの節を書かない。最終報告は結論（何をしたか／どこで止まったか）から書く。Opus 5 はディスクに書くドキュメントも会話も既定で長いため、明示的な分量指示が必要
@@ -142,7 +165,7 @@ claude-task-worker all             # Run all workers concurrently
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
+`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
@@ -152,9 +175,9 @@ claude-task-worker all             # Run all workers concurrently
 - **サブエージェントは人に質問できない**: opus 側と同じ理由で、`general-purpose-assistant` / `lightweight-assistant` / `check-library` の「ユーザーに確認する」を「安全側の既定を選んで前提を報告する」「差し戻す」へ置き換えた
 - **探索手段の指示を CodeGraph 優先へ統一**: `general-purpose-assistant` に残っていた「LSPツールを最優先」は、システムプロンプトおよび `explore-agent` の CodeGraph 優先方針と矛盾していたため、CodeGraph → LSP → `Grep`/`Glob` の順に修正した
 
-上記のうち `triage-created-issue` / `triage-pr` のスキル本文の調整は、**既定モデルを全ワーカー opus に揃えた後もそのまま残してある**。「主観語で判定を分けない」「例示リストに判定基準を併記する」はモデルに依らず判定を安定させる書き方であり、`model` を `sonnet` へ下げ直した場合にも効き続ける必要があるため。
+上記のうち `triage-pr` のスキル本文の調整は、**同ワーカーを opus に据え置いた後もそのまま残してある**（`triage-created-issue` は sonnet のまま）。「主観語で判定を分けない」「例示リストに判定基準を併記する」はモデルに依らず判定を安定させる書き方であり、`model` を `sonnet` へ下げ直した場合にも効き続ける必要があるため。
 
-effort は全ワーカーで `high` のまま（Sonnet 5 の既定）。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
+effort は大半のワーカーで `high`（Sonnet 5 の既定）。手順が一意な `epic-issue` / `apply-ui-design` のみ `medium`。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
 
 ### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
 
@@ -184,7 +207,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 1. `advisor: false`（既定）なら `advisorModel` の指定に関わらず渡さない。判定はワーカー側（`issue-worker.ts` / `pr-worker.ts`）で行い、無効時は `buildClaudeExecution()` へ空文字を渡す
 2. `advisorModel` が空文字（または未指定でその既定が空文字）なら `buildClaudeArgs()` が `--advisor` ごと省く。**値なしの `--advisor` を渡すと後続フラグを値として食われる**ため、必ずモデル名とセットでのみ付ける
 
-`advisorModel` のパースは `parseWorkerEntry()` の他フィールドと違い**空文字を有効値として受け付ける**（「advisor を使わない」の明示指定）。既定値は claude 側の制約（advisor は main モデル以上の能力が必要）に合わせ、全ワーカー `""`（＝渡さない）にしてある（既定 `model` が全て `opus` のため、opus advisor を付けても意味がない）。`model` を `sonnet` 等へ下げたワーカーには `"opus"` を指定できる。
+`advisorModel` のパースは `parseWorkerEntry()` の他フィールドと違い**空文字を有効値として受け付ける**（「advisor を使わない」の明示指定）。既定値は全ワーカー `""`（＝渡さない）。opus のワーカーは claude 側の制約（advisor は main モデル以上の能力が必要）で opus advisor を付けても意味がなく、sonnet へ下げたワーカーは opus advisor を付けると下げたぶんのコスト削減を打ち消すため。sonnet ワーカーの品質が落ちた場合の調整弁として `"opus"` を指定できる。
 
 ### `mode`（タスクの実行形態）
 

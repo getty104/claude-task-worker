@@ -4,6 +4,9 @@ description: 直近N日（デフォルト7日）にマージされた `cc-ui-des
 disable-model-invocation: true
 argument-hint: "[期間（日数、省略時は7）] [関連Issue番号（任意）]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
+model: opus
+effort: high
+context: fork
 ---
 
 # Update DESIGN.md

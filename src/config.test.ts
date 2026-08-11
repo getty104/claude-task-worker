@@ -72,14 +72,24 @@ test("parseUiDesignEntry falls back to the default for a non-boolean yolo", (t) 
   assert.equal(parseUiDesignEntry({ enabled: true, yolo: "true" }).yolo, false);
 });
 
-test("every worker defaults to opus without an advisor", () => {
+test("every worker defaults to a known model without an advisor", () => {
   // claude 側の制約: advisor は main モデル以上の能力が必要。opus のワーカーに
-  // opus advisor を付けても意味がないため既定は空文字（＝渡さない）。
+  // opus advisor を付けても意味がないため既定は空文字（＝渡さない）。sonnet へ
+  // 下げたワーカーも既定は空文字で、必要なら claude-task-worker.json で付ける。
   assert.equal(DEFAULT_WORKER_CONFIG.model, "opus");
   assert.equal(DEFAULT_WORKER_CONFIG.advisorModel, "");
   for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
-    assert.equal(config.model, "opus", `WORKER_DEFAULTS.${name}.model`);
+    assert.ok(["opus", "sonnet"].includes(config.model), `WORKER_DEFAULTS.${name}.model=${config.model}`);
     assert.equal(config.advisorModel, "", `WORKER_DEFAULTS.${name}.advisorModel`);
+  }
+});
+
+test("workers on the delivery critical path stay on opus", () => {
+  // セッションログの実測（sonnet期 vs opus期）で、opus は手戻り（fix-review-point/exec-issue）が
+  // 1.16 → 0.72、PR再トリアージが 5.48 → 3.23 に減った。単セッションのコストが高くても
+  // Issue 1件あたりの合計では opus が安い。下げると手戻りが増えて逆に高くつく。
+  for (const name of ["exec-issue", "fix-review-point", "triage-pr", "create-issue"]) {
+    assert.equal(WORKER_DEFAULTS[name].model, "opus", `WORKER_DEFAULTS.${name}.model`);
   }
 });
 

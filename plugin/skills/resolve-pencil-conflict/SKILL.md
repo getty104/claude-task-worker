@@ -3,6 +3,7 @@ name: resolve-pencil-conflict
 description: gitコンフリクト状態になった.penファイル（Pencilで作成されたデザインファイル）を、Pencil CLI（`pencil`コマンド）とgitだけで解消するスキル。.penは暗号化バイナリでテキストマージが不可能なため、コンフリクトマーカーの手編集や`git mergetool`は絶対に使わず、「片側採用 → もう一方の変更をPencilで再適用」のフローで解消する。ユーザーが.penファイルのコンフリクト解消、rebase/merge中に`UU`/`AA`状態になった.penの解消、テキストマージで破損した.penの復旧などを依頼した場合に必ずこのスキルを使用する。通常の.penの編集・新規作成は`edit-pencil-design`スキル、PR全体のコンフリクト解消フロー（rebase起点・force-push）は`resolve-pr-conflict`スキルの担当。
 model: opus
 effort: high
+context: fork
 ---
 
 # Resolve Pencil Conflict
