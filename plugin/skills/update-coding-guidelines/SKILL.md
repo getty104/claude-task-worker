@@ -4,6 +4,9 @@ description: 直近N日（デフォルト1日）のPRレビューで繰り返し
 disable-model-invocation: true
 argument-hint: "[期間（日数、省略時は1）] [関連Issue番号（任意）]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Read, Write, Edit, Skill
+model: opus
+effort: high
+context: fork
 ---
 
 # Update Coding Guidelines

@@ -4,6 +4,7 @@ description: "依頼された内容を要件とTODOに分解し、タスクご�
 argument-hint: "[task-description]"
 model: opus
 effort: high
+context: fork
 ---
 
 # Breakdown Issues
