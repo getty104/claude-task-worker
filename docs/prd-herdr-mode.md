@@ -60,7 +60,7 @@
     "time-card": "/absolute/path/to/time-card"
   },
   "projectGroups": {
-    "igsa": ["time-card"],
+    "web": ["time-card"],
     "all-mine": ["my-app", "time-card"]
   }
 }

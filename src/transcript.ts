@@ -18,8 +18,8 @@ import { join } from "node:path";
  */
 
 // cwd のエンコード規則（`/` と `.` と `_` の扱い）は Claude Code の実装依存で、
-// 実測でも `dementia_app` が `dementia-app` になるなど不可逆。ディレクトリ名を
-// 再現しようとせず、UUID であるセッションIDでディレクトリを総なめする。
+// 実測でもアンダースコアがハイフンへ潰れる（`my_app` → `my-app`）など不可逆。
+// ディレクトリ名を再現しようとせず、UUID であるセッションIDでディレクトリを総なめする。
 export function transcriptRoot(): string {
   return join(homedir(), ".claude", "projects");
 }

@@ -57,13 +57,25 @@ claude-task-worker all             # Run all workers concurrently
 2. 一定間隔（ワーカーごとに設定）でGitHub APIをポーリング
 3. ラベル・アサイン条件でフィルタリング
 4. `isRunning()` で重複実行防止
-5. トリガーラベル除去 → `cc-in-progress` ラベル付与
-6. `.claude/worktrees/<worktreeId>` にワーカー自身がworktreeを生成し（`claude --worktree` は locked worktree の残骸問題があるため不使用）、Claude CLI をそのworktreeをcwdとして起動する（`mode: "default"` は `claude -p` の非同期spawn、`mode: "herdr"` は herdr のタスク専用タブでTUI起動。後述の「`mode`（タスクの実行形態）」参照）
-7. 完了時コールバックでラベル・worktree・ローカルブランチをクリーンアップ
+5. `hasOpenBlockers()` で Open な blockedBy を持つIssueを除外（後述）
+6. トリガーラベル除去 → `cc-in-progress` ラベル付与
+7. `.claude/worktrees/<worktreeId>` にワーカー自身がworktreeを生成し（`claude --worktree` は locked worktree の残骸問題があるため不使用）、Claude CLI をそのworktreeをcwdとして起動する（`mode: "default"` は `claude -p` の非同期spawn、`mode: "herdr"` は herdr のタスク専用タブでTUI起動。後述の「`mode`（タスクの実行形態）」参照）
+8. 完了時コールバックでラベル・worktree・ローカルブランチをクリーンアップ
 
 サブIssue（`parent` を持つIssue）の worktree は `cc-epic-<parent番号>` から作られる（`issue-worker.ts`）。**分析系スキルもこのベースブランチを「ターゲットブランチ」として明示的に導出する**（`create-issue-from-issue-number` / `update-issue` / `answer-issue-questions` の冒頭ステップ。導出ロジックは `exec-issue` / `create-pr` と同一の parent → upstream → default の順）。worktree 自体は正しく epic ブランチ由来なのに、スキル本文がベースブランチの概念を持たないと、モデルが暗黙にデフォルトブランチをターゲットと見なし、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであること**を「マージされていないがどうするか」という本来不要な検討事項・確認事項として description や回答コメントへ書き込む。同ステップでは (1) デフォルトブランチとの差分を論点にしない、(2) Epic PR の未マージは正常状態として確認事項化しない、(3) `gh pr list` の関連PRは `baseRefName == BASE_BRANCH` のものだけを対象にする（Epic PR 自身を除外する）、の3点を規定している。
 
 ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
+
+#### blockedBy ガードの二重化（検索インデックス経由では取りこぼす）
+
+Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`listIssuesByLabel()` の検索クエリに入れた `-is:blocked` **だけでは足りない**。同修飾子は正しく動作するが、判定材料が検索インデックスなので次の2点で「まだブロック扱いになっていない」Issueを拾いうる:
+
+1. **`gh issue create --blocked-by` が2フェーズ**。Issue作成（ラベル付与含む）と依存登録が別々のAPI呼び出しになるため、Issue の timeline 上でもラベル付与イベントと `blocked_by_added` の間に実測2〜3秒の隙間ができる。`create-issue` のポーリングは60秒間隔なので、この窓に当たると新規スコープIssueを非ブロック状態で掴む
+2. **依存が後付けされる経路がある**。依存を登録するのは `breakdown-issues`（作成時の `--blocked-by`）と `update-issue`（`gh issue edit --add-blocked-by`）だけで、`create-issue` ワーカーが回す `create-issue-from-issue-number` は `post-issue-body` を `mode=edit` で呼ぶ。同スキルは `mode=edit` で `blocked_by` を明示的に無視するため、分析中に依存を発見しても登録できない。実運用の timeline 調査では、blockedBy を持つIssueの大半が作成の数分〜数時間後に初めて `blocked_by_added` を付けられており、その間は検索側のガードでは原理的に止められない
+
+そこで `issue-worker.ts` は候補ループの中で、`isRunning()` の直後・`preflight` の手前に `hasOpenBlockers()`（`gh issue view <n> --json blockedBy`）を挟み、**検索インデックスを経由しない実体**で最終判定する。判定は `-is:blocked` と同じ意味論で、`state === "OPEN"` のブロッカーが1件でもあればスキップする（依存を貼ったまま解消済みのIssueは通す）。取得に失敗した場合は検索側のガードに委ねて続行する（`gh` の一時障害で全ワーカーが止まる方が影響が大きい）。
+
+上記2の「依存が後付けされる」構造自体は残っている（依存が未登録の間は GitHub 側にブロック情報が存在しないため、どのガードでも検出できない）。
 
 ### 同期実行ガード（`claude -p` セッションの早期終了防止）
 
@@ -222,7 +234,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 2. `waitForHerdrTask()` が agentステータスをポーリングし、**`done`**、または**一度 `working` を観測した後の `idle`** を完了とみなす（後者の seenWorking ガードは起動直後の `idle`/`unknown` を完了と誤判定しないため）。`blocked` は人が herdr のペインで解除する前提で待機を継続し、ステータステーブルには `running:blocked` と表示する。ペイン消失（`pane_not_found`）は失敗扱い
 3. 完了時の出力（`claude -p` の stdout・exit code の代替）は **transcript 優先・ペイン内容フォールバック**の2段構え。`agentGet` が返す claude のセッションID（`agent_session.value`）を鍵に `~/.claude/projects/*/<sessionId>.jsonl` を引き、最終アシスタント発言を Slack 通知本文に使う（`src/transcript.ts`）。引けない場合のみ `paneRead --source recent` のペイン内容を使い、空振り検知（内容が空なら失敗）もそちらで行う
    - **ペイン内容をそのまま通知に載せると装飾しか届かない**。TUI のペインは「会話ログ + 空行パディング + 入力ボックス + ステータスバー」で構成され、Slack 通知は末尾1000文字しか載せないため、実際に届くのは罫線・`❯` プロンプト・`ctx 7% │ 5h 26%` といった TUI のクロームだけになる（完了報告は空行パディングより上にあり切り落とされる）
-   - transcript のプロジェクトディレクトリ名は cwd のエンコード結果（実測で `dementia_app` → `dementia-app` と不可逆）なので再現しようとせず、UUID であるセッションIDでディレクトリを総なめして探す（`findTranscriptPath()`）
+   - transcript のプロジェクトディレクトリ名は cwd のエンコード結果（実測でアンダースコアがハイフンへ潰れる `my_app` → `my-app` のように不可逆）なので再現しようとせず、UUID であるセッションIDでディレクトリを総なめして探す（`findTranscriptPath()`）
    - サブエージェントの発言（`isSidechain: true`）は除外する。`claude -p` の stdout 相当はメインエージェントの完了報告であり、サブエージェントの報告は途中経過
 4. **出力回収 → `stopHerdrTask()` → 完了コールバック**の順で片付ける。claudeがworktreeを掴んだままだと `removeWorktree()` が失敗しうるため、セッション終了はラベル操作・worktree削除より先に行う
 

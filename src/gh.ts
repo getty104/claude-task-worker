@@ -364,6 +364,25 @@ export async function hasLabel(type: "issue" | "pr", number: number, label: stri
   });
 }
 
+/**
+ * Issue が Open な blockedBy（GitHub Issue Dependencies）を持つかを実体から判定する。
+ *
+ * listIssuesByLabel の `-is:blocked` は検索インデックス経由のため、
+ * (1) `gh issue create --blocked-by` が「Issue作成 → 依存付与」の2フェーズで動き
+ *     ラベル付与から依存登録まで実測2〜3秒の隙間があること、
+ * (2) その後もインデックス反映に遅延があること、
+ * の2点で「まだブロック扱いになっていない」Issueを拾いうる。起動直前に本関数で
+ * 引き直すことで、検索インデックスを経由しない実体の状態で最終判定する。
+ */
+export async function hasOpenBlockers(issueNumber: number): Promise<boolean> {
+  return withRetry(async () => {
+    const output = await execGh(["issue", "view", String(issueNumber), "--json", "blockedBy"]);
+    const parsed = JSON.parse(output);
+    const nodes: { state: string }[] = parsed?.blockedBy?.nodes ?? [];
+    return nodes.some((node) => node.state === "OPEN");
+  });
+}
+
 export async function removeLabel(type: "issue" | "pr", number: number, label: string): Promise<void> {
   await withRetry(async () => {
     try {

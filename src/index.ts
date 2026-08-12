@@ -96,7 +96,7 @@ Example:
   claude-task-worker all --label priority-high --label needs-design
   claude-task-worker yolo --epic 100 --epic 200 --label priority-high
   claude-task-worker all --project all
-  claude-task-worker all --project igsa
+  claude-task-worker all --project web
   claude-task-worker exec-issue --project my-app --epic 100`);
 }
 

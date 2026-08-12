@@ -6,7 +6,7 @@ import type * as GhModule from "./gh";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { hasLabel, findPrNumberClosingIssue } = (await import("./gh")) as typeof GhModule;
+const { hasLabel, hasOpenBlockers, findPrNumberClosingIssue } = (await import("./gh")) as typeof GhModule;
 
 const REPO_INFO_STDOUT = JSON.stringify({
   owner: { login: "getty104" },
@@ -154,4 +154,33 @@ test("findPrNumberClosingIssue returns null when the referencing PR's headRefNam
     }),
   );
   assert.equal(await findPrNumberClosingIssue(1, "adj-noun-1234"), null);
+});
+
+test("hasOpenBlockers returns true when any blockedBy issue is still open", async (t) => {
+  mockExecFile(t, JSON.stringify({ number: 3, blockedBy: { nodes: [{ number: 1, state: "OPEN" }], totalCount: 1 } }));
+  assert.equal(await hasOpenBlockers(3), true);
+});
+
+test("hasOpenBlockers returns false when every blockedBy issue is closed", async (t) => {
+  // 検索の -is:blocked と同じ意味論（Openなブロッカーだけを見る）に揃える。
+  // 依存を貼ったまま解消済みのIssueを止め続けてはいけない。
+  mockExecFile(
+    t,
+    JSON.stringify({
+      number: 3,
+      blockedBy: {
+        nodes: [
+          { number: 1, state: "CLOSED" },
+          { number: 2, state: "CLOSED" },
+        ],
+        totalCount: 2,
+      },
+    }),
+  );
+  assert.equal(await hasOpenBlockers(3), false);
+});
+
+test("hasOpenBlockers returns false when the issue has no dependencies", async (t) => {
+  mockExecFile(t, JSON.stringify({ number: 3, blockedBy: { nodes: [], totalCount: 0 } }));
+  assert.equal(await hasOpenBlockers(3), false);
 });
