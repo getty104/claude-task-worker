@@ -1,6 +1,14 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
 import { getWorkerConfig } from "../config";
-import { getCurrentUser, getRepoInfo, listIssuesByLabel, listIssuesByNumbers, removeLabel, addLabel } from "../gh";
+import {
+  getCurrentUser,
+  getRepoInfo,
+  hasOpenBlockers,
+  listIssuesByLabel,
+  listIssuesByNumbers,
+  removeLabel,
+  addLabel,
+} from "../gh";
 import type { Issue } from "../gh";
 import { syncDefaultBranch, ensureEpicBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
@@ -68,6 +76,20 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
         for (const issue of candidates) {
           if (isRunning(issue.number)) continue;
           if (isWorkerAtCapacity(config.name)) break;
+
+          // 検索側の -is:blocked は検索インデックス経由で取りこぼしうるため、起動直前に
+          // 実体を引き直す。取得に失敗した場合は検索側のガードに委ねて続行する
+          // （gh の一時障害で全ワーカーが止まる方が影響が大きい）。
+          let blocked = false;
+          try {
+            blocked = await hasOpenBlockers(issue.number);
+          } catch (err) {
+            console.error(`[${config.name}] hasOpenBlockers failed for #${issue.number}: ${err}`);
+          }
+          if (blocked) {
+            console.log(`[${config.name}] #${issue.number}: skipped (blocked by an open issue)`);
+            continue;
+          }
 
           if (config.preflight) {
             const action = await config.preflight(issue);
