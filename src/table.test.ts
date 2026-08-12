@@ -440,14 +440,18 @@ test("buildLogTableLines keeps every row the same display width with wide charac
 
 // --- captureConsole ---
 
+// 「端末へ出さない」の検証にあたって process.stdout.write を差し替えてはいけない。
+// node:test の子プロセスは実行結果を process.stdout 経由で親へ返すため、差し替えている
+// 間にレポーターが書き込むとその分が失われ、親のデシリアライズが
+// "Unable to deserialize cloned data" で落ちる（個々のテストは全て pass するのに
+// ファイル単位で失敗する）。captureConsole() のパッチ後の console はそもそも端末に
+// 触れないので、パッチ前の console.error が呼ばれないことだけを見れば足りる。
 test("captureConsole keeps console output in the log buffer instead of the terminal", () => {
-  const originalError = console.error;
-  const originalWrite = process.stdout.write.bind(process.stdout);
+  const original = { log: console.log, info: console.info, warn: console.warn, error: console.error };
   let wroteToTerminal = false;
-  process.stdout.write = (() => {
+  console.error = (() => {
     wroteToTerminal = true;
-    return true;
-  }) as typeof process.stdout.write;
+  }) as typeof console.error;
 
   try {
     captureConsole();
@@ -464,7 +468,11 @@ test("captureConsole keeps console output in the log buffer instead of the termi
     const widths = new Set(buildLogTableLines(pushed).map((l) => getDisplayWidth(l)));
     assert.equal(widths.size, 1);
   } finally {
-    process.stdout.write = originalWrite;
-    console.error = originalError;
+    // captureConsole() は console.log/info/warn/error の4つを差し替えるので全て戻す。
+    Object.assign(console, original);
+    // captureConsole() が登録する process.on("exit") は残ログを端末へ書き出す。
+    // 解除手段が無いので、バッファを空にして終了時の書き出し自体を起こさせない
+    // （これも上と同じ理由で stdout を汚してはいけない）。
+    logLines.length = 0;
   }
 });
