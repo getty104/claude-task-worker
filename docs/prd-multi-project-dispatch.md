@@ -46,7 +46,7 @@
     "time-card": "/absolute/path/to/time-card"
   },
   "projectGroups": {
-    "igsa": ["time-card"],
+    "web": ["time-card"],
     "all-mine": ["my-app", "time-card"]
   }
 }
@@ -84,7 +84,7 @@ claude-task-worker <command> [--project <projectName>] [既存オプション...
 ```bash
 claude-task-worker all --project all
 claude-task-worker all --project my-app --project time-card
-claude-task-worker all --project igsa            # グループ igsa に含まれる全プロジェクト
+claude-task-worker all --project web            # グループ web に含まれる全プロジェクト
 claude-task-worker exec-issue --project my-app --epic 100
 ```
 

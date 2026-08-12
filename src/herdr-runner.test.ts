@@ -33,7 +33,7 @@ test("toAgentName converts a task tab label into a valid herdr agent name", () =
 test("toAgentName satisfies the herdr agent name rules for tricky inputs", () => {
   // 大文字・全角・記号を含む、数字始まり、先頭記号、超長文字列でも規則を満たす。
   const cases = [
-    taskTabLabel("Dementia_App", 12),
+    taskTabLabel("My_App", 12),
     taskTabLabel("プロジェクト", 7),
     taskTabLabel("123numeric", 9),
     taskTabLabel("a".repeat(60), 999999),
