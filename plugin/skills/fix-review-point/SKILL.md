@@ -114,7 +114,25 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 - 修正タスクの一覧（目的・対象範囲・完了条件付き）
 - タスク間の依存関係
 
-**修正点がない場合**: `gh pr checks $0` でCIの全チェックが Pass していることを確認する。Pass している場合は `gh pr merge $0 --merge --delete-branch` でPRをマージして終了する。チェックが失敗中の場合はマージせず、CI失敗状況をレビュアーに報告して終了する。
+**修正点がない場合**: `gh pr checks $0` でCIの全チェックが Pass していることを確認する。Pass している場合は `gh pr merge $0 --merge --delete-branch` でPRをマージし、下記「マージ後の関連Issue連動Close」を実行して終了する。チェックが失敗中の場合はマージせず、CI失敗状況をレビュアーに報告して終了する。
+
+### マージ後の関連Issue連動Close
+
+GitHubの `Closes #<issue番号>` 記法による自動クローズは**デフォルトブランチへのマージ時にのみ**発動する。`cc-epic-<N>` のような非デフォルトブランチへ向いたPRをマージしてもIssueは閉じず、Epic のサブIssueが未完のまま残って `create-epic-pr` の起動条件（全サブIssueのクローズ）が満たされなくなる。そのため、マージ前にベースブランチを控えておき、デフォルトブランチと**一致しない**場合のみ明示的にクローズする。
+
+```bash
+BASE_BRANCH=$(gh pr view $0 --json baseRefName -q .baseRefName)
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+```
+
+マージ成功後、`BASE_BRANCH` が `DEFAULT_BRANCH` と一致する場合はGitHubが自動でクローズするためスキップする。一致しない場合はPR本文から関連Issue番号を抽出し、抽出できたすべての番号を `--reason completed`（実装がEpicブランチへ取り込まれた完了クローズ。マージせずクローズする場合の `--reason "not planned"` とは異なる）でクローズする。
+
+```bash
+gh pr view $0 --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'
+gh issue close <issue番号> --reason completed
+```
+
+関連Issueが抽出できない場合は、その旨を最終報告に含めること。
 
 返却内容は後続フェーズで各サブエージェントに渡すため、全文を保持しておくこと。
 
