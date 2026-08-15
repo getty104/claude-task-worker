@@ -147,7 +147,9 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 効かない宣言を残すと「このスキルは sonnet で動いている」という誤った前提でコスト試算やモデル調整をしてしまうため、`src/skill-frontmatter.test.ts` の「a skill declaring model/effort also declares context: fork」で機械的に固定してある。あわせて**ワーカー起動スキル（12個）には `model:` も `context:` も書かない**ことも同ファイルで固定している（ワーカーのモデルは `claude-task-worker.json` の `workers.<name>.model` が決めるため、スキル側に書くとその設定を上書きしてしまう）。
 
-fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict` / `breakdown-issues` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`。
+fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`。
+
+**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。
 
 **`context: fork` へ Skill ツール経由の args は届く**。かつて Claude Code のバグ（anthropics/claude-code#34164）で届かず argsファイルの二重チャネルで回避していたが、上流で修正済み。実運用のPRで `create-pr` に渡した Issue 番号が `Closes #<N>` とベースブランチ（`cc-epic-<N>`）の両方に正しく反映されていることを確認している。
 
