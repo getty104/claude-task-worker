@@ -30,6 +30,13 @@ interface PrWorkerConfig {
   command: string;
   triggerLabel: string;
   excludeLabels?: string[];
+  /**
+   * 完了時にトリガーラベルを外さない。`dependencies` のように GitHub 側（Dependabot）が
+   * 付ける分類ラベルをトリガーに使うワーカー向け。ワーカーが外すとPRの分類情報が失われる。
+   * 使う場合、再ポーリングで無限に拾い続けないよう `onFinally` で `excludeLabels` に
+   * 含まれるラベルを必ず付けること。
+   */
+  keepTriggerLabel?: boolean;
   onCompleted?: (pr: PullRequestWithChecks, output: string) => Promise<void>;
   onFinally?: (pr: PullRequestWithChecks) => Promise<void>;
 }
@@ -117,11 +124,13 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 } catch (err) {
                   console.error(`[${config.name}] post-task error for PR #${pr.number}: ${err}`);
                 } finally {
-                  await removeLabel("pr", pr.number, config.triggerLabel).catch((err) =>
-                    console.error(
-                      `[${config.name}] removeLabel ${config.triggerLabel} failed for PR #${pr.number}: ${err}`,
-                    ),
-                  );
+                  if (!config.keepTriggerLabel) {
+                    await removeLabel("pr", pr.number, config.triggerLabel).catch((err) =>
+                      console.error(
+                        `[${config.name}] removeLabel ${config.triggerLabel} failed for PR #${pr.number}: ${err}`,
+                      ),
+                    );
+                  }
                   if (hadTriageScope) {
                     await addLabel("pr", pr.number, LABEL_TRIAGE_SCOPE).catch((err) =>
                       console.error(
