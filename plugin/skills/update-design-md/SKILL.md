@@ -1,12 +1,15 @@
 ---
 name: update-design-md
-description: 直近N日（デフォルト7日）にマージされた `cc-ui-design` ラベル付きPR（UIデザインPR）から確定したビジュアルアイデンティティ（カラー・タイポグラフィ・スペーシング・コンポーネント）をリポジトリルートの `DESIGN.md`（google-labs-code/design.md フォーマット）へ集約・更新し、`design.md` CLI の lint を通してから commit-push + create-pr でPRを作成する（`cc-triage-scope` ラベル + 自分自身をAssignee）。`DESIGN.md` は pencil-design-updater がデザイン時の前提として読み込む。
+description: 直近N日（デフォルト1日）にマージされた `cc-ui-design` ラベル付きPR（UIデザインPR）から確定したビジュアルアイデンティティ（カラー・タイポグラフィ・スペーシング・コンポーネント）をリポジトリルートの `DESIGN.md`（google-labs-code/design.md フォーマット）へ集約・更新し、`design.md` CLI の lint を通してから commit-push + create-pr でPRを作成する（`cc-triage-scope` ラベル + 自分自身をAssignee）。`DESIGN.md` は pencil-design-updater がデザイン時の前提として読み込む。
 disable-model-invocation: true
-argument-hint: "[期間（日数、省略時は7）] [関連Issue番号（任意）]"
+argument-hint: "[期間（日数、省略時は1）] [関連Issue番号（任意）]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
-model: opus
-effort: high
-context: fork
+hooks:
+  Stop:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Update DESIGN.md
@@ -23,7 +26,7 @@ context: fork
 
 **絶対にやらないこと**:
 - **収集対象の** PR / Issue への書き込み（コメント・ラベル・再オープンなど。収集は読み取りのみ。フェーズ7で自分が作成したPRへラベル・Assigneeを付けるのはこの制限の対象外）
-- `DESIGN.md` 以外のファイルの編集（`.pen`・ソースコード・`CODING_GUIDELINES.md`・`.claude/requirements/` を含む）
+- `DESIGN.md` 以外のファイルの編集（`.pen`・ソースコード・`CODING_GUIDELINES.md`・`.claude/requirements/` を含む。ワーカーが書き込んだ `claude-task-worker.json` の `lastRun` をコミットに含めるのはこの制限の対象外。本スキルが同ファイルを編集することはない）
 - **`.pen` の編集**（`save()` を呼ぶ操作）。調査は `inspect-pencil-node` の読み取り専用手順のみ。デザイン側の修正が必要と判断した場合も、報告に1行挙げるだけにする
 - 実データの裏付けがない値の記載（「よくある値」で埋めない。読み取れなかった項目は書かない。推測値は、次のデザインがそれに合わせて作られた時点で「正」になってしまう）
 - 1つのPRでしか使われていない画面固有の装飾のトークン化（後述の採用基準）
@@ -32,6 +35,10 @@ context: fork
 ---
 
 # Instructions
+
+## 実行モードの制約
+
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `update-design-md` ワーカーから24時間おきに自動起動され（`uiDesign.enabled` が `true` のリポジトリのみ）、ワーカーは起動時刻を `claude-task-worker.json` の `lastRun` へ書き込んだうえで次の24時間の実行を抑止する。処理が未完のままターンを終えると、その日の分の収集・トークン化が行われないまま実行済みとして扱われ、取りこぼしたデザインPRは二度と対象期間に入らない（対象期間は常に直近N日で、遡らない）。
 
 ## フェーズ0: 事前チェック・引数パース
 
@@ -60,10 +67,10 @@ fi
 
 `$ARGUMENTS` を空白区切りで最大2トークンに分解する。
 
-- 1番目: 期間（日数）。省略時または非数値の場合は `7`
+- 1番目: 期間（日数）。省略時または非数値の場合は `1`
 - 2番目: 関連Issue番号（任意）。`#` プレフィックスは除去して数値部分のみ保持
 
-例: `/update-design-md` → 日数=7, Issue番号=なし ／ `/update-design-md 14 #123` → 日数=14, Issue番号=123
+例: `/update-design-md` → 日数=1, Issue番号=なし ／ `/update-design-md 14 #123` → 日数=14, Issue番号=123
 
 Issue番号はフェーズ7で `create-pr` に渡す。指定なしの場合はPR本文の `Closes #N` 行を省略する。
 
@@ -284,7 +291,15 @@ components:
 
 **完了条件**: `DESIGN.md` が更新され、追加・統合・上書き・削除したトークン数を把握できていること。
 
-`git status` で差分が発生していなければ「DESIGN.md 更新差分なし」と報告してこのスキルを終了する（フェーズ5以降は実行せず、空コミット・空PRを作らない）。
+`git status` で差分が発生していなければ「DESIGN.md 更新差分なし」と報告してこのスキルを終了する（フェーズ5以降は実行せず、空コミット・空PRを作らない）。差分の判定に `claude-task-worker.json` は数えない（次節）。
+
+### `claude-task-worker.json`（実行記録）の扱い
+
+`claude-task-worker` の定期ワーカーから自動起動された場合、ワーカーが起動時に `claude-task-worker.json` の `lastRun.update-design-md` を今回の実行時刻へ書き換えている。これは本スキルの成果物ではないが、**コミットから除外しない**（成果物と同じPRに含めることで、マージ時点で次の24時間の実行抑止が恒久化する）。
+
+- 差分の有無を判定するときは `claude-task-worker.json` を数に入れない。このファイルにしか差分が無い場合は「DESIGN.md 更新差分なし」として終了する（タイムスタンプだけのPRは作らない）
+- `DESIGN.md` の差分がある場合は `claude-task-worker.json` もそのままコミットに含める（`git checkout` 等で戻さない）
+- 内容の編集はしない（値はワーカーが書く。`uiDesign.designDir` を読むのはフェーズ0のとおり読み取りのみ。手動起動で差分が無ければ何もしない）
 
 ## フェーズ5: lint 通過（`DESIGN_MD_CMD` が使える場合は**必須**）
 

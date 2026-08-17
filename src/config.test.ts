@@ -1,9 +1,19 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type * as ConfigModule from "./config";
 
-const { parseUiDesignEntry, parseWorkerEntry, DEFAULT_UI_DESIGN_CONFIG, DEFAULT_WORKER_CONFIG, WORKER_DEFAULTS } =
-  (await import("./config")) as typeof ConfigModule;
+const {
+  parseLastRunEntry,
+  parseUiDesignEntry,
+  parseWorkerEntry,
+  writeLastRun,
+  DEFAULT_UI_DESIGN_CONFIG,
+  DEFAULT_WORKER_CONFIG,
+  WORKER_DEFAULTS,
+} = (await import("./config")) as typeof ConfigModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
 function silenceWarn(t: TestContext): void {
@@ -104,6 +114,39 @@ test("parseWorkerEntry accepts an empty advisorModel as an explicit opt-out", (t
   // 他フィールドと違い空文字は不正値ではなく「advisor を使わない」の明示指定。
   assert.equal(parseWorkerEntry("update-issue", { advisorModel: "" })?.advisorModel, "");
   assert.equal(parseWorkerEntry("update-issue", { advisorModel: "fable" })?.advisorModel, "fable");
+});
+
+test("parseLastRunEntry keeps only parseable timestamps", (t) => {
+  silenceWarn(t);
+  // 壊れた値で定期ワーカーが「実行済み」と誤判定して永久に走らなくなるのを防ぐ。
+  assert.deepEqual(parseLastRunEntry({ "update-design-md": "2026-08-17T00:00:00.000Z", broken: "yesterday", n: 1 }), {
+    "update-design-md": "2026-08-17T00:00:00.000Z",
+  });
+  assert.deepEqual(parseLastRunEntry("2026-08-17"), {});
+});
+
+test("writeLastRun records the timestamp without dropping other settings", () => {
+  const root = mkdtempSync(join(tmpdir(), "ctw-lastrun-"));
+  const path = join(root, "claude-task-worker.json");
+  writeFileSync(path, JSON.stringify({ uiDesign: { enabled: true }, lastRun: { "update-design-md": "2026-08-01" } }));
+
+  writeLastRun(root, "update-coding-guidelines", new Date("2026-08-17T09:00:00.000Z"));
+
+  assert.deepEqual(JSON.parse(readFileSync(path, "utf-8")), {
+    uiDesign: { enabled: true },
+    lastRun: {
+      "update-design-md": "2026-08-01",
+      "update-coding-guidelines": "2026-08-17T09:00:00.000Z",
+    },
+  });
+});
+
+test("writeLastRun creates the config file when the repo has none", () => {
+  const root = mkdtempSync(join(tmpdir(), "ctw-lastrun-"));
+  writeLastRun(root, "update-requirement-rules", new Date("2026-08-17T09:00:00.000Z"));
+  assert.deepEqual(JSON.parse(readFileSync(join(root, "claude-task-worker.json"), "utf-8")), {
+    lastRun: { "update-requirement-rules": "2026-08-17T09:00:00.000Z" },
+  });
 });
 
 test("parseWorkerEntry falls back to the default for a non-string advisorModel", (t) => {

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep as SEP } from "node:path";
 
 export type WorkerName =
@@ -13,7 +13,10 @@ export type WorkerName =
   | "resolve-conflict"
   | "epic-issue"
   | "create-ui-design"
-  | "apply-ui-design";
+  | "apply-ui-design"
+  | "update-coding-guidelines"
+  | "update-requirement-rules"
+  | "update-design-md";
 
 export interface WorkerRuntimeConfig {
   skill: string;
@@ -41,9 +44,16 @@ export interface UiDesignConfig {
   yolo: boolean;
 }
 
+// 定期ワーカー（24時間おきに1回だけ走らせるもの）の最終実行時刻。ワーカー名 → ISO8601。
+// プロセス内のメモリではなくリポジトリの設定ファイルに置くのは、ワーカーを再起動しても
+// 間隔が保たれるようにするため。値はワーカーが worktree 側へ書き込み、スキルの
+// commit-push でその日の成果物と同じPRに含めてコミットされる。
+export type LastRunLog = Record<string, string>;
+
 interface Config {
   fixReviewPointCallbackCommentMessage?: string;
   uiDesign: UiDesignConfig;
+  lastRun: LastRunLog;
   workers: Record<string, WorkerRuntimeConfig>;
 }
 
@@ -172,11 +182,44 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
   },
+  // 以下3つは定期ワーカー（createScheduledWorker）。実行間隔そのものは
+  // SCHEDULE_INTERVAL_HOURS（24時間）と実行ログで決まり、pollingIntervalSeconds は
+  // 「24時間経過したかを確認する頻度」でしかない。
+  // model が opus なのは、成果物（CODING_GUIDELINES.md / .claude/requirements/ / DESIGN.md）が
+  // 後続の全 Issue・全デザインの前提として読まれ、誤った一般化がそのまま下流の手戻りになるため。
+  "update-coding-guidelines": {
+    skill: "/claude-task-worker:update-coding-guidelines",
+    model: "opus",
+    advisorModel: "",
+    effort: "high",
+    pollingIntervalSeconds: 3600,
+    cooldownSeconds: 0,
+    maxConcurrentTasks: 1,
+  },
+  "update-requirement-rules": {
+    skill: "/claude-task-worker:update-requirement-rules",
+    model: "opus",
+    advisorModel: "",
+    effort: "high",
+    pollingIntervalSeconds: 3600,
+    cooldownSeconds: 0,
+    maxConcurrentTasks: 1,
+  },
+  "update-design-md": {
+    skill: "/claude-task-worker:update-design-md",
+    model: "opus",
+    advisorModel: "",
+    effort: "high",
+    pollingIntervalSeconds: 3600,
+    cooldownSeconds: 0,
+    maxConcurrentTasks: 1,
+  },
 };
 
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
+  lastRun: {},
   workers: {},
 };
 
@@ -301,6 +344,23 @@ export function parseUiDesignEntry(val: unknown): UiDesignConfig {
   return result;
 }
 
+// 値が文字列のエントリだけを残す（壊れた値で定期ワーカーが止まらないようにする）。
+export function parseLastRunEntry(val: unknown): LastRunLog {
+  if (typeof val !== "object" || val === null || Array.isArray(val)) {
+    console.warn(`[config] invalid lastRun: expected object, ignoring`);
+    return {};
+  }
+  const result: LastRunLog = {};
+  for (const [name, at] of Object.entries(val as Record<string, unknown>)) {
+    if (typeof at === "string" && !Number.isNaN(Date.parse(at))) {
+      result[name] = at;
+    } else {
+      console.warn(`[config] invalid lastRun.${name}: ${String(at)}, ignoring`);
+    }
+  }
+  return result;
+}
+
 export function loadConfig(): Config {
   const configPath = CONFIG_PATH;
   let raw: Record<string, unknown>;
@@ -308,12 +368,16 @@ export function loadConfig(): Config {
     raw = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, workers: {} };
+      return { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
     }
     throw err;
   }
 
-  const result: Config = { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, workers: {} };
+  const result: Config = { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
+
+  if ("lastRun" in raw) {
+    result.lastRun = parseLastRunEntry(raw["lastRun"]);
+  }
 
   if ("fixReviewPointCallbackCommentMessage" in raw) {
     const val = raw["fixReviewPointCallbackCommentMessage"];
@@ -344,6 +408,43 @@ export function loadConfig(): Config {
 export function getWorkerConfig(workerName: string): WorkerRuntimeConfig {
   const config = loadConfig();
   return config.workers[workerName] ?? { ...defaultsFor(workerName) };
+}
+
+// 定期ワーカーの最終実行時刻（epoch ms）。記録が無い・読めない場合は undefined＝実行可。
+export function getLastRunAt(workerName: string): number | undefined {
+  let at: string | undefined;
+  try {
+    at = loadConfig().lastRun[workerName];
+  } catch (err) {
+    console.warn(`[config] failed to load lastRun, treating ${workerName} as never run: ${err}`);
+    return undefined;
+  }
+  if (at === undefined) return undefined;
+  const parsed = Date.parse(at);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+// 最終実行時刻を <repoRoot>/claude-task-worker.json の lastRun へ書き込む。
+// 呼び出し側は worktree のルートを渡す。書き込んだ差分はスキルの commit-push が
+// その日の成果物（CODING_GUIDELINES.md 等）と同じコミット・同じPRに含める。
+// 既存の設定は保持する（生JSONを読み直してマージするため、パース時に落ちる不正キーも壊さない）。
+export function writeLastRun(repoRoot: string, workerName: string, at: Date = new Date()): void {
+  const path = join(repoRoot, "claude-task-worker.json");
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>;
+    }
+  } catch (err) {
+    // 設定ファイルが無いリポジトリでは lastRun だけを持つファイルを新規作成する。
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[config] failed to read ${path}, rewriting it with lastRun only: ${err}`);
+    }
+  }
+  const current = typeof raw["lastRun"] === "object" && raw["lastRun"] !== null ? raw["lastRun"] : {};
+  raw["lastRun"] = { ...(current as Record<string, unknown>), [workerName]: at.toISOString() };
+  writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
 }
 
 // 設定ファイル不在・破損でもワークフローが勝手に有効化されないよう、

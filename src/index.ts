@@ -12,6 +12,9 @@ import { checkDependabotWorker } from "./workers/check-dependabot";
 import { epicIssueWorker } from "./workers/epic-issue";
 import { createUiDesignWorker } from "./workers/create-ui-design";
 import { applyUiDesignWorker } from "./workers/apply-ui-design";
+import { updateCodingGuidelinesWorker } from "./workers/update-coding-guidelines";
+import { updateRequirementRulesWorker } from "./workers/update-requirement-rules";
+import { updateDesignMdWorker } from "./workers/update-design-md";
 import {
   shutdown,
   waitForAllProcesses,
@@ -54,6 +57,9 @@ const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: s
   "epic-issue": epicIssueWorker,
   "create-ui-design": createUiDesignWorker,
   "apply-ui-design": applyUiDesignWorker,
+  "update-coding-guidelines": updateCodingGuidelinesWorker,
+  "update-requirement-rules": updateRequirementRulesWorker,
+  "update-design-md": updateDesignMdWorker,
 };
 
 function printUsage(): void {
@@ -79,6 +85,9 @@ Workers:
   epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
   create-ui-design  Poll cc-create-ui-design issues and create a Pencil design PR (requires uiDesign.enabled)
   apply-ui-design   Poll cc-ui-design-pr-created issues and write the design reference back once the design PR is merged (requires uiDesign.enabled)
+  update-coding-guidelines  Run /update-coding-guidelines once every 24 hours over the last 24 hours
+  update-requirement-rules  Run /update-requirement-rules once every 24 hours over the last 24 hours
+  update-design-md  Run /update-design-md once every 24 hours over the last 24 hours (requires uiDesign.enabled)
   all               Poll all workers except triage-created-issue, triage-pr, check-dependabot
   yolo              Poll all workers including triage-created-issue, triage-pr, check-dependabot
 
@@ -317,6 +326,11 @@ if (hasProjectFilter()) {
       epicIssueWorker({ epicFilters, labelFilters }),
       createUiDesignWorker({ epicFilters, labelFilters }),
       applyUiDesignWorker({ epicFilters, labelFilters }),
+      // 24時間おきの定期ワーカー。update-design-md は uiDesign.enabled が false のとき
+      // 自身で no-op になる（create-ui-design / apply-ui-design と同じ扱い）。
+      updateCodingGuidelinesWorker(),
+      updateRequirementRulesWorker(),
+      updateDesignMdWorker(),
     ]);
   })();
 } else if (workerType === "yolo") {
@@ -338,6 +352,9 @@ if (hasProjectFilter()) {
       epicIssueWorker({ epicFilters, labelFilters }),
       createUiDesignWorker({ epicFilters, labelFilters }),
       applyUiDesignWorker({ epicFilters, labelFilters }),
+      updateCodingGuidelinesWorker(),
+      updateRequirementRulesWorker(),
+      updateDesignMdWorker(),
     ]);
   })();
 } else {
