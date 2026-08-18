@@ -4,9 +4,12 @@ description: 直近N日（デフォルト1日）のPRレビューで繰り返し
 disable-model-invocation: true
 argument-hint: "[期間（日数、省略時は1）] [関連Issue番号（任意）]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Read, Write, Edit, Skill
-model: opus
-effort: high
-context: fork
+hooks:
+  Stop:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Update Coding Guidelines
@@ -19,13 +22,17 @@ context: fork
 
 **絶対にやらないこと**:
 - レビューコメントへの返信・Resolve・既存PRへの編集（読み取りのみ）
-- `CODING_GUIDELINES.md`以外のソースコードへの修正
+- `CODING_GUIDELINES.md`以外のファイルの編集（ワーカーが書き込んだ`claude-task-worker.json`の`lastRun`をコミットに含めるのはこの制限の対象外。本スキルが同ファイルを編集することはない）
 - 単発（2回未満）の指摘のルール化（ノイズ防止）
 - スタイル好み・命名の主観・スコープ外提案など「対応不要寄り」の項目のルール化
 - 既存ルールと意味重複する項目の別ルールとしての追加（必ず統合・圧縮する）
 - デフォルトブランチ上での直接コミット（必ずfeature branchに切り替えてから`commit-push`を呼ぶ）
 
 # Instructions
+
+## 実行モードの制約
+
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `update-coding-guidelines` ワーカーから24時間おきに自動起動され、ワーカーは起動時刻を `claude-task-worker.json` の `lastRun` へ書き込んだうえで次の24時間の実行を抑止する。処理が未完のままターンを終えると、その日の分の収集・ルール化が行われないまま実行済みとして扱われ、取りこぼしたレビューコメントは二度と対象期間に入らない（対象期間は常に直近N日で、遡らない）。
 
 ## フェーズ0: 事前チェック・引数パース
 
@@ -162,7 +169,15 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 
 **完了条件**: `CODING_GUIDELINES.md`が更新されており、追加/変更したルール、統合・圧縮した既存ルール、ファイル全体の行数が把握できていること。
 
-`git status`で差分が発生していなければ「ガイドライン更新差分なし」と報告してこのスキルを終了する（フェーズ4以降のコミット・PR作成は実行しない）。
+`git status`で差分が発生していなければ「ガイドライン更新差分なし」と報告してこのスキルを終了する（フェーズ4以降のコミット・PR作成は実行しない）。差分の判定に`claude-task-worker.json`は数えない（次節）。
+
+### `claude-task-worker.json`（実行記録）の扱い
+
+`claude-task-worker`の定期ワーカーから自動起動された場合、ワーカーが起動時に`claude-task-worker.json`の`lastRun.update-coding-guidelines`を今回の実行時刻へ書き換えている。これは本スキルの成果物ではないが、**コミットから除外しない**（成果物と同じPRに含めることで、マージ時点で次の24時間の実行抑止が恒久化する）。
+
+- 差分の有無を判定するときは`claude-task-worker.json`を数に入れない。このファイルにしか差分が無い場合は「ガイドライン更新差分なし」として終了する（タイムスタンプだけのPRは作らない）
+- `CODING_GUIDELINES.md`の差分がある場合は`claude-task-worker.json`もそのままコミットに含める（`git checkout`等で戻さない）
+- 内容の編集はしない（値はワーカーが書く。手動起動で差分が無ければ何もしない）
 
 ## フェーズ4: feature branch への切替
 

@@ -16,6 +16,9 @@ claude-task-worker create-issue    # Poll cc-triage-scope issues whose blockedBy
 claude-task-worker update-issue    # Poll update-issue labeled issues
 claude-task-worker install         # Add marketplace, install plugin, install/update the CLI itself
 claude-task-worker update          # Update the claude-task-worker plugin/marketplace and the CLI itself
+claude-task-worker update-coding-guidelines  # Run /update-coding-guidelines once per 24h
+claude-task-worker update-requirement-rules  # Run /update-requirement-rules once per 24h
+claude-task-worker update-design-md          # Run /update-design-md once per 24h (uiDesign.enabled only)
 claude-task-worker all             # Run all workers concurrently
 ```
 
@@ -38,6 +41,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/commands/design-md.ts`** - DESIGN.md CLI（[`@google/design.md`](https://github.com/google-labs-code/design.md)）連携。`installDesignMdCli()` の1関数のみで、`install` / `update` の**どちらからも同じ関数を呼ぶ**（CodeGraph と違い self-upgrade 機構を持たないため、更新手段が `npm install -g <pkg>@latest` しかない。冪等なので分岐する意味がない）。同パッケージは bin として `design.md` と `designmd` の2つを提供するが、`.` を含む前者は環境によって解決に失敗するためスキル側は **`designmd` を既定**にしている
 - **`src/runcat.ts`** - RunCat Neo 用の利用状況スナップショット書き出し。`~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で上書き可）へ一時ファイル + rename で原子的に書き込む。フォーマットは `~/dotfiles/claude/statusline.py` の出力と揃えてある（`buildRuncatSnapshot`/`resetStamp`/`resetHour`）。ただしリセット時刻は `ceilToMinute()` で秒以下を切り上げて分境界に揃える（API は `:59` 秒でリセット時刻を返すため、切り捨て表示だと 1 分手前に見える）。切り上げが日付・時をまたぐ場合はそれぞれ日付付き表示・次の時に繰り上がる。書き出しは `slack.ts` の `buildTokenLimitText()` 経由で行われるため、`usage` コマンド実行時に加えてワーカーのタスク完了/失敗通知のたびに更新される（Slack webhook 未設定でも通知が no-op になるだけでスナップショットは更新される）。ただし利用状況の取得自体は `/tmp/claude-usage-cache.json` の360秒キャッシュを挟むため、値の鮮度は最大6分古くなりうる
 - **`src/workers/`** - 各ワーカー実装
+- **`src/workers/scheduled-worker.ts`** - 定期ワーカーの共通実装（`createScheduledWorker()`）。Issue/PR をポーリングせず、時刻だけを条件にスキルを起動する。`update-coding-guidelines` / `update-requirement-rules` / `update-design-md` が使う（後述の「定期ワーカー」参照）
 - **`src/workers/ui-design.ts`** - UIデザイン先行ワークフローの純粋ヘルパー（`create-ui-design` / `apply-ui-design` が共有）。`designBranchName()`（`cc-ui-design-<N>`）、`hasDesignReference()`（description のデザイン参照セクション判定）、`classifyDesignPr()`（デザインPRの状態 → preflight 判定）、各種 Issue コメント本文。gh 依存を持たないため分岐だけをユニットテストできる
 - **`plugin/`** - Claude Code プラグイン本体（`.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `scripts/`, `.mcp.json`）
 - **`.claude-plugin/marketplace.json`** - このリポジトリを Claude Code マーケットプレイスとして公開するための定義
@@ -93,7 +97,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 3. **自律実行原則のシステムプロンプト注入**（`src/claude-args.ts`）: `systemPromptFor(model)` の本文を `--append-system-prompt-file <path>` で注入する（`os.tmpdir()/claude-task-worker/append-system-prompt-<pid>-<variant>.txt` へバリアント単位で一度だけ原子的に書き出し、そのパスを渡す `systemPromptFilePath(model)`。`variant` は `opus` / `default` で、opus と sonnet のワーカーが同一プロセスで並走する `all` / `--project` 実行でも互いのファイルを上書きしないようにしている。モデル別の出し分けは後述の「モデル別システムプロンプト」参照）。**文字列を `--append-system-prompt` で直接渡さないのは herdr モードのため**。herdr は agent 引数を `herdr agent start ... -- <args>` としてターゲットシェル経由で起動するが、**改行を含む引数**を `invalid_agent_argument`（"agent arguments cannot be encoded safely for the target shell"）として拒否する。複数行のシステムプロンプトをインラインで渡すと herdr モードのタスク起動が必ずこのエラーで失敗するため、内容をファイルへ逃がして引数から改行を除く。default モード（spawn。シェルを介さないので改行自体は問題ない）でも同じファイル参照を使い、両モードの引数を一致させる。内容は「ワーカーから自動起動されている・ユーザーに質問しない・全ステップを完遂してから終了する・曖昧なら安全側を選び根拠を報告する」に加えて、サブエージェント向けの原則（委譲時に同原則を伝える・子の完了報告を鵜呑みにせず成果物を検証する）も含む。かつてサブエージェントへは `--append-subagent-system-prompt` で直接注入していたが、同フラグは `-p` 非対話モード限定で herdr モードの TUI 起動では使えず、実行形態によって原則の届き方が変わってしまうため、注入経路を `--append-system-prompt` 一本へ統合した（メインエージェントが委譲プロンプトで伝える形になり、注入の確実性は下がるトレードオフを受け入れている）。文面も実行形態に依存しない表現にしてある。スキル本文に自律実行原則を複製しないのは、対話セッションでスキルを手動実行する場合は実在するユーザーと対話してよいため。あわせて**コード探索の原則（CodeGraph 優先）**も同プロンプトに含める（テキスト検索より優先する・**利用可否は codegraph 系 MCP ツールの有無だけで判断する**・無ければ即テキスト検索へ・インデックスのセットアップはしない・返ったソースは読み終えたものとして扱う・委譲時は方針も伝える）。詳細な手順は `plugin/agents/explore-agent.md` にあるが、それはメインエージェント自身が探索する場合や explore-agent 以外のサブエージェントへ委譲する場合には届かないため、全セッション共通の原則としてシステムプロンプト側にも置いている。
 4. **ワーカーレベルの完了検証**（`src/workers/exec-issue.ts` / `epic-issue.ts` の `onCompleted`）: 上記をすり抜けて exit 0 で終了しても、期待成果物を検証できるまでラベル遷移しない最後の砦。exec-issue は「Issue がクローズ済み（変更不要パス）」または「作業ブランチ（worktreeId）を head とする PR か Issue を closing 参照する PR の実在」を確認できた場合のみ `cc-pr-created` を付与し、確認できなければ `cc-need-human-check` を付与して Issue に状況コメントを残す。epic-issue は `cc-epic-<N>` を head とする Epic PR の実在確認後にのみ `cc-pr-created` を付ける。`onCompleted` が `false` を返すと `issue-worker.ts` は完了通知ではなく失敗通知（Slack）を送る。
 
-ワーカー起動スキル12個（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design`）の本文の「実行モードの制約」セクションには、スキル固有のリスク（どのラベル遷移が壊れるか）のみを記述する（自律実行原則は上記 3 の CLI 注入に一元化されており、スキル本文には複製しない）。
+ワーカー起動スキル15個（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）の本文の「実行モードの制約」セクションには、スキル固有のリスク（どのラベル遷移が壊れるか）のみを記述する（自律実行原則は上記 3 の CLI 注入に一元化されており、スキル本文には複製しない）。
 
 ### 実装のサブエージェント委譲（`exec-issue` / `fix-review-point`）
 
@@ -145,9 +149,9 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 実測での裏付け: opus の `exec-issue` セッション244件すべてでメインスレッドのモデルが単一だった。同スキルは毎回 `commit-push`（当時 `model: sonnet` / fork 無し）を呼んでいるのに、sonnet のターンが1つも現れない。fork 済みの `create-pr` は別コンテキストなのでそもそも同一セッションに現れない。
 
-効かない宣言を残すと「このスキルは sonnet で動いている」という誤った前提でコスト試算やモデル調整をしてしまうため、`src/skill-frontmatter.test.ts` の「a skill declaring model/effort also declares context: fork」で機械的に固定してある。あわせて**ワーカー起動スキル（12個）には `model:` も `context:` も書かない**ことも同ファイルで固定している（ワーカーのモデルは `claude-task-worker.json` の `workers.<name>.model` が決めるため、スキル側に書くとその設定を上書きしてしまう）。
+効かない宣言を残すと「このスキルは sonnet で動いている」という誤った前提でコスト試算やモデル調整をしてしまうため、`src/skill-frontmatter.test.ts` の「a skill declaring model/effort also declares context: fork」で機械的に固定してある。あわせて**ワーカー起動スキル（15個）には `model:` も `context:` も書かない**ことも同ファイルで固定している（ワーカーのモデルは `claude-task-worker.json` の `workers.<name>.model` が決めるため、スキル側に書くとその設定を上書きしてしまう）。
 
-fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`。
+fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
 
 **`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。
 
@@ -210,7 +214,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 1. **`docker compose down --volumes --remove-orphans`**: 実行cwd直下に compose ファイル（`docker-compose.yml` / `docker-compose.yaml` / `compose.yml` / `compose.yaml`）が存在する場合のみ実行。docker未導入・未起動でも無視して継続する。
 2. **worktree配下を作業ディレクトリに持つ残留プロセスへ `SIGTERM`**: 実行cwd（worktree、`.claude/worktrees/<adj-noun-NNNN>` で一意）を cwd に持つプロセスだけを対象にする。切り離されたプロセスも起動時の cwd を保持し、worktree名はこの実行に固有なため、「この実行が起動したプロセス」だけを、ユーザー自身や別実行のプロセスに触れずに特定できる。ただし本フック自身の祖先チェーン（node フック・そのシェル・`claude` プロセスはいずれもworktreeをcwdに持つ）は除外し、自プロセスの巻き添え停止を防ぐ。プロセス列挙は Linux では `/proc/<pid>/cwd`、macOS 等では `lsof` を用いる。
 
-判定ロジック（`selectPidsToKill` / `parseLsofCwds` / `isUnder` / `resolveTargetDir`）は純粋関数として export し、`plugin/scripts/stop-servers.test.mjs` でユニットテストする。対象スキルは同期実行ガードと同じ12スキル（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design`）。
+判定ロジック（`selectPidsToKill` / `parseLsofCwds` / `isUnder` / `resolveTargetDir`）は純粋関数として export し、`plugin/scripts/stop-servers.test.mjs` でユニットテストする。対象スキルは同期実行ガードと同じ15スキル（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）。
 
 ### `advisor`（アドバイザーモデル）
 
@@ -339,11 +343,23 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - **ループ防止**: `update-issue` は同セクションに列挙済みの項目を `confirmation_items` として再掲しない。`triage-created-issue` 側でも、実質同一の問いが再掲されていたら「未回答の新規項目」ではなく引き渡し済み（経路2の対象）として扱う。両側に置いているのは、回答不能 → 確認事項として再掲 → 再委任の往復を片側の実装漏れで作らないため
 - 委任 → `cc-update-issue` → `update-issue` → 再トリアージ、で往復は1回で決着する
 
+### 定期ワーカー（`createScheduledWorker`）
+
+`update-coding-guidelines` / `update-requirement-rules` / `update-design-md` は、Issue・PR のラベルではなく**時刻**だけを条件にスキルを起動する。24時間おきに1回、直近24時間（＝スキルへ渡す期間引数は `1`）を対象に走る。実装は `src/workers/scheduled-worker.ts` の1関数で、3ワーカーは名前・スキル・タスクIDだけが違う。
+
+- **実行記録は `claude-task-worker.json` の `lastRun.<ワーカー名>`（ISO8601）**。ワーカーは worktree 側のファイルへ書き込み、スキルの `commit-push` がその日の成果物（`CODING_GUIDELINES.md` / `.claude/requirements/` / `DESIGN.md`）と**同じコミット・同じPR**に含める。記録が恒久化するのはPRのマージ時点で、それまではプロセス内の起動時刻（`startedAt`）が二重実行を止める。両方を見るのは、PR がマージされるまでの間に毎ポーリングで再起動するのを防ぐため
+- 3スキルとも「差分の有無を判定するときに `claude-task-worker.json` を数えない」規定を持つ。ワーカーが必ず書き込む以上、これが無いと成果物が空でも毎日タイムスタンプだけのPRが立つ
+- `pollingIntervalSeconds`（既定3600）は**実行間隔ではなく「24時間経過したかを確認する頻度」**。実行間隔は `SCHEDULE_INTERVAL_HOURS`（24）で固定
+- タスクIDは `-1` / `-2` / `-3`。`process-manager` の台帳は数値キーで Issue/PR 番号（正数）と共有するため、衝突しないよう負値を割り当てている
+- **`update-design-md` は `uiDesign.enabled` が `true` のときだけ起動する**。DESIGN.md の材料である `cc-ui-design` ラベル付きのマージ済みデザインPRを作るのはデザイン先行フローだけで、無効なリポジトリでは収集対象が原理的に存在しない（毎日空振りのセッションを焼くだけになる）。判定は `index.ts` ではなくワーカー側（`enabled` コールバック）に置き、`all` / `yolo` からの一括起動でも個別コマンドでも同じ経路を通す
+- 3スキルの引数インターフェースは統一してある（`[期間（日数、省略時は1）] [関連Issue番号（任意）]`）。既定を `1` に揃えたのは、ワーカーの実行間隔（24時間）とスキル単体実行時の対象期間を一致させるため。収集スクリプトの `DAYS="${1:-1}"` も同じ既定
+- 3スキルはワーカー起動スキルになったため、`model:` / `effort:` / `context: fork` を持たない（モデルは `claude-task-worker.json` の `workers.<name>.model` が決める）。`src/skill-frontmatter.test.ts` の entrySkills リストで固定してある
+
 ### 要件ルール（`.claude/requirements/`）
 
 対象リポジトリの `.claude/requirements/` に、過去のIssueで確定した**仕様・要件レベルの判断ロジック**を要件タイプ別のマークダウンとして集約する仕組み。ワーカーは介在せず、スキル同士の読み書き契約だけで成立する。
 
-- **書き手**: `update-requirement-rules`（手動起動、`disable-model-invocation: true`）。引数の期間（既定7日）で `cc-triage-scope` / `cc-pr-created` ラベル付きIssueの description とコメントを収集し（`scripts/fetch-recent-requirement-issues.sh`）、複数Issueで反復している判断をルール化して `.claude/requirements/<category>.md` を更新、`commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-coding-guidelines` と同じ経路で、以降のレビュー・マージは `triage-pr` に乗る）
+- **書き手**: `update-requirement-rules`（`update-requirement-rules` ワーカーから24時間おきに自動起動。手動起動も可）。引数の期間（既定7日）で `cc-triage-scope` / `cc-pr-created` ラベル付きIssueの description とコメントを収集し（`scripts/fetch-recent-requirement-issues.sh`）、複数Issueで反復している判断をルール化して `.claude/requirements/<category>.md` を更新、`commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-coding-guidelines` と同じ経路で、以降のレビュー・マージは `triage-pr` に乗る）
 - **読み手**: `create-issue` / `create-issue-from-issue-number` / `answer-issue-questions`。`README.md`（カテゴリ表）を先に読み、**関係するカテゴリファイルだけ**を読む二段構え（全ファイル読み込みはコンテキストを食うだけで判断材料にならない）
 - **`CODING_GUIDELINES.md` との棲み分け**: 判定は「そのルールを知っていると **Issue の description（要件・実装プラン・影響範囲）の書き分けが変わるか**」の1問。変わるなら要件ルール、コードを書く段階でしか効かないなら `CODING_GUIDELINES.md`。「責務をどの層に置くか」「エラー時のふるまい」は仕様にも作法にも読めて境界が引けないため、この問いで機械的に倒す（両方に載せると片方だけ更新されて食い違う）
 - **採用基準**: 独立した2件以上のIssueでの反復（**同一Epic配下の兄弟Issue群は何件あっても1件と数える** — 同じ設計議論を相互参照しながら繰り返すため、形式的には簡単に2件を満たしてしまう）／一般方針の明示／ラベル語彙・ワーカー間の契約・設定スキーマなど共有語彙に触れる判断は1件でも採用
@@ -355,7 +371,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 対象リポジトリのルート `DESIGN.md` に、マージ済みUIデザインPRで確定したビジュアルアイデンティティを集約する仕組み。フォーマットは [google-labs-code/design.md](https://github.com/google-labs-code/design.md)（`@google/design.md`）の仕様に従い、YAML フロントマターの機械可読トークン（`colors` / `typography` / `spacing` / `rounded` / `components`）とマークダウン本文の設計意図の2層構成。要件ルールと同じく**ワーカーは介在せず、スキル/エージェント同士の読み書き契約だけで成立する**。
 
-- **書き手**: `update-design-md`（手動起動、`disable-model-invocation: true`）。引数の期間（既定7日）で `cc-ui-design` ラベル付きの**マージ済み**PRを収集し（`scripts/fetch-recent-ui-design-prs.sh`）、レビューコメントと `.pen` の実データからトークン・原則を抽出して `DESIGN.md` を更新、`designmd lint` を通してから `commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-requirement-rules` / `update-coding-guidelines` と同じ経路）
+- **書き手**: `update-design-md`（`update-design-md` ワーカーから24時間おきに自動起動。`uiDesign.enabled` が `true` のリポジトリのみ。手動起動も可）。引数の期間（既定7日）で `cc-ui-design` ラベル付きの**マージ済み**PRを収集し（`scripts/fetch-recent-ui-design-prs.sh`）、レビューコメントと `.pen` の実データからトークン・原則を抽出して `DESIGN.md` を更新、`designmd lint` を通してから `commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-requirement-rules` / `update-coding-guidelines` と同じ経路）
 - **読み手**: `pencil-design-updater` エージェント。作業プロセスのステップ1で `DESIGN.md` を読み、色・フォント・余白・角丸を定義済みトークンの値で指定する（Pencil はトークン参照を解決しないため、`{colors.primary}` ではなく `#1A1C1E` のように実値まで落として `--prompt` / `execute` の編集スニペットに渡す）
 - **`.pen` の中身は diff から読めない**。暗号化バイナリのため `Read` / `Grep` が効かず、変更ファイル一覧だけでは何が変わったか分からない。そこで収集スクリプトは変更ファイルを `pen_files` / `snapshot_files`（`snapshots/` のPNG）/ `other_files` に仕分けて返し、スキルは (1) スナップショット画像を `Read` で見て傾向を掴み、(2) `inspect-pencil-node`（読み取り専用）で Node 属性から正確なトークン値を取る、の2経路で実データに当たる。**推測値は書かない** — 一度書くと次のデザインがそれに合わせて作られ、事後的に「正」になってしまうため
 - **収集対象はマージ済みPRのみ**。マージ後なら `.pen` もスナップショットも現在のワークツリーに存在するので、head ブランチが削除済みでも実データを読める（未マージPRを含めると、後で却下された値をトークン化しうる）

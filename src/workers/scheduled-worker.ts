@@ -1,0 +1,114 @@
+import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
+import { getLastRunAt, getWorkerConfig, writeLastRun } from "../config";
+import { getRepoInfo } from "../gh";
+import { syncDefaultBranch } from "../git";
+import { isRunning, isShuttingDown, run } from "../process-manager";
+import { generateWorktreeName } from "../random-name";
+import { notifyError, notifyTaskCompleted, notifyTaskFailed } from "../slack";
+import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
+import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "../worktree";
+
+// 定期ワーカーの実行間隔。スキルへ渡す収集期間（日数）もここから導出するため、
+// 「24時間おきに、直近24時間を対象に走る」が常に一致する。
+export const SCHEDULE_INTERVAL_HOURS = 24;
+const SCHEDULE_INTERVAL_MS = SCHEDULE_INTERVAL_HOURS * 60 * 60 * 1000;
+const SCOPE_DAYS = SCHEDULE_INTERVAL_HOURS / 24;
+
+export interface ScheduledWorkerConfig {
+  name: string;
+  command: string;
+  // process-manager の台帳・ステータステーブルのキー。Issue / PR 番号（正数）と
+  // 衝突しないよう負値を割り当てる。
+  taskId: number;
+  // false を返す間はスキルを起動しない（設定でオプトアウトされたワーカー用）。
+  enabled?: () => boolean;
+}
+
+// Issue / PR のポーリングではなく、時刻だけを条件にスキルを起動するワーカー。
+//
+// 最終実行時刻は claude-task-worker.json の `lastRun` に持つ。値を書くのはワーカーだが、
+// 書き込み先は worktree 側のファイルで、スキルの commit-push がその日の成果物と同じPRに含める。
+// つまり記録が恒久化するのはPRがマージされた時点で、それまでは下記の起動時刻（プロセス内）が
+// 二重実行を止める。設定ファイルへ寄せているのは、実行間隔をリポジトリの状態として
+// 追跡・レビューできるようにするため。
+export function createScheduledWorker(config: ScheduledWorkerConfig): () => Promise<void> {
+  return async () => {
+    const { owner, name: repoName, defaultBranch } = await getRepoInfo();
+    const { pollingIntervalSeconds } = getWorkerConfig(config.name);
+    console.log(
+      `[${config.name}] Checking every ${pollingIntervalSeconds} seconds (runs at most once per ${SCHEDULE_INTERVAL_HOURS}h for ${owner}/${repoName})`,
+    );
+
+    // 設定ファイルの lastRun が更新されるのはPRのマージ後なので、それだけを見ると
+    // マージまでの間は毎ポーリングで再起動してしまう。プロセス内の起動時刻を併用して塞ぐ。
+    let startedAt = 0;
+
+    const tick = async () => {
+      if (isShuttingDown()) return;
+      if (config.enabled && !config.enabled()) return;
+      if (isRunning(config.taskId)) return;
+
+      const now = Date.now();
+      const lastRunAt = Math.max(getLastRunAt(config.name) ?? 0, startedAt);
+      if (lastRunAt > 0 && now - lastRunAt < SCHEDULE_INTERVAL_MS) return;
+
+      const worktreeId = generateWorktreeName();
+      startedAt = now;
+      try {
+        syncDefaultBranch(defaultBranch);
+        const { model, effort, skill, advisorModel } = getWorkerConfig(config.name);
+        const command = skill || config.command;
+        const mode = getRunMode();
+        const execution = buildClaudeExecution({
+          mode,
+          prompt: `${command} ${SCOPE_DAYS}`,
+          model,
+          effort,
+          advisorModel: isAdvisorEnabled() ? advisorModel : "",
+          permissionMode: getPermissionMode(),
+        });
+
+        await createWorktreeFromBranch(worktreeId, defaultBranch);
+        const cwd = getWorktreePath(worktreeId);
+        // スキルが commit する前に書いておく（スキル側は「差分に含まれていたらそのまま
+        // コミットする」だけでよく、タイムスタンプの生成をモデルに任せない）。
+        writeLastRun(cwd, config.name, new Date(now));
+        console.log(`[${config.name}] created worktree ${worktreeId} from ${defaultBranch}`);
+
+        const repoUrl = `https://github.com/${owner}/${repoName}`;
+        run(
+          execution.command,
+          execution.args,
+          config.taskId,
+          config.name,
+          config.name,
+          worktreeId,
+          async (status, output) => {
+            try {
+              if (status === "completed") {
+                await notifyTaskCompleted(config.name, repoName, config.taskId, config.name, repoUrl, output);
+              } else {
+                await notifyTaskFailed(config.name, repoName, config.taskId, config.name, repoUrl, output);
+              }
+            } catch (err) {
+              console.error(`[${config.name}] post-task error: ${err}`);
+            } finally {
+              await removeWorktree(worktreeId).catch((err) =>
+                console.error(`[${config.name}] removeWorktree failed: ${err}`),
+              );
+            }
+          },
+          cwd,
+          buildClaudeEnv(mode),
+        );
+      } catch (err) {
+        console.error(`[${config.name}] setup error: ${err}`);
+        await removeWorktree(worktreeId).catch(() => {});
+        await notifyError(config.name, repoName, err);
+      }
+    };
+
+    await tick();
+    setInterval(tick, pollingIntervalSeconds * 1000);
+  };
+}

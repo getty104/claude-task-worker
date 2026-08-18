@@ -21,7 +21,7 @@ set -euo pipefail
 #                      README/docs 配下等の無関係な画像を混入させない）
 #   - other_files:    それ以外（pen_files にも snapshot_files にも該当しないもの）
 
-DAYS="${1:-7}"
+DAYS="${1:-1}"
 OUT_FILE="${2:-}"
 JOB_LIMIT="${JOB_LIMIT:-10}"
 MAX_PRS="${MAX_PRS:-50}"

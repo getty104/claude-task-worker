@@ -14,7 +14,7 @@ set -euo pipefail
 #   Issue本文＋全コメントはそのまま読むとコンテキストを食い潰すため、
 #   呼び出し側が jq で必要な Issue だけを取り出せるようにしている。
 
-DAYS="${1:-7}"
+DAYS="${1:-1}"
 OUT_FILE="${2:-}"
 JOB_LIMIT="${JOB_LIMIT:-10}"
 MAX_ISSUES="${MAX_ISSUES:-80}"

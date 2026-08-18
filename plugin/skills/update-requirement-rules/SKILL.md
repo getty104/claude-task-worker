@@ -1,17 +1,20 @@
 ---
 name: update-requirement-rules
-description: 直近N日（デフォルト7日）に更新された `cc-triage-scope` / `cc-pr-created` ラベル付きGitHub Issueのdescriptionとコメントを横断し、繰り返し現れる仕様判断・要件決定のロジックを再利用可能なルールとして抽出して `.claude/requirements/` 配下のタイプ別マークダウンへ集約・統合・圧縮したうえで、commit-push + create-prでPRを作成する（`cc-triage-scope`ラベル + 自分自身をAssignee）。作成したルールは create-issue / create-issue-from-issue-number / answer-issue-questions が仕様作成・判断の材料として読み込む。
+description: 直近N日（デフォルト1日）に更新された `cc-triage-scope` / `cc-pr-created` ラベル付きGitHub Issueのdescriptionとコメントを横断し、繰り返し現れる仕様判断・要件決定のロジックを再利用可能なルールとして抽出して `.claude/requirements/` 配下のタイプ別マークダウンへ集約・統合・圧縮したうえで、commit-push + create-prでPRを作成する（`cc-triage-scope`ラベル + 自分自身をAssignee）。作成したルールは create-issue / create-issue-from-issue-number / answer-issue-questions が仕様作成・判断の材料として読み込む。
 disable-model-invocation: true
-argument-hint: "[期間（日数、省略時は7）] [関連Issue番号（任意）]"
+argument-hint: "[期間（日数、省略時は1）] [関連Issue番号（任意）]"
 allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Read, Write, Edit, Glob, Grep, Agent, Skill
-model: opus
-effort: high
-context: fork
+hooks:
+  Stop:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Update Requirement Rules
 
-直近N日のIssue（`cc-triage-scope` / `cc-pr-created`）から**仕様・要件レベルの判断ロジック**を抽出し、`.claude/requirements/` 配下のタイプ別ルールファイルへ集約するスキル。収集 → 抽出 → ルール化 → 統合・整理 → PR作成まで一貫して実行する。
+直近N日（デフォルト1日）のIssue（`cc-triage-scope` / `cc-pr-created`）から**仕様・要件レベルの判断ロジック**を抽出し、`.claude/requirements/` 配下のタイプ別ルールファイルへ集約するスキル。収集 → 抽出 → ルール化 → 統合・整理 → PR作成まで一貫して実行する。
 
 ## なぜこれをやるのか
 
@@ -29,7 +32,7 @@ context: fork
 
 **絶対にやらないこと**:
 - **収集対象の** Issue / PR への書き込み（コメント・ラベル・クローズなど。収集は読み取りのみ。フェーズ5で自分が作成したPRへラベル・Assigneeを付けるのはこの制限の対象外）
-- `.claude/requirements/` 配下以外のファイルの編集（ソースコード・`CODING_GUIDELINES.md`・`docs/` を含む）
+- `.claude/requirements/` 配下以外のファイルの編集（ソースコード・`CODING_GUIDELINES.md`・`docs/` を含む。ワーカーが書き込んだ `claude-task-worker.json` の `lastRun` をコミットに含めるのはこの制限の対象外。本スキルが同ファイルを編集することはない）
 - **コーディング規約のルール化** — 命名・型・テストの書き方・レビュー指摘由来の実装作法は `update-coding-guidelines` の責務。境界の判定はフェーズ2の「`update-coding-guidelines` との境界」の1問（descriptionの書き分けが変わるか）で機械的に行う
 - 1件しか根拠のない判断のルール化（採用基準の例外条件を満たす場合を除く）
 - 特定Issueの経緯・議論の記録（ルールは再利用可能な判断基準であって議事録ではない。特定Issueの実装詳細・PR番号を書かない）
@@ -38,6 +41,10 @@ context: fork
 ---
 
 # Instructions
+
+## 実行モードの制約
+
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `update-requirement-rules` ワーカーから24時間おきに自動起動され、ワーカーは起動時刻を `claude-task-worker.json` の `lastRun` へ書き込んだうえで次の24時間の実行を抑止する。処理が未完のままターンを終えると、その日の分の収集・ルール化が行われないまま実行済みとして扱われ、取りこぼしたIssueは二度と対象期間に入らない（対象期間は常に直近N日で、遡らない）。
 
 ## フェーズ0: 事前チェック・引数パース
 
@@ -48,10 +55,10 @@ context: fork
 
 `$ARGUMENTS` を空白区切りで最大2トークンに分解する。
 
-- 1番目: 期間（日数）。省略時または非数値の場合は `7`
+- 1番目: 期間（日数）。省略時または非数値の場合は `1`
 - 2番目: 関連Issue番号（任意）。`#` プレフィックスは除去して数値部分のみ保持
 
-例: `/update-requirement-rules` → 日数=7, Issue番号=なし ／ `/update-requirement-rules 14 #123` → 日数=14, Issue番号=123
+例: `/update-requirement-rules` → 日数=1, Issue番号=なし ／ `/update-requirement-rules 14 #123` → 日数=14, Issue番号=123
 
 Issue番号はフェーズ5で `create-pr` に渡す。指定なしの場合はPR本文の `Closes #N` 行を省略する。
 
@@ -253,7 +260,15 @@ Issue の description と確認事項への回答コメントから、**「こ�
 
 **完了条件**: `.claude/requirements/` が更新され、追加・統合・上書き・削除した件数と各ファイルのルール数が把握できていること。`README.md` のカテゴリ表が実ファイルと一致していること。
 
-`git status` で差分が発生していなければ「要件ルール更新差分なし」と報告してこのスキルを終了する（フェーズ4以降は実行しない。空コミット・空PRを作らない）。
+`git status` で差分が発生していなければ「要件ルール更新差分なし」と報告してこのスキルを終了する（フェーズ4以降は実行しない。空コミット・空PRを作らない）。差分の判定に `claude-task-worker.json` は数えない（次節）。
+
+### `claude-task-worker.json`（実行記録）の扱い
+
+`claude-task-worker` の定期ワーカーから自動起動された場合、ワーカーが起動時に `claude-task-worker.json` の `lastRun.update-requirement-rules` を今回の実行時刻へ書き換えている。これは本スキルの成果物ではないが、**コミットから除外しない**（成果物と同じPRに含めることで、マージ時点で次の24時間の実行抑止が恒久化する）。
+
+- 差分の有無を判定するときは `claude-task-worker.json` を数に入れない。このファイルにしか差分が無い場合は「要件ルール更新差分なし」として終了する（タイムスタンプだけのPRは作らない）
+- `.claude/requirements/` 配下の差分がある場合は `claude-task-worker.json` もそのままコミットに含める（`git checkout` 等で戻さない）
+- 内容の編集はしない（値はワーカーが書く。手動起動で差分が無ければ何もしない）
 
 ## フェーズ4: feature branch への切替
 

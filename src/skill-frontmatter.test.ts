@@ -51,6 +51,9 @@ test("worker entry skills do not pin a model", () => {
     "create-epic-pr",
     "create-ui-design",
     "apply-ui-design",
+    "update-coding-guidelines",
+    "update-requirement-rules",
+    "update-design-md",
   ];
   for (const name of entrySkills) {
     const fm = skills.find(([n]) => n === name)?.[1];
