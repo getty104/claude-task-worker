@@ -1,12 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { writeLastRun } from "./config";
-import { addLabel, createPullRequest, findOpenPrNumberByHeadRef } from "./gh";
+import { createPullRequest, findOpenPrNumberByHeadRef, mergePullRequest } from "./gh";
 import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "./worktree";
 
 const execFileAsync = promisify(execFile);
 
-const TRIAGE_LABEL = "cc-triage-scope";
 const CONFIG_FILE = "claude-task-worker.json";
 
 // ワーカーごとに固定のブランチ名。未マージのPRが残っている場合は同じブランチへ
@@ -32,7 +31,7 @@ export function lastRunPrBody(workerName: string, at: Date): string {
     `- 実行時刻: ${at.toISOString()}`,
     "",
     `このPRは実行記録のみを更新します（成果物の変更は同ワーカーが起動したスキルが別PRで出します）。`,
-    `マージされることで次回実行の抑止が恒久化するため、内容の確認は不要です。`,
+    `レビュー対象ではないため、ワーカーがそのままマージします。`,
   ].join("\n");
 }
 
@@ -62,19 +61,18 @@ export async function publishLastRunPr(workerName: string, defaultBranch: string
     await git(cwd, ["commit", "-m", lastRunPrTitle(workerName)]);
     await git(cwd, ["push", "--force", "origin", `HEAD:refs/heads/${branch}`]);
 
+    // 前回のPRが（マージ失敗などで）残っていれば、force-push でタイムスタンプを進めた
+    // そのPRをそのままマージ対象にする。記録PRが積み上がらない。
     const existing = await findOpenPrNumberByHeadRef(branch);
-    if (existing !== null) {
-      console.log(`[${workerName}] updated existing lastRun PR #${existing}`);
-      return;
-    }
-    const prNumber = await createPullRequest(
-      defaultBranch,
-      branch,
-      lastRunPrTitle(workerName),
-      lastRunPrBody(workerName, at),
-    );
-    await addLabel("pr", prNumber, TRIAGE_LABEL);
-    console.log(`[${workerName}] created lastRun PR #${prNumber}`);
+    const prNumber =
+      existing ??
+      (await createPullRequest(defaultBranch, branch, lastRunPrTitle(workerName), lastRunPrBody(workerName, at)));
+
+    // レビュー対象ではないので triage-pr には載せずワーカーが直接マージする。
+    // 失敗（必須チェック待ち・ブランチ保護など）は呼び出し元がログに留めるだけで、
+    // PRは open のまま残る。次回実行が同じブランチへ force-push してマージを再試行する。
+    await mergePullRequest(prNumber);
+    console.log(`[${workerName}] merged lastRun PR #${prNumber}`);
   } finally {
     await removeWorktree(branch).catch((err) => console.error(`[${workerName}] removeWorktree failed: ${err}`));
   }

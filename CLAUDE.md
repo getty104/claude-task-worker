@@ -350,7 +350,8 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 - **実行記録は `claude-task-worker.json` の `lastRun.<ワーカー名>`（ISO8601）で、書き込み・コミット・PR作成はすべてワーカーの責務**（`src/last-run-pr.ts` の `publishLastRunPr()`）。スキルは同ファイルに一切触らない。記録が恒久化するのはそのPRのマージ時点で、それまではプロセス内の起動時刻（`startedAt`）が二重実行を止める。両方を見るのは、PR がマージされるまでの間に毎ポーリングで再起動するのを防ぐため
 - **実行記録のPRは成果物のPRと分ける**。スキルは収集対象が0件（`pr_count` / `issue_count` が0）でも成果物の差分が無くても早期終了するので、記録をスキルの `commit-push` に相乗りさせると「材料が無かった日は記録が残らない」＝ワーカー再起動後に同じ期間を何度も走り直す（毎回セッションを1本焼く）ことになる。ワーカー側で出せば、スキルの終了経路に関わらず必ず記録される
-- ブランチ名は `ctw-last-run-<ワーカー名>` の**固定名**で、push は毎回 force。未マージのPRが残っている場合は同じPRのタイムスタンプが進むだけなので、記録PRが積み上がらない（open PRの有無は `findOpenPrNumberByHeadRef()` で確認し、無いときだけ `gh pr create`）。付与するラベルは `cc-triage-scope` のみで、以降のマージは `triage-pr` に乗る
+- ブランチ名は `ctw-last-run-<ワーカー名>` の**固定名**で、push は毎回 force。未マージのPRが残っている場合は同じPRのタイムスタンプが進むだけなので、記録PRが積み上がらない（open PRの有無は `findOpenPrNumberByHeadRef()` で確認し、無いときだけ `gh pr create`）
+- **記録PRはワーカーが直接マージする**（`gh pr merge --merge --delete-branch`）。レビュー対象ではないので `cc-triage-scope` は付けず `triage-pr` にも載せない（毎日1本ずつトリアージのセッションを焼くだけになる）。マージ失敗（必須チェック待ち・ブランチ保護など）はログのみで、PRは open のまま残り次回実行が force-push してマージを再試行する
 - `publishLastRunPr()` の失敗はスキル起動を止めない（catch してログのみ）。記録PRが作れなくてもその日の収集は走らせるべきで、記録は次回ポーリングで作り直せる
 - `pollingIntervalSeconds`（既定3600）は**実行間隔ではなく「24時間経過したかを確認する頻度」**。実行間隔は `SCHEDULE_INTERVAL_HOURS`（24）で固定
 - タスクIDは `-1` / `-2` / `-3`。`process-manager` の台帳は数値キーで Issue/PR 番号（正数）と共有するため、衝突しないよう負値を割り当てている
