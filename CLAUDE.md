@@ -41,6 +41,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/commands/design-md.ts`** - DESIGN.md CLI（[`@google/design.md`](https://github.com/google-labs-code/design.md)）連携。`installDesignMdCli()` の1関数のみで、`install` / `update` の**どちらからも同じ関数を呼ぶ**（CodeGraph と違い self-upgrade 機構を持たないため、更新手段が `npm install -g <pkg>@latest` しかない。冪等なので分岐する意味がない）。同パッケージは bin として `design.md` と `designmd` の2つを提供するが、`.` を含む前者は環境によって解決に失敗するためスキル側は **`designmd` を既定**にしている
 - **`src/runcat.ts`** - RunCat Neo 用の利用状況スナップショット書き出し。`~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で上書き可）へ一時ファイル + rename で原子的に書き込む。フォーマットは `~/dotfiles/claude/statusline.py` の出力と揃えてある（`buildRuncatSnapshot`/`resetStamp`/`resetHour`）。ただしリセット時刻は `ceilToMinute()` で秒以下を切り上げて分境界に揃える（API は `:59` 秒でリセット時刻を返すため、切り捨て表示だと 1 分手前に見える）。切り上げが日付・時をまたぐ場合はそれぞれ日付付き表示・次の時に繰り上がる。書き出しは `slack.ts` の `buildTokenLimitText()` 経由で行われるため、`usage` コマンド実行時に加えてワーカーのタスク完了/失敗通知のたびに更新される（Slack webhook 未設定でも通知が no-op になるだけでスナップショットは更新される）。ただし利用状況の取得自体は `/tmp/claude-usage-cache.json` の360秒キャッシュを挟むため、値の鮮度は最大6分古くなりうる
 - **`src/workers/`** - 各ワーカー実装
+- **`src/last-run-pr.ts`** - 定期ワーカーの実行記録（`lastRun`）だけを更新するPRの作成。`publishLastRunPr()`（固定名ブランチの worktree を作り `writeLastRun` → commit → force-push → open PR が無ければ `gh pr create` ＋ `cc-triage-scope` 付与 → worktree 削除）、`lastRunBranchName()` / `hasLastRunChange()` / `lastRunPrTitle()` / `lastRunPrBody()`（テスト可能な純粋関数）
 - **`src/workers/scheduled-worker.ts`** - 定期ワーカーの共通実装（`createScheduledWorker()`）。Issue/PR をポーリングせず、時刻だけを条件にスキルを起動する。`update-coding-guidelines` / `update-requirement-rules` / `update-design-md` が使う（後述の「定期ワーカー」参照）
 - **`src/workers/ui-design.ts`** - UIデザイン先行ワークフローの純粋ヘルパー（`create-ui-design` / `apply-ui-design` が共有）。`designBranchName()`（`cc-ui-design-<N>`）、`hasDesignReference()`（description のデザイン参照セクション判定）、`classifyDesignPr()`（デザインPRの状態 → preflight 判定）、各種 Issue コメント本文。gh 依存を持たないため分岐だけをユニットテストできる
 - **`plugin/`** - Claude Code プラグイン本体（`.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `scripts/`, `.mcp.json`）
@@ -347,8 +348,11 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` は、Issue・PR のラベルではなく**時刻**だけを条件にスキルを起動する。24時間おきに1回、直近24時間（＝スキルへ渡す期間引数は `1`）を対象に走る。実装は `src/workers/scheduled-worker.ts` の1関数で、3ワーカーは名前・スキル・タスクIDだけが違う。
 
-- **実行記録は `claude-task-worker.json` の `lastRun.<ワーカー名>`（ISO8601）**。ワーカーは worktree 側のファイルへ書き込み、スキルの `commit-push` がその日の成果物（`CODING_GUIDELINES.md` / `.claude/requirements/` / `DESIGN.md`）と**同じコミット・同じPR**に含める。記録が恒久化するのはPRのマージ時点で、それまではプロセス内の起動時刻（`startedAt`）が二重実行を止める。両方を見るのは、PR がマージされるまでの間に毎ポーリングで再起動するのを防ぐため
-- 3スキルとも「差分の有無を判定するときに `claude-task-worker.json` を数えない」規定を持つ。ワーカーが必ず書き込む以上、これが無いと成果物が空でも毎日タイムスタンプだけのPRが立つ
+- **実行記録は `claude-task-worker.json` の `lastRun.<ワーカー名>`（ISO8601）で、書き込み・コミット・PR作成はすべてワーカーの責務**（`src/last-run-pr.ts` の `publishLastRunPr()`）。スキルは同ファイルに一切触らない。記録が恒久化するのはそのPRのマージ時点で、それまではプロセス内の起動時刻（`startedAt`）が二重実行を止める。両方を見るのは、PR がマージされるまでの間に毎ポーリングで再起動するのを防ぐため
+- **実行記録のPRは成果物のPRと分ける**。スキルは収集対象が0件（`pr_count` / `issue_count` が0）でも成果物の差分が無くても早期終了するので、記録をスキルの `commit-push` に相乗りさせると「材料が無かった日は記録が残らない」＝ワーカー再起動後に同じ期間を何度も走り直す（毎回セッションを1本焼く）ことになる。ワーカー側で出せば、スキルの終了経路に関わらず必ず記録される
+- ブランチ名は `ctw-last-run-<ワーカー名>` の**固定名**で、push は毎回 force。未マージのPRが残っている場合は同じPRのタイムスタンプが進むだけなので、記録PRが積み上がらない（open PRの有無は `findOpenPrNumberByHeadRef()` で確認し、無いときだけ `gh pr create`）
+- **記録PRはワーカーが直接マージする**（`gh pr merge --merge --delete-branch`）。レビュー対象ではないので `cc-triage-scope` は付けず `triage-pr` にも載せない（毎日1本ずつトリアージのセッションを焼くだけになる）。マージ失敗（必須チェック待ち・ブランチ保護など）はログのみで、PRは open のまま残り次回実行が force-push してマージを再試行する
+- `publishLastRunPr()` の失敗はスキル起動を止めない（catch してログのみ）。記録PRが作れなくてもその日の収集は走らせるべきで、記録は次回ポーリングで作り直せる
 - `pollingIntervalSeconds`（既定3600）は**実行間隔ではなく「24時間経過したかを確認する頻度」**。実行間隔は `SCHEDULE_INTERVAL_HOURS`（24）で固定
 - タスクIDは `-1` / `-2` / `-3`。`process-manager` の台帳は数値キーで Issue/PR 番号（正数）と共有するため、衝突しないよう負値を割り当てている
 - **`update-design-md` は `uiDesign.enabled` が `true` のときだけ起動する**。DESIGN.md の材料である `cc-ui-design` ラベル付きのマージ済みデザインPRを作るのはデザイン先行フローだけで、無効なリポジトリでは収集対象が原理的に存在しない（毎日空振りのセッションを焼くだけになる）。判定は `index.ts` ではなくワーカー側（`enabled` コールバック）に置き、`all` / `yolo` からの一括起動でも個別コマンドでも同じ経路を通す

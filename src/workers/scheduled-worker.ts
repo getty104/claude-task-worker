@@ -1,7 +1,8 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
-import { getLastRunAt, getWorkerConfig, writeLastRun } from "../config";
+import { getLastRunAt, getWorkerConfig } from "../config";
 import { getRepoInfo } from "../gh";
 import { syncDefaultBranch } from "../git";
+import { publishLastRunPr } from "../last-run-pr";
 import { isRunning, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyError, notifyTaskCompleted, notifyTaskFailed } from "../slack";
@@ -26,9 +27,10 @@ export interface ScheduledWorkerConfig {
 
 // Issue / PR のポーリングではなく、時刻だけを条件にスキルを起動するワーカー。
 //
-// 最終実行時刻は claude-task-worker.json の `lastRun` に持つ。値を書くのはワーカーだが、
-// 書き込み先は worktree 側のファイルで、スキルの commit-push がその日の成果物と同じPRに含める。
-// つまり記録が恒久化するのはPRがマージされた時点で、それまでは下記の起動時刻（プロセス内）が
+// 最終実行時刻は claude-task-worker.json の `lastRun` に持つ。書き込み・コミット・PR作成は
+// すべてワーカーの責務（publishLastRunPr）で、スキルは同ファイルに一切触らない。成果物とは
+// 別PRに分けているのは、材料が無くてスキルがPRを作らない日でも記録を残すため。
+// 記録が恒久化するのはそのPRがマージされた時点で、それまでは下記の起動時刻（プロセス内）が
 // 二重実行を止める。設定ファイルへ寄せているのは、実行間隔をリポジトリの状態として
 // 追跡・レビューできるようにするため。
 export function createScheduledWorker(config: ScheduledWorkerConfig): () => Promise<void> {
@@ -68,11 +70,15 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           permissionMode: getPermissionMode(),
         });
 
+        // 実行記録は成果物とは別PRでワーカー自身が出す。材料が無くてスキルがPRを
+        // 作らない日でも lastRun がマージで恒久化するようにするため、スキル側の手順には
+        // 載せない。失敗してもスキルの起動は止めない（次回ポーリングで作り直せる）。
+        await publishLastRunPr(config.name, defaultBranch, new Date(now)).catch((err) =>
+          console.error(`[${config.name}] publishLastRunPr failed: ${err}`),
+        );
+
         await createWorktreeFromBranch(worktreeId, defaultBranch);
         const cwd = getWorktreePath(worktreeId);
-        // スキルが commit する前に書いておく（スキル側は「差分に含まれていたらそのまま
-        // コミットする」だけでよく、タイムスタンプの生成をモデルに任せない）。
-        writeLastRun(cwd, config.name, new Date(now));
         console.log(`[${config.name}] created worktree ${worktreeId} from ${defaultBranch}`);
 
         const repoUrl = `https://github.com/${owner}/${repoName}`;
