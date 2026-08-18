@@ -413,6 +413,14 @@ export async function commentOnIssue(issueNumber: number, body: string): Promise
   await execGh(["issue", "comment", String(issueNumber), "--body", body]);
 }
 
+// PRを作成して番号を返す。`gh pr create` は作成したPRのURLを標準出力に返す。
+export async function createPullRequest(base: string, head: string, title: string, body: string): Promise<number> {
+  const url = await execGh(["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body]);
+  const matched = url.match(/\/pull\/(\d+)/);
+  if (!matched) throw new Error(`gh pr create returned an unexpected output: ${url}`);
+  return Number(matched[1]);
+}
+
 export async function createLabel(name: string, color?: string, force?: boolean): Promise<boolean> {
   try {
     const args = ["label", "create", name];
