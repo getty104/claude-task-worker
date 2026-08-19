@@ -13,6 +13,7 @@ const {
   DEFAULT_UI_DESIGN_CONFIG,
   DEFAULT_WORKER_CONFIG,
   WORKER_DEFAULTS,
+  SCHEDULED_WORKER_NAMES,
 } = (await import("./config")) as typeof ConfigModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
@@ -156,4 +157,10 @@ test("parseWorkerEntry falls back to the default for a non-string advisorModel",
   assert.equal(parseWorkerEntry("exec-issue", { advisorModel: null })?.advisorModel, "");
   // 有効値の指定は残る（不正値だけが弾かれることの確認）。
   assert.equal(parseWorkerEntry("triage-pr", { advisorModel: "opus" })?.advisorModel, "opus");
+});
+
+test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
+  for (const name of SCHEDULED_WORKER_NAMES) {
+    assert.ok(WORKER_DEFAULTS[name], `missing defaults for ${name}`);
+  }
 });
