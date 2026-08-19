@@ -1,6 +1,6 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
-import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH } from "../config.js";
+import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH, SCHEDULED_WORKER_NAMES } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
@@ -118,10 +118,14 @@ function logWriteResult(result: "created" | "overwritten" | "skipped", path: str
 // ワーカーごとの設定（workers.<name>）は書き出さない。未指定なら `getWorkerConfig()` が
 // WORKER_DEFAULTS へフォールバックするため、既定値を写経した設定はプラグイン更新で既定が
 // 変わっても古い値に固定され続けるだけで害になる。上書きしたいワーカーだけを人が追記する。
+// lastRun は init 実行時刻で埋める。空だと初回ポーリングで3つの定期ワーカーが一斉に走り、
+// セットアップ直後の（材料がまだ無い）リポジトリで空振りのセッションを3本焼くため。
 async function createConfig(force: boolean): Promise<void> {
+  const now = new Date().toISOString();
   const initialConfig = {
     ...DEFAULT_CONFIG,
     uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
+    lastRun: Object.fromEntries(SCHEDULED_WORKER_NAMES.map((name) => [name, now])),
     workers: {},
   };
   const result = await writeFileWithMode(CONFIG_PATH, JSON.stringify(initialConfig, null, 2), force);

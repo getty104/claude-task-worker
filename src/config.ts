@@ -216,6 +216,13 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
   },
 };
 
+// 定期ワーカー（createScheduledWorker）の名前。init が lastRun の初期値を書き出す際に使う。
+export const SCHEDULED_WORKER_NAMES = [
+  "update-coding-guidelines",
+  "update-requirement-rules",
+  "update-design-md",
+] as const;
+
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
