@@ -8,10 +8,24 @@ import {
 } from "../gh";
 import { createIssuePollingWorker } from "./issue-worker";
 
-function prMissingComment(worktreeId: string): string {
+// 最終報告（stdout）は長くなりうるためコメントには末尾のみ載せる。
+// PRを作らなかった理由は報告の結び（結論）に現れるため、先頭ではなく末尾を残す。
+const REPORT_TAIL_LIMIT = 3000;
+
+export function formatSessionReport(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed === "") return "（セッションの出力はありませんでした）";
+  const tail = trimmed.length > REPORT_TAIL_LIMIT ? `…（先頭を省略）\n${trimmed.slice(-REPORT_TAIL_LIMIT)}` : trimmed;
+  return ["```", tail, "```"].join("\n");
+}
+
+function prMissingComment(worktreeId: string, output: string): string {
   return [
     "## PR未作成のまま自動実行が終了しました（要人手確認）",
     `exec-issue のセッションは正常終了（exit 0）しましたが、この実行の作業ブランチ（\`${worktreeId}\`）を head とするPRも、本Issueを closing 参照するPRも見つかりませんでした。PR作成前にセッションが終了した可能性があります。`,
+    "",
+    "## PRを作成しなかった理由（セッションの最終報告）",
+    formatSessionReport(output),
     "",
     "## 状態の確認",
     `- 変更が push 済みの場合はリモートブランチ \`${worktreeId}\` が残っています。内容を確認し、必要なら手動でPRを作成してください`,
@@ -29,7 +43,7 @@ export const execIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: s
     triggerLabels: ["cc-exec-issue"],
     epicFilters: opts.epicFilters,
     labelFilters: opts.labelFilters,
-    onCompleted: async (issueNumber, worktreeId) => {
+    onCompleted: async (issueNumber, worktreeId, output) => {
       // スキルがPRを作成できず cc-need-human-check を付与した場合は、
       // PRが存在しないのに cc-pr-created を付けて完了扱いにしないよう抑止する。
       if (await hasLabel("issue", issueNumber, "cc-need-human-check")) {
@@ -56,7 +70,7 @@ export const execIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: s
         `[exec-issue] #${issueNumber}: session exited without a PR (branch: ${worktreeId}); marking cc-need-human-check`,
       );
       await addLabel("issue", issueNumber, "cc-need-human-check");
-      await commentOnIssue(issueNumber, prMissingComment(worktreeId)).catch((err) =>
+      await commentOnIssue(issueNumber, prMissingComment(worktreeId, output)).catch((err) =>
         console.error(`[exec-issue] commentOnIssue failed for #${issueNumber}: ${err}`),
       );
       return false;
