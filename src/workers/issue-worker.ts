@@ -37,7 +37,7 @@ interface IssueWorkerConfig {
   preflight?: (issue: Issue) => Promise<PreflightResult>;
   // exit 0 でも期待成果物（PR等）を検証できなかった場合は false を返す。
   // その場合ワーカーは完了通知ではなく失敗通知を送る。void / true は完了扱い。
-  onCompleted?: (issueNumber: number, worktreeId: string) => Promise<boolean | void>;
+  onCompleted?: (issueNumber: number, worktreeId: string, output: string) => Promise<boolean | void>;
 }
 
 export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promise<void> {
@@ -159,7 +159,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
                 try {
                   if (status === "completed") {
-                    const verified = (await config.onCompleted?.(issue.number, worktreeId)) ?? true;
+                    const verified = (await config.onCompleted?.(issue.number, worktreeId, output)) ?? true;
                     if (verified === false) {
                       await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
                     } else {
