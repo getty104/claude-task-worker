@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { writeLastRun } from "./config";
-import { createPullRequest, findOpenPrNumberByHeadRef, mergePullRequest } from "./gh";
+import { createPullRequest, findOpenPrNumberByHeadRef, getCurrentUser } from "./gh";
 import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "./worktree";
 
 const execFileAsync = promisify(execFile);
 
 const CONFIG_FILE = "claude-task-worker.json";
+
+// 記録PRのマージは triage-pr ワーカーに任せる。そのためのトリガーラベル。
+const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
 // ワーカーごとに固定のブランチ名。未マージのPRが残っている場合は同じブランチへ
 // force-push して同一PRを進めるため、タイムスタンプPRが積み上がらない。
@@ -31,7 +34,7 @@ export function lastRunPrBody(workerName: string, at: Date): string {
     `- 実行時刻: ${at.toISOString()}`,
     "",
     `このPRは実行記録のみを更新します（成果物の変更は同ワーカーが起動したスキルが別PRで出します）。`,
-    `レビュー対象ではないため、ワーカーがそのままマージします。`,
+    `マージは \`triage-pr\` ワーカーが行います。`,
   ].join("\n");
 }
 
@@ -61,18 +64,24 @@ export async function publishLastRunPr(workerName: string, defaultBranch: string
     await git(cwd, ["commit", "-m", lastRunPrTitle(workerName)]);
     await git(cwd, ["push", "--force", "origin", `HEAD:refs/heads/${branch}`]);
 
-    // 前回のPRが（マージ失敗などで）残っていれば、force-push でタイムスタンプを進めた
-    // そのPRをそのままマージ対象にする。記録PRが積み上がらない。
+    // 前回のPRが（マージ前に次の実行が来たなどで）残っていれば、force-push でタイムスタンプを
+    // 進めたそのPRをそのまま使う。記録PRが積み上がらない。
     const existing = await findOpenPrNumberByHeadRef(branch);
-    const prNumber =
-      existing ??
-      (await createPullRequest(defaultBranch, branch, lastRunPrTitle(workerName), lastRunPrBody(workerName, at)));
+    if (existing !== null) {
+      console.log(`[${workerName}] updated lastRun PR #${existing}`);
+      return;
+    }
 
-    // レビュー対象ではないので triage-pr には載せずワーカーが直接マージする。
-    // 失敗（必須チェック待ち・ブランチ保護など）は呼び出し元がログに留めるだけで、
-    // PRは open のまま残る。次回実行が同じブランチへ force-push してマージを再試行する。
-    await mergePullRequest(prNumber);
-    console.log(`[${workerName}] merged lastRun PR #${prNumber}`);
+    // マージは triage-pr ワーカーに任せる（cc-triage-scope + 自分自身をAssignee）。
+    // ワーカーが直接マージすると必須チェック・ブランチ保護をすり抜けるため。
+    const prNumber = await createPullRequest(
+      defaultBranch,
+      branch,
+      lastRunPrTitle(workerName),
+      lastRunPrBody(workerName, at),
+      { labels: [LABEL_TRIAGE_SCOPE], assignee: await getCurrentUser() },
+    );
+    console.log(`[${workerName}] opened lastRun PR #${prNumber}`);
   } finally {
     await removeWorktree(branch).catch((err) => console.error(`[${workerName}] removeWorktree failed: ${err}`));
   }
