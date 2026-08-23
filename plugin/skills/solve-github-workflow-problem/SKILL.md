@@ -1,80 +1,63 @@
 ---
 name: solve-github-workflow-problem
-description: GitHub Actions ワークフローのURLを受け取り、その最新実行が失敗している場合に原因を調査・特定して修正し、PRを作成します。最新実行が成功している場合は何もしません。
-argument-hint: "[workflow-url]"
+description: GitHub Actions ワークフロー実行（run）のIDまたはURLを受け取り、その実行が失敗している場合に原因を調査・特定して修正し、PRを作成します。成功している場合は何もしません。
+argument-hint: "[run-id | run-url]"
 ---
 
 # Solve GitHub Workflow Problem
 
-指定された GitHub Actions ワークフローの**最新の実行結果**を確認し、失敗していれば原因を特定して修正PRを作成するスキルです。
+指定された GitHub Actions の**ワークフロー実行（run）**の結果を確認し、失敗していれば原因を特定して修正PRを作成するスキルです。
 
 # Instructions
 
 ## ステップ0: 引数のパース
 
-`$ARGUMENTS` に渡された URL から `owner` / `repo` / ワークフローの識別子を取り出す。受け付ける形式:
+`$ARGUMENTS` から run ID（と、URL 形式なら `owner/repo`）を取り出す。受け付ける形式:
 
-| URL 形式 | 取り出すもの |
+| 形式 | 例 |
 |---------|------------|
-| `https://github.com/<owner>/<repo>/actions/workflows/<file>.yml` | ワークフローファイル名 |
-| `https://github.com/<owner>/<repo>/actions/runs/<run-id>` | run ID（そのrunが属するワークフローを対象にする） |
-| `https://github.com/<owner>/<repo>/actions/workflows/<file>.yml?query=...` | クエリ文字列を捨ててファイル名 |
+| run ID（数値のみ） | `1234567890` |
+| run URL | `https://github.com/<owner>/<repo>/actions/runs/<run-id>` |
+| run URL（ジョブ・クエリ付き） | `https://github.com/<owner>/<repo>/actions/runs/<run-id>/job/<job-id>` |
 
 ```bash
-URL=$(printf '%s' "$ARGUMENTS" | tr -d '[:space:]')
-REPO=$(printf '%s' "$URL" | sed -E 's#^https?://github\.com/([^/]+/[^/]+)/.*#\1#')
-WORKFLOW=$(printf '%s' "$URL" | sed -E 's#.*/actions/workflows/([^/?#]+).*#\1#;t;d')
-RUN_ID=$(printf '%s' "$URL" | sed -E 's#.*/actions/runs/([0-9]+).*#\1#;t;d')
+ARG=$(printf '%s' "$ARGUMENTS" | tr -d '[:space:]')
+RUN_ID=$(printf '%s' "$ARG" | grep -oE '^[0-9]+$|/actions/runs/[0-9]+' | grep -oE '[0-9]+$')
+REPO=$(printf '%s' "$ARG" | grep -oE '^https?://github\.com/[^/]+/[^/]+' | sed -E 's#^https?://github\.com/##')
+CURRENT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+REPO="${REPO:-$CURRENT_REPO}"
 ```
 
-`REPO` が取れない（URLがGitHub ActionsのURLでない）場合は、その旨を報告して終了する。
-
-`WORKFLOW` と `RUN_ID` がどちらも空（ワークフローURL・run URLのいずれの形式にも一致しない）場合は、対象URLとして不正である旨を報告して終了する。
+`RUN_ID` が取れない（run ID でも run URL でもない）場合は、その旨を報告して終了する。
 
 ```bash
-if [ -z "$WORKFLOW" ] && [ -z "$RUN_ID" ]; then
-  echo "対象URLとして不正です（ワークフローURL / run URLのいずれの形式にも一致しません）"
+if [ -z "$RUN_ID" ]; then
+  echo "対象として不正です（run ID / run URL のいずれの形式にも一致しません）"
   exit 1
-fi
-```
-
-`RUN_ID` だけが取れた場合は、そのrunが属するワークフローを `workflowDatabaseId`（数値ID）で引き当てる。同名ワークフローが複数存在すると `workflowName` では一意に解決できないため、数値IDを使う:
-
-```bash
-if [ -z "$WORKFLOW" ] && [ -n "$RUN_ID" ]; then
-  WORKFLOW=$(gh run view "$RUN_ID" --repo "$REPO" --json workflowDatabaseId -q .workflowDatabaseId)
 fi
 ```
 
 ### 対象リポジトリの確認
 
-```bash
-CURRENT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-```
-
 `REPO` が `CURRENT_REPO` と一致しない場合、**修正は行わない**。原因の調査結果だけを報告して終了する（作業ディレクトリのリポジトリと別リポジトリのコードは修正できないため）。
 
-## ステップ1: 最新実行結果の取得
+## ステップ1: 実行結果の取得
 
 ```bash
-gh run list --repo "$REPO" --workflow "$WORKFLOW" --all --limit 1 \
-  --json databaseId,displayTitle,headBranch,headSha,status,conclusion,createdAt,url
+gh run view "$RUN_ID" --repo "$REPO" \
+  --json databaseId,displayTitle,workflowName,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,url,attempt
 ```
-
-無効化されたワークフローのrunも対象にするため `--all` を付ける（`--all` が無いと `gh run list --workflow` は無効化されたワークフローのrunを返さない）。
 
 - `status` が `completed` でない（実行中・キュー待ち）: **何もしない**。実行中である旨を報告して終了する
 - `conclusion` が `success` / `skipped` / `cancelled`: **何もしない**。その旨を報告して終了する
 - `conclusion` が `action_required` / `neutral` / `stale`: 人手対応が必要である旨を報告して終了する
 - `conclusion` が `failure` / `timed_out` / `startup_failure`: ステップ2へ進む
 
-実行履歴が1件も無い場合も何もせず報告して終了する。
+run が存在しない（コマンドが失敗する）場合も何もせず報告して終了する。
 
 ## ステップ2: 失敗原因の調査と特定
 
 ```bash
-RUN_ID=<ステップ1のdatabaseId>
-
 # 失敗したジョブ・ステップの一覧（成功系のskipped/cancelledを誤って拾わないよう、失敗値だけを明示的に指定する）
 gh run view "$RUN_ID" --repo "$REPO" --json jobs \
   -q '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | {name, conclusion, steps: [.steps[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | .name]}'
@@ -97,14 +80,14 @@ gh run view "$RUN_ID" --repo "$REPO" --log-failed
 
 ### C（一過性）の場合
 
-同一ワークフローの直近の実行を確認し、**対象runと同じ `headSha`（同じコード）**で成功しているrunがあるかを見る。別コミットの成功runを「同じコード」と誤認しないよう、`headSha` の一致を必ず確認すること。
+同一ワークフローの直近の実行を確認し、**対象runと同じ `headSha`（同じコード）**で成功しているrunがあるかを見る。別コミットの成功runを「同じコード」と誤認しないよう、`headSha` の一致を必ず確認すること。ワークフローの指定にはステップ1で取得した `workflowDatabaseId`（数値ID）を使う（同名ワークフローが複数存在すると名前では一意に解決できないため）。
 
 ```bash
-gh run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 \
+gh run list --repo "$REPO" --workflow "$WORKFLOW_DATABASE_ID" --all --limit 10 \
   --json databaseId,headSha,conclusion,createdAt
 ```
 
-一過性と判断でき（対象runと同じ `headSha` を持つ成功runが存在する）、かつ対象runがまだ再実行されていない（`gh run view "$RUN_ID" --repo "$REPO" --json attempt -q .attempt` が `1`）場合に限り、**1回だけ**再実行して終了する。
+一過性と判断でき（対象runと同じ `headSha` を持つ成功runが存在する）、かつ対象runがまだ再実行されていない（ステップ1の `attempt` が `1`）場合に限り、**1回だけ**再実行して終了する。
 
 ```bash
 gh run rerun "$RUN_ID" --repo "$REPO" --failed
@@ -163,8 +146,7 @@ PR 本文には、対象ワークフロー・失敗した run の URL・特定�
 
 ## 出力
 
-- **対象ワークフロー**: 名前と URL
-- **最新実行**: run URL / ブランチ / status / conclusion
+- **対象run**: run URL / ワークフロー名 / ブランチ / status / conclusion
 - **判定**: 成功（対応不要） / 実行中（対応不要） / 修正あり / 再実行 / 対応不可（人手）
 - **原因**: 特定した一次原因（該当時）
 - **修正内容**: 変更したファイルと修正の要点（該当時）
