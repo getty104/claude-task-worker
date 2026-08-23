@@ -207,8 +207,12 @@ export function buildClaudeArgs({
   const advisor = advisorModel?.trim() ?? "";
   const permission = permissionMode ?? DEFAULT_PERMISSION_MODE;
   return [
-    ...(mode === "herdr" ? [] : ["-p"]),
-    prompt,
+    // default モードはプロンプトを引数で渡す（print モード）。herdr モードでは渡さない:
+    // 引数で渡すと claude が起動と同時に作業を始めてしまい、`herdr agent start` が
+    // 「入力待ちになるまで」ブロックする仕様と噛み合わない（タスクが終わるまで返らず、
+    // 2分を超えると timeout で落ちる）。プロンプトは起動後に `herdr agent prompt` で
+    // 投入し、herdr にターンを追跡させる（herdr-runner.ts の startHerdrTask 参照）。
+    ...(mode === "herdr" ? [] : ["-p", prompt]),
     "--permission-mode",
     permission,
     "--chrome",
@@ -229,6 +233,9 @@ export function buildClaudeArgs({
 export interface ClaudeExecution {
   command: string;
   args: string[];
+  // herdr モードのみ設定される、起動後に `herdr agent prompt` で投入するプロンプト。
+  // default モードでは args に含まれるため undefined。
+  prompt?: string;
 }
 
 /**
@@ -236,11 +243,15 @@ export interface ClaudeExecution {
  *
  * 実行形態（default / herdr）とは直交する。default モードでは spawn の command
  * （`claude`）と引数にそのまま渡す。herdr モードでは `command`（＝claude）を agent kind、
- * `args` を `herdr agent start ... -- <args>` の agent 引数として使う
- * （`herdr-runner.ts` の `startHerdrTask` 参照）。
+ * `args` を `herdr agent start ... -- <args>` の agent 引数として使い、`prompt` は起動後に
+ * `herdr agent prompt` で投入する（`herdr-runner.ts` の `startHerdrTask` 参照）。
  */
 export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecution {
-  return { command: CLAUDE_COMMAND, args: buildClaudeArgs(invocation) };
+  return {
+    command: CLAUDE_COMMAND,
+    args: buildClaudeArgs(invocation),
+    ...(invocation.mode === "herdr" ? { prompt: invocation.prompt } : {}),
+  };
 }
 
 // claude へ渡す環境変数を組み立てる。

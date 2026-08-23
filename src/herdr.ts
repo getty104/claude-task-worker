@@ -351,8 +351,9 @@ const AGENT_START_EXEC_BUFFER_MS = 15 * 1000;
 // 担うため、呼び出し側は起動確認の別ポーリングが不要になる。検出できなければ herdr が
 // エラー（例: `agent_pane_not_found`）を返し、execHerdr が HerdrError を投げる。
 //
-// **`args` に実行ファイル（claude）は含めない**。実行ファイルは `--kind` が供給するため、
-// `--` の後ろへ渡すのは claude のフラグだけ（herdr は返り値の argv で `["claude", ...args]` と
+// **`args` に実行ファイル（claude）とプロンプトは含めない**。実行ファイルは `--kind` が
+// 供給するため、`--` の後ろへ渡すのは claude のフラグだけ（プロンプトは起動後に
+// `agentPrompt` で投入する。理由は同関数のコメント参照）（herdr は返り値の argv で `["claude", ...args]` と
 // 補完する）。cwd と env は tabCreate の `--cwd` / `--env` でペインへ渡してあり、そこで起動する
 // claude が継承する。呼び出し側は agent start の前にシェルプロンプトの描画を待つこと
 // （herdr-runner の waitForPaneReady 参照）。
@@ -374,6 +375,20 @@ export async function agentStart(
     throw new Error(`Failed to start agent in pane ${paneId}: invalid response structure from herdr`);
   }
   return toAgentInfo(agent);
+}
+
+// 起動済みエージェントへプロンプトを送信する（`herdr agent prompt <pane> <text>`）。
+//
+// **プロンプトは claude の起動引数ではなく必ずこの経路で渡す**。引数で渡すと claude が
+// 起動と同時に作業を始めてしまい、(1) `agent start` が入力待ちになるまで返らない
+// （＝ワーカーのポーリングがタスク完了後にしか始まらず `working` を観測できない）、
+// (2) herdr がそのターンを追跡しないため非フォーカス完了で `done` にならず `idle` に戻る、
+// の2点でワーカーの完了判定が永久に成立しなくなる（実測: `running:idle` のまま無限待機）。
+//
+// `--wait` は付けない。完了待ちは waitForHerdrTask のポーリングが担うため、ここでは
+// 送信だけを行う。エージェントが blocked のときは herdr が `agent_blocked` を返す。
+export async function agentPrompt(paneId: string, text: string): Promise<void> {
+  await execHerdr(["agent", "prompt", paneId, text]);
 }
 
 // ペインで動いているエージェントの状態を取得する。ペインが消えている場合は

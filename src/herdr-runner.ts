@@ -136,26 +136,36 @@ export interface StartTiming {
  * herdr のタスク専用タブで claude を TUI 起動する（1タスク=1タブ）。
  *
  * `--no-focus` でタスク専用タブを作り、その**ルートペイン（シェル）で** `herdr agent start`
- * を使って claude を起動する。`agent start <name> --kind claude --pane <id> -- <args>` は（name は
+ * を使って素の claude(TUI) を起動し、起動後に `herdr agent prompt` でタスクのプロンプトを
+ * 投入する。`agent start <name> --kind claude --pane <id> -- <args>` は（name は
  * ラベルを agent 名規則へ変換した `toAgentName(label)`）、
  * ペインのシェルで claude を起動し、agent として検出され入力待ちになるまで同期的にブロックする
  * （旧 send-text 方式の「起動コマンド送信 → 自動検出待ちポーリング」を1コマンドで担う）。
  * `--kind claude` が実行ファイルを供給するため、`args` には claude のフラグだけを渡す
- * （実行ファイル名は含めない）。cwd・env は tabCreate の `--cwd` / `--env` でペインへ渡してあり、
- * そこで起動する claude が継承する。ルートペインがそのまま claude のペインになるので、
- * 旧実装のような余剰シェルペインの `paneClose` は不要。
+ * （実行ファイル名・プロンプトは含めない）。cwd・env は tabCreate の `--cwd` / `--env` で
+ * ペインへ渡してあり、そこで起動する claude が継承する。ルートペインがそのまま claude の
+ * ペインになるので、旧実装のような余剰シェルペインの `paneClose` は不要。
+ *
+ * **プロンプトを起動引数に含めてはいけない**。含めると claude が起動と同時に作業を始め、
+ * 「入力待ちになるまでブロックする」`agent start` がタスク完了まで返らず（2分を超えると
+ * timeout エラーで作業中の claude ごとタブが閉じられる）、しかも herdr がそのターンを
+ * 追跡しないため非フォーカス完了で `done` にならず `idle` へ戻る。結果として
+ * waitForHerdrTask は `working` を一度も観測できず、完了を永久に検知できない
+ * （実測: ステータスが `running:idle` のまま張り付く）。
  *
  * 手順:
  * 1. tabCreate（`--no-focus`）でユーザーの見ているタブに割り込まないタスク専用タブを作る
  * 2. waitForPaneReady でシェルプロンプトの描画を待つ（未描画で agent start すると起動に失敗しうる）
  * 3. agentStart で claude を起動し、検出＋入力待ちになるまで待つ。検出できなければ herdr が
- *    エラーを返して agentStart が throw する（例: 起動失敗・プリアンブル失敗）。その場合は
+ *    エラーを返して agentStart が throw する（例: 起動失敗）。その場合は
  *    シェルだけのタブが残らないよう閉じてから失敗させる
+ * 4. agentPrompt でタスクのプロンプトを投入する。失敗時は 3 と同様にタブを閉じて失敗させる
  */
 export async function startHerdrTask({
   label,
   cwd,
   args,
+  prompt,
   env,
   workspaceId,
   herdr,
@@ -164,6 +174,8 @@ export async function startHerdrTask({
   label: string;
   cwd: string;
   args: string[];
+  // 起動後に投入するタスクのプロンプト（スキル呼び出し文字列）。
+  prompt: string;
   env?: Record<string, string>;
   workspaceId?: string;
   herdr?: typeof HerdrModule;
@@ -185,6 +197,9 @@ export async function startHerdrTask({
     }
     // agent 名はラベルと違い文字種が厳しく制限されるため、ラベルから規則に合う名前へ変換して渡す。
     await mod.agentStart(paneId, { name: toAgentName(label), args, readyTimeoutMs: timing?.agentStartReadyTimeoutMs });
+    // 入力待ちになった claude へタスクを投入する。この経路で送ることで herdr がターンを
+    // 追跡し、作業中は working、非フォーカスでの完了は done を返すようになる。
+    await mod.agentPrompt(paneId, prompt);
   } catch (err) {
     // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
     await mod.tabClose(tabId).catch(() => {});

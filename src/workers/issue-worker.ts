@@ -185,6 +185,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               },
               cwd,
               buildClaudeEnv(mode),
+              execution.prompt,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);

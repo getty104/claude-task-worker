@@ -179,6 +179,7 @@ export function resolveProjectName(cwd: string = process.cwd()): string {
 // agent ステータスで完了を検知する。
 async function runViaHerdr(
   args: string[],
+  prompt: string,
   id: number,
   onComplete?: OnComplete,
   cwd?: string,
@@ -197,11 +198,13 @@ async function runViaHerdr(
   herdrTasks.set(id, { paneId: "", tabId: "" });
 
   try {
-    // args は claude のフラグのみ（実行ファイル claude は agent start の `--kind` が供給する）。
+    // args は claude のフラグのみ（実行ファイル claude は agent start の `--kind` が供給し、
+    // プロンプトは起動後に agent prompt で投入する）。
     task = await startHerdrTask({
       label,
       cwd: cwd ?? process.cwd(),
       args,
+      prompt,
       env,
       workspaceId: getCurrentWorkspaceId(),
     });
@@ -240,6 +243,9 @@ export function run(
   onComplete?: OnComplete,
   cwd?: string,
   env?: Record<string, string>,
+  // herdr モードで起動後に投入するプロンプト（`buildClaudeExecution` の `prompt`）。
+  // default モードでは args に含まれるため不要。
+  prompt?: string,
 ): void {
   // 同じ Issue/PR を再実行したときは古いエントリを削除してから入れ直し、
   // Map の挿入順で「最新に繰り上げる」（selectRecentTasks の直近順表示と揃える）。
@@ -258,8 +264,8 @@ export function run(
 
   if (getRunMode() === "herdr") {
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、
-    // command は渡さず claude のフラグ（args）だけを渡す。
-    void runViaHerdr(args, id, onComplete, cwd, env);
+    // command は渡さず claude のフラグ（args）とプロンプトを渡す。
+    void runViaHerdr(args, prompt ?? "", id, onComplete, cwd, env);
     return;
   }
 
