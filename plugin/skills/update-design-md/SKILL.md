@@ -3,7 +3,7 @@ name: update-design-md
 description: 直近N日（デフォルト1日）にマージされた `cc-ui-design` ラベル付きPR（UIデザインPR）から確定したビジュアルアイデンティティ（カラー・タイポグラフィ・スペーシング・コンポーネント）をリポジトリルートの `DESIGN.md`（google-labs-code/design.md フォーマット）へ集約・更新し、`design.md` CLI の lint を通してから commit-push + create-pr でPRを作成する（`cc-triage-scope` ラベル + 自分自身をAssignee）。`DESIGN.md` は pencil-design-updater がデザイン時の前提として読み込む。
 disable-model-invocation: true
 argument-hint: "[期間（日数、省略時は1）] [関連Issue番号（任意）]"
-allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
+allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*), Bash(claude-task-worker:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
 hooks:
   Stop:
     - matcher: ""

@@ -23,7 +23,7 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-ui-design` ワーカー（`cc-create-ui-design` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-ui-design-pr-created` の付与、デザインPRへの `cc-ui-design` 付与と、`uiDesign.yolo` が `true` の場合の `cc-triage-scope` 付与）を進める。処理が未完のままターンを終えると、デザインPR未作成のままトリガーラベルが外れてIssueが停滞したり、デザインなしで実装フェーズへ流れたりする状態壊れが起きる。
 
-> **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。`pencil` の疎通確認はフェーズ0の本文で行う。
+> **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。`claude-task-worker pencil` の疎通確認はフェーズ0の本文で行う。
 
 ## スコープと出力の規律
 
@@ -42,9 +42,11 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 ### 0-2. Pencil の疎通確認
 
+`@pen.dev/cli` にはアセットURIを絶対URIとして解決できないバグがあり、`claude-task-worker pencil` はその修正を `NODE_OPTIONS` 経由で注入したうえで `pencil` を実行するラッパーである。引数・stdin・終了コードはそのまま素通しするため使い方は `pencil` と同じで、以下も含め本スキルでは素の `pencil` を直接呼ばずすべて `claude-task-worker pencil` を経由する。
+
 ```bash
-pencil version
-pencil status
+claude-task-worker pencil version
+claude-task-worker pencil status
 ```
 
 いずれかが失敗する（未インストール・未認証など）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**
@@ -89,7 +91,7 @@ fi
 
 `DESIGN_DIR` が空文字列のまま（=上記の `jq` 失敗）の場合は、デザインを作らずフェーズ0-2と同じ手順（Issueへの理由コメント + `cc-need-human-check` 付与。デザインPRは作らない）でスキルを終了する。以降「フェーズ0-2と同じ手順」はこの手順を指す。
 
-**完了条件**: worktree内・Issue OPEN・`pencil` 疎通OK・`DESIGN_DIR` が空文字列でなく確定していること。
+**完了条件**: worktree内・Issue OPEN・`claude-task-worker pencil` 疎通OK・`DESIGN_DIR` が空文字列でなく確定していること。
 
 ## フェーズ1: デザイン要件の抽出
 
