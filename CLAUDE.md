@@ -412,6 +412,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 ## Conventions
 
 - ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
+- **本リポジトリ（public）の成果物に他のprivateリポジトリの情報を書かない**。コミットメッセージ・PR本文・Issue・ドキュメント・コード内コメント・テストのフィクスチャすべてが対象で、リポジトリ名・Issue/PR番号・ブランチ名・タブラベル（`ctw:<project>:#<n>`）・worktree名・ファイルパス・ログ抜粋のように**どのプロジェクトかを特定できる文字列**を含めない。ワーカーは複数のprivateリポジトリで動くため、不具合の実測値はここへ持ち込みやすい（例: ステータステーブルやherdrのタブ一覧をそのまま貼る）。現象・件数・所要時間・herdr/claude のバージョンといった**再現に必要な事実だけ**を、プロジェクト名を伏せた形で書く（「5タスクが836分 `running:idle` で張り付いた」のように）
 - ログは `[worker-name]` プレフィックス付き
 - エラーはtry-catchでログ出力し、ワーカーはクラッシュせず継続
 - SIGTERM/SIGINT で全子プロセスを graceful shutdown
