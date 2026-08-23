@@ -2,6 +2,7 @@ import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH, SCHEDULED_WORKER_NAMES } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
+import CTW_SOLVE_GITHUB_WORKFLOW_PROBLEM_SKILL from "../../plugin/skills/ctw-solve-github-workflow-problem/SKILL.md";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
 // 制約下で「**同時に付きうるラベル同士**の最小 ΔE(CIE2000) を最大化する15色」を数値最適化した。
@@ -154,6 +155,12 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
   await mkdir(".github/workflows", { recursive: true });
   const workflowPath = ".github/workflows/assign-creator-on-cc-triage-scope.yml";
   logWriteResult(await writeFileWithMode(workflowPath, ASSIGN_CREATOR_WORKFLOW, force), workflowPath);
+
+  console.log("[init] Creating project skills...");
+  const skillDir = ".claude/skills/ctw-solve-github-workflow-problem";
+  await mkdir(skillDir, { recursive: true });
+  const skillPath = `${skillDir}/SKILL.md`;
+  logWriteResult(await writeFileWithMode(skillPath, CTW_SOLVE_GITHUB_WORKFLOW_PROBLEM_SKILL, force), skillPath);
 
   console.log("[init] Creating config file...");
   await createConfig(force);
