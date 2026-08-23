@@ -387,8 +387,9 @@ export async function agentStart(
 //
 // `--wait` は付けない。完了待ちは waitForHerdrTask のポーリングが担うため、ここでは
 // 送信だけを行う。エージェントが blocked のときは herdr が `agent_blocked` を返す。
+// pane send-text 等と同じ fire-and-forget 系のため、空応答でも成功として扱う。
 export async function agentPrompt(paneId: string, text: string): Promise<void> {
-  await execHerdr(["agent", "prompt", paneId, text]);
+  await execHerdr(["agent", "prompt", paneId, text], { allowEmptyResult: true });
 }
 
 // ペインで動いているエージェントの状態を取得する。ペインが消えている場合は

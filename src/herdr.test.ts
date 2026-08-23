@@ -13,6 +13,7 @@ const {
   paneSendText,
   paneSendKeys,
   paneRead,
+  agentPrompt,
   agentStart,
   AGENT_KIND,
   AGENT_START_READY_TIMEOUT_MS,
@@ -79,6 +80,11 @@ test("paneSendText resolves without throwing when herdr returns empty stdout and
 test("paneSendKeys resolves without throwing when herdr returns empty stdout and stderr on success", async (t) => {
   mockExecFile(t, "", "");
   await assert.doesNotReject(paneSendKeys("w3:pB", "enter"));
+});
+
+test("agentPrompt resolves without throwing when herdr returns empty stdout and stderr on success", async (t) => {
+  mockExecFile(t, "", "");
+  await assert.doesNotReject(agentPrompt("w3:pB", "do the task"));
 });
 
 test("paneSendText still throws invalid JSON when stdout is non-empty but not JSON", async (t) => {
