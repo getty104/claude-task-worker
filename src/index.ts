@@ -27,7 +27,7 @@ import { removeStaleWorktrees } from "./worktree";
 import { init } from "./commands/init";
 import { install } from "./commands/install";
 import { update } from "./commands/update";
-import { version } from "./commands/version";
+import { version, notifyIfOutdated } from "./commands/version";
 import { pencil } from "./commands/pencil";
 import { buildTokenLimitText, send } from "./slack";
 import {
@@ -115,8 +115,13 @@ const workerType = process.argv[2];
 
 if (workerType === "version" || workerType === "--version" || workerType === "-v") {
   version();
+  await notifyIfOutdated();
   process.exit(process.exitCode ?? 0);
 }
+
+// 最新版の案内。ワーカーは captureConsole() 後にログテーブルへ流れるよう、
+// 待たずに投げっぱなしにする（起動を数秒遅らせないため）。
+void notifyIfOutdated();
 
 if (!workerType) {
   printUsage();
