@@ -1,4 +1,5 @@
 import { upgradeCodegraphCli } from "./codegraph.js";
+import { printGlobalPackageVersions } from "./install";
 import { installDesignMdCli } from "./design-md";
 import { installPenCli } from "./pen";
 import { runCommand } from "./run-command.js";
@@ -52,6 +53,7 @@ export async function update(): Promise<void> {
   const designMdOk = await installDesignMdCli("update");
   // Pen CLI も self-upgrade 機構を持たないため、更新はインストールと同じ関数（旧パッケージ削除込み）。
   const penOk = await installPenCli("update");
+  await printGlobalPackageVersions("update");
   if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk || !designMdOk || !penOk) {
     process.exitCode = 1;
   }
