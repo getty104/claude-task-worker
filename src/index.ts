@@ -28,6 +28,7 @@ import { init } from "./commands/init";
 import { install } from "./commands/install";
 import { update } from "./commands/update";
 import { version } from "./commands/version";
+import { pencil } from "./commands/pencil";
 import { buildTokenLimitText, send } from "./slack";
 import {
   hasProjectFilter,
@@ -70,6 +71,7 @@ Commands:
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   usage             Notify current usage to Slack
+  pencil <args...>  Run the Pencil CLI with the asset base-URI fix loaded (passes every argument and stdin through)
   version           Print the installed claude-task-worker CLI version (aliases: --version, -v)
 
 Workers:
@@ -128,6 +130,7 @@ if (
   workerType !== "install" &&
   workerType !== "update" &&
   workerType !== "usage" &&
+  workerType !== "pencil" &&
   !WORKERS[workerType]
 ) {
   console.error(`Unknown command: ${workerType}`);
@@ -298,6 +301,8 @@ if (hasProjectFilter()) {
   (async () => {
     await update();
   })();
+} else if (workerType === "pencil") {
+  pencil(process.argv.slice(3));
 } else if (workerType === "usage") {
   (async () => {
     // buildTokenLimitText は取得した利用状況で RunCat 用スナップショットも更新する

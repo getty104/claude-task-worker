@@ -1,4 +1,4 @@
-const PROJECT_INCOMPATIBLE_COMMANDS = ["init", "install", "update", "usage", "version"];
+const PROJECT_INCOMPATIBLE_COMMANDS = ["init", "install", "update", "usage", "version", "pencil"];
 
 function collectFlagValues(argv: string[], flag: string): string[] {
   const values: string[] = [];
