@@ -3,9 +3,9 @@ import { installDesignMdCli } from "./design-md";
 import { installPenCli } from "./pen";
 import { runCommand } from "./run-command.js";
 
-const PLUGIN_NAME = "claude-task-worker";
-const MARKETPLACE_NAME = "claude-task-worker";
-const MARKETPLACE_SOURCE = "getty104/claude-task-worker";
+export const PLUGIN_NAME = "claude-task-worker";
+export const MARKETPLACE_NAME = "claude-task-worker";
+export const MARKETPLACE_SOURCE = "getty104/claude-task-worker";
 
 async function addMarketplace(): Promise<void> {
   console.log(`[install] Adding marketplace: ${MARKETPLACE_SOURCE}...`);

@@ -1,12 +1,12 @@
 ---
-name: ctw-solve-github-workflow-problem
-description: claude-task-worker が提供するスキル。GitHub Actions ワークフローのURLを受け取り、その最新実行が失敗している場合に原因を調査・特定して修正し、PRを作成します。最新実行が成功している場合は何もしません。
+name: solve-github-workflow-problem
+description: GitHub Actions ワークフローのURLを受け取り、その最新実行が失敗している場合に原因を調査・特定して修正し、PRを作成します。最新実行が成功している場合は何もしません。
 argument-hint: "[workflow-url]"
 ---
 
 # Solve GitHub Workflow Problem
 
-`claude-task-worker` が提供するスキル（`claude-task-worker init` が対象リポジトリの `.claude/skills/` へコピーする）。指定された GitHub Actions ワークフローの**最新の実行結果**を確認し、失敗していれば原因を特定して修正PRを作成するスキルです。
+指定された GitHub Actions ワークフローの**最新の実行結果**を確認し、失敗していれば原因を特定して修正PRを作成するスキルです。
 
 # Instructions
 
@@ -29,10 +29,21 @@ RUN_ID=$(printf '%s' "$URL" | sed -E 's#.*/actions/runs/([0-9]+).*#\1#;t;d')
 
 `REPO` が取れない（URLがGitHub ActionsのURLでない）場合は、その旨を報告して終了する。
 
-`RUN_ID` だけが取れた場合は、そのrunが属するワークフローを引き当てる:
+`WORKFLOW` と `RUN_ID` がどちらも空（ワークフローURL・run URLのいずれの形式にも一致しない）場合は、対象URLとして不正である旨を報告して終了する。
 
 ```bash
-WORKFLOW=$(gh run view "$RUN_ID" --repo "$REPO" --json workflowName -q .workflowName)
+if [ -z "$WORKFLOW" ] && [ -z "$RUN_ID" ]; then
+  echo "対象URLとして不正です（ワークフローURL / run URLのいずれの形式にも一致しません）"
+  exit 1
+fi
+```
+
+`RUN_ID` だけが取れた場合は、そのrunが属するワークフローを `workflowDatabaseId`（数値ID）で引き当てる。同名ワークフローが複数存在すると `workflowName` では一意に解決できないため、数値IDを使う:
+
+```bash
+if [ -z "$WORKFLOW" ] && [ -n "$RUN_ID" ]; then
+  WORKFLOW=$(gh run view "$RUN_ID" --repo "$REPO" --json workflowDatabaseId -q .workflowDatabaseId)
+fi
 ```
 
 ### 対象リポジトリの確認
@@ -46,12 +57,15 @@ CURRENT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 ## ステップ1: 最新実行結果の取得
 
 ```bash
-gh run list --repo "$REPO" --workflow "$WORKFLOW" --limit 1 \
-  --json databaseId,displayTitle,headBranch,status,conclusion,createdAt,url
+gh run list --repo "$REPO" --workflow "$WORKFLOW" --all --limit 1 \
+  --json databaseId,displayTitle,headBranch,headSha,status,conclusion,createdAt,url
 ```
+
+無効化されたワークフローのrunも対象にするため `--all` を付ける（`--all` が無いと `gh run list --workflow` は無効化されたワークフローのrunを返さない）。
 
 - `status` が `completed` でない（実行中・キュー待ち）: **何もしない**。実行中である旨を報告して終了する
 - `conclusion` が `success` / `skipped` / `cancelled`: **何もしない**。その旨を報告して終了する
+- `conclusion` が `action_required` / `neutral` / `stale`: 人手対応が必要である旨を報告して終了する
 - `conclusion` が `failure` / `timed_out` / `startup_failure`: ステップ2へ進む
 
 実行履歴が1件も無い場合も何もせず報告して終了する。
@@ -61,9 +75,9 @@ gh run list --repo "$REPO" --workflow "$WORKFLOW" --limit 1 \
 ```bash
 RUN_ID=<ステップ1のdatabaseId>
 
-# 失敗したジョブ・ステップの一覧
+# 失敗したジョブ・ステップの一覧（成功系のskipped/cancelledを誤って拾わないよう、失敗値だけを明示的に指定する）
 gh run view "$RUN_ID" --repo "$REPO" --json jobs \
-  -q '.jobs[] | select(.conclusion != "success") | {name, conclusion, steps: [.steps[] | select(.conclusion != "success") | .name]}'
+  -q '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | {name, conclusion, steps: [.steps[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | .name]}'
 
 # 失敗したステップのログ
 gh run view "$RUN_ID" --repo "$REPO" --log-failed
@@ -79,18 +93,18 @@ gh run view "$RUN_ID" --repo "$REPO" --log-failed
 - **B. リポジトリ内の変更では直せない**: シークレット/権限不足、外部サービス障害、レート制限、APIクレジット枯渇、CIランナー障害
 - **C. 一過性の可能性がある**: ネットワーク到達不能、イメージ取得失敗、キャッシュ破損、flakyテスト
 
-原因箇所の特定にはコード探索を使う（CodeGraph MCP ツールが使える場合はそれを優先し、無ければ `Grep` / `Glob`）。ワークフロー定義自体の問題は `.github/workflows/` を直接読む。
+原因箇所の特定にはコード探索を使う（CodeGraph MCP ツールが使える場合はそれを優先し、無ければ `Grep` / `Glob`）。ワークフロー定義自体の問題は `.github/workflows/` を直接確認する。
 
 ### C（一過性）の場合
 
-同一ワークフローの直近の実行を確認し、同じコードで成功しているかを見る。
+同一ワークフローの直近の実行を確認し、**対象runと同じ `headSha`（同じコード）**で成功しているrunがあるかを見る。別コミットの成功runを「同じコード」と誤認しないよう、`headSha` の一致を必ず確認すること。
 
 ```bash
 gh run list --repo "$REPO" --workflow "$WORKFLOW" --limit 10 \
   --json databaseId,headSha,conclusion,createdAt
 ```
 
-一過性と判断でき、かつ対象runがまだ再実行されていない（`gh run view "$RUN_ID" --repo "$REPO" --json attempt -q .attempt` が `1`）場合に限り、**1回だけ**再実行して終了する。
+一過性と判断でき（対象runと同じ `headSha` を持つ成功runが存在する）、かつ対象runがまだ再実行されていない（`gh run view "$RUN_ID" --repo "$REPO" --json attempt -q .attempt` が `1`）場合に限り、**1回だけ**再実行して終了する。
 
 ```bash
 gh run rerun "$RUN_ID" --repo "$REPO" --failed
