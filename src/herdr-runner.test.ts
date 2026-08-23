@@ -129,8 +129,10 @@ interface FakeHerdrOptions {
   tabCloseError?: Error;
   tabCreateError?: Error;
   // agentStart（`agent start` 起動 + 検出待ち）が投げるエラー。
-  // 起動失敗・プリアンブル失敗など、herdr が検出できなかったケースの再現。
+  // 起動失敗など、herdr が検出できなかったケースの再現。
   agentStartError?: Error;
+  // agentPrompt（`agent prompt` によるプロンプト投入）が投げるエラー。
+  agentPromptError?: Error;
 }
 
 function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
@@ -162,6 +164,10 @@ function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
         agentStatus: "idle" as const,
         sessionId: options.sessionId,
       };
+    },
+    agentPrompt: async (paneId: string, text: string) => {
+      options.calls?.push(`agentPrompt:${paneId}:${text}`);
+      if (options.agentPromptError) throw options.agentPromptError;
     },
     tabClose: async (tabId: string) => {
       options.calls?.push(`tabClose:${tabId}`);
@@ -271,13 +277,32 @@ test("startHerdrTask launches claude into the task tab's root shell pane via age
   const task = await startHerdrTask({
     label: "ctw:my-app:#12",
     cwd: "/tmp/worktree",
-    args: ["/skill 12"],
+    args: ["--model", "opus"],
+    prompt: "/skill 12",
     herdr,
   });
   // ルートペインがそのまま claude のペインになる（余剰シェルペインの paneClose は不要）。
   assert.deepEqual(task, { paneId: "pane-root", tabId: "tab-task" });
-  // タブ作成 → ルートペインで agent start、の順。args には実行ファイル claude は含めない。
-  assert.deepEqual(calls, ["tabCreate:ctw:my-app:#12:/tmp/worktree", "agentStart:pane-root:ctw-my-app-12:/skill 12"]);
+  // タブ作成 → ルートペインで agent start → agent prompt でタスク投入、の順。
+  // **プロンプトは起動引数に含めない**（含めると agent start がタスク完了まで返らず、
+  // herdr がターンを追跡しないため完了検知が永久に成立しなくなる）。
+  assert.deepEqual(calls, [
+    "tabCreate:ctw:my-app:#12:/tmp/worktree",
+    "agentStart:pane-root:ctw-my-app-12:--model opus",
+    "agentPrompt:pane-root:/skill 12",
+  ]);
+});
+
+// プロンプト投入に失敗したまま待機へ進むと、何もしない claude を延々ポーリングすることになる。
+// agent start の失敗と同じくタブを閉じて失敗として確定させる。
+test("startHerdrTask closes the task tab when the prompt cannot be submitted", async () => {
+  const calls: string[] = [];
+  const herdr = makeFakeHerdr({ statuses: [], calls, agentPromptError: new Error("agent_blocked") });
+  await assert.rejects(
+    startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", args: [], prompt: "/skill 12", herdr }),
+    /agent_blocked/,
+  );
+  assert.equal(calls.at(-1), "tabClose:tab-task");
 });
 
 // agent start は検出できなければ herdr がエラーを返す（起動失敗・プリアンブル失敗など）。
@@ -285,7 +310,10 @@ test("startHerdrTask launches claude into the task tab's root shell pane via age
 test("startHerdrTask closes the task tab when agent start fails", async () => {
   const calls: string[] = [];
   const herdr = makeFakeHerdr({ statuses: [], calls, agentStartError: new Error("boom") });
-  await assert.rejects(startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", args: [], herdr }), /boom/);
+  await assert.rejects(
+    startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", args: [], prompt: "/skill 12", herdr }),
+    /boom/,
+  );
   // シェルだけのタブを残さない。
   assert.deepEqual(calls, [
     "tabCreate:ctw:my-app:#12:/tmp/worktree",

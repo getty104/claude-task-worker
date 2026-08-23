@@ -122,17 +122,22 @@ test("systemPromptFilePath writes one file per variant so concurrent workers can
   assert.equal(systemPromptFilePath("claude-opus-5"), opusPath);
 });
 
-test("buildClaudeArgs uses -p only in default mode", () => {
+// herdr mode must NOT pass the prompt on the command line: claude would start working
+// immediately, `herdr agent start` (which blocks until the agent is ready for input) would not
+// return until the task finished, and herdr would not track the turn — so the worker never
+// observes `working` and never completes (observed symptom: stuck at `running:idle`).
+// The prompt is submitted after startup via `herdr agent prompt` instead.
+test("buildClaudeArgs passes the prompt on the command line only in default mode", () => {
   const common = { prompt: "/skill 123", model: "sonnet", effort: "high" };
   const defaultArgs = buildClaudeArgs({ mode: "default", ...common });
   const herdrArgs = buildClaudeArgs({ mode: "herdr", ...common });
 
   assert.equal(defaultArgs[0], "-p");
   assert.equal(defaultArgs[1], "/skill 123");
-  assert.equal(herdrArgs[0], "/skill 123");
   assert.ok(!herdrArgs.includes("-p"));
-  // Everything except the -p flag is identical between the two modes.
-  assert.deepEqual(defaultArgs.slice(1), herdrArgs);
+  assert.ok(!herdrArgs.includes("/skill 123"));
+  // Everything except `-p <prompt>` is identical between the two modes.
+  assert.deepEqual(defaultArgs.slice(2), herdrArgs);
 });
 
 test("buildClaudeArgs keeps the tool restrictions and the system prompt in both modes", () => {
@@ -215,11 +220,19 @@ test("buildClaudeExecution always runs claude directly with the built args", () 
   }
 });
 
-test("buildClaudeExecution keeps -p as the only difference between the two modes", () => {
+test("buildClaudeExecution keeps `-p <prompt>` as the only difference between the two modes", () => {
   const common = { prompt: "/skill 1", model: "opus", effort: "high" } as const;
   const defaultArgs = buildClaudeExecution({ mode: "default", ...common }).args;
   const herdrArgs = buildClaudeExecution({ mode: "herdr", ...common }).args;
 
   assert.equal(defaultArgs[0], "-p");
-  assert.deepEqual(defaultArgs.slice(1), herdrArgs);
+  assert.equal(defaultArgs[1], "/skill 1");
+  assert.deepEqual(defaultArgs.slice(2), herdrArgs);
+});
+
+// herdr モードだけ、起動後に `herdr agent prompt` で投入するプロンプトを別口で返す。
+test("buildClaudeExecution exposes the prompt separately in herdr mode only", () => {
+  const common = { prompt: "/skill 1", model: "opus", effort: "high" } as const;
+  assert.equal(buildClaudeExecution({ mode: "herdr", ...common }).prompt, "/skill 1");
+  assert.equal(buildClaudeExecution({ mode: "default", ...common }).prompt, undefined);
 });
