@@ -1,7 +1,8 @@
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
 import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH, SCHEDULED_WORKER_NAMES } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
+import { PLUGIN_NAME, MARKETPLACE_NAME, MARKETPLACE_SOURCE } from "./install.js";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
 // 制約下で「**同時に付きうるラベル同士**の最小 ΔE(CIE2000) を最大化する15色」を数値最適化した。
@@ -132,6 +133,55 @@ async function createConfig(force: boolean): Promise<void> {
   logWriteResult(result, CONFIG_PATH);
 }
 
+export const PROJECT_SETTINGS_PATH = ".claude/settings.json";
+
+// プラグインを**プロジェクト設定**（`.claude/settings.json`）へ登録する。ローカルの
+// `claude plugin install`（`install` コマンド）はユーザー設定（`~/.claude/settings.json`）に
+// 書かれるためリポジトリをクローンした別環境には届かない。Claude Code on the web は
+// リポジトリの `.claude/settings.json` を読むので、ここに書いておくと web でも本プラグインの
+// スキル（`solve-github-workflow-problem` など）がそのまま使える。
+// マージ方式なのは、既存の `.claude/settings.json`（permissions・hooks 等）を壊さないため。
+// 既存ファイルが JSON として壊れている場合は上書きせず警告だけ出す（人の設定を消さない）。
+export function mergePluginSettings(current: Record<string, unknown>): Record<string, unknown> {
+  const marketplaces = { ...((current.extraKnownMarketplaces as Record<string, unknown>) ?? {}) };
+  marketplaces[MARKETPLACE_NAME] = { source: { source: "github", repo: MARKETPLACE_SOURCE } };
+  const plugins = { ...((current.enabledPlugins as Record<string, unknown>) ?? {}) };
+  plugins[`${PLUGIN_NAME}@${MARKETPLACE_NAME}`] = true;
+  return { ...current, extraKnownMarketplaces: marketplaces, enabledPlugins: plugins };
+}
+
+export async function registerPluginInSettings(): Promise<void> {
+  let current: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(PROJECT_SETTINGS_PATH, "utf-8");
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      console.log(`[init] Skipped: ${PROJECT_SETTINGS_PATH} is not a JSON object`);
+      return;
+    }
+    current = parsed as Record<string, unknown>;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.log(`[init] Skipped: failed to read ${PROJECT_SETTINGS_PATH}: ${(err as Error).message}`);
+      return;
+    }
+  }
+
+  const merged = mergePluginSettings(current);
+  if (JSON.stringify(merged) === JSON.stringify(current)) {
+    console.log(`[init] Already registered: ${PLUGIN_NAME}@${MARKETPLACE_NAME} in ${PROJECT_SETTINGS_PATH}`);
+    return;
+  }
+  try {
+    await mkdir(".claude", { recursive: true });
+    await writeFile(PROJECT_SETTINGS_PATH, `${JSON.stringify(merged, null, 2)}\n`, "utf-8");
+  } catch (err) {
+    console.log(`[init] Skipped: failed to write ${PROJECT_SETTINGS_PATH}: ${(err as Error).message}`);
+    return;
+  }
+  console.log(`[init] Registered ${PLUGIN_NAME}@${MARKETPLACE_NAME} in ${PROJECT_SETTINGS_PATH}`);
+}
+
 export async function init(options: { force?: boolean } = {}): Promise<void> {
   const force = options.force ?? false;
   console.log(`[init] Creating labels...${force ? " (force mode)" : ""}`);
@@ -154,6 +204,9 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
   await mkdir(".github/workflows", { recursive: true });
   const workflowPath = ".github/workflows/assign-creator-on-cc-triage-scope.yml";
   logWriteResult(await writeFileWithMode(workflowPath, ASSIGN_CREATOR_WORKFLOW, force), workflowPath);
+
+  console.log("[init] Registering the plugin in project settings...");
+  await registerPluginInSettings();
 
   console.log("[init] Creating config file...");
   await createConfig(force);
