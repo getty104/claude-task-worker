@@ -66,7 +66,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Git](https://git-scm.com/) | worktree の作成・ブランチ操作 |
 | [jq](https://jqlang.org/) | プラグインスキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス。任意（未導入でも探索がテキスト検索に落ちるだけ） |
-| [Pencil CLI](https://docs.pencil.dev/for-developers/pencil-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（呼び出しは `claude-task-worker pencil` 経由） |
+| [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `claude-task-worker pencil` 経由） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
 
 CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に単一バンドルされ、Node.js 標準モジュールのみで動作する）。
@@ -88,6 +88,25 @@ claude plugin install claude-task-worker@claude-task-worker
 ```
 
 herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
+
+### Pen CLI のログイン
+
+`.pen` を扱うスキル（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict`）は Pen CLI の認証を必要とする。未ログインだと `.pen` の読み書きが失敗するため、UIデザイン先行ワークフローを使うなら**インストール後に一度ログインしておく**（`.pen` を触らないので `claude-task-worker pencil` ラッパー経由でなくてよい）。
+
+```bash
+pencil login    # メールアドレス + パスワード、またはメールアドレス + OTP コード
+pencil status   # 認証状態の確認
+```
+
+セッショントークンは `~/.pencil/session-cli.json` に保存され、以降のコマンドで再利用される。
+
+CI やワーカーを実行するマシンなど対話ログインできない環境では、環境変数 `PEN_CLI_KEY`（pen.dev の組織設定 > Developer Keys で発行）を使う。保存済みトークンより優先される。
+
+```bash
+export PEN_CLI_KEY=pencil_cli_...
+```
+
+詳細は [Pen CLI のドキュメント](https://docs.pencil.dev/for-developers/pen-cli)を参照。
 
 ### 更新
 

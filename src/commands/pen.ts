@@ -35,9 +35,29 @@ export async function installPenCli(logPrefix: string): Promise<boolean> {
   try {
     await runCommand("npm", ["install", "-g", `${PEN_PACKAGE}@latest`]);
     console.log(`[${logPrefix}] Pen CLI installed.`);
-    return true;
   } catch (err) {
     console.error(`[${logPrefix}] Failed to install Pen CLI: ${(err as Error).message}`);
     return false;
+  }
+
+  await warnIfPenLoggedOut(logPrefix);
+  return true;
+}
+
+/**
+ * Pen CLI が未ログインならログイン手順を案内する。
+ *
+ * `pencil status` は未認証のとき終了コード 1 を返す（認証済みなら 0）。ログインしていないと
+ * `.pen` を扱うスキルが実行時に失敗するため、install / update の時点で気づけるようにする。
+ * 案内するだけで、ログイン自体は対話が必要なのでユーザーに委ねる（失敗扱いにもしない）。
+ */
+async function warnIfPenLoggedOut(logPrefix: string): Promise<void> {
+  const { runCommand } = await loadRunCommand();
+  try {
+    await runCommand("pencil", ["status"]);
+  } catch {
+    console.log(
+      `[${logPrefix}] Pen CLI is not authenticated. Run \`pencil login\` (or set PEN_CLI_KEY) before using .pen designs.`,
+    );
   }
 }
