@@ -133,20 +133,31 @@ interface FakeHerdrOptions {
   agentStartError?: Error;
   // agentPrompt（`agent prompt` によるプロンプト投入）が投げるエラー。
   agentPromptError?: Error;
+  // statuses を使い切った後に agent get が返し続けるステータス（既定 idle）。
+  defaultStatus?: AgentStatus;
+  // agent get の最初の1回だけ投げる一時的なエラー（statuses の残数に関係なく発生させる）。
+  // waitForPromptAccepted が一時的な agentGet 失敗を受理成功と誤判定しないことの検証用。
+  agentGetTransientError?: Error;
 }
+
+// プロンプト受理待ちを「1回だけ確認して打ち切る」時間設定（テストを決定的にするため）。
+const FAST_ACCEPT = { promptAcceptTimeoutMs: 0, promptAcceptPollIntervalMs: 0 };
 
 function makeFakeHerdr(options: FakeHerdrOptions): typeof HerdrModule {
   const statuses = [...options.statuses];
   let ctrlCSent = false;
+  let agentGetCalls = 0;
   return {
     HerdrError,
     agentGet: async (target: string) => {
+      agentGetCalls++;
       // ctrl-c 後は claude が終了して agent 検出が外れる（ペインは残る）。
       if (ctrlCSent && !options.paneSurvivesCtrlC) {
         throw new HerdrError(`agent ${target} not found`, "agent_not_found");
       }
+      if (options.agentGetTransientError && agentGetCalls === 1) throw options.agentGetTransientError;
       if (options.agentGetError && statuses.length === 0) throw options.agentGetError;
-      const agentStatus = statuses.shift() ?? "idle";
+      const agentStatus = statuses.shift() ?? options.defaultStatus ?? "idle";
       return { paneId: target, tabId: "tab-1", workspaceId: "w1", agentStatus, sessionId: options.sessionId };
     },
     paneRead: async () => options.paneOutput ?? "task finished",
@@ -273,13 +284,15 @@ test("waitForHerdrTask aborts when the worker is shutting down", async () => {
 
 test("startHerdrTask launches claude into the task tab's root shell pane via agent start", async () => {
   const calls: string[] = [];
-  const herdr = makeFakeHerdr({ statuses: [], calls });
+  // 投入後にターンが始まった（working）ことまで確認してから返る。
+  const herdr = makeFakeHerdr({ statuses: ["working"], calls });
   const task = await startHerdrTask({
     label: "ctw:my-app:#12",
     cwd: "/tmp/worktree",
     args: ["--model", "opus"],
     prompt: "/skill 12",
     herdr,
+    timing: FAST_ACCEPT,
   });
   // ルートペインがそのまま claude のペインになる（余剰シェルペインの paneClose は不要）。
   assert.deepEqual(task, { paneId: "pane-root", tabId: "tab-task" });
@@ -301,6 +314,69 @@ test("startHerdrTask closes the task tab when the prompt cannot be submitted", a
   await assert.rejects(
     startHerdrTask({ label: "ctw:my-app:#12", cwd: "/tmp/worktree", args: [], prompt: "/skill 12", herdr }),
     /agent_blocked/,
+  );
+  assert.equal(calls.at(-1), "tabClose:tab-task");
+});
+
+// `agent prompt` はエラーを返さないのに claude が何も始めないことがある（起動直後の
+// ダイアログが Enter を食う）。無言で idle を待ち続けるとスキルが一度も実行されないまま
+// タスクが張り付くため、再投入 → それでも始まらなければ失敗として確定させる。
+test("startHerdrTask resends the prompt when the claude session stays idle after submission", async () => {
+  const calls: string[] = [];
+  // 1回目の投入後は idle のまま（＝投入が食われた）、再投入後に working へ移る。
+  const herdr = makeFakeHerdr({ statuses: ["idle", "working"], calls });
+  await startHerdrTask({
+    label: "ctw:my-app:#12",
+    cwd: "/tmp/worktree",
+    args: [],
+    prompt: "/skill 12",
+    herdr,
+    timing: FAST_ACCEPT,
+  });
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("agentPrompt")),
+    ["agentPrompt:pane-root:/skill 12", "agentPrompt:pane-root:/skill 12"],
+  );
+});
+
+// agentGet の一時的な失敗を受理成功として扱うと、ダイアログに食われた投入を
+// 「受理済み」と誤判定し ensurePromptAccepted の再投入がスキップされてしまう
+// （waitForHerdrTask 側は working を一度も観測できず無限待機に陥る）。
+// 一時エラーの後に working が返れば、通常どおり受理成功と判定され再投入は起きないこと。
+test("startHerdrTask treats a transient agentGet error as still-pending, not as accepted", async () => {
+  const calls: string[] = [];
+  const herdr = makeFakeHerdr({
+    statuses: ["working"],
+    calls,
+    agentGetTransientError: new Error("temporary herdr failure"),
+  });
+  await startHerdrTask({
+    label: "ctw:my-app:#12",
+    cwd: "/tmp/worktree",
+    args: [],
+    prompt: "/skill 12",
+    herdr,
+    timing: { promptAcceptTimeoutMs: 1000, promptAcceptPollIntervalMs: 1 },
+  });
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("agentPrompt")),
+    ["agentPrompt:pane-root:/skill 12"],
+  );
+});
+
+test("startHerdrTask fails and closes the tab when the prompt is never accepted", async () => {
+  const calls: string[] = [];
+  const herdr = makeFakeHerdr({ statuses: [], calls, defaultStatus: "idle" });
+  await assert.rejects(
+    startHerdrTask({
+      label: "ctw:my-app:#12",
+      cwd: "/tmp/worktree",
+      args: [],
+      prompt: "/skill 12",
+      herdr,
+      timing: FAST_ACCEPT,
+    }),
+    /did not start the task/,
   );
   assert.equal(calls.at(-1), "tabClose:tab-task");
 });

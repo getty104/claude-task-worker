@@ -130,7 +130,14 @@ export interface StartTiming {
   paneReadyPollIntervalMs?: number;
   // `herdr agent start --timeout` へ渡す、claude 検出＋入力待ちまでの待機上限。
   agentStartReadyTimeoutMs?: number;
+  promptAcceptTimeoutMs?: number;
+  promptAcceptPollIntervalMs?: number;
 }
+
+// プロンプト投入後、claude がターンを開始（working / done）するまで待つ上限。
+// これを過ぎても idle のままなら投入が受理されていない（下記 waitForPromptAccepted 参照）。
+export const PROMPT_ACCEPT_TIMEOUT_MS = 20 * 1000;
+export const PROMPT_ACCEPT_POLL_INTERVAL_MS = 500;
 
 /**
  * herdr のタスク専用タブで claude を TUI 起動する（1タスク=1タブ）。
@@ -200,13 +207,80 @@ export async function startHerdrTask({
     // 入力待ちになった claude へタスクを投入する。この経路で送ることで herdr がターンを
     // 追跡し、作業中は working、非フォーカスでの完了は done を返すようになる。
     await mod.agentPrompt(paneId, prompt);
+    await ensurePromptAccepted(paneId, prompt, mod, timing);
   } catch (err) {
     // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
+    // ここが try ブロック全体（waitForPaneReady / agentStart / agentPrompt /
+    // ensurePromptAccepted）の唯一のエラー処理経路のため、paneId と原因をここで
+    // 一括してログへ残す（残さないと実運用で原因調査ができない）。
+    console.error(`[herdr-runner] failed to start task in pane ${paneId}: ${err}`);
     await mod.tabClose(tabId).catch(() => {});
     throw err;
   }
 
   return { paneId, tabId };
+}
+
+/**
+ * プロンプトが実際に受理されたことを確認し、受理されていなければ1度だけ再投入する。
+ *
+ * **`agent prompt` の成功はプロンプトが submit されたことを意味しない**。claude(TUI) は
+ * `agent start` が入力待ち（interactive_ready）とみなした後も、起動時のダイアログ
+ * （フォルダの信頼確認・初回起動の案内など）を描画しうる。その状態で投入すると、
+ * 本文が入力欄に入らないまま Enter がダイアログの確定に食われ、**herdr はエラーを返さない
+ * のに claude は何も実行しない**。ワーカーから見ると agent は idle のままなので
+ * `waitForHerdrTask` の seenWorking ガードが永久に満たされず、スキルが1度も実行されないまま
+ * タスクが張り付く（実測: `agent prompt` 成功 → 直後に blocked → idle、ペインの入力欄は空）。
+ *
+ * そこで投入後に「ターンが始まったか」（working / done の観測）を確認する。始まっていなければ
+ * ダイアログが消えている可能性があるので一度だけ再投入し、それでも始まらなければ失敗として
+ * 確定させる（呼び出し側がタブを閉じ、ワーカーは失敗通知を出す）。無言で待ち続けるより
+ * 失敗させた方がよい。
+ */
+async function ensurePromptAccepted(
+  paneId: string,
+  prompt: string,
+  mod: typeof HerdrModule,
+  timing?: StartTiming,
+): Promise<void> {
+  if (await waitForPromptAccepted(paneId, mod, timing)) return;
+  console.warn(`[herdr-runner] the prompt was not accepted in pane ${paneId} (claude stayed idle); resending it`);
+  await mod.agentPrompt(paneId, prompt);
+  if (await waitForPromptAccepted(paneId, mod, timing)) return;
+  throw new Error(
+    `the claude session in pane ${paneId} did not start the task after the prompt was submitted twice ` +
+      `(a startup dialog most likely swallowed it)`,
+  );
+}
+
+// working / done を観測できたら受理とみなす。非フォーカスのタスクタブでは完了が idle ではなく
+// done として現れるため、極端に短いタスクを取りこぼさないよう done も受理に含める。
+//
+// `agentGet` の失敗を「受理成功（true）」扱いにしてはいけない。ダイアログに食われた
+// 直後の一時的なエラーをここで成功扱いにすると、本PRが直そうとしている症状
+// （ensurePromptAccepted の再投入がスキップされ working を一度も観測できないまま張り付く）
+// を再生産してしまう。エラーもタイムアウトまではポーリング継続の一因として扱い、
+// pane/agent が本当に消えているケースは再投入時の agentPrompt が例外を投げて
+// startHerdrTask 側の catch（呼び出し元）で失敗が確定する。
+async function waitForPromptAccepted(paneId: string, mod: typeof HerdrModule, timing?: StartTiming): Promise<boolean> {
+  const timeoutMs = timing?.promptAcceptTimeoutMs ?? PROMPT_ACCEPT_TIMEOUT_MS;
+  const pollIntervalMs = timing?.promptAcceptPollIntervalMs ?? PROMPT_ACCEPT_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  let loggedError = false;
+  for (;;) {
+    try {
+      const { agentStatus } = await mod.agentGet(paneId);
+      if (agentStatus === "working" || agentStatus === "done") return true;
+    } catch (err) {
+      // ポーリングのたびに大量に出さないよう、この待機1回につき最初の1件だけログする。
+      if (!loggedError) {
+        console.error(`[herdr-runner] failed to read agent status for pane ${paneId} after the prompt: ${err}`);
+        loggedError = true;
+      }
+    }
+    if (Date.now() >= deadline) return false;
+    await sleep(pollIntervalMs);
+  }
 }
 
 // ペインに最初の出力（シェルのプロンプト）が現れるまで待つ。プロンプト文字列はユーザーの

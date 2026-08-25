@@ -269,6 +269,19 @@ herdr モードでは `buildClaudeArgs()` がプロンプトを**引数に含め
 | 起動引数（旧実装） | ターン終了と同時／120秒超なら `timeout` エラー | ワーカーからは観測不能 | **`idle`**（`done` にならない） |
 | `agent prompt`（現行） | 数秒（素の TUI が入力待ちになるまで） | `working` | **`done`** |
 
+#### `agent prompt` の成功は「投入された」ことを意味しない（スキルが実行されない原因）
+
+`herdr agent start` が返す interactive_ready は「claude が入力を受け付ける状態になった」ことの推定でしかなく、その直後に claude(TUI) が**起動時のダイアログ**（フォルダの信頼確認、初回起動の案内など）を描画することがある。この状態で `agent prompt` を送ると、本文が入力欄に入らないまま Enter がダイアログの確定に食われ、**herdr はエラーを返さないのに claude は何も実行しない**。ワーカーから見ると agent は idle のままなので `waitForHerdrTask` の seenWorking ガードが永久に満たされず、スキルが1度も実行されないままタスクが張り付く。
+
+実測（herdr 0.8.2 / Claude Code 2.1.241、新規ディレクトリで claude を起動するプローブ）:
+
+- 起動時ダイアログが `agent start` より先に出た場合は herdr が `agent_not_ready`（"blocked during startup"）を返す（＝ワーカーは失敗として検知できる）
+- ダイアログが `agent start` の後に出た場合は `agent prompt` が成功を返し、直後のステータスが `blocked` → `idle` へ落ち、ペインの入力欄は空のまま（＝**検知できない**）。3回中1回発生
+
+そのため `startHerdrTask` は投入後に `ensurePromptAccepted()` で**ターンが始まったこと（`working` / `done` の観測）を確認**する。確認できなければ1度だけ再投入し、それでも始まらなければ失敗として確定させる（タブを閉じてワーカーの失敗通知に載せる）。無言で idle を待ち続けるより失敗させる方がよい。
+
+`agent prompt --wait` は使っていない。`--wait` は「投入後5秒以内に状態変化があるか」を見る仕組みだが、上記のダイアログ経路では `idle` → `blocked` という状態変化が起きるため settled 状態として**成功扱いになり**、投入失敗を検知できない。`--until working` を付けると今度は8秒以内に終わる短いタスクが `timeout` になりうる（実測: 長いタスクでは `--wait --timeout 8000` が `timeout` を返す一方で agent は `working`）。どちらも判定を曖昧にするだけなので、ワーカー側のポーリングで直接 `working` / `done` を確認する。
+
 #### `done`（未確認完了）ステータスの扱い
 
 herdr の `AgentStatus` は `idle` / `working` / `blocked` / **`done`** / `unknown` の5値（`herdr api schema` の `AgentStatus` enum が正）。`done` は「作業を終えたが、ユーザーがまだそのペインを見ていない」**未確認完了**の状態で、herdr は working から idle へ落ちたペインが非フォーカスだと idle ではなく `done` を返し、ユーザーがそのタブを開いた時点で `idle` へ落とす（検出ロジック自体は idle と判定している。`herdr agent explain <pane>` は `state: idle` を返す）。
