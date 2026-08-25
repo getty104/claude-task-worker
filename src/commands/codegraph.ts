@@ -50,8 +50,8 @@ export function appendIgnoreEntry(current: string, entry: string): string | null
 export async function installCodegraphCli(logPrefix: string): Promise<boolean> {
   console.log(`[${logPrefix}] Installing CodeGraph CLI (npm install -g ${CODEGRAPH_PACKAGE}@latest)...`);
   try {
-    const { runCommand } = await loadRunCommand();
-    await runCommand("npm", ["install", "-g", `${CODEGRAPH_PACKAGE}@latest`]);
+    const { npmInstallGlobalLatest } = await loadRunCommand();
+    await npmInstallGlobalLatest(CODEGRAPH_PACKAGE);
     console.log(`[${logPrefix}] CodeGraph CLI installed.`);
     return true;
   } catch (err) {
