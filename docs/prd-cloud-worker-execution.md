@@ -110,14 +110,17 @@ Claude Code on the Web（クラウドセッション）はタスクごとに使�
 
 `cloud: true` のワーカーがある場合、ワーカー起動時に以下を確認する。**チェック対象ごとに契約が異なる**:
 
-- **3（プラグイン宣言）はリポジトリ内のファイルを読むだけで起動時に静的検査でき、満たさなければエラー終了する（タスクを1件も起動しない）**
-- **1（サインイン）・2（GitHub 連携）・4（`allow_remote_sessions` 組織ポリシー）はいずれも claude.ai 側のアカウント/組織状態で、ワーカー起動時点でローカルから静的に検査する手段が無い（またはその手段が未確認）ため、エラー終了の対象にはせず、タスク実行時に失敗した場合のエラーメッセージ案内に留める**（→ 9-1）
+- **1（サインイン）・3（プラグイン宣言）は起動時に静的検査でき、満たさなければエラー終了する（タスクを1件も起動しない）**
+- **2（GitHub 連携）・4（`allow_remote_sessions` 組織ポリシー）はローカルから照会する手段が無いため、エラー終了の対象にはせず、タスク実行時に失敗した場合のエラーメッセージ案内に留める**
 
-1. **claude.ai アカウントでのサインイン**。API キー認証・第三者プロバイダ（Bedrock / Vertex 等）ではクラウドセッションを作成できない（失敗時のエラーメッセージで案内）
-2. **GitHub 連携**（Claude GitHub App の認可、または `/web-setup` による `gh` トークンの同期）。未設定だとセッション作成が clone で失敗する（失敗時のエラーメッセージで案内）
+実測の詳細（判定コマンド・構成ごとの出力・案内メッセージの文面案）は `docs/cloud-prerequisite-checks.md`（Issue #225）。
+
+1. **claude.ai アカウントでのサインイン**。API キー認証・第三者プロバイダ（Bedrock / Vertex 等）ではクラウドセッションを作成できない。`claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で**起動時に静的検査してエラー終了する**（`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返すため、`apiKeySource` の不在を併せて見る必要がある）
+2. **GitHub 連携**（Claude GitHub App の認可、または `/web-setup` による `gh` トークンの同期）。連携状態は非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない（失敗時のエラーメッセージで案内）
+   - 未設定でもセッション作成自体は成功し、ローカル作業ツリーがアップロードされてシードされる（PRD 4.4-1 の「クラウド VM が自前で clone する」前提は GitHub 連携済みの場合にのみ成立する）。失敗するのは `--ref` / `--on-branch` を付けた場合で、その時点で連携未設定が顕在化する
 3. **リポジトリ `.claude/settings.json` へのプラグイン宣言**。クラウドセッションが読み込むのは**リポジトリの**設定で、ローカルの `~/.claude/settings.json`（`claude plugin install` の書き込み先）は届かない。`extraKnownMarketplaces` + `enabledPlugins` に本プラグインが宣言されていないと、`/claude-task-worker:exec-issue` などのスキルがクラウド VM に存在せず、セッションが空振りする（起動時に静的検査してエラー終了）
    - この登録処理（`registerPluginInSettings()` / `mergePluginSettings()`）は `ce46d5d` で `init` から撤去済み。**クラウド実行の前提として復活が必要**（`claude-task-worker init --cloud` 等、明示的なオプトインで書き込む形が望ましい）
-4. **`allow_remote_sessions` 組織ポリシー**。組織側でクラウドセッションの作成が無効化されているとセッション作成不可（失敗時のエラーメッセージで案内）
+4. **`allow_remote_sessions` 組織ポリシー**。組織側でクラウドセッションの作成が無効化されているとセッション作成不可。CLI はポリシー取得結果を `policy-limits.json` にキャッシュする実装を持つが、実測環境では生成されず、不在は「未取得」と「拒否」を区別できないため静的検査しない（失敗時のエラーメッセージで案内）
 
 ### 4.6 通知
 
@@ -216,7 +219,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 ## 9. 確認事項（実装前に実測が必要）
 
-1. **前提条件チェックの現実的な範囲**: claude.ai サインイン状態・GitHub 連携をワーカー起動時にコマンドで判定できるか（できなければ 4.5 の 1・2 はエラーメッセージでの案内に落とす）
+1. ~~**前提条件チェックの現実的な範囲**~~: **実測済み**（Issue #225 / `docs/cloud-prerequisite-checks.md`）。1（サインイン）は `claude auth status --json` で静的判定でき起動時エラーへ、2（GitHub 連携）・4（組織ポリシー）は照会手段が無く案内のみへ確定。4.5 を更新済み
 2. `--append-system-prompt-file` がクラウドセッションで受理されるか。**拒否される場合はクラウド実行を起動時エラーとする**（プロンプト本文への前置は、外部テキストによる上書きを許すためセキュリティ上採用しない）。残課題は、同等の system-level control（本文とは別チャネルでシステムプロンプトを注入する手段）がクラウドセッションに存在するかの実測
 3. `--model` / `--effort` / `--advisor` / `--chrome` の受理可否（クラウドでは `/model` で切り替える旨の記述があり、起動引数として受理されるかは未確認）
 4. クラウドセッションのローカル transcript（`~/.claude/projects/*/<sessionId>.jsonl`）が生成されるか。されない場合、最終レポートはペイン内容フォールバックのみになる
