@@ -178,3 +178,266 @@ This checkout is a linked working tree, a submodule or a checkout with a separat
 - `session_01B7H8tU5MCgei8ezfzeUafF`（T7・T3・T4）
 
 これらは実測の副産物であり、不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。
+
+---
+
+# クラウドセッションの完了検知・セッションID・transcript の実測結果
+
+`claude --cloud` で作ったクラウドセッションを herdr からドライブし、完了検知・セッションID取得・transcript 読み取りが既存実装のまま流用できるかを実測した記録（Issue #224 / S-2、PRD 9-4 / 9-8 / 9-9 / 受け入れ基準7 に対応）。上の「起動引数の実測結果」（Issue #223 / S-1）と同一環境・同一日の測定で、同じファイルにまとめている。
+
+- 実測日: 2026-08-27
+- 実測バージョン: `claude --version` → `2.1.247 (Claude Code)` / `herdr --version` → `herdr 0.8.2`
+- `~/.config/claude-task-worker/config.json` の `mode`: `"herdr"`
+- 挙動はバージョン依存のため、いずれかがここより新しい場合は再実測すること
+
+## 実測環境
+
+- 実行場所: herdr タブ（`tab create --cwd <worktree> --no-focus`）のルートペイン。`script` による疑似 pty ではなく**実TTY**
+- 実行ディレクトリ: git の linked worktree（`.claude/worktrees/clever-zenith-6645`）
+- S-1 と同じく、このリポジトリでは claude.ai 側の **GitHub App 連携が未設定**
+
+## 結論
+
+**PRD 4.4-2 が前提とする「クラウドセッションにアタッチし続けるローカルのドライバ」は、2.1.247 / 本アカウントでは存在しない。** したがって herdr の agent ステータスで*クラウドセッションの*完了を検知する経路は無い。
+
+| 起動経路 | ローカルに残るか | 実行される場所 | herdr の agent 検出 | 完了シグナル | 出力のローカル取得 |
+|---|---|---|---|---|---|
+| `claude --cloud "<desc>"`（新規作成） | **残らない**（作成後 即 exit） | — | 不可（`agent_not_found`） | 無し | セッションIDが stdout に出るのみ |
+| `claude --cloud <session_id>`（対話アタッチ） | — | — | — | — | アカウント単位で無効（S-1 T4） |
+| `claude -p --cloud <session_id> "<msg>"` | 残らない（即 return） | **クラウド VM** | 不可 | 無し | 不可（CLI に取得手段なし） |
+| `claude --teleport <session_id>` | 残る（TUI） | **ローカル** | **可**（`working`/`idle`/`done`/`blocked`） | **有り** | 可（ローカル transcript） |
+
+一方、**driver 契約そのもの（`working` / `idle` / `done` / `blocked` の遷移）は teleport セッションで完全に成立した**（M-2 / M-4）。`observeAgentStatus()` / `waitForHerdrTask()` のロジックはローカル TUI に対しては正しく、クラウド実行で壊れるのは「ドライブ対象がローカルになってしまう」という接続経路の側である。
+
+## PRD 項目への対応
+
+| PRD | 問い | 実測結果 |
+|---|---|---|
+| 9-8 / 4.4-2 | herdr の agent ステータスがクラウドをドライブする TUI でも `working`/`idle`/`done` を返すか | **前提が成立しない**。クラウドをドライブし続けるローカル TUI が存在しない（M-1 / M-3）。teleport セッション（＝ローカル実行）に対しては非フォーカスで `working` → `done` を正しく返す（M-2） |
+| 受け入れ基準7 | 質問待ちを `idle` として誤返却しないか | **誤返却しない**。`AskUserQuestion` で停止した状態は `blocked` を返し続けた（M-4）。`blocked` は `observeAgentStatus()` で待機継続に倒れるため誤完了は起きない |
+| 9-9 | `agentGet()` の `sessionId` がクラウドセッションIDと一致し `https://claude.ai/code/<id>` として使えるか | **一致しない**。`agent_session` は `kind: "id"` で返るが `value` は**ローカル claude のセッションUUID**（例 `f9342ab2-…`）。クラウドセッションIDは `session_01…` 形式で別物。UUID を URL に入れると claude.ai は「このセッションは見つかりませんでした」を返す（M-3 / M-7） |
+| 9-4 | `~/.claude/projects/*/<sessionId>.jsonl` が生成されるか | **クラウドセッションでは生成されない**。teleport セッションではローカルターンの分だけ生成され、`readFinalReport()` 相当（末尾の非 sidechain アシスタント発言）が正しく読める（M-6）。クラウド側で実行されたターンは transcript にもペインにも一切現れない |
+| 4.4-5 | クラウドセッションの作業ブランチ名をローカルから取得できるか | **取得手段は無い**。CLI にクラウドセッションを列挙・照会する経路が無く（M-8）、ローカルの `~/.claude/sessions/<pid>.json` にもクラウドセッションとの紐付けは記録されない（M-9）。ブランチ名自体は claude.ai の Web UI でのみ確認できた（M-5） |
+
+## 測定ログ（verbatim）
+
+### M-1: `claude --cloud "<desc>"` は実TTYでも即終了する
+
+herdr ペイン（実TTY）で実行:
+
+```
+$ claude --cloud "CTW S-2 completion probe"
+Created cloud session: CTW S-2 completion probe
+View: https://claude.ai/code/session_01GzxNRV2bGSHoRJgidxNAPY?from=cli&m=0
+Resume with: claude --teleport session_01GzxNRV2bGSHoRJgidxNAPY
+This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.
+$
+```
+
+直後の観測:
+
+```
+$ herdr pane process-info --pane <pane>
+  → foreground_processes: [{ "name": "zsh", ... }]     # claude は残っていない
+$ herdr agent get <pane>
+  {"error":{"code":"agent_not_found","message":"agent target <pane> not found"},"id":"cli:agent:get"}
+```
+
+シェルプロンプトが戻り、フォアグラウンドは zsh。**TUI に留まらないため herdr は agent を検出できない**。S-1 の T5 が `script` 疑似 pty で観測した exit=0 は pty 起因ではなく、実TTYでも同じ挙動だった。
+
+### M-2: `claude --teleport <session_id>` はアタッチでき、状態遷移も正常
+
+同じペインで実行すると TUI が起動し、`agent get` が agent を返した:
+
+```
+$ claude --teleport session_01GzxNRV2bGSHoRJgidxNAPY
+ ▐▛███▛█   Claude Code v2.1.247
+▝▜██████▀  Opus 5 (1M context) with high effort · Claude Max
+  ▝▝ ▝▝    ~/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645
+⏺ Session resumed
+```
+
+```json
+{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"f9342ab2-b410-41e2-af7d-c3e3eb1ad598"},"agent_status":"idle", ... }
+```
+
+`herdr agent prompt` でプロンプトを投入し、3秒間隔でポーリングした結果（タブは非フォーカスのまま）:
+
+```
+t=3s   idle
+t=6s   working
+t=9s   working
+t=12s  done      ← 以降 60s まで done を維持
+```
+
+**ローカル実行と完全に同じ `idle` → `working` → `done` の遷移**。非フォーカスで `idle` に落ちず `done` に留まるため、`observeAgentStatus()` の `done` 即完了ルールがそのまま効く。
+
+### M-3: `--teleport` の実行場所は**ローカル**
+
+M-2 のプロンプトは `uname -a; whoami; hostname; pwd; git rev-parse --abbrev-ref HEAD` の実行と verbatim 報告を依頼したもの。ペインに出た結果:
+
+```
+Darwin MacBook-Air-2.local 25.6.0 Darwin Kernel Version 25.6.0: ... arm64
+getty104
+MacBook-Air-2.local
+/Users/getty104/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645
+clever-zenith-6645
+```
+
+**ローカルマシン（Darwin / ローカルユーザー / ローカル worktree / ローカルブランチ）で実行されている**。`--teleport` はクラウド VM をリモート操作するのではなく、セッションを手元へ引き寄せてローカルで継続するフラグ。ctrl-c で抜けた際の案内も `Resume this session with: claude --resume f9342ab2-…` とローカル resume を示す。
+
+`claude agents --json --all` でも同セッションは `"kind": "interactive"` かつローカル `pid` 付きで列挙される（M-8 参照）。
+
+### M-4: 質問待ちは `blocked` を返す（`idle` 誤返却なし）
+
+teleport セッションに「`AskUserQuestion` ツールで質問だけして他は何もするな」と投入し、選択肢が表示された状態でポーリング:
+
+```
+t=3s   done      ← 直前ターンの残り
+t=6s   blocked
+t=9s   blocked
+...
+t=36s  blocked   ← 36秒まで blocked を維持
+```
+
+**`blocked` を返し続け、`idle` へは落ちない**。`observeAgentStatus()` は `blocked` を `running`（待機継続）へ倒すため、質問待ちが完了扱いされる誤判定は発生しない。受け入れ基準7 のうち「質問待ちを `idle` として誤返却しないこと」は満たされている。
+
+### M-5: `claude -p --cloud <id>` はクラウド VM で実行されるが、CLI からは何も観測できない
+
+新規セッション `session_01Ccww8Z876VzSDVKsSnU813` を作成し、非TTY（通常のシェル）から投函:
+
+```
+$ claude -p --cloud session_01Ccww8Z876VzSDVKsSnU813 "Run this and report the raw output verbatim, nothing else: uname -a; whoami; hostname; pwd; git rev-parse --abbrev-ref HEAD; git remote -v"
+Sent to cloud session.
+Session ID: session_01Ccww8Z876VzSDVKsSnU813
+View: https://claude.ai/code/session_01Ccww8Z876VzSDVKsSnU813?from=cli&m=0
+```
+
+**即座に return する**（実行完了を待たない）。exit code も出力も「送った」ことしか示さず、**完了シグナルにできる情報が一切無い**。
+
+claude.ai の Web UI で確認すると、クラウド VM 側では正しく実行されていた:
+
+```
+Linux vm 6.18.44-fc-v21 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+root
+vm
+/home/user/repo
+clever-zenith-6645
+```
+
+続けてモデルの地の文:
+
+```
+git remote -v produced no output — there are no remotes configured on this clone.
+```
+
+判明した事実:
+
+1. クラウド VM は Linux / x86_64 / `root` / cwd `/home/user/repo`
+2. ブランチ名は**ローカル worktree のブランチ名がそのまま持ち込まれている**（GitHub App 未設定のためワークツリーがアップロードされてシードされた結果。S-1 T11 と整合）
+3. **`git remote` が1件も無い**。この構成のクラウドセッションは push も PR 作成もできない
+
+3 は `exec-issue` をクラウド化する前提そのものに関わる（GitHub App 連携が未設定のままでは、クラウドセッションは成果物を GitHub へ出せない）。本Issueのスコープ外だが判断材料として記録する。
+
+### M-6: クラウド側のターンはローカルへ降りてこない
+
+M-5 の投函から 100 秒後、同じセッションへ `claude --teleport session_01Ccww8Z876VzSDVKsSnU813` でアタッチした。TUI は `⏺ Session resumed` を表示したが会話履歴は空。「直前までのやり取りを教えて」と尋ねた応答:
+
+```
+NO PRIOR HISTORY
+
+このメッセージが会話の最初のユーザーメッセージです。それ以前のやり取りはありません。
+（中略）
+「別マシンから継続中のセッション」という注記はありますが、実際に引き継がれた会話履歴はこちら側には存在しません。
+```
+
+**クラウド VM で実行されたターン（M-5 の結果）は、teleport してもローカルには一切現れない。** ペイン内容にもローカル transcript にも入らないため、`buildHerdrTaskResult()` の transcript 経路・ペイン内容フォールバックのどちらでもクラウドの成果を回収できない。
+
+transcript 自体の生成状況:
+
+```
+# クラウドセッションID では存在しない
+$ ls ~/.claude/projects/*/session_01GzxNRV2bGSHoRJgidxNAPY.jsonl
+ls: ...: No such file or directory
+
+# teleport セッションのローカル UUID では、ローカルターン実行後に生成される
+$ ls -la ~/.claude/projects/-Users-…-clever-zenith-6645/f2364f35-be0f-493b-8dc9-d38116d2c07d.jsonl
+-rw-------  1 getty104  staff  106574 Aug 27 22:34 …
+```
+
+生成された transcript に対して `readFinalReport()` 相当（末尾から最初の非 sidechain アシスタント発言）を適用すると、上記の `NO PRIOR HISTORY …` が正しく取り出せた。**`findTranscriptPath()` / `readFinalReport()` の実装自体は teleport セッションに対して無修正で機能する**（読めるのがローカルターンだけ、という制約が付くだけ）。
+
+### M-7: `agentGet()` の sessionId は claude.ai の URL として使えない
+
+M-2 で得た `agent_session.value`（`f9342ab2-b410-41e2-af7d-c3e3eb1ad598`）を `https://claude.ai/code/<value>` として開いた結果:
+
+```
+このセッションは見つかりませんでした
+削除されたか、アクセス権限がない可能性があります。
+```
+
+一方、`claude --cloud` の stdout に出たクラウドセッションID（`session_01Ccww8Z876VzSDVKsSnU813`）で開くと、投函したメッセージと VM 側の実行結果が表示された（M-5）。
+
+**ID の形式からして別系統**（ローカルは UUID、クラウドは `session_01` プレフィックスの ULID 様式）。`src/herdr.ts` の `toAgentInfo()` が拾う `agent_session.value` を Slack 通知の URL に流用することはできない。
+
+### M-8: CLI にクラウドセッションを列挙・照会する手段は無い
+
+`claude agents --json --all`（ヘルプ上「アクティブなセッション（interactive と background）を JSON 配列で出力。TTY 不要」）を実行したが、**返るのはローカルセッションのみ**でクラウドセッション（`session_01…`）は1件も含まれない。要素の形は:
+
+```json
+{
+  "pid": 36521,
+  "cwd": "/Users/getty104/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645",
+  "kind": "interactive",
+  "startedAt": 1787837238191,
+  "sessionId": "f9342ab2-b410-41e2-af7d-c3e3eb1ad598",
+  "name": "clever-zenith-6645-88",
+  "status": "idle"
+}
+```
+
+`claude --help` のサブコマンド（`agents` / `auth` / `auto-mode` / `doctor` / `gateway` / `import` / `install` / `mcp` / `plugin` / `project` / `setup-token` / `ultrareview` / `update`）にも、クラウドセッションの一覧・状態照会にあたるものは無い。
+
+副次的な収穫として、`claude agents --json` は**ローカル**セッションについて `status`（`idle` / `busy`）を TTY 無しで返す。herdr に依存しない完了検知チャネルとして使える（`mode: "default"` でも効く）。本Issueのスコープ外だが記録する。
+
+### M-9: ローカルにクラウドセッションIDの記録は残らない
+
+`~/.claude/` 配下をクラウドセッションIDで検索した結果、ヒットしたのは**本実測セッション自身の transcript**（コマンドを実行した記録）だけで、claude が管理する紐付けレコードは存在しなかった。teleport セッションのローカルレコード `~/.claude/sessions/<pid>.json` にもクラウド側への参照は無い:
+
+```json
+{"pid":36521,"sessionId":"f9342ab2-b410-41e2-af7d-c3e3eb1ad598","cwd":"…/clever-zenith-6645","startedAt":1787837238191,"procStart":"Thu Aug 27 13:27:17 2026","version":"2.1.247","peerProtocol":1,"peerFeatures":["notify_idle","artifact_yield"],"kind":"interactive","entrypoint":"cli","pidDomain":"darwin","messagingSocketPath":"/tmp/cc-socks/36521.sock","name":"clever-zenith-6645-88","nameSource":"derived","nameSince":1787837238191,"status":"idle","updatedAt":1787837445256,"statusUpdatedAt":1787837445256}
+```
+
+**クラウドセッションIDを得られるのは `claude --cloud` / `claude -p --cloud <id>` の stdout だけ**。Slack へセッション URL を載せる実装（#238）は、起動コマンドの標準出力を `Created cloud session:` / `View: https://claude.ai/code/<id>` 行としてパースする以外に手段が無い。
+
+## PRD からの差分
+
+1. **4.4-2 の前提（ドライバによる完了検知）が成立しない**。クラウドセッションにアタッチし続けるローカルプロセスが存在せず、`--teleport` はローカル実行に化ける（M-1 / M-3）。既存 `waitForHerdrTask()` の「流用」ではクラウドの完了を検知できない
+2. **4.4-3 のフォールバックが両方とも空振りする**。transcript もペイン内容も、クラウド VM で実行されたターンを含まない（M-6）。最終レポートの取得経路は現状ゼロ
+3. **9-9 の想定（`agentGet()` の sessionId ＝ クラウドセッションID）が誤り**（M-7）。取得元は起動コマンドの stdout になる
+4. **受け入れ基準7 の「質問待ちを `idle` と誤返却しない」は満たされている**（M-4）。ただし検証できたのはローカル TUI に対する herdr の挙動であり、クラウドセッションの質問待ちについては観測経路が無いため未検証
+5. **GitHub App 未設定のクラウドセッションには git remote が無い**（M-5）。PR を作るワーカーをこの構成のままクラウド化することはできない
+
+## 未実測項目
+
+1. **GitHub App 連携済みリポジトリでの挙動全般**
+   - 理由: 実測リポジトリで claude.ai 側の GitHub App 連携が未設定。クラウド VM がリモートを clone する経路（remote あり・独自ブランチ）に入れないため、ブランチ名の決まり方・push 可否・`gh pr list` からの追跡可否がいずれも判定できない
+   - 再現手順: https://claude.ai/code で対象リポジトリの GitHub 連携をセットアップしたうえで M-5 を再実行し、`git remote -v` / `git rev-parse --abbrev-ref HEAD` の出力を比較する
+2. **クラウドセッションの質問待ち（`blocked` 相当）の観測**
+   - 理由: クラウドセッションを観測できる CLI 経路が無いため（M-8）、状態を取得する手段そのものが存在しない
+   - 再現手順: 対話アタッチ（`claude --cloud <session_id>`）がアカウントで有効化された環境で M-4 を再実行する
+3. **対話アタッチが有効なアカウントでの完了検知**
+   - 理由: 本アカウントでは `claude --cloud <session_id>` の対話アタッチが無効（S-1 T4）。有効なら「クラウドをドライブし続けるローカル TUI」が成立し、PRD 4.4-2 の前提が復活しうる
+   - 再現手順: 対話アタッチが有効な環境で herdr ペインから `claude --cloud <session_id>` を実行し、M-2 と同じポーリングを行う
+4. **`--teleport` した作業がクラウドセッションへ同期して戻るか**
+   - 理由: teleport 側にクラウドの履歴が降りてこないこと（M-6）は確認したが、逆方向（ローカルで進めたターンが claude.ai 側に反映されるか）は確認していない
+   - 再現手順: teleport セッションで1ターン実行したのち、claude.ai の当該セッション画面にそのターンが現れるかを確認する
+
+## 実測の副作用
+
+本実測により以下2件のクラウドセッションが作成された:
+
+- `session_01GzxNRV2bGSHoRJgidxNAPY`（M-1 / M-2 / M-3 / M-4。teleport 経由でローカルターンを3回実行）
+- `session_01Ccww8Z876VzSDVKsSnU813`（M-5 / M-6。クラウド VM 側で1ターン実行）
+
+不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。あわせて herdr のプローブ用タブは実測後にクローズ済み。
