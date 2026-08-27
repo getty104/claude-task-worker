@@ -1,7 +1,7 @@
 import { CODEGRAPH_PACKAGE, installCodegraphCli } from "./codegraph.js";
 import { DESIGN_MD_PACKAGE, installDesignMdCli } from "./design-md";
 import { PEN_PACKAGE, installPenCli } from "./pen";
-import { runCommand } from "./run-command.js";
+import { npmInstallGlobalLatest, runCommand } from "./run-command.js";
 
 export const PLUGIN_NAME = "claude-task-worker";
 export const MARKETPLACE_NAME = "claude-task-worker";
@@ -54,7 +54,7 @@ async function installPlugin(): Promise<boolean> {
 async function installCli(): Promise<boolean> {
   console.log("[install] Installing claude-task-worker CLI (npm install -g claude-task-worker@latest)...");
   try {
-    await runCommand("npm", ["install", "-g", "claude-task-worker@latest"]);
+    await npmInstallGlobalLatest(PLUGIN_NAME);
     console.log("[install] claude-task-worker CLI installed.");
     return true;
   } catch (err) {

@@ -2,7 +2,7 @@ import { upgradeCodegraphCli } from "./codegraph.js";
 import { printGlobalPackageVersions } from "./install";
 import { installDesignMdCli } from "./design-md";
 import { installPenCli } from "./pen";
-import { runCommand } from "./run-command.js";
+import { npmInstallGlobalLatest, runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
 const MARKETPLACE_NAME = "claude-task-worker";
@@ -34,7 +34,7 @@ async function updatePlugin(): Promise<boolean> {
 async function updateCli(): Promise<boolean> {
   console.log("[update] Updating claude-task-worker CLI (npm install -g claude-task-worker@latest)...");
   try {
-    await runCommand("npm", ["install", "-g", "claude-task-worker@latest"]);
+    await npmInstallGlobalLatest(PLUGIN_NAME);
     console.log("[update] claude-task-worker CLI updated.");
     return true;
   } catch (err) {

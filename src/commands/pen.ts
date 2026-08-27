@@ -23,7 +23,7 @@ export const LEGACY_PEN_PACKAGE = "@pencil.dev/cli";
  */
 export async function installPenCli(logPrefix: string): Promise<boolean> {
   console.log(`[${logPrefix}] Removing legacy Pen CLI (npm uninstall -g ${LEGACY_PEN_PACKAGE})...`);
-  const { runCommand } = await loadRunCommand();
+  const { runCommand, npmInstallGlobalLatest } = await loadRunCommand();
   try {
     await runCommand("npm", ["uninstall", "-g", LEGACY_PEN_PACKAGE]);
   } catch (err) {
@@ -33,7 +33,7 @@ export async function installPenCli(logPrefix: string): Promise<boolean> {
 
   console.log(`[${logPrefix}] Installing Pen CLI (npm install -g ${PEN_PACKAGE}@latest)...`);
   try {
-    await runCommand("npm", ["install", "-g", `${PEN_PACKAGE}@latest`]);
+    await npmInstallGlobalLatest(PEN_PACKAGE);
     console.log(`[${logPrefix}] Pen CLI installed.`);
   } catch (err) {
     console.error(`[${logPrefix}] Failed to install Pen CLI: ${(err as Error).message}`);

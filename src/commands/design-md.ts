@@ -19,8 +19,8 @@ export const DESIGN_MD_PACKAGE = "@google/design.md";
 export async function installDesignMdCli(logPrefix: string): Promise<boolean> {
   console.log(`[${logPrefix}] Installing DESIGN.md CLI (npm install -g ${DESIGN_MD_PACKAGE}@latest)...`);
   try {
-    const { runCommand } = await loadRunCommand();
-    await runCommand("npm", ["install", "-g", `${DESIGN_MD_PACKAGE}@latest`]);
+    const { npmInstallGlobalLatest } = await loadRunCommand();
+    await npmInstallGlobalLatest(DESIGN_MD_PACKAGE);
     console.log(`[${logPrefix}] DESIGN.md CLI installed.`);
     return true;
   } catch (err) {
