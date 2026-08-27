@@ -161,7 +161,7 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 ### Opus 実行スキル/エージェントのプロンプト方針
 
-`WORKER_DEFAULTS`（`src/config.ts`）の **`model: opus` のワーカー**（`exec-issue` / `fix-review-point` / `triage-pr` / `create-issue` / `answer-issue-questions` / `create-ui-design` / `resolve-conflict`。`DEFAULT_WORKER_CONFIG` の既定も `opus`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater` / `requirement-todo-organizer`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
+`WORKER_DEFAULTS`（`src/config.ts`）の **`model: opus` のワーカー**（`exec-issue` / `fix-review-point` / `triage-pr` / `create-issue` / `answer-issue-questions` / `create-ui-design` / `resolve-conflict`。`DEFAULT_WORKER_CONFIG` の既定も `opus`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
 
 - **スコープの規律**: 依頼された範囲だけを実装/回答/分解し、気づいた別の改善は成果物に混ぜず報告へ1行で挙げる。依頼が誤っていると考える場合も、指摘を1-2行添えたうえで依頼どおりのスコープで完遂する（黙って縮小・拡大・別物への置き換えをしない）。Issue description・TODOリスト・`.pen` は後段の実装スコープそのものになるため、ここが膨らむと実装まで膨らむ
 - **成果物の分量**: Issueコメント・PR body・description・最終報告は「必要な実質だけ」。同じ内容の言い換え・埋め草セクション・該当なしの節を書かない。最終報告は結論（何をしたか／どこで止まったか）から書く。Opus 5 はディスクに書くドキュメントも会話も既定で長いため、明示的な分量指示が必要
