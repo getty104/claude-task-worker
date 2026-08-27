@@ -103,7 +103,7 @@ background: false
 - **context7 MCP**: React、Next.js、Tailwind、その他のライブラリの最新ドキュメントを取得する
 - **Playwright MCP**: ブラウザを操作してレンダリング結果を視覚的に確認し、レイアウト問題をデバッグする（`browser_navigate` / `browser_resize` / `browser_take_screenshot` / `browser_snapshot` / `browser_click` / `browser_console_messages` など。ツール名はプレフィックス付き（`mcp__plugin_claude-task-worker_playwright__*` 等）で現れるため**末尾の名前**で判定する）
 - **next-devtools MCP**: Next.js固有のパターンと最適化を活用する
-- **inspect-pencil-nodeスキル**: `.pen` から特定NodeのデザインデータをCLI経由で取得する（`execute` の `Get` で属性、`export_nodes` / `get_screenshot` で画像を `.pen` と同階層の `snapshots/` に出力）。**Pencilデザインを実装の参照元にするときは必ずこのスキルを通す**（Pencil MCPに依存せず `claude-task-worker pencil` コマンドのみで完結）
+- **inspect-pencil-nodeスキル**: `.pen` から特定NodeのデザインデータをCLI経由で取得する（`execute` の `Get` で属性、`export_nodes` / `get_screenshot` で画像を `.pen` と同階層の `snapshots/` に出力）。**Pencilデザインを実装の参照元にするときは必ずこのスキルを通す**（Pencil MCPに依存せず `pencil` コマンドのみで完結）
 
 ## 他スキルを呼び出す場合の必須ルール
 

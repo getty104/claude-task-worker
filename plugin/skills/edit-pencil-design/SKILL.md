@@ -1,6 +1,6 @@
 ---
 name: edit-pencil-design
-description: Pencil CLI（`pencil`コマンド）だけを使って.penファイル（Pencilで作成されたデザインファイル）をAIプロンプトまたは決定論的な編集操作で修正・更新・新規作成するスキル。.penファイルの編集、ボタン追加、レイアウト変更、UIデザインの調整、Pencilデザインの更新、新しい.penデザインの作成などの依頼で必ず使用する。AI任せの編集・新規作成はエージェントモード（`claude-task-worker pencil --in --out --prompt`）で行い、既存ファイルは同一パスを指定して上書き、新規作成は`--in`を省略して`--out`に新しいパスを指定する。決定論的な編集はインタラクティブモード（`claude-task-worker pencil interactive`）の`execute`（`Insert` / `Update` / `Delete` など）で行い、最後に`save()`する。編集・作成後は「**編集・作成したコンポーネントのNodeだけ**」を`export_nodes` / `get_screenshot`でPNG出力し、`.pen`と同階層の`snapshots/`ディレクトリに保存する。Pencil MCPには依存せず`pencil`コマンドのみで完結する。.penファイルのgitコンフリクト解消・破損復旧は本スキルではなく`resolve-pencil-conflict`スキルの担当。
+description: Pencil CLI（`pencil`コマンド）だけを使って.penファイル（Pencilで作成されたデザインファイル）をAIプロンプトまたは決定論的な編集操作で修正・更新・新規作成するスキル。.penファイルの編集、ボタン追加、レイアウト変更、UIデザインの調整、Pencilデザインの更新、新しい.penデザインの作成などの依頼で必ず使用する。AI任せの編集・新規作成はエージェントモード（`pencil --in --out --prompt`）で行い、既存ファイルは同一パスを指定して上書き、新規作成は`--in`を省略して`--out`に新しいパスを指定する。決定論的な編集はインタラクティブモード（`pencil interactive`）の`execute`（`Insert` / `Update` / `Delete` など）で行い、最後に`save()`する。編集・作成後は「**編集・作成したコンポーネントのNodeだけ**」を`export_nodes` / `get_screenshot`でPNG出力し、`.pen`と同階層の`snapshots/`ディレクトリに保存する。Pencil MCPには依存せず`pencil`コマンドのみで完結する。.penファイルのgitコンフリクト解消・破損復旧は本スキルではなく`resolve-pencil-conflict`スキルの担当。
 ---
 
 # Edit Pencil Design
@@ -15,10 +15,10 @@ Pencil CLI の2つの実行モードを使い分ける:
 
 | モード | 起動方法 | できること |
 |---|---|---|
-| **エージェントモード** | `claude-task-worker pencil --in --out --prompt`（新規作成時は `--in` 省略） | AIプロンプトで `.pen` を編集・新規作成（**自然言語**での編集・作成はこのモードのみ） |
-| **インタラクティブモード** | `claude-task-worker pencil interactive -i -o` | `get_app_state()` / `execute({ input })` / `get_screenshot()` / `export_nodes()` / `save()` / `exit()`。**決定論的な編集（Insert / Update / Delete 等）もこちらで完結する**（旧 `batch_design` の代替） |
+| **エージェントモード** | `pencil --in --out --prompt`（新規作成時は `--in` 省略） | AIプロンプトで `.pen` を編集・新規作成（**自然言語**での編集・作成はこのモードのみ） |
+| **インタラクティブモード** | `pencil interactive -i -o` | `get_app_state()` / `execute({ input })` / `get_screenshot()` / `export_nodes()` / `save()` / `exit()`。**決定論的な編集（Insert / Update / Delete 等）もこちらで完結する**（旧 `batch_design` の代替） |
 
-`.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node構造の確認・Node ID取得・Node単位スクリーンショットはすべて `claude-task-worker pencil interactive` 経由で行う。
+`.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node構造の確認・Node ID取得・Node単位スクリーンショットはすべて `pencil interactive` 経由で行う。
 
 # 重要な前提
 
@@ -26,14 +26,11 @@ Pencil CLI の2つの実行モードを使い分ける:
 - **新規作成は `--in` を省略し、`--out` にまだ存在しないパスを指定する**（既存パスを `--out` に指定すると意図せぬ上書きになるため、実行前に存在チェックを必ず行う）
 - **gitコンフリクトのテキストマージは絶対禁止**（`.pen` は暗号化バイナリのため、コンフリクトマーカーの手編集や `git mergetool` はファイルを破損させる。コンフリクト解消は `resolve-pencil-conflict` スキルの担当）
 - **スクリーンショットはファイル全体ではなく編集・作成対象のNodeだけ**（差分レビューが容易になる）
-- **素の `pencil` を直接呼ばない**。実行はすべて `claude-task-worker pencil` 経由で行う（理由は次節）
 
 # 前提条件の確認
 
-`@pen.dev/cli` にはアセットURIを絶対URIとして解決できないバグがあり、`.pen` のアセット読み込みが失敗する。`claude-task-worker pencil` はこの修正をNode の loader hook として `NODE_OPTIONS` 経由で注入したうえで `pencil` を実行するラッパーで、引数・stdin・stdout・stderr・終了コードはすべてそのまま素通しする（heredocも従来どおり使える）ため、使い方は素の `pencil` と完全に同じ。本スキルでは以降すべてのコマンドを `claude-task-worker pencil` として実行し、素の `pencil` を直接呼ばない。
-
-1. `claude-task-worker pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。旧パッケージ `@pencil.dev/cli` しか入っていない環境では 0.2.x の旧ツール構成になるため、必ず 0.3.x へ更新する）
-2. `claude-task-worker pencil status` — 未認証なら `claude-task-worker pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内（0.2.x での名称は `PENCIL_CLI_KEY`）
+1. `pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。旧パッケージ `@pencil.dev/cli` しか入っていない環境では 0.2.x の旧ツール構成になるため、必ず 0.3.x へ更新する）
+2. `pencil status` — 未認証なら `pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内（0.2.x での名称は `PENCIL_CLI_KEY`）
 3. 対象の `.pen` ファイルの存在確認 — **編集**なら先に存在している必要がある。**新規作成**なら存在していてはならない（既に存在する場合は、編集として扱うべきかユーザーに確認する）。新規作成では出力先ディレクトリを `mkdir -p` で用意する
 
 # 実行ルール
@@ -44,7 +41,7 @@ Pencil CLI の2つの実行モードを使い分ける:
 
 ### 既存ファイルの編集（エージェント / `interactive` どちらも可）
 
-- **エージェントモード** `claude-task-worker pencil --in path/to/design.pen --out path/to/design.pen --prompt "<修正内容>"`（短縮形 `-i` / `-o` / `-p`）— 自然言語で任せたい編集。大きめのリファイン、レイアウト調整、複数Nodeにまたがる修正向き
+- **エージェントモード** `pencil --in path/to/design.pen --out path/to/design.pen --prompt "<修正内容>"`（短縮形 `-i` / `-o` / `-p`）— 自然言語で任せたい編集。大きめのリファイン、レイアウト調整、複数Nodeにまたがる修正向き
 - **インタラクティブモードの `execute({ input: '...' })`** — 「このNodeの色を `#123456` に」「このフレームにテキストを1つ足す」のような決定論的な編集向き。結果が予測可能で差分も追いやすいが、heredoc/シェルの改行展開を誤るとサイレントに失敗するため、**ルール2の安全規則を必ず守る**
 
 どちらのモードでも `--in` と `--out` には**同じ `.pen` パス**を指定する。
@@ -74,19 +71,19 @@ Pencil CLI の2つの実行モードを使い分ける:
 ### 新規ファイルの作成（エージェントモード、または空キャンバスからの `execute`）
 
 ```bash
-claude-task-worker pencil --out path/to/new-design.pen --prompt "<作成したいデザインの内容>"
+pencil --out path/to/new-design.pen --prompt "<作成したいデザインの内容>"
 ```
 
 - `--in` を**省略**し、`--out` に新しい `.pen` パスを指定する
 - 実行前に `--out` のパスが未使用であることを確認する（`[ -e path ]` チェック）。既に存在する場合は上書きせず、編集として扱うかユーザーに確認する
-- 決定論的に組み立てたい場合は `claude-task-worker pencil interactive -o path/to/new-design.pen`（`-i` 省略＝空キャンバス）で `execute` の `Insert` を重ね、最後に `save()` する
+- 決定論的に組み立てたい場合は `pencil interactive -o path/to/new-design.pen`（`-i` 省略＝空キャンバス）で `execute` の `Insert` を重ね、最後に `save()` する
 
 ## ルール2: インタラクティブモードを heredoc で非対話的に呼び出す
 
-`claude-task-worker pencil interactive` は標準入力からコマンドを流せば非対話的に実行できる。
+`pencil interactive` は標準入力からコマンドを流せば非対話的に実行できる。
 
 ```bash
-claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF'
+pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF'
 execute({ input: 'Update("title-01", { fill: "#123456" })' })
 save()
 exit()
@@ -123,7 +120,7 @@ EOF
    World")
    # → "Hello\nWorld" という、正しくエスケープされたJSON文字列リテラルになる
 
-   claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF
+   pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF
    execute({ input: 'Update("title-01", { content: ${TEXT_JSON} })' })
    save()
    exit()
@@ -154,7 +151,7 @@ save()
 exit()
 EOF
 cat "${WORK_DIR}/cmds.txt"   # 文字列リテラル内の \n が2文字のまま残っていることを目視
-claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen < "${WORK_DIR}/cmds.txt"
+pencil interactive -i path/to/design.pen -o path/to/design.pen < "${WORK_DIR}/cmds.txt"
 ```
 
 `\n` が実改行に化けていたら即失敗。`<<'EOF'` に修正してやり直す。あわせて `execute` のレスポンスに `Error` / warnings が出ていないかも必ず確認する（出ていれば `save()` してはいけない）。
@@ -178,7 +175,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 1. **編集前のスナップショット取得**（編集のみ）
    ```bash
-   claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' 2>/dev/null | sed -n 's/^TREE //p' > "${WORK_DIR}/before.json"
+   pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' 2>/dev/null | sed -n 's/^TREE //p' > "${WORK_DIR}/before.json"
 execute({ input: 'Print("TREE", JSON.stringify(Get((n,c)=>({d:c.depth,id:n.id,name:n.name,type:n.type,x:n.x,y:n.y,w:c.bounds.width,h:c.bounds.height,fill:n.fill,content:n.content}))))' })
 exit()
 EOF
@@ -190,7 +187,7 @@ EOF
 
 2. **編集（エージェントモード）** — 標準出力・標準エラーも `${WORK_DIR}` に流し、同時実行時のログ取り違えを防ぐ
    ```bash
-   claude-task-worker pencil --in path/to/design.pen --out path/to/design.pen --prompt "<具体的な指示>" \
+   pencil --in path/to/design.pen --out path/to/design.pen --prompt "<具体的な指示>" \
      > "${WORK_DIR}/edit.log" 2>&1
    ```
 
@@ -234,7 +231,7 @@ STEM="$(basename "$DESIGN" .pen)"
 TS="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$SNAP_DIR"
 
-claude-task-worker pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
+pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
 export_nodes({ nodeIds: ["<編集Node1 ID>", "<編集Node2 ID>"], outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
 exit()
 EOF
@@ -249,7 +246,7 @@ done
 画像を自分の目で確認したいだけなら `get_screenshot({ nodeId: "<Node ID>" })`（`"document"` はこちらでのみ有効）。ファイルとして残すなら base64 を自分でデコードする。
 
 ```bash
-claude-task-worker pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/shot.txt"
+pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/shot.txt"
 get_screenshot({ nodeId: "<Node ID>" })
 exit()
 EOF
@@ -258,7 +255,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 
 - ファイル命名規則: `<.penファイル名のステム>-<Node名 or Node ID>-<YYYYMMDD-HHMMSS>.png`（例: `login.pen` の `header` Node → `snapshots/login-header-20260627-153045.png`）。タイムスタンプ込みにより `snapshots/` 内も同時実行で衝突しない
 - 新規Nodeが親コンテナ内に追加された場合、親Node IDも対象に加えると配置確認しやすい
-- **ファイル全体のエクスポート（エージェントモードの `--export`）は原則使わない**。ユーザーが明示的に全体画像を要求した場合のみ `claude-task-worker pencil --in <path> --export <全体画像のpath> --export-scale 2` を補助的に使う
+- **ファイル全体のエクスポート（エージェントモードの `--export`）は原則使わない**。ユーザーが明示的に全体画像を要求した場合のみ `pencil --in <path> --export <全体画像のpath> --export-scale 2` を補助的に使う
 - スクリーンショットはコスト高。サイズ・配置の確認だけなら `execute` の `Get` visitor で `ctx.bounds` / `ctx.problems`（`"partially clipped"` / `"fully clipped"`）を `Print` する方が安く確実
 
 ## ルール6: 実行結果をユーザーに伝える
@@ -272,7 +269,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 
 # 標準ワークフロー
 
-1. **前提確認**: `claude-task-worker pencil version`（0.3.x であること）、`claude-task-worker pencil status`
+1. **前提確認**: `pencil version`（0.3.x であること）、`pencil status`
 2. **操作種別の判定と対象ファイル確認**: 編集なら `.pen` が存在すること、新規作成なら `--out` のパスが未使用であること（ルール1）
 3. **作業ディレクトリ確保**（ルール3）
 4. **`snapshots/` 準備**: `mkdir -p <.penと同じディレクトリ>/snapshots`
@@ -288,12 +285,12 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 
 ## 編集A（自然言語）: ログインページに「Forgot password?」リンクを追加
 
-標準ワークフローどおり before.json 取得 → `claude-task-worker pencil --in designs/login.pen --out designs/login.pen --prompt "Add a 'Forgot password?' link below the password input, aligned to the right" > "${WORK_DIR}/edit.log" 2>&1` → after.json 取得。差分から新規Node `forgot-link-01` を特定したら:
+標準ワークフローどおり before.json 取得 → `pencil --in designs/login.pen --out designs/login.pen --prompt "Add a 'Forgot password?' link below the password input, aligned to the right" > "${WORK_DIR}/edit.log" 2>&1` → after.json 取得。差分から新規Node `forgot-link-01` を特定したら:
 
 ```bash
 TS="$(date +%Y%m%d-%H%M%S)"
 mkdir -p designs/snapshots
-claude-task-worker pencil interactive -i designs/login.pen -o designs/login.pen <<EOF
+pencil interactive -i designs/login.pen -o designs/login.pen <<EOF
 export_nodes({ nodeIds: ["forgot-link-01"], outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
 exit()
 EOF
@@ -303,7 +300,7 @@ mv "${WORK_DIR}/img/forgot-link-01.png" "designs/snapshots/login-forgot-link-${T
 ## 編集B（決定論的）: 同じリンクを `execute` で正確に追加する
 
 ```bash
-claude-task-worker pencil interactive -i designs/login.pen -o designs/login.pen <<'EOF' > "${WORK_DIR}/edit.log" 2>&1
+pencil interactive -i designs/login.pen -o designs/login.pen <<'EOF' > "${WORK_DIR}/edit.log" 2>&1
 get_app_state({ include_schema: true, include_canvas_design: true, include_scripts_and_shaders: false, include_browser: false })
 execute({ input: 'Insert("password-field-01", { type: "text", name: "Forgot Password Link", content: "パスワードをお忘れですか？", fontSize: 13, fill: "#2563EB" })' })
 save()
@@ -320,7 +317,7 @@ EOF
 [ -e designs/error-404.pen ] && { echo "designs/error-404.pen は既に存在します" >&2; exit 1; }
 
 # 作成（--in は省略、--out に新しいパス）
-claude-task-worker pencil --out designs/error-404.pen \
+pencil --out designs/error-404.pen \
   --prompt "Create a 404 error page with a large '404' heading, a 'ページが見つかりません' message, and a primary button linking back to home" \
   > "${WORK_DIR}/edit.log" 2>&1
 
@@ -356,8 +353,8 @@ claude-task-worker pencil --out designs/error-404.pen \
 
 # トラブルシューティング
 
-- **`pencil: command not found` / 認証エラー**: 前提条件の確認どおり `npm install -g @pen.dev/cli`（Node.js 18以上）／`claude-task-worker pencil login` または `PEN_CLI_KEY` を案内
-- **`Unknown tool: batch_design` / `batch_get` / `get_editor_state`**: CLI 0.3.x で廃止済み。`execute` と `get_app_state` に読み替える（早見表の「廃止済み」参照）。`claude-task-worker pencil version` が 0.2.x なら旧パッケージ `@pencil.dev/cli` を掴んでいるので 0.3.x を入れ直す
+- **`pencil: command not found` / 認証エラー**: 前提条件の確認どおり `npm install -g @pen.dev/cli`（Node.js 18以上）／`pencil login` または `PEN_CLI_KEY` を案内
+- **`Unknown tool: batch_design` / `batch_get` / `get_editor_state`**: CLI 0.3.x で廃止済み。`execute` と `get_app_state` に読み替える（早見表の「廃止済み」参照）。`pencil version` が 0.2.x なら旧パッケージ `@pencil.dev/cli` を掴んでいるので 0.3.x を入れ直す
 - **`Invalid syntax. Expected: tool_name({ key: value })`**: `execute` の `input` をダブルクォートで囲んだ中にダブルクォート文字列を注入して入れ子が壊れている。ルール2の原則2（`input` はシングルクォート囲み）を適用する
 - **`-o` が必須エラー**: ヘッドレス実行では `-o` 必須。ルール2のとおり `-i` と同じパスを指定する（`save()` を呼ばなければ変更は永続化されない）
 - **`get_screenshot` に `out` を渡しても画像ファイルができない**: 現行の `get_screenshot` はファイル出力パラメータを持たず base64 を返すだけ。ルール5のデコード手順を使うか `export_nodes` を使う
