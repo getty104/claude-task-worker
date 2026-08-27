@@ -157,7 +157,7 @@ explore-agent サブエージェントで確認事項に関連するコードベ
 
 分析の観点: 言及されている機能・コンポーネントの実装状況、関連する設定ファイルの内容、必要に応じたgit履歴、コードベース内の関連パターン。調査対象のコード・設定に外部URLが現れ、それが結論を左右する場合は「外部リンクの参照」に従う（explore-agent へ委譲する場合も、この方針とURL・要点を返すことをプロンプトに明示する）。
 
-UIや画面挙動に関する確認事項は、`claude-in-chrome` MCP（`mcp__claude-in-chrome__*`）で実際の画面上の動作を確認する（利用前に `claude-in-chrome` スキルを呼び出してツール群をロードすること）。`tabs_create_mcp` / `navigate` で該当ページへアクセスし、`computer` / `read_page` / `form_input` でレンダリング結果の確認とインタラクション（クリック・入力・遷移）の検証を行い、`read_console_messages` / `read_network_requests` でDOM・コンソール・ネットワークを確認する。確認結果はスクリーンショットやログの抜粋を含めて回答の根拠として引用する。
+UIや画面挙動に関する確認事項は、Playwright MCP（`browser_*` ツール群。プレフィックス付きで現れるため**末尾の名前**で判定する）で実際の画面上の動作を確認する。`browser_navigate` で該当ページへアクセスし、`browser_snapshot` / `browser_take_screenshot` / `browser_click` / `browser_type` / `browser_fill_form` でレンダリング結果の確認とインタラクション（クリック・入力・遷移）の検証を行い、`browser_console_messages` / `browser_network_requests` でコンソール・ネットワークを確認する。確認結果はスクリーンショットやログの抜粋を含めて回答の根拠として引用する。
 
 ### ステップ4: 回答の作成とコメント編集
 

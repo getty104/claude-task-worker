@@ -215,7 +215,6 @@ export function buildClaudeArgs({
     ...(mode === "herdr" ? [] : ["-p", prompt]),
     "--permission-mode",
     permission,
-    "--chrome",
     "--disallowedTools",
     DISALLOWED_TOOLS_ARG,
     "--append-system-prompt-file",

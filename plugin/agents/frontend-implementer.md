@@ -47,7 +47,7 @@ background: false
 
 実装したUIがデザインと**完全に一致**していることをブラウザで確認するまで、実装は完了ではない。「コードはデザインどおりに書いたので一致しているはず」という推定で完了報告することを禁止する。
 
-1. **確認環境を用意する**: `claude-in-chrome` スキルで `mcp__claude-in-chrome__*` ツール群をロードし、開発サーバー（`npm run dev` 等）を起動して対象画面のURLを開く。デザインの想定ビューポート幅に `mcp__claude-in-chrome__resize_window` で合わせる（レスポンシブ対応が要件なら各ブレークポイントで確認する）
+1. **確認環境を用意する**: Playwright MCP（`mcp__*__browser_*` ツール群）を使い、開発サーバー（`npm run dev` 等）を起動して `browser_navigate` で対象画面のURLを開く。デザインの想定ビューポート幅に `browser_resize` で合わせる（レスポンシブ対応が要件なら各ブレークポイントで確認する）。スクリーンショットは `browser_take_screenshot` で取得する
 2. **比較対象を並べる**: デザイン側のスクリーンショット（`.pen` なら `inspect-pencil-node` スキルで対象Nodeの画像を取得）と、ブラウザのスクリーンショットを**両方 `Read` で見て**突き合わせる。片方だけを見て判断しない
 3. **差分を項目単位で洗い出す**: 要素の欠落・余分な要素、配置/順序、サイズ・余白（padding/margin/gap）、色（背景・文字・境界）、タイポグラフィ（フォント・サイズ・太さ・行間）、角丸・影・境界線、テキスト内容。差分があれば具体値（デザイン値 vs 実装値）で記録する
 4. **インタラクティブ状態も確認する**: デザインに hover / focus / active / disabled / エラー / ローディング / 空状態が定義されている場合は、それぞれを再現して確認する
@@ -101,7 +101,7 @@ background: false
 
 - **shadcn MCP**: カスタムコンポーネントを構築する前に利用可能なshadcn/uiコンポーネントを確認する
 - **context7 MCP**: React、Next.js、Tailwind、その他のライブラリの最新ドキュメントを取得する
-- **claude-in-chrome MCP**: Chromeブラウザを操作してレンダリング結果を視覚的に確認し、レイアウト問題をデバッグする（`mcp__claude-in-chrome__*` ツール群。利用前に `claude-in-chrome` スキルでツール群をロードする）
+- **Playwright MCP**: ブラウザを操作してレンダリング結果を視覚的に確認し、レイアウト問題をデバッグする（`browser_navigate` / `browser_resize` / `browser_take_screenshot` / `browser_snapshot` / `browser_click` / `browser_console_messages` など。ツール名はプレフィックス付き（`mcp__plugin_claude-task-worker_playwright__*` 等）で現れるため**末尾の名前**で判定する）
 - **next-devtools MCP**: Next.js固有のパターンと最適化を活用する
 - **inspect-pencil-nodeスキル**: `.pen` から特定NodeのデザインデータをCLI経由で取得する（`execute` の `Get` で属性、`export_nodes` / `get_screenshot` で画像を `.pen` と同階層の `snapshots/` に出力）。**Pencilデザインを実装の参照元にするときは必ずこのスキルを通す**（Pencil MCPに依存せず `claude-task-worker pencil` コマンドのみで完結）
 
