@@ -8,7 +8,7 @@
     "claude-task-worker": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js && esbuild src/pen-baseuri-fix.ts --bundle --platform=node --format=esm --outfile=dist/pen-baseuri-fix.mjs",
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js",
     "dev": "tsc --noEmit --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

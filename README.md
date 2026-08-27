@@ -66,7 +66,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Git](https://git-scm.com/) | worktree の作成・ブランチ操作 |
 | [jq](https://jqlang.org/) | プラグインスキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス。任意（未導入でも探索がテキスト検索に落ちるだけ） |
-| [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `claude-task-worker pencil` 経由） |
+| [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `pencil` 経由） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
 
 CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に単一バンドルされ、Node.js 標準モジュールのみで動作する）。
@@ -91,7 +91,7 @@ herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` ま�
 
 ### Pen CLI のログイン
 
-`.pen` を扱うスキル（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict`）は Pen CLI の認証を必要とする。未ログインだと `.pen` の読み書きが失敗するため、UIデザイン先行ワークフローを使うなら**インストール後に一度ログインしておく**（`.pen` を触らないので `claude-task-worker pencil` ラッパー経由でなくてよい）。
+`.pen` を扱うスキル（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict`）は Pen CLI の認証を必要とする。未ログインだと `.pen` の読み書きが失敗するため、UIデザイン先行ワークフローを使うなら**インストール後に一度ログインしておく**。
 
 ```bash
 pencil login    # メールアドレス + パスワード、またはメールアドレス + OTP コード
@@ -168,21 +168,7 @@ claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--
 | `init` | ラベル・テンプレート・設定ファイルの作成と CodeGraph セットアップ |
 | `install` / `update` | 上記「セットアップ」を参照 |
 | `usage` | Claude API 使用状況（5時間/7日間の利用率とリセット時刻）を表示し、Slack にも通知 |
-| `pencil <args...>` | Pencil CLI をアセット URI 修正パッチ付きで実行するラッパー（下記参照） |
 | `version` | CLI のバージョンを表示（`--version` / `-v` も可） |
-
-### `pencil <args...>`
-
-`@pen.dev/cli`（`pencil`）にはアセットのベース URI を絶対 URI として解決できないバグがあり、`.pen` を開くと `Base URI must be absolute!` で失敗する。本コマンドはその修正を Node の loader hook（`dist/pen-baseuri-fix.mjs`）として `NODE_OPTIONS` 経由で注入したうえで `pencil` を実行するラッパー。
-
-```bash
-claude-task-worker pencil version
-claude-task-worker pencil interactive -i designs/login.pen -o designs/login.pen <<'EOF'
-...
-EOF
-```
-
-引数・stdin・stdout・stderr・終了コードはすべて素通しするため、使い方は `pencil` と同じ。`.pen` を扱うスキル・エージェント（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict` / `pencil-design-updater` など）はすべてこのラッパー経由で `pencil` を呼ぶ。
 
 ### `--epic <issue-number>`
 

@@ -1,6 +1,6 @@
 ---
 name: inspect-pencil-node
-description: "Pencil CLI（`pencil`コマンド）だけを使って、.penファイル（Pencilで作成されたデザインファイル）の中のNodeのデザインデータ（属性・構造）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / image など）、再利用可能コンポーネント、特定Node配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。インタラクティブモード（`claude-task-worker pencil interactive`）で `execute` の `Get` / `Print`（読み取り専用関数のみ）を使ってNode属性を取得し、`export_nodes` / `get_screenshot` で画像を`.pen`と同階層の`snapshots/`にPNG出力する。編集はしない（`save()` も変更系関数も呼ばない）ため、対象ファイルは絶対に書き換わらない。Pencil MCPには依存せず`pencil`コマンドのみで完結。"
+description: "Pencil CLI（`pencil`コマンド）だけを使って、.penファイル（Pencilで作成されたデザインファイル）の中のNodeのデザインデータ（属性・構造）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / image など）、再利用可能コンポーネント、特定Node配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。インタラクティブモード（`pencil interactive`）で `execute` の `Get` / `Print`（読み取り専用関数のみ）を使ってNode属性を取得し、`export_nodes` / `get_screenshot` で画像を`.pen`と同階層の`snapshots/`にPNG出力する。編集はしない（`save()` も変更系関数も呼ばない）ため、対象ファイルは絶対に書き換わらない。Pencil MCPには依存せず`pencil`コマンドのみで完結。"
 ---
 
 # Inspect Pencil Node
@@ -19,7 +19,7 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 # 設計思想
 
-本スキルで使うのは**インタラクティブモード**（`claude-task-worker pencil interactive -i -o`）のみ。`get_app_state` / `execute` / `get_screenshot` / `export_nodes` / `exit` を heredoc で呼ぶ。エージェントモード（`claude-task-worker pencil --in --out --prompt`）はAI編集用なので使わない。
+本スキルで使うのは**インタラクティブモード**（`pencil interactive -i -o`）のみ。`get_app_state` / `execute` / `get_screenshot` / `export_nodes` / `exit` を heredoc で呼ぶ。エージェントモード（`pencil --in --out --prompt`）はAI編集用なので使わない。
 
 `.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node属性の取得・スクリーンショット出力はすべてインタラクティブモード経由で行う。
 
@@ -27,10 +27,8 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 # 前提条件の確認
 
-`@pen.dev/cli` にはアセットURIを絶対URIとして解決できないバグがあり、`.pen` のアセット読み込みが失敗する。`claude-task-worker pencil` はこの修正をNode の loader hook として `NODE_OPTIONS` 経由で注入したうえで `pencil` を実行するラッパーで、引数・stdin・stdout・stderr・終了コードはすべてそのまま素通しする（heredocも従来どおり使える）ため、使い方は素の `pencil` と完全に同じ。本スキルでは以降すべてのコマンドを `claude-task-worker pencil` として実行し、素の `pencil` を直接呼ばない。
-
-1. `claude-task-worker pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。パッケージ名は 0.3.x で `@pencil.dev/cli` から改称され、`pen` / `pencil` の両方のbinを提供する。旧パッケージしか無い環境は 0.2.x の旧ツール構成のため必ず更新する）
-2. `claude-task-worker pencil status` — 未認証なら `claude-task-worker pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内（0.2.x での名称は `PENCIL_CLI_KEY`）
+1. `pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。パッケージ名は 0.3.x で `@pencil.dev/cli` から改称され、`pen` / `pencil` の両方のbinを提供する。旧パッケージしか無い環境は 0.2.x の旧ツール構成のため必ず更新する）
+2. `pencil status` — 未認証なら `pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内（0.2.x での名称は `PENCIL_CLI_KEY`）
 3. 対象の `.pen` ファイルが存在するか
 4. ユーザーの取得対象指定を上記5系統（＋サブツリー限定）のどれかにマップする。どれも曖昧な場合だけトップレベル走査で候補を提示
 
@@ -49,14 +47,12 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 `export_html` / `browser` / `spawn_agents` / `get_guidelines` は本スキルの守備範囲外（HTML書き出し・実サイト取り込み・エージェント起動・ガイド取得）なので使わない。
 
-**素の `pencil` を直接呼ばない**。実行はすべて `claude-task-worker pencil` 経由で行う（前提条件の確認を参照）。
-
 ## ルール2: インタラクティブモードを heredoc で非対話的に呼び出す
 
 heredoc で固定のコマンド列を流し、結果を `${WORK_DIR}` 配下に保存する。
 
 ```bash
-claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/out.txt"
+pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/out.txt"
 execute({ input: 'Print(Get("<node-id>", { depth: 2 }))' })
 exit()
 EOF
@@ -75,7 +71,7 @@ EOF
 1. **heredoc は最優先で `<<'EOF'`（シングルクォート付き）を使う** — Regex内のバックスラッシュもそのままPencilに届く。
 
    ```bash
-   claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/nodes.txt"
+   pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/nodes.txt"
    execute({ input: 'Get(n => /header|hero/i.test(n.name) && Print(n.id, n.name, n.type))' })
    exit()
    EOF
@@ -87,7 +83,7 @@ EOF
    PATTERN_JSON=$(jq -Rs 'rtrimstr("\n")' <<< 'header|hero|nav')
    # → 正しくエスケープされたJSON文字列リテラル（前後にダブルクォート付き）になる
 
-   claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF > "${WORK_DIR}/nodes.txt"
+   pencil interactive -i path/to/design.pen -o path/to/design.pen <<EOF > "${WORK_DIR}/nodes.txt"
    execute({ input: 're = new RegExp(${PATTERN_JSON}, "i"); Get(n => re.test(n.name) && Print(n.id, n.name, n.type))' })
    exit()
    EOF
@@ -116,7 +112,7 @@ execute({ input: 'Get(n => /header/i.test(n.name) && Print(n.id, n.name))' })
 exit()
 EOF
 cat "${WORK_DIR}/cmds.txt"   # \n やバックスラッシュが2文字のまま残っていることを目視
-claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen < "${WORK_DIR}/cmds.txt" > "${WORK_DIR}/nodes.txt"
+pencil interactive -i path/to/design.pen -o path/to/design.pen < "${WORK_DIR}/cmds.txt" > "${WORK_DIR}/nodes.txt"
 ```
 
 `\n` が実改行に化けていたら即失敗。`<<'EOF'` に修正してやり直す。
@@ -176,7 +172,7 @@ type Visit<T> = (node: Child, ctx: Ctx) => T | undefined;         // undefined �
 それでも候補が絞れない（「あのヘッダー的なやつ」のように曖昧）場合は、まず `get_app_state` でトップレベルNodeと再利用可能コンポーネントの一覧を取り、3〜5件の候補をユーザーに提示する。**ID必須ではない**のがポイント。
 
 ```bash
-claude-task-worker pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/state.txt"
+pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/state.txt"
 get_app_state({ include_schema: true, include_canvas_design: true, include_scripts_and_shaders: false, include_browser: false })
 exit()
 EOF
@@ -200,7 +196,7 @@ TS="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$SNAP_DIR"
 
 # 複数Nodeを一括出力（一次出力は WORK_DIR）
-claude-task-worker pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
+pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
 export_nodes({ nodeIds: ["node-a", "node-b"], outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
 exit()
 EOF
@@ -216,7 +212,7 @@ done
 ドキュメント全体、または画像を目で確認したいだけの単一Nodeは `get_screenshot({ nodeId: "..." })`。`nodeId: "document"` はこちらでのみ有効。ファイルとして残すなら base64 を自分でデコードする。
 
 ```bash
-claude-task-worker pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/shot.txt"
+pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/shot.txt"
 get_screenshot({ nodeId: "document" })
 exit()
 EOF
@@ -245,7 +241,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 
 # 標準ワークフロー
 
-1. **前提確認**: `claude-task-worker pencil version`、`claude-task-worker pencil status`、対象 `.pen` の存在
+1. **前提確認**: `pencil version`、`pencil status`、対象 `.pen` の存在
 2. **作業ディレクトリ確保**（ルール3）
 3. **`snapshots/` 準備**: `mkdir -p <.penと同じディレクトリ>/snapshots`
 4. **取得スコープの決定**: 依頼を「ID / 名前Regex / type / reusable / サブツリー / トップレベル」にマップ。曖昧なときだけ `get_app_state` またはトップレベル走査で候補を提示
@@ -260,7 +256,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 標準ワークフローどおり準備し、Node ID が分からないのでまず名前Regexで候補を洗い出す。
 
 ```bash
-claude-task-worker pencil interactive -i designs/login.pen -o designs/login.pen <<'EOF' > "${WORK_DIR}/hits.txt"
+pencil interactive -i designs/login.pen -o designs/login.pen <<'EOF' > "${WORK_DIR}/hits.txt"
 execute({ input: 'Get((n, c) => /header/i.test(n.name) && Print(n.id, n.name, n.type, c.bounds.width, c.bounds.height))' })
 exit()
 EOF
@@ -271,7 +267,7 @@ EOF
 ```bash
 TS="$(date +%Y%m%d-%H%M%S)"
 
-claude-task-worker pencil interactive -i designs/login.pen -o designs/login.pen <<EOF > "${WORK_DIR}/combined.txt"
+pencil interactive -i designs/login.pen -o designs/login.pen <<EOF > "${WORK_DIR}/combined.txt"
 execute({ input: 'Print(Get("header-01", { depth: 2, resolveVariables: true }))' })
 export_nodes({ nodeIds: ["header-01"], outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
 exit()
@@ -294,7 +290,7 @@ TS="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$SNAP_DIR"
 
 # 再利用可能コンポーネントを一括検索（1Node1行。行頭に固定マーカーを付けて機械抽出を安全にする）
-claude-task-worker pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/components.txt"
+pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/components.txt"
 execute({ input: 'Get(n => n.reusable && Print("COMP", n.id, n.name, n.type))' })
 exit()
 EOF
@@ -302,7 +298,7 @@ EOF
 # マーカー行の2列目（id）だけを集めてJSON配列にする
 IDS_JSON=$(grep -E '^COMP [A-Za-z0-9_-]+ ' "${WORK_DIR}/components.txt" | awk '{print $2}' | jq -R . | jq -sc .)
 
-claude-task-worker pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
+pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
 export_nodes({ nodeIds: ${IDS_JSON}, outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
 exit()
 EOF
@@ -342,7 +338,7 @@ done
 # トラブルシューティング
 
 - **`pencil: command not found`**: `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要）
-- **認証エラー**: `claude-task-worker pencil login`、または `PEN_CLI_KEY` 環境変数を設定
+- **認証エラー**: `pencil login`、または `PEN_CLI_KEY` 環境変数を設定
 - **`-o` が必須エラー**: ヘッドレス実行では `-o` 必須。入力と同じパスを指定し、`save()` を呼ばなければ変更されない
 - **`Unknown tool: batch_get` / `get_editor_state`**: CLI 0.3.x で廃止済み。`execute` の `Get` と `get_app_state` に読み替える（早見表の「廃止済み」参照）
 - **`get_screenshot` に `out` を渡しても画像ファイルができない**: 現行の `get_screenshot` はファイル出力パラメータを持たず base64 を返すだけ。ルール5のデコード手順を使うか `export_nodes` を使う
