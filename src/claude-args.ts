@@ -4,6 +4,10 @@ import path from "node:path";
 import { CLOUD_DONE_LABEL } from "./config";
 import { DEFAULT_PERMISSION_MODE, type PermissionMode, type RunMode } from "./user-config";
 
+// クラウドタスクの最終報告コメントの固定見出し。生成側（本ファイル）と取得側（gh.ts）で
+// 文言を共有し、どちらかだけ変更して取得が黙って壊れる事故を防ぐ。
+export const CLOUD_REPORT_HEADING = "## claude-task-worker 実行結果";
+
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
 // herdr モードは herdr タブ内の TUI セッション。どちらも応答するユーザーは常駐しない）。
 // 以下のツールはこの実行形態では原理的に使い道がない（または有害）なため、CLI の
@@ -268,8 +272,9 @@ export function buildCloudCreateArgs(commonArgs: string[], description: string):
 // スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で投函プロンプトへ付加する方針。
 export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
-  const instruction = `完了・中断にかかわらず、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
-  return `${prompt}\n\n${instruction}`;
+  const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
+  const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
+  return `${prompt}\n\n${reportInstruction}\n\n${labelInstruction}`;
 }
 
 // クラウドセッションへのプロンプト投函コマンド（TTY 不要・即 return の

@@ -17,6 +17,7 @@ const {
   buildCloudCreateArgs,
   buildCloudDispatchArgs,
   appendCloudDoneInstruction,
+  CLOUD_REPORT_HEADING,
   shellQuote,
   isOpusModel,
   systemPromptFilePath,
@@ -376,6 +377,11 @@ test("appendCloudDoneInstruction keeps the original prompt and appends the label
   assert.ok(result.startsWith(prompt));
   assert.ok(result.includes("cc-cloud-done"));
   assert.ok(result.includes("Issue #123"));
+});
+
+test("appendCloudDoneInstruction includes the cloud report heading", () => {
+  const result = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
+  assert.ok(result.includes(CLOUD_REPORT_HEADING));
 });
 
 test("appendCloudDoneInstruction switches wording between issue and pr targets", () => {
