@@ -1,7 +1,7 @@
 OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 OWNER="$(echo $OWNER_REPO | cut -d'/' -f1)"
 REPO="$(echo $OWNER_REPO | cut -d'/' -f2)"
-PR_NUMBER="$(gh pr view --json number --jq '.number')"
+PR_NUMBER="${1:-$(gh pr view --json number --jq '.number')}"
 
 if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
   echo "Error: Could not determine PR number. Make sure the current branch has an open PR." >&2
