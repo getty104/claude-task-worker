@@ -53,16 +53,30 @@ function findRecord(
 }
 
 // `herdr agent start <name> --kind claude --pane <id> --timeout <ms> -- <claude args...>` から
-// claude のフラグ部分（`--` の後ろ）だけを取り出す。
+// claude のフラグ部分（`--` の後ろ）だけを取り出す。ローカル実行（herdr モード・cloud 未指定）は
+// 引き続きこの経路（runViaHerdr）を使うため残す。
 function extractAgentStartArgs(record: StubRecord): string[] {
   const idx = record.argv.indexOf("--");
   assert.ok(idx >= 0, `agent start の argv に "--" が見つからない: ${JSON.stringify(record.argv)}`);
   return record.argv.slice(idx + 1);
 }
 
+// クラウド実行の作成コマンドは `herdr pane send-text <paneId> "claude --cloud <desc> ..."`
+// としてシェルへ送出される（クォート済みの1文字列）。argv[2] が paneId、argv[3] がその文字列。
+function extractCreateCommand(record: StubRecord): string {
+  return record.argv[3] ?? "";
+}
+
 function argValue(argv: string[], flag: string): string | undefined {
   const idx = argv.indexOf(flag);
   return idx >= 0 ? argv[idx + 1] : undefined;
+}
+
+// クォート済みのシェルコマンド文字列から `--flag <value>` の値を取り出す。トークンはすべて
+// shellQuote() でシングルクォートされているため、フラグ自身も `'--flag'` の形で現れる。
+function commandFlagValue(command: string, flag: string): string | undefined {
+  const match = new RegExp(`'${flag}' '([^']*)'`).exec(command);
+  return match?.[1];
 }
 
 async function gitBranchList(repoDir: string): Promise<string[]> {
@@ -94,7 +108,12 @@ const ISSUE_GH_SCENARIO = {
 test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree を作らない", { timeout: 75_000 }, async (t) => {
   const stubs = installCliStubs({
     gh: ISSUE_GH_SCENARIO,
-    herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] exec-issue cloud report" },
+    // 作成フェーズがペイン内容をポーリングしてセッションIDを取得するため、実測の出力形状
+    // （`View:` の URL）を含めておく。含めないと作成フェーズがタイムアウトする。
+    herdr: {
+      paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubA?from=cli&m=0",
+    },
+    claude: { stdout: "[stub] exec-issue cloud report" },
   });
   const handle = await startWorker({
     worker: "exec-issue",
@@ -132,17 +151,22 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
     "--env に CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS が含まれてはいけない",
   );
 
-  const agentStart = findRecord(records, "herdr", "agent", "start");
-  assert.ok(agentStart, "agent start の記録が見つからない");
-  const claudeArgs = extractAgentStartArgs(agentStart!);
-  assert.ok(claudeArgs.includes("--cloud"), "--cloud が付いていない");
-  assert.equal(argValue(claudeArgs, "--ref"), "main");
-  assert.ok(!claudeArgs.includes("--on-branch"), "--on-branch が付いてはいけない");
-  assert.ok(!claudeArgs.includes("-p"), "-p が付いてはいけない（herdr モードは常に非付与）");
-  // 実測: buildClaudeArgs() は cloud 実行でも --permission-mode / --disallowedTools を
-  // 常に付ける（cloud で省く実装にはなっていない）。現行実装の実測値を正としてテストする。
-  assert.ok(claudeArgs.includes("--permission-mode"), "実装は cloud でも --permission-mode を付ける");
-  assert.ok(claudeArgs.includes("--disallowedTools"), "実装は cloud でも --disallowedTools を付ける");
+  assert.equal(findRecord(records, "herdr", "agent", "start"), undefined, "クラウド実行で agent start が呼ばれている");
+
+  const sendText = findRecord(records, "herdr", "pane", "send-text");
+  assert.ok(sendText, "作成コマンドの pane send-text 記録が見つからない");
+  const createCommand = extractCreateCommand(sendText!);
+  assert.ok(createCommand.includes("'--cloud'"), "--cloud が付いていない");
+  assert.equal(commandFlagValue(createCommand, "--ref"), "main");
+  assert.ok(!createCommand.includes("'--on-branch'"), "--on-branch が付いてはいけない");
+  assert.ok(!createCommand.includes("'-p'"), "-p が付いてはいけない（クラウド作成コマンドは常に非付与）");
+  assert.ok(createCommand.includes("'--permission-mode'"), "実装は cloud でも --permission-mode を付ける");
+  assert.ok(createCommand.includes("'--disallowedTools'"), "実装は cloud でも --disallowedTools を付ける");
+
+  const claudeRecord = records.find((r) => r.command === "claude" && r.argv[0] === "-p" && r.argv.includes("--cloud"));
+  assert.ok(claudeRecord, "投函コマンド（claude -p --cloud <id> <prompt>）の記録が見つからない");
+  assert.equal(claudeRecord!.argv[1], "--cloud");
+  assert.equal(claudeRecord!.argv[2], "session_stubA");
 
   assert.ok(!existsSync(join(handle.repoDir, ".claude", "worktrees")), "worktree ディレクトリが作られている");
   const branches = await gitBranchList(handle.repoDir);
@@ -163,7 +187,10 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
       prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-triage-scope" }], title: "Fix bug" }],
       view: { "701": { checks: [] } },
     },
-    herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] triage-pr cloud report" },
+    herdr: {
+      paneOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubB?from=cli&m=0",
+    },
+    claude: { stdout: "[stub] triage-pr cloud report" },
   });
   const handle = await startWorker({
     worker: "triage-pr",
@@ -176,13 +203,13 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
     stubs.cleanup();
   });
 
-  await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined);
+  await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined);
 
-  const agentStart = findRecord(stubs.records(), "herdr", "agent", "start")!;
-  const claudeArgs = extractAgentStartArgs(agentStart);
-  assert.equal(argValue(claudeArgs, "--on-branch"), "feature-x");
-  assert.ok(!claudeArgs.includes("--ref"), "PR系ワーカーは --ref を付けてはいけない");
-  assert.ok(claudeArgs.includes("--cloud"));
+  const sendText = findRecord(stubs.records(), "herdr", "pane", "send-text")!;
+  const createCommand = extractCreateCommand(sendText);
+  assert.equal(commandFlagValue(createCommand, "--on-branch"), "feature-x");
+  assert.ok(!createCommand.includes("'--ref'"), "PR系ワーカーは --ref を付けてはいけない");
+  assert.ok(createCommand.includes("'--cloud'"));
 });
 
 // ============================================================
@@ -191,7 +218,10 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
 test("C: update-coding-guidelines のクラウド実行が --ref を付ける", { timeout: 60_000 }, async (t) => {
   const stubs = installCliStubs({
     gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
-    herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] scheduled cloud report" },
+    herdr: {
+      paneOutput: "Created cloud session: ctw:demo:#0\nView: https://claude.ai/code/session_stubC?from=cli&m=0",
+    },
+    claude: { stdout: "[stub] scheduled cloud report" },
   });
   const handle = await startWorker({
     worker: "update-coding-guidelines",
@@ -207,25 +237,30 @@ test("C: update-coding-guidelines のクラウド実行が --ref を付ける", 
 
   // publishLastRunPr() が worktree/commit/push/pr-create を行ってから run() に進むため、
   // 他ケースよりタイムアウトを長めに取る。
-  await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 40_000);
+  await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined, 40_000);
 
-  const agentStart = findRecord(stubs.records(), "herdr", "agent", "start")!;
-  const claudeArgs = extractAgentStartArgs(agentStart);
-  assert.equal(argValue(claudeArgs, "--ref"), "main");
-  assert.ok(claudeArgs.includes("--cloud"));
+  const sendText = findRecord(stubs.records(), "herdr", "pane", "send-text")!;
+  const createCommand = extractCreateCommand(sendText);
+  assert.equal(commandFlagValue(createCommand, "--ref"), "main");
+  assert.ok(createCommand.includes("'--cloud'"));
 });
 
 // ============================================================
 // D. 失敗時の cleanup（exec-issue, cloud: true, タスク失敗）
 // ============================================================
 test(
-  "D: exec-issue のクラウド実行が空振り失敗しても cc-in-progress を除去し PR ラベルを付けない",
+  "D: exec-issue のクラウド実行が投函コマンドの失敗（非0終了）でも cc-in-progress を除去し PR ラベルを付けない",
   { timeout: 75_000 },
   async (t) => {
     const stubs = installCliStubs({
       gh: ISSUE_GH_SCENARIO,
-      // paneOutput を空にすると buildHerdrTaskResult() が空振り（失敗）と判定する。
-      herdr: { agentStatuses: ["working", "done"], paneOutput: "" },
+      // 作成フェーズは成功させ（セッションIDを取得できる）、投函フェーズを非0終了で
+      // 失敗させる。新方式では完了判定に agent ステータス（working/done）を使わないため、
+      // 空のペイン出力ではなく claude の終了コードで失敗を作る。
+      herdr: {
+        paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubD?from=cli&m=0",
+      },
+      claude: { exitCode: 1, stdout: "", stderr: "[stub] dispatch failed" },
     });
     const handle = await startWorker({
       worker: "exec-issue",

@@ -20,11 +20,9 @@ export const AGENT_POLL_INTERVAL_MS = 3 * 1000;
 // 空振り検知へ流用する。
 export const PANE_OUTPUT_LINES = 300;
 
-// herdr モードのタスクが作るタブのラベル。cloud=true のときだけ末尾へ `:cloud` を付け、
-// クラウド実行（workers.<name>.cloud）を識別できるようにする。既定 false でローカル実行の
-// 戻り値は不変。
-export function taskTabLabel(projectName: string, number: number, cloud = false): string {
-  return `ctw:${projectName}:#${number}${cloud ? ":cloud" : ""}`;
+// herdr モードのタスクが作るタブのラベル。
+export function taskTabLabel(projectName: string, number: number): string {
+  return `ctw:${projectName}:#${number}`;
 }
 
 // `herdr agent start <name>` の agent 名は「小文字始まり・小文字/数字/'-'/'_' のみ・1〜32文字」に
@@ -96,7 +94,14 @@ export function observeAgentStatus(
 // （同一タスクの起動出力に複数のセッションURLが出ることは想定していないため、最後まで
 // スキャンして上書きし続けるより単純で、事故時の挙動も予測しやすい）。
 const CLOUD_SESSION_URL_RE = /https:\/\/claude\.ai\/code\/([A-Za-z0-9_-]+)/;
-const CLOUD_SESSION_CREATED_RE = /Created cloud session:\s*([A-Za-z0-9_-]+)/;
+// 実測（docs/cloud-session-launch-flags.md の T5/T7/M-1）で `Created cloud session:` の
+// 後ろに出るのは**セッションIDではなく description そのもの**（例:
+// `Created cloud session: CTW probe`）。本Issueの description は `ctw:<project>:#<n>` の形を
+// しており、セッションID形式（`[A-Za-z0-9_-]+`）にマッチしてしまうと、作成待ちのポーリング中に
+// `View:` 行が描画される前の中間状態を読んだ際に description を偽のIDとして掴む。
+// そこでセッションID形式（`session_` で始まる）にのみマッチするよう絞り、`View:` の URL
+// パターンを優先する順序は維持する。
+const CLOUD_SESSION_CREATED_RE = /Created cloud session:\s*(session_[A-Za-z0-9_-]+)/;
 
 export function extractCloudSessionId(text: string): string | undefined {
   return CLOUD_SESSION_URL_RE.exec(text)?.[1] ?? CLOUD_SESSION_CREATED_RE.exec(text)?.[1];
@@ -114,14 +119,10 @@ export function extractCloudSessionId(text: string): string | undefined {
  * 使い物にならない（transcript.ts 参照）。transcript を引けなかった場合のみ
  * 従来どおりペイン内容へフォールバックする。
  */
-export function buildHerdrTaskResult(
-  paneOutput: string,
-  options?: { report?: string; cloudSessionId?: string },
-): TaskResult {
+export function buildHerdrTaskResult(paneOutput: string, options?: { report?: string }): TaskResult {
   const report = options?.report?.trim() ?? "";
-  const cloudSessionId = options?.cloudSessionId;
   if (report !== "") {
-    return { status: "completed", output: report, ...(cloudSessionId ? { cloudSessionId } : {}) };
+    return { status: "completed", output: report };
   }
   if (paneOutput.trim() === "") {
     return {
@@ -129,10 +130,9 @@ export function buildHerdrTaskResult(
       output:
         "[worker] the claude session became idle but its pane produced no output " +
         "(session aborted before the model ran; e.g. a skill preamble command failed)",
-      ...(cloudSessionId ? { cloudSessionId } : {}),
     };
   }
-  return { status: "completed", output: paneOutput, ...(cloudSessionId ? { cloudSessionId } : {}) };
+  return { status: "completed", output: paneOutput };
 }
 
 export interface HerdrTask {
@@ -196,7 +196,6 @@ export async function startHerdrTask({
   workspaceId,
   herdr,
   timing,
-  onCloudSessionId,
 }: {
   label: string;
   cwd: string;
@@ -207,8 +206,6 @@ export async function startHerdrTask({
   workspaceId?: string;
   herdr?: typeof HerdrModule;
   timing?: StartTiming;
-  // クラウド実行時、起動出力からクラウドセッションIDを拾えたら呼ばれる。
-  onCloudSessionId?: (sessionId: string) => void;
 }): Promise<HerdrTask> {
   const mod = herdr ?? (await loadHerdr());
   const { tabId, paneId } = await mod.tabCreate({ label, cwd, workspaceId, env });
@@ -230,35 +227,12 @@ export async function startHerdrTask({
     // 追跡し、作業中は working、非フォーカスでの完了は done を返すようになる。
     await mod.agentPrompt(paneId, prompt);
     await ensurePromptAccepted(paneId, prompt, mod, timing);
-    // クラウド実行（--cloud）では claude が起動出力に `Created cloud session: <id>` /
-    // `View: https://claude.ai/code/<id>...` を描画する。ローカルには他に記録が残らないため
-    // ペインからの抽出が唯一の取得手段。抽出できなくても正常系（ローカル実行では常に無い）。
-    if (onCloudSessionId) {
-      try {
-        const content = await mod.paneRead(paneId, { source: "recent", lines: PANE_OUTPUT_LINES });
-        const cloudSessionId = extractCloudSessionId(content);
-        if (cloudSessionId) onCloudSessionId(cloudSessionId);
-      } catch (err) {
-        console.error(`[herdr-runner] failed to read pane ${paneId} for cloud session id: ${err}`);
-      }
-    }
   } catch (err) {
     // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
     // ここが try ブロック全体（waitForPaneReady / agentStart / agentPrompt /
     // ensurePromptAccepted）の唯一のエラー処理経路のため、paneId と原因をここで
     // 一括してログへ残す（残さないと実運用で原因調査ができない）。
     console.error(`[herdr-runner] failed to start task in pane ${paneId}: ${err}`);
-    // 失敗経路（タイムアウト等）でもクラウドセッションが既に作られていることがあるため、
-    // タブを閉じてペイン内容が失われる前に拾っておく（受け入れ基準上こちらが本命の経路）。
-    if (onCloudSessionId) {
-      try {
-        const content = await mod.paneRead(paneId, { source: "recent", lines: PANE_OUTPUT_LINES });
-        const cloudSessionId = extractCloudSessionId(content);
-        if (cloudSessionId) onCloudSessionId(cloudSessionId);
-      } catch {
-        // ペイン読み取り自体の失敗は元のエラーを潰さないよう無視する。
-      }
-    }
     await mod.tabClose(tabId).catch(() => {});
     throw err;
   }
@@ -330,7 +304,8 @@ async function waitForPromptAccepted(paneId: string, mod: typeof HerdrModule, ti
 
 // ペインに最初の出力（シェルのプロンプト）が現れるまで待つ。プロンプト文字列はユーザーの
 // シェル設定依存のため内容は判定せず「何か描画されたか」だけを見る（dispatcher.ts と同じ方針）。
-async function waitForPaneReady(
+// `src/process-manager.ts` のクラウド作成フェーズ（`runViaCloud`）からも再利用するため export する。
+export async function waitForPaneReady(
   paneId: string,
   mod: typeof HerdrModule,
   options?: { timeoutMs?: number; pollIntervalMs?: number },
@@ -417,8 +392,7 @@ export async function waitForHerdrTask(
     if (observed.decision === "completed") {
       const output = await readPaneOutput(paneId, mod);
       const report = (options?.readReport ?? readFinalReport)(sessionId);
-      const cloudSessionId = extractCloudSessionId(output);
-      return buildHerdrTaskResult(output, { report, cloudSessionId });
+      return buildHerdrTaskResult(output, { report });
     }
     if (observed.decision === "blocked-first-seen") {
       options?.onBlocked?.();

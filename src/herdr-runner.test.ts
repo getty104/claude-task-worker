@@ -23,12 +23,6 @@ test("taskTabLabel formats the tab label as ctw:<project>:#<number>", () => {
   assert.equal(taskTabLabel("my-app", 123), "ctw:my-app:#123");
 });
 
-test("taskTabLabel appends :cloud only when cloud is true", () => {
-  assert.equal(taskTabLabel("my-app", 123, true), "ctw:my-app:#123:cloud");
-  assert.equal(taskTabLabel("my-app", 123, false), "ctw:my-app:#123");
-  assert.equal(taskTabLabel("my-app", 123), "ctw:my-app:#123");
-});
-
 const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 
 test("toAgentName converts a task tab label into a valid herdr agent name", () => {
@@ -45,20 +39,6 @@ test("toAgentName satisfies the herdr agent name rules for tricky inputs", () =>
     taskTabLabel("123numeric", 9),
     taskTabLabel("a".repeat(60), 999999),
     "###",
-  ];
-  for (const label of cases) {
-    const name = toAgentName(label);
-    assert.match(name, AGENT_NAME_RE, `"${label}" -> "${name}" should be a valid agent name`);
-  }
-});
-
-test("toAgentName satisfies the herdr agent name rules for cloud-labeled tricky inputs", () => {
-  // 32文字切り詰めで `-cloud` が落ちうるが、規則（文字種・長さ）を満たすことだけを検証する。
-  const cases = [
-    taskTabLabel("My_App", 12, true),
-    taskTabLabel("プロジェクト", 7, true),
-    taskTabLabel("123numeric", 9, true),
-    taskTabLabel("a".repeat(60), 999999, true),
   ];
   for (const label of cases) {
     const name = toAgentName(label);
@@ -149,18 +129,10 @@ test("extractCloudSessionId returns undefined when neither pattern is present", 
   assert.equal(extractCloudSessionId("⏺ 修正しました\nctx 7% │ 5h 26%"), undefined);
 });
 
-test("buildHerdrTaskResult attaches cloudSessionId to completed and failed results", () => {
-  const completed = buildHerdrTaskResult("done", { cloudSessionId: "session_abc" });
-  assert.deepEqual(completed, { status: "completed", output: "done", cloudSessionId: "session_abc" });
-
-  const failed = buildHerdrTaskResult("   ", { cloudSessionId: "session_abc" });
-  assert.equal(failed.status, "failed");
-  assert.equal(failed.cloudSessionId, "session_abc");
-});
-
-test("buildHerdrTaskResult omits cloudSessionId when not provided", () => {
-  const result = buildHerdrTaskResult("done");
-  assert.equal("cloudSessionId" in result, false);
+test("extractCloudSessionId does not treat the description itself as a session id", () => {
+  // `Created cloud session:` の後ろは description（例: タスクタブラベル）そのものであり、
+  // セッションID（`session_` 始まり）ではない。誤って description を掴まないことを検証する。
+  assert.equal(extractCloudSessionId("Created cloud session: ctw:my-app:#123"), undefined);
 });
 
 interface FakeHerdrOptions {
