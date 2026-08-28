@@ -98,7 +98,7 @@ claude plugin install claude-task-worker@claude-task-worker
 
 herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
 
-クラウド実行（`workers.<名前>.cloud: true`）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境セットアップスクリプトで `npx claude-task-worker install` を実行する（リポジトリの `scripts/cloud-setup.sh` がその中身）。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。詳細は後述の「[`cloud`（クラウド実行）](#cloudクラウド実行)」を参照。
+クラウド実行（`workers.<名前>.cloud: true`）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境設定（Environment setup script / セットアップスクリプト欄）に `npx claude-task-worker install` を直接記載しておく。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。詳細は後述の「[`cloud`（クラウド実行）](#cloudクラウド実行)」を参照。
 
 ### GitHub コネクタの有効化
 
@@ -345,7 +345,7 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。`
 - `config.json` の `mode` が `"herdr"` であること。新しいクラウドセッションの作成には TTY が必要で、`"default"` の子プロセス実行では作れない。`cloud: true` のワーカーがあるのに `mode` が `"herdr"` でない場合は**ワーカー起動時にエラー終了する**（`"default"` へフォールバックしない）
 - claude.ai アカウントでのサインインが必須。API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成では利用できない。`cloud: true` のワーカーがある場合、これはワーカー起動時に静的検査される
 - 対象リポジトリの GitHub App 連携（クラウド VM から push / PR 作成を行うため）
-- クラウド VM の環境セットアップスクリプトで `npx claude-task-worker install`（`scripts/cloud-setup.sh`）を実行し、プラグイン・CLI を導入しておくこと
+- claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載してプラグイン・CLI を導入しておくこと（手順は「[インストール](#インストール)」参照）
 
 上記のうち静的検査されるのは1〜2番目だけで、GitHub App 連携とクラウド VM 側の導入状況はローカルから確認できないため検査されない。
 

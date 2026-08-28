@@ -126,7 +126,7 @@ Claude Code on the Web（クラウドセッション）はタスクごとに使�
 1. **claude.ai アカウントでのサインイン**。API キー認証・第三者プロバイダ（Bedrock / Vertex 等）ではクラウドセッションを作成できない。`checkCloudAuth()` が `claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で**起動時に静的検査してエラー終了する**（`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返すため、`apiKeySource` の不在を併せて見る必要がある）。`claude auth status --json` の実行・パースそのものに失敗した「判定不能」なケースは拒否根拠にせず、エラーにしない安全側の倒し方をとる
 2. **GitHub 連携**（Claude GitHub App の認可、または `/web-setup` による `gh` トークンの同期）。連携状態は非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない（失敗時のエラーメッセージで案内）
    - 未設定でもセッション作成自体は成功し、ローカル作業ツリーがアップロードされてシードされる（PRD 4.4-1 の「クラウド VM が自前で clone する」前提は GitHub 連携済みの場合にのみ成立する）。失敗するのは `--ref` / `--on-branch` を付けた場合で、その時点で連携未設定が顕在化する
-3. **プラグイン導入**。クラウド VM に本プラグインのスキルが存在しないと `/claude-task-worker:exec-issue` などのセッションが空振りする。リポジトリの `.claude/settings.json` へ宣言を書き戻せばクラウドセッションが自動的にプラグインを有効化する、という前提で `shouldRegisterPlugin()` / `mergePluginSettings()`（`src/commands/init.ts`）と `checkPluginDeclaration()` による静的検査を実装していたが、その前提が事実でなかったため撤去した（Issue #268）。代わりにクラウド VM の環境セットアップスクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行し、VM 側にプラグイン・CLI を直接導入する。VM 側の導入状況はローカルから照会できないため静的検査は行わない
+3. **プラグイン導入**。クラウド VM に本プラグインのスキルが存在しないと `/claude-task-worker:exec-issue` などのセッションが空振りする。リポジトリの `.claude/settings.json` へ宣言を書き戻せばクラウドセッションが自動的にプラグインを有効化する、という前提で `shouldRegisterPlugin()` / `mergePluginSettings()`（`src/commands/init.ts`）と `checkPluginDeclaration()` による静的検査を実装していたが、その前提が事実でなかったため撤去した（Issue #268）。代わりに claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載し、VM 側にプラグイン・CLI を直接導入する。VM 側の導入状況はローカルから照会できないため静的検査は行わない
 4. **`allow_remote_sessions` 組織ポリシー**。組織側でクラウドセッションの作成が無効化されているとセッション作成不可。CLI はポリシー取得結果を `policy-limits.json` にキャッシュする実装を持つが、実測環境では生成されず、不在は「未取得」と「拒否」を区別できないため静的検査しない（失敗時のエラーメッセージで案内）
 
 ### 4.6 通知
@@ -226,7 +226,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 | リスク | 緩和 |
 |-------|------|
-| クラウドセッションのスキルが空振りし、ワーカーが「完了」と誤認してラベルを進める | 既存の空出力検知（`buildTaskResult`）と `onCompleted` の成果物検証がそのまま効く。加えてクラウド VM の環境セットアップスクリプト（`scripts/cloud-setup.sh`）でプラグインを導入しておくことで空振りの主要因を潰す |
+| クラウドセッションのスキルが空振りし、ワーカーが「完了」と誤認してラベルを進める | 既存の空出力検知（`buildTaskResult`）と `onCompleted` の成果物検証がそのまま効く。加えてクラウド VM の環境設定のセットアップスクリプト欄でプラグインを導入しておくことで空振りの主要因を潰す |
 | GraphQL 403 でスキルが途中失敗し、Issue/PR が中途半端な状態で残る | 失敗は Slack 通知に出る。適合性「△」のワーカーは Phase 1 では既定 `false` のまま、実測でホワイトリスト化する |
 | ドライバがクラウドセッションの完了を検知できない（実測でクラウドをドライブし続けるローカル TUI 自体が存在しないことが確定。→4.4-2 / 9-8） | Phase 2 で完了検知の代替チャネルを用意する（→10章）。Phase 1 では失敗通知に session URL を載せて人が拾えるようにする |
 | クラウド実行がレート制限を食い、ローカルのワーカーが詰まる | `maxConcurrentTasks` は据え置き。クラウド化はワーカー単位のオプトインなので影響範囲が限定される |
@@ -250,7 +250,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 - **Phase 2**: 以下の残課題に取り組む
   - `mode: "default"` でのクラウド実行
   - ドライバ再接続と**完了検知の代替チャネル**。S-2 の実測で `--teleport` によるローカルドライバ接続が成立しないことが確定したため（→9-8）、herdr の agent ステータスに代わる検知手段が要る。副次的な観測（`docs/cloud-session-launch-flags.md` M-8）として、`claude agents --json` は TTY 無しで `status`（`idle` / `busy`）を返し herdr 非依存の完了検知に使えるが、**返るのはローカルセッションのみでクラウドセッションは1件も含まれない**ため、そのままではクラウド実行の完了検知には使えない
-  - クラウド環境セットアップスクリプトの提供（`pencil` / `codegraph` / `designmd` の導入。Pencil はさらに認証が要る）。プラグイン・CLI 自体の導入（`npx claude-task-worker install`）は `scripts/cloud-setup.sh` として Phase 1 で実装済み（Issue #268）
+  - クラウド環境セットアップスクリプトの提供（`pencil` / `codegraph` / `designmd` の導入。Pencil はさらに認証が要る）。プラグイン・CLI 自体の導入（`npx claude-task-worker install`）は claude.ai の環境設定へ直接記載する方式として Phase 1 で実装済み（Issue #268）
   - `resolve-conflict` の force-push 可否の再測定
   - 上記すべての前提となる **GitHub App 連携済みリポジトリでの再実測**（`--ref` / `--on-branch` の意味論、REST 代替の実行検証、書き込み系操作の個別可否、push 可否がいずれもこの前提に依存する。→9-2・9-3・9-5・9-6・9-7）
 
