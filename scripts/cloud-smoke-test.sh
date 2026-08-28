@@ -22,7 +22,6 @@ SNAPSHOT_DIR="${CLOUD_SMOKE_TEST_SNAPSHOT_DIR:-/tmp/cloud-smoke-test}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-task-worker"
 USER_CONFIG_PATH="$CONFIG_DIR/config.json"
 REPO_CONFIG_PATH="claude-task-worker.json"
-PROJECT_SETTINGS_PATH=".claude/settings.json"
 EXPECTED_CLAUDE_VERSION="2.1.247"
 EXPECTED_HERDR_VERSION="0.8.2"
 
@@ -111,25 +110,7 @@ cmd_preflight() {
     report NG "claude command not found"
   fi
 
-  # 4. .claude/settings.json plugin declaration
-  if [ -f "$PROJECT_SETTINGS_PATH" ]; then
-    if jq -e . "$PROJECT_SETTINGS_PATH" >/dev/null 2>&1; then
-      local has_marketplace has_plugin
-      has_marketplace="$(jq -r '.extraKnownMarketplaces["claude-task-worker"] != null' "$PROJECT_SETTINGS_PATH" 2>/dev/null || echo false)"
-      has_plugin="$(jq -r '.enabledPlugins["claude-task-worker@claude-task-worker"] != null' "$PROJECT_SETTINGS_PATH" 2>/dev/null || echo false)"
-      if [ "$has_marketplace" = "true" ] && [ "$has_plugin" = "true" ]; then
-        report OK "$PROJECT_SETTINGS_PATH declares the plugin"
-      else
-        report NG "$PROJECT_SETTINGS_PATH is missing extraKnownMarketplaces/enabledPlugins (run: claude-task-worker init --cloud)"
-      fi
-    else
-      report NG "$PROJECT_SETTINGS_PATH is not valid JSON"
-    fi
-  else
-    report NG "$PROJECT_SETTINGS_PATH not found (run: claude-task-worker init --cloud)"
-  fi
-
-  # 5. herdr reachability
+  # 4. herdr reachability
   if command -v herdr >/dev/null 2>&1; then
     local herdr_version
     herdr_version="$(herdr --version 2>/dev/null || echo "")"

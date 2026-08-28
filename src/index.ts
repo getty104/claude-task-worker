@@ -25,7 +25,7 @@ import {
 import { captureConsole } from "./table";
 import { removeStaleWorktrees } from "./worktree";
 import { init } from "./commands/init";
-import { install, PROJECT_SETTINGS_PATH } from "./commands/install";
+import { install } from "./commands/install";
 import { update } from "./commands/update";
 import { version, notifyIfOutdated } from "./commands/version";
 import { buildTokenLimitText, send } from "./slack";
@@ -36,8 +36,7 @@ import {
   buildForwardedCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
-import { loadConfig, checkCloudConfig, type ProjectSettings, type CloudAuthStatus } from "./config";
-import { readFile } from "node:fs/promises";
+import { loadConfig, checkCloudConfig, type CloudAuthStatus } from "./config";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -72,7 +71,7 @@ function printUsage(): void {
   console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
 
 Commands:
-  init [--force] [--cloud]  Create required GitHub labels and config file (use --force to overwrite existing files; --cloud registers the plugin in .claude/settings.json for Claude Code on the web)
+  init [--force]  Create required GitHub labels and config file (use --force to overwrite existing files)
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   usage             Notify current usage to Slack
@@ -202,28 +201,6 @@ async function assertRunModeAvailable(): Promise<void> {
   console.log("[worker] run mode: herdr (each task runs as a TUI session in its own herdr tab)");
 }
 
-// リポジトリの `.claude/settings.json` を読み、`checkPluginDeclaration()` の入力形式（ok /
-// missing / invalid の3状態）へ変換する。
-async function readProjectSettings(): Promise<ProjectSettings> {
-  let raw: string;
-  try {
-    raw = await readFile(PROJECT_SETTINGS_PATH, "utf-8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing" };
-    return { kind: "invalid", reason: (err as Error).message };
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    return { kind: "invalid", reason: (err as Error).message };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { kind: "invalid", reason: `${PROJECT_SETTINGS_PATH} is not a JSON object` };
-  }
-  return { kind: "ok", value: parsed as Record<string, unknown> };
-}
-
 // `claude auth status --json` を実行してパースする。未ログイン時は exit 1 だが stdout に
 // JSON が出る（`docs/cloud-prerequisite-checks.md` M3）ため、終了コードでは判定しない。
 // 実行・パースに失敗した場合は「判定不能」として扱い、起動を止める根拠にしない。
@@ -252,18 +229,16 @@ async function readCloudAuthStatus(): Promise<CloudAuthStatus> {
 }
 
 // cloud: true のワーカー構成が非対応（mode !== "herdr" や、pencil CLI 認証・force-push の
-// 可否が未検証なワーカーへの cloud: true、プラグイン未宣言、claude.ai 未サインイン）だと
+// 可否が未検証なワーカーへの cloud: true、claude.ai 未サインイン）だと
 // タスク起動が壊れた形で失敗し続けるため、サイレントにローカル実行へフォールバックせず起動時に落とす。
-// プラグイン宣言・サインイン状態の I/O は cloud: true のワーカーが1件も無ければ行わない。
+// サインイン状態の I/O は cloud: true のワーカーが1件も無ければ行わない。
 async function assertCloudAvailable(): Promise<void> {
   const workers = loadConfig().workers;
   const hasCloudWorker = Object.values(workers).some((w) => w.cloud);
-  const settings = hasCloudWorker ? await readProjectSettings() : undefined;
   const status = hasCloudWorker ? await readCloudAuthStatus() : undefined;
   const errors = checkCloudConfig({
     workers,
     mode: getRunMode(),
-    settings,
     auth: status ? { status, baseUrl: process.env.ANTHROPIC_BASE_URL } : undefined,
   });
   if (errors.length === 0) return;
@@ -373,8 +348,7 @@ if (hasProjectFilter()) {
 } else if (workerType === "init") {
   const initArgs = process.argv.slice(3);
   const force = initArgs.includes("--force");
-  const cloud = initArgs.includes("--cloud");
-  init({ force, cloud });
+  init({ force });
 } else if (workerType === "install") {
   (async () => {
     await install();
