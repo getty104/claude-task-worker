@@ -164,7 +164,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               issue.title,
               config.name,
               worktreeId,
-              async (status, output) => {
+              async (status, output, cloudSessionId) => {
                 lastCompletionAt = Date.now();
                 for (const label of consumableTriggerLabels(config.triggerLabels)) {
                   await removeLabel("issue", issue.number, label).catch((err) =>
@@ -175,18 +175,49 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                   if (status === "completed") {
                     const verified = (await config.onCompleted?.(issue.number, worktreeId, output)) ?? true;
                     if (verified === false) {
-                      await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+                      await notifyTaskFailed(
+                        config.name,
+                        name,
+                        issue.number,
+                        issue.title,
+                        issueUrl,
+                        output,
+                        cloudSessionId,
+                      );
                     } else {
-                      await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
+                      await notifyTaskCompleted(
+                        config.name,
+                        name,
+                        issue.number,
+                        issue.title,
+                        issueUrl,
+                        output,
+                        cloudSessionId,
+                      );
                     }
                   } else {
-                    await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+                    await notifyTaskFailed(
+                      config.name,
+                      name,
+                      issue.number,
+                      issue.title,
+                      issueUrl,
+                      output,
+                      cloudSessionId,
+                    );
                   }
                 } catch (err) {
                   console.error(`[${config.name}] post-task error for #${issue.number}: ${err}`);
-                  await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output).catch(
-                    (notifyErr) =>
-                      console.error(`[${config.name}] notifyTaskFailed failed for #${issue.number}: ${notifyErr}`),
+                  await notifyTaskFailed(
+                    config.name,
+                    name,
+                    issue.number,
+                    issue.title,
+                    issueUrl,
+                    output,
+                    cloudSessionId,
+                  ).catch((notifyErr) =>
+                    console.error(`[${config.name}] notifyTaskFailed failed for #${issue.number}: ${notifyErr}`),
                   );
                 } finally {
                   await removeLabel("issue", issue.number, "cc-in-progress").catch((err) =>
