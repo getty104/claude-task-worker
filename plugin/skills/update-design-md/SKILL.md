@@ -143,7 +143,7 @@ git show "<merge_commit>:<path>" > "$TMPDIR_DESIGN/<pr_number>/$(basename <path>
 
 2-0 で復元した `pen_files` を対象に、`Skill` ツールで `inspect-pencil-node` を起動して読み取り専用で属性を取得する（`merge_commit` 時点の内容をそのまま復元しているだけなので Pencil CLI で通常どおり開ける）。
 
-取得すべきもの（`inspect-pencil-node` の `execute` + `Get` visitor の指定方法を使い分ける。CLI 0.3.x で `batch_get` は廃止され、読み取りは `execute` に一本化されている）:
+取得すべきもの（`inspect-pencil-node` の `execute` + `Get` visitor の指定方法を使い分ける。CLI 0.3.5 では読み取りも画像出力も `execute` に一本化されている）:
 
 - **再利用可能コンポーネント**（`Get(n => n.reusable && Print(...))`）— デザインシステムのコンポーネント定義そのもの。最優先
 - **テキストNode**（`Get(n => n.type === "text" && Print(...))`）— `fontFamily` / `fontSize` / `fontWeight` / `lineHeight` / `letterSpacing` の実値

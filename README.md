@@ -66,7 +66,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Git](https://git-scm.com/) | worktree の作成・ブランチ操作 |
 | [jq](https://jqlang.org/) | プラグインスキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス。任意（未導入でも探索がテキスト検索に落ちるだけ） |
-| [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `pencil` 経由） |
+| [Pen CLI](https://docs.pen.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `pencil` 経由） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
 
 CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に単一バンドルされ、Node.js 標準モジュールのみで動作する）。
@@ -106,7 +106,7 @@ CI やワーカーを実行するマシンなど対話ログインできない�
 export PEN_CLI_KEY=pencil_cli_...
 ```
 
-詳細は [Pen CLI のドキュメント](https://docs.pencil.dev/for-developers/pen-cli)を参照。
+詳細は [Pen CLI のドキュメント](https://docs.pen.dev/for-developers/pen-cli)を参照。
 
 ### 更新
 
