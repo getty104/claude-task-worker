@@ -357,7 +357,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 - **1（サインイン）**: `checkCloudAuth()` が `claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で判定する。API キー認証・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成ではクラウドセッションを作成できない。**`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返す**ため `apiKeySource` の不在を併せて見る必要がある。コマンドの実行・パースに失敗した「判定不能」は**エラーにしない**（サインイン状態が読めないことを拒否根拠にしない安全側の倒し方）
 - **2（GitHub 連携）**: 非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない
-- **3（プラグイン導入）**: クラウド VM の環境セットアップスクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行してプラグイン・CLI を導入する。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式（`checkPluginDeclaration()` による静的検査）は、クラウドセッションがその宣言を読んで自動的にプラグインを有効化するという前提が事実でなかったため撤去した（Issue #268）。VM 側で `install` を実行済みかどうかはローカルから確認できないため静的検査は行わない
+- **3（プラグイン導入）**: claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載してプラグイン・CLI を導入する。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式（`checkPluginDeclaration()` による静的検査）は、クラウドセッションがその宣言を読んで自動的にプラグインを有効化するという前提が事実でなかったため撤去した（Issue #268）。VM 側で `install` を実行済みかどうかはローカルから確認できないため静的検査は行わない
 - **4（`allow_remote_sessions` 組織ポリシー）**: CLI がポリシーを `policy-limits.json` にキャッシュする実装を持つが実測環境では生成されず、「未取得」と「拒否」を区別できないため静的検査しない
 
 上記1の検査は `cloud: true` のワーカーが1件も無ければ **I/O ごと行わない**（`cloud` を書かない既存リポジトリでの挙動を完全に不変に保つため）。
@@ -523,7 +523,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `claude-task-worker` プラグイン（本リポジトリの `plugin/`）がインストール済み
   - `npx claude-task-worker install` で一括セットアップ可能
   - 手動の場合: `claude plugin marketplace add getty104/claude-task-worker` → `claude plugin install claude-task-worker@claude-task-worker`
-  - Claude Code on the web からも実行する場合、およびクラウド実行（`workers.<name>.cloud: true`）を使う場合は、クラウド VM の環境セットアップスクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行し、VM 側にプラグイン・CLI を導入しておく（リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した。Issue #268）
+  - Claude Code on the web からも実行する場合、およびクラウド実行（`workers.<name>.cloud: true`）を使う場合は、claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載し、VM 側にプラグイン・CLI を導入しておく（リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した。Issue #268）
   - あわせて claude.ai アカウントでのサインインもクラウド実行の必須前提。未サインイン・API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）構成では、同じくワーカー起動時の静的検査（`checkCloudAuth()`）でエラー終了する（詳細は Architecture の「クラウド実行（`workers.<name>.cloud`）」参照）
 - CodeGraph (`codegraph`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`codegraph serve --mcp`）。`explore-agent` およびワーカー起動セッションは**この MCP ツール経由で** CodeGraph を使う。ツールが無い場合、および未インデックスでエラー・空結果が返る場合は `Glob`/`Grep` にフォールバックする
