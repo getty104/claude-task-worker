@@ -11,8 +11,9 @@ const { buildClaudeArgs, buildClaudeEnv } = (await import("./claude-args")) as t
 // instead of referencing DISALLOWED_TOOLS_ARG / systemPromptFilePath() etc. — this test must
 // fail if the production values change, not track them.
 
-// `cloud` is out of scope here: ClaudeInvocation has no `cloud` field yet (#232 unmerged).
-// `WORKER_DEFAULTS.cloud === false` is #228's scope, not this file's.
+// `cloud` is out of scope here by design, not because the field is missing: ClaudeInvocation
+// now has `cloud` / `baseRef` / `onBranch`. Cloud argument shapes are pinned in
+// claude-args.test.ts, and the worker-level wiring in cloud-execution.integration.test.ts.
 
 const PROMPT_FILE_PLACEHOLDER = "<system-prompt-file>";
 
