@@ -1,3 +1,7 @@
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
+# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になるため動作しない。
+# レビュースレッドの Resolve（resolveReviewThread）はREST代替が無く別Issueの担当のため、
+# シェルのロジックは変更していない。詳細は plugin/references/github-access.md を参照。
 OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 OWNER="$(echo $OWNER_REPO | cut -d'/' -f1)"
 REPO="$(echo $OWNER_REPO | cut -d'/' -f2)"

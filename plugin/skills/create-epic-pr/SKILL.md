@@ -19,6 +19,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `epic-issue` ワーカー（`cc-epic-issue` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移や後続処理を進める。処理が未完のままターンを終えると、PR URL 未取得のまま報告されたり、Epic PR 未作成のまま `cc-epic-issue` が外れる状態壊れが起きる。
@@ -31,6 +35,8 @@ hooks:
 
 ### 0-2. Epic Issueの存在確認
 
+> GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view $0 --json number,title,state,url
 ```
@@ -42,6 +48,8 @@ Issueが存在しない、または `state` が `CLOSED` の場合は中断す�
 `pwd` でカレントを確認する。`git status --short` で未コミット変更があれば中断する。本スキルはコードを編集しないため、未コミット変更はユーザーの作業中ファイルの可能性が高く、退避操作も行わない。
 
 ### 0-4. デフォルトブランチ名の取得
+
+リポジトリ情報の単独取得ツールが MCP に無いため `gh` に据え置く（`git symbolic-ref refs/remotes/origin/HEAD` 等のローカル導出も可）。
 
 ```bash
 gh repo view --json defaultBranchRef -q .defaultBranchRef.name
@@ -137,6 +145,8 @@ Closes #$0
 ## フェーズ4: PR の作成（`gh pr create` 実行）
 
 ### 4-1. assignee の取得
+
+GitHub MCP が使える場合はログインユーザー取得に `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 ME=$(gh api user --jq '.login')

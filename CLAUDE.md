@@ -330,6 +330,8 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 判定は「Phase 1 でクラウド実行を推奨してよいか」であり、**起動時ガードの対象とは別**。起動時に拒否されるのは `CLOUD_DENIED_WORKERS` の3ワーカーだけで、`fix-review-point` / `triage-pr` / `check-dependabot` は起動時には許可されるが `cloud: true` を推奨しない。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
 
+前節「GitHub アクセス（GitHub MCP 優先 / `gh` フォールバック）」の移行により、下表の劣化要因（GraphQL 403）は MCP 経由で回避されうる見込みである。ただしクラウドでの MCP 起動・認証は未実測のため、**下表の判定・値はこの見込みを反映せず変更していない**。
+
 前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md` M-5）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
 
 あわせて、クラウド VM の `gh` が古い（実測 2.45.0）ため `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` でクライアント側から失敗する、という**プロキシ制限とは独立した交絡**もある。
@@ -501,6 +503,22 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 `explore-agent` 側にも同じ方針をステップ4.5として置いている。同エージェントの「一切の変更を行わない」原則が読み取り専用の外部参照まで禁じていると読めたため、`WebFetch` / `WebSearch` / context7 は禁止に含まないことを明記した（禁止されるのは投稿・書き込み）。委譲元の3スキルもプロンプトで同方針を伝える。
 
+### GitHub アクセス（GitHub MCP 優先 / `gh` フォールバック）
+
+クラウドセッションの GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` がフィールドを問わず 403 になる（`docs/cloud-graphql-proxy-limits.md`）。この状態ではタスクセッションが Issue/PR 本文を1文字も読めないため、`plugin/` 配下スキルの GitHub アクセスを GitHub MCP 優先へ切り替えた。GitHub MCP はこのプロキシを経由しない。
+
+`gh` → MCP ツールの対応表は `plugin/references/github-access.md` の1ファイルに集約し、各スキルはそこを参照する形にしてある。GitHub MCP のツール名は上流（github/github-mcp-server）で統廃合が進んでおり（`list_workflow_runs` → `actions_list` など）、30本弱のスキルへツール名を直書きすると個々のリネームで一斉に腐る。1ファイルに寄せればリネームは1箇所の修正で済む。
+
+`gh` コマンドは削除せずフォールバックとして本文に残してある。GitHub MCP は前提条件ではなく最適化であり、未設定・未認証のローカル環境でスキルを壊さないため。フォールバックは1操作につき1回に限る（MCP で失敗した同じ操作を MCP で再試行しない。認証・設定の問題は再試行では直らない）。
+
+`gh` のまま残す操作もある（`gh pr checkout` / `gh pr status` / `gh-asset` / `gh repo view --json` など）。いずれもローカルの作業ツリー・カレントブランチという文脈に依存するか、MCP に同等の取得手段が無いことが理由で、クラウド対応とは無関係にこのまま残る。
+
+`src/gh.ts` などワーカープロセス（ローカル）側の `gh` 呼び出しは対象外。ワーカーはローカルで走り続けるためプロキシのゲートを受けない。クラウドで走るのはタスクセッション（スキル）だけである。
+
+レビュースレッドの Resolve（GraphQL `resolveReviewThread`、`resolve-pr-comments` スキル）は本移行のスコープ外。REST に該当エンドポイントが無く、フック／タスクハンドラ実行へ移す方針で別Issueの担当。
+
+**クラウドセッションでの GitHub MCP の起動・認証はローカルから照会する手段が無いため未実測**。この移行によって GraphQL ゲートの影響が MCP 経由で回避されうる見込みだが、確認できていない。下記「クラウド実行」の「ワーカー別の適合性」表はこの実測を反映しておらず、値は変更していない。
+
 ## Conventions
 
 - ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
@@ -530,3 +548,6 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`npx -y @playwright/mcp@latest`）。サーバー本体は npx がその都度解決するため事前導入は不要だが、ブラウザバイナリが未取得だと MCP ツールの初回呼び出しが実行時に失敗する
   - 取得は `npx -y playwright-core@latest install chromium`（`src/commands/playwright.ts`）。chromium のみで、`--browser chrome` のブランドChannel は対象外
   - Linux ではシステムライブラリも必要なため、続けて `install-deps` を実行する（非 root では `sudo npx playwright-core@latest install-deps chromium`。root では `sudo` なし）。sudo のパスワードを求められることがある
+- GitHub MCP がセットアップ済み（任意）
+  - `plugin/.mcp.json` からリモート版（`https://api.githubcopilot.com/mcp/`）を参照する。認証は OAuth が既定（Claude Code の `/mcp` から実行）で、PAT 方式（`headers` で `Authorization: Bearer` を渡す）も代替として使える
+  - **未設定・未認証でもスキルは `gh` へフォールバックするため動作する**（前提条件ではなく最適化）。対応表は `plugin/references/github-access.md` を参照

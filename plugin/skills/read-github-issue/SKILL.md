@@ -10,6 +10,10 @@ argument-hint: "[issue-number]"
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 0. 入力の確定
 
 本スキルの入力は対象 Issue の番号1つ。下記の args 入力スロットに呼び出し時の args が展開される。Issue 番号（数字。`#123` 形式や Issue URL でもよい）として解釈できればそれを採用する。番号を得られない場合は、推測で番号を選ばず、理由を1-2行で出力して**即中断**する。
@@ -28,18 +32,20 @@ $ARGUMENTS
 
 本文・状態・ラベルをまとめて取得する。コメントは取得しない（本文のみを分析対象とする）。
 
+GitHub MCP の `issue_read`（method: `get`）を第一手段とする。MCP が利用不可（未設定・未認証・呼び出し失敗）な場合のみ、以下の `gh` コマンドへフォールバックする。
+
 ```bash
 gh issue view <issue番号> --json number,title,state,labels,assignees,milestone,url,body
 ```
 
 以下も併せて確認：
 
-- **画像/添付**: 本文に画像URLがある場合、`gh-asset` でダウンロードして内容を読む
+- **画像/添付**: 本文に画像URLがある場合、`gh-asset` でダウンロードして内容を読む（ローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` のまま残す）
   ```
   gh-asset download <asset_id> ~/Downloads/
   ```
   参考: https://github.com/YuitoSato/gh-asset
-- **リンクされたIssue/PR**: `#123` 形式や URL での参照は依存関係の手がかり。必要に応じて `gh issue view <num>` / `gh pr view <num>` で内容を確認
+- **リンクされたIssue/PR**: `#123` 形式や URL での参照は依存関係の手がかり。必要に応じて GitHub MCP の `issue_read`（method: `get`）/ `pull_request_read`（method: `get`）を優先し、利用不可なら `gh issue view <num>` / `gh pr view <num>` へフォールバックして内容を確認
 - **コード参照**: 本文に登場するファイルパス・関数名は対象範囲特定の起点。実際の所在・周辺実装の確認は手順2で `explore-agent` に委譲する
 
 Issueが `CLOSED` の場合、その旨を明記してそのまま返す（タスク分解は行わない）。

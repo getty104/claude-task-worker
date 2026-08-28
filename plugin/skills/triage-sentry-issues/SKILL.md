@@ -14,11 +14,15 @@ Sentry の Issue 一覧 URL `$ARGUMENTS` を起点に、未解決 Issue を「�
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## ステップ0: 前提確認
 
 1. **Sentry MCP ツールが使えること**。ツール名のプレフィックスは接続方法で変わる（`mcp__plugin_sentry_sentry__*` / `mcp__claude_ai_Sentry__*` など）ため、**末尾の名前**で判定する。必要なのは `search_issues` / `get_sentry_resource` / `update_issue` の3つ。無ければ「Sentry MCP が未接続のため実行できません」と出力して終了する。
 2. `$ARGUMENTS` が Sentry の Issue 一覧 URL でなければ、期待する形式を示して終了する。
-3. `gh repo view --json nameWithOwner -q .nameWithOwner` で対象リポジトリを確定する。
+3. `gh repo view --json nameWithOwner -q .nameWithOwner` で対象リポジトリを確定する（単独取得ツールがMCPに無いため gh のまま残す）。
 4. `pwd` を確認する。worktree を**新たに作成しない**（`.claude/worktrees/` 配下ならそこで、それ以外ならその場で作業する）。
 
 **完了条件**: Sentry MCP が使え、URL が妥当で、対象リポジトリが確定していること。
@@ -104,7 +108,8 @@ update_issue(issueUrl=<permalink>, status='resolved', reason='<根拠。修正�
 
 **未解消の場合**:
 
-1. **重複確認**: `gh issue list --state all --search "<shortId>" --json number,title,url,state` を実行する。同じ Sentry Issue を指す GitHub Issue が既にあれば**作成せず**、そのURLを添えて `skipped-duplicate` として報告する
+1. **重複確認**: GitHub MCP が使える場合は `list_issues` / `search_issues` を使う。以下は MCP 利用不可時のフォールバック。
+   `gh issue list --state all --search "<shortId>" --json number,title,url,state` を実行する。同じ Sentry Issue を指す GitHub Issue が既にあれば**作成せず**、そのURLを添えて `skipped-duplicate` として報告する
 2. 重複が無ければ `create-issue` スキル（`claude-task-worker:create-issue`）を呼ぶ。引数には自然言語のタスク説明として次を含める:
    - エラーのタイトルと種別（例外クラス・メッセージ）
    - Sentry Issue URL と shortId、環境、発生件数・影響ユーザー数、firstSeen / lastSeen

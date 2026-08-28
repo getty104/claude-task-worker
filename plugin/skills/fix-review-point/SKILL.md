@@ -20,6 +20,10 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `cc-fix-onetime` ラベルをトリガーに自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-fix-onetime` の除去やコールバックコメント投稿を進める。処理未完のままターンを終えると、修正コミット未 push のまま Resolve だけ済まされたり、レビュー未対応のまま fix ラベルが外れて放置される状態壊れが起きる。
@@ -100,10 +104,11 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 
 並列で以下を確認する。1つでも失敗したら、その場で原因を解消してから先に進むこと。
 
-- `gh pr view $0 --json number,state,headRefName,isDraft,labels` でPRが存在し `OPEN` であることを確認する。CLOSED/MERGEDなら処理を中断。取得したラベル一覧は「修正点がない場合」の Epic PR 判定で使う（再取得しない）
-- `gh pr checkout $0 >/dev/null 2>&1` でPRブランチをチェックアウト
+- GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+  `gh pr view $0 --json number,state,headRefName,isDraft,labels` でPRが存在し `OPEN` であることを確認する。CLOSED/MERGEDなら処理を中断。取得したラベル一覧は「修正点がない場合」の Epic PR 判定で使う（再取得しない）
+- `gh pr checkout $0 >/dev/null 2>&1` でPRブランチをチェックアウト（ローカル作業ツリーへの checkout はリモート API では代替できないため `gh` のまま残す）
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら安全のため処理を中断する（デフォルトブランチで作業してはならない）
-- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと一致する場合は中断する。デフォルトブランチ名の取得失敗も中断する（fail-safe）
+- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと一致する場合は中断する。デフォルトブランチ名の取得失敗も中断する（fail-safe）（単独取得ツールが MCP に無いため `gh` のまま残す）
 - `git status --short` で未コミット変更があれば `git stash push -u -m "fix-review-point auto-stash $0"` で自動退避してから先に進む（ユーザーへの確認は行わない）
 
 **完了条件**: worktree内、PRブランチ（デフォルトブランチ以外）にチェックアウト済み、PR OPEN が確認できていること。
@@ -116,7 +121,8 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 - 修正タスクの一覧（目的・対象範囲・完了条件付き）
 - タスク間の依存関係
 
-**修正点がない場合**: `gh pr checks $0` でCIの全チェックが Pass していることを確認する。チェックが失敗中の場合はマージせず、CI失敗状況をレビュアーに報告して終了する。Pass している場合は、ステップ0で取得したラベル一覧で **Epic PR（`cc-epic-issue` ラベル付き）かどうか**を確認して分岐する:
+**修正点がない場合**: GitHub MCP が使える場合は `pull_request_read`（method: `get_status` / `get_check_runs`）を使う。以下は MCP 利用不可時のフォールバック。
+`gh pr checks $0` でCIの全チェックが Pass していることを確認する。チェックが失敗中の場合はマージせず、CI失敗状況をレビュアーに報告して終了する。Pass している場合は、ステップ0で取得したラベル一覧で **Epic PR（`cc-epic-issue` ラベル付き）かどうか**を確認して分岐する:
 
 - **Epic PR の場合**: マージするとデフォルトブランチへの集約反映（＝リリース）になるため、**マージしない**。`triage-pr` の Epic PR 判定と同じリリースゲートとして `cc-release-ready` ラベルのみを付与して終了する（関連Issueの連動Closeにも進まない）。
 
@@ -130,12 +136,16 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 
 GitHubの `Closes #<issue番号>` 記法による自動クローズは**デフォルトブランチへのマージ時にのみ**発動する。`cc-epic-<N>` のような非デフォルトブランチへ向いたPRをマージしてもIssueは閉じず、Epic のサブIssueが未完のまま残って `create-epic-pr` の起動条件（全サブIssueのクローズ）が満たされなくなる。そのため、マージ前にベースブランチを控えておき、デフォルトブランチと**一致しない**場合のみ明示的にクローズする。
 
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 BASE_BRANCH=$(gh pr view $0 --json baseRefName -q .baseRefName)
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
 ```
 
 マージ成功後、`BASE_BRANCH` が `DEFAULT_BRANCH` と一致する場合はGitHubが自動でクローズするためスキップする。一致しない場合はPR本文から関連Issue番号を抽出し、抽出できたすべての番号を `--reason completed`（実装がEpicブランチへ取り込まれた完了クローズ。マージせずクローズする場合の `--reason "not planned"` とは異なる）でクローズする。
+
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr view $0 --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'
@@ -272,10 +282,11 @@ gh issue close <issue番号> --reason completed
    ```bash
    gh pr close $0 --comment "<クローズ理由。代替PR/Issueがあればそのリンクを含める>"
    ```
-3. 関連Issueを特定する。優先順位:
+3. 関連Issueを特定する。GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。優先順位:
    - `gh pr view $0 --json closingIssuesReferences -q '.closingIssuesReferences[].number'`（GitHubが自動認識したリンク）
    - 上記が空の場合は `gh pr view $0 --json body -q '.body'` の本文から `Closes #<n>` / `Fixes #<n>` / `Resolves #<n>` を正規表現で抽出する
-4. 取得した各Issue番号について `gh issue view <n> --json state -q '.state'` で状態を確認し、`OPEN` の場合のみ以下を実行する。
+4. 取得した各Issue番号について状態を確認し、`OPEN` の場合のみ以下を実行する。GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+   `gh issue view <n> --json state -q '.state'`
    ```bash
    gh issue comment <n> --body-file - <<EOF
    ## 関連PRクローズに伴うクローズ

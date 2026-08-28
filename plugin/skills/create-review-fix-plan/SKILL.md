@@ -12,11 +12,15 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## フェーズ0: 事前チェック
 
 並列で以下を確認する。1つでも失敗したら、その場で原因を解消してから先に進むこと。
 
-- `gh pr view --json number,state,title,headRefName` でカレントPRが取得できることを確認する。取得できない場合は呼び出し元にエラーを返す
+- カレントPRの `number` / `state` / `title` / `headRefName` を取得できることを確認する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら `gh pr view --json number,state,title,headRefName` にフォールバックする。取得できない場合は呼び出し元にエラーを返す
 - PRの `state` が `OPEN` であることを確認する。`MERGED`/`CLOSED` の場合は呼び出し元にその旨を返して終了
 
 **完了条件**: PRが特定でき、OPEN状態であることが確認できていること。
@@ -27,11 +31,17 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 
 ### 1-1. レビューコメント・会話コメントの取得
 
+GitHub MCP の `pull_request_read`（method: `get_review_comments`）で未解決レビュースレッドと会話コメントを取得することを第一手段とする。利用不可なら以下の共有スクリプトへフォールバックする。
+
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 ```
 
 > `scripts/fetch-unresolved-comments.sh` は `triage-pr` スキルからも `${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh` として参照される共有スクリプト。パス・ファイル名を変更する場合は `triage-pr` 側の参照も合わせて直すこと。
+
+MCP経路で取得する場合も、スクリプトが返すJSONと同じ意味の情報を同じ観点で抽出すること（`unresolved_threads[]` の `thread_id` / `path` / `line` / `is_outdated` / `comments[]`、`conversation_comments[]` の `author` / `body` / `url` / `created_at` / `is_minimized`）。後続フェーズと `fix-review-point` がこれらのキーに依存するため、キー名・粒度をどちらの経路でも揃える。
+
+**重要**: `thread_id`（GraphQLのスレッドID）はレビュースレッドのResolve（`resolve-pr-comments`スキル）で必要になる。MCP経路でスレッドIDが取得できない場合は、Resolveのために既存スクリプト経路が必要になりうる。
 
 返却されるJSONから2系統のフィードバックを抽出する。
 
@@ -48,6 +58,8 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 
 ### 1-2. PR本文の取得
 
+GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
+
 ```bash
 gh pr view --json title,body,url
 ```
@@ -56,11 +68,13 @@ PRの目的・スコープ・関連Issueを把握し、レビューコメント�
 
 ### 1-3. CIステータスの取得
 
+GitHub MCP の `pull_request_read`（method: `get_status` / `get_check_runs`）を優先し、利用不可なら以下にフォールバックする。
+
 ```bash
 gh pr checks --json state,name,link,workflow
 ```
 
-`state` が `FAILURE` / `STARTUP_FAILURE` のチェックがあれば、各 `link` から `run-id` を抽出して詳細ログを取得：
+`state` が `FAILURE` / `STARTUP_FAILURE` のチェックがあれば、各 `link` から `run-id` を抽出して詳細ログを取得する。GitHub MCP の `get_job_logs`（`failed_only: true`）を優先し、利用不可なら以下にフォールバックする。
 
 ```bash
 gh run view <run-id> --log-failed

@@ -16,6 +16,10 @@ argument-hint: "[task-description]"
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 生成する description のスコープと分量
 
 description は人間がレビューし、後続の `exec-issue` が実装スコープとして読む成果物である。**引数のタスク説明にある要求を実装可能な形へ具体化する**のが本スキルの仕事であり、要求を増やす場ではない。
@@ -77,7 +81,7 @@ git fetch --prune || true
 3. **取得**: 種類ごとに手段を使い分ける
    - 一般のWebページ・仕様書・記事 → `WebFetch`
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → `gh issue view` / `gh pr view` / `gh api`（GitHubのURLは `WebFetch` より `gh` の方が確実）
+   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
    - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら確認事項に回す
@@ -136,7 +140,7 @@ E2Eテストが存在し、かつタスクがユーザー操作フロー（画�
 進行中・直近完了済みの関連作業を見落とし、既存実装と重複するゴーストタスクを含んだ Issue を起票しないため、explore-agent が特定した対象ファイル一覧について直近の commit 履歴と関連 PR を必ず確認する。
 
 - 対象ファイルごとに `git log --oneline -10 <file>` を実行し、直近 commit のサマリを把握する
-- `gh pr list --search "<file>"` で未マージの関連 PR を確認する
+- `gh pr list --search "<file>"` で未マージの関連 PR を確認する（GitHub MCP が使える場合は `list_pull_requests` / `search_pull_requests` を使う。以下はフォールバック）
 - 直近 commit に大規模リファクタ・共通ヘルパー追加などの大きな変更が含まれる場合や、未マージの関連 PR がある場合は、その内容を `post-issue-body` に渡す「直近関連変更」セクション（必要に応じて「参照情報」にも）に必ず記載し、実装プランが既存実装と重複していないか検証する
 - git 履歴のない新規機能要求など確認が困難なケースでは「該当なし」と記載してスキップしてよい
 
@@ -172,8 +176,8 @@ E2Eテストが存在し、かつタスクがユーザー操作フロー（画�
 推測で無関係な Issue を紐付けないよう、**根拠が明確なものだけ**を対象にする。
 
 1. **タスク説明中の明示的な参照**: `$ARGUMENTS` に他の Issue/PR への言及（`#123`・Issue URL・「〇〇 の後に」「〇〇 が前提」「〇〇 をブロックする」等）があれば抽出する。
-2. **explore-agent・直近関連変更からの示唆**: ステップ2のコード分析・直近関連変更で、この Issue の前提として先に片付けるべき Open な作業（Issue、または未マージ PR に紐づく Issue）や、この Issue が完了しないと進められない既存 Open Issue が判明したら候補にする。関連しそうな Open Issue の探索には `gh issue list --state open --search "<キーワード>"` を使ってよい。
-3. **現在状態の検証**: 候補の Issue 番号は必ず `gh issue view <番号> --json number,state,title` で **Open であること**を確認する。CLOSED の Issue は relationship に含めない（`gh issue create` の検証で失敗する、または意味を成さないため）。
+2. **explore-agent・直近関連変更からの示唆**: ステップ2のコード分析・直近関連変更で、この Issue の前提として先に片付けるべき Open な作業（Issue、または未マージ PR に紐づく Issue）や、この Issue が完了しないと進められない既存 Open Issue が判明したら候補にする。関連しそうな Open Issue の探索には `gh issue list --state open --search "<キーワード>"` を使ってよい（GitHub MCP が使える場合は `list_issues` / `search_issues` を使う。以下はフォールバック）。
+3. **現在状態の検証**: 候補の Issue 番号は必ず `gh issue view <番号> --json number,state,title` で **Open であること**を確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）。CLOSED の Issue は relationship に含めない（`gh issue create` の検証で失敗する、または意味を成さないため）。
 4. **方向の確定**:
    - **blocked_by**（この新Issueをブロックする＝先に片付けるべき既存Issue）: この新Issueに着手する前に完了している必要がある Open Issue の番号。
    - **blocking**（この新Issueがブロックする＝後続で待たせる既存Issue）: この新Issueが完了しないと進められない既存 Open Issue の番号。

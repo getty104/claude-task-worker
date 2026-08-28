@@ -19,6 +19,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `apply-ui-design` ワーカー（`cc-ui-design-pr-created` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-ui-design-ready` + `cc-exec-issue` の付与）を進める。description の更新が未完のままターンを終えると、デザイン参照が無いまま実装フェーズへ流れ、合意済みデザインと無関係な実装PRが作られる状態壊れが起きる（ワーカー側の `onCompleted` はこれを検出して `cc-need-human-check` に落とす）。
@@ -27,7 +31,7 @@ hooks:
 
 ## フェーズ0: 事前チェック
 
-- `gh issue view $0 --json number,title,body,state` でIssueが `OPEN` であることを確認する。CLOSEDなら **中断**
+- `gh issue view $0 --json number,title,body,state` でIssueが `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - description（`body`）は後続フェーズで丸ごと保持するため、変数に控えておく
 
 **完了条件**: Issue OPEN、現在の description を取得済み。
@@ -35,6 +39,8 @@ hooks:
 ## フェーズ1: デザインPRとデザイン成果物の特定
 
 ### 1-1. デザインPRの特定
+
+> GitHub MCP が使える場合は `list_pull_requests` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr list --head "cc-ui-design-$0" --state all --json number,url,state,mergedAt
@@ -46,6 +52,8 @@ gh pr list --head "cc-ui-design-$0" --state all --json number,url,state,mergedAt
 - 1件のみの場合に限り、その `number` と `url` を最終報告と description に使うため保持する
 
 ### 1-2. マージされた成果物のパス取得
+
+> GitHub MCP が使える場合は `pull_request_read`（method: `get_files`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr diff <デザインPR番号> --name-only
@@ -88,6 +96,8 @@ gh pr diff <デザインPR番号> --name-only
 
 固定パスは同一Issueへの並行実行で衝突しうるため `mktemp` で一意な一時ファイルを確保する。さらに、本文の取得（`view`）と書き戻し（`edit`）の間に人間または別プロセスが本文を更新している可能性があるため、`edit` 直前に本文を再取得して差分を検証する。
 
+> GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"
 trap 'rm -f "$BODY_FILE"' EXIT
@@ -124,6 +134,8 @@ fi
 外部変更を検知した場合は、**上書きせず**最新本文を起点に `BODY_FILE` を再構築してから `gh issue edit` を再試行する（最大2回まで）。2回目も `LATEST_BODY` が再取得のたびに変化し続ける等で収束しない場合は、更新を諦め、その旨と理由を最終報告に明記して**失敗として終了**する（ワーカー側の `onCompleted` が検出して `cc-need-human-check` に落とす前提）。
 
 ### 2-3. 更新の検証
+
+> GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh issue view $0 --json body --jq .body | grep -F '## UIデザイン'
