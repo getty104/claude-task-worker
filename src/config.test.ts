@@ -14,6 +14,7 @@ const {
   DEFAULT_WORKER_CONFIG,
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
+  checkCloudConfig,
 } = (await import("./config")) as typeof ConfigModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
@@ -190,4 +191,42 @@ test("every worker defaults to cloud disabled", () => {
   for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
     assert.equal(config.cloud, false, `WORKER_DEFAULTS.${name}.cloud`);
   }
+});
+
+test("checkCloudConfig allows cloud: true workers when mode is herdr", () => {
+  const workers = {
+    "exec-issue": { ...DEFAULT_WORKER_CONFIG, cloud: true },
+  };
+  assert.deepEqual(checkCloudConfig({ workers, mode: "herdr" }), []);
+});
+
+test("checkCloudConfig rejects cloud: true when mode is not herdr", () => {
+  const workers = {
+    "exec-issue": { ...DEFAULT_WORKER_CONFIG, cloud: true },
+  };
+  const errors = checkCloudConfig({ workers, mode: "default" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /exec-issue/);
+  assert.match(errors[0], /mode/);
+});
+
+test("checkCloudConfig rejects cloud: true on a denied worker even under mode herdr", () => {
+  const workers = {
+    "resolve-conflict": { ...DEFAULT_WORKER_CONFIG, cloud: true },
+  };
+  const errors = checkCloudConfig({ workers, mode: "herdr" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /resolve-conflict/);
+});
+
+test("checkCloudConfig reports both reasons when a denied worker also has mode !== herdr", () => {
+  const workers = {
+    "create-ui-design": { ...DEFAULT_WORKER_CONFIG, cloud: true },
+  };
+  const errors = checkCloudConfig({ workers, mode: "default" });
+  assert.equal(errors.length, 2);
+});
+
+test("checkCloudConfig reports nothing for the existing default configuration (cloud unset/false everywhere)", () => {
+  assert.deepEqual(checkCloudConfig({ workers: WORKER_DEFAULTS, mode: "default" }), []);
 });
