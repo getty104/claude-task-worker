@@ -1,11 +1,11 @@
 ---
 name: inspect-pencil-node
-description: "Pencil CLI（`pencil`コマンド）だけを使って、.penファイル（Pencilで作成されたデザインファイル）の中のNodeのデザインデータ（属性・構造）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / image など）、再利用可能コンポーネント、特定Node配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。インタラクティブモード（`pencil interactive`）で `execute` の `Get` / `Print`（読み取り専用関数のみ）を使ってNode属性を取得し、`export_nodes` / `get_screenshot` で画像を`.pen`と同階層の`snapshots/`にPNG出力する。編集はしない（`save()` も変更系関数も呼ばない）ため、対象ファイルは絶対に書き換わらない。Pencil MCPには依存せず`pencil`コマンドのみで完結。"
+description: "pen.dev CLI（`pencil` / `pen`コマンド）だけを使って、.penファイル（pen.devで作成されたデザインファイル）の中のNodeのデザインデータ（属性・構造）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / image など）、再利用可能コンポーネント、特定Node配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。インタラクティブモード（`pencil interactive`）で `execute` の `Get` / `Print`（読み取り専用関数のみ）を使ってNode属性を取得し、同じ `execute` の `Export` / `TakeScreenshot` で画像を`.pen`と同階層の`snapshots/`にPNG出力する。編集はしない（`save()` も変更系関数も呼ばない）ため、対象ファイルは絶対に書き換わらない。pen.dev MCPには依存せず`pencil`コマンドのみで完結。"
 ---
 
 # Inspect Pencil Node
 
-Pencil CLI（`pencil`コマンド）**のみ**で `.pen` デザインファイル内のNodeのデータと画像を**読み取り専用**で取得するスキル。MCPサーバーには依存しない。公式ドキュメント: [docs.pencil.dev/for-developers/pencil-cli](https://docs.pencil.dev/for-developers/pencil-cli)
+pen.dev CLI（`pencil` コマンド。`pen` も同じバイナリ）**のみ**で `.pen` デザインファイル内のNodeのデータと画像を**読み取り専用**で取得するスキル。MCPサーバーには依存しない。公式ドキュメント: [docs.pen.dev/for-developers/pen-cli](https://docs.pen.dev/for-developers/pen-cli)
 
 姉妹スキル `edit-pencil-design` が「編集 + 編集Nodeのスクショ」を担当するのに対し、こちらは「Nodeを覗き見るだけ」で `.pen` の中身は一切書き換えない。
 
@@ -19,16 +19,16 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 # 設計思想
 
-本スキルで使うのは**インタラクティブモード**（`pencil interactive -i -o`）のみ。`get_app_state` / `execute` / `get_screenshot` / `export_nodes` / `exit` を heredoc で呼ぶ。エージェントモード（`pencil --in --out --prompt`）はAI編集用なので使わない。
+本スキルで使うのは**インタラクティブモード**（`pencil interactive -i -o`）のみ。`read_skill` / `get_app_state` / `execute` / `exit` を heredoc で呼ぶ。エージェントモード（`pencil --in --out --prompt`）はAI編集用なので使わない。
 
 `.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node属性の取得・スクリーンショット出力はすべてインタラクティブモード経由で行う。
 
-**CLI 0.3.x でツール構成が変わっている**。旧 `batch_get` / `get_editor_state` は廃止された。現在のシェル内ツールは `browser` / `execute` / `export_html` / `export_nodes` / `get_app_state` / `get_guidelines` / `get_screenshot` / `spawn_agents` のみで、**Node属性の取得は `execute` の中で `Get` / `Print` を呼ぶ形に一本化**されている。
+**CLI 0.3.5 でシェル内ツールが5つに整理された**。現在あるのは `browser` / `execute` / `get_app_state` / `get_style` / `read_skill` のみで、**Node属性の取得も画像出力も `execute` の中で `Get` / `Print` / `Export` / `TakeScreenshot` を呼ぶ形に一本化**されている。
 
 # 前提条件の確認
 
-1. `pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。パッケージ名は 0.3.x で `@pencil.dev/cli` から改称され、`pen` / `pencil` の両方のbinを提供する。旧パッケージしか無い環境は 0.2.x の旧ツール構成のため必ず更新する）
-2. `pencil status` — 未認証なら `pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内（0.2.x での名称は `PENCIL_CLI_KEY`）
+1. `pencil version` — 未インストールなら `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要。`pen` / `pencil` の両方のbinを提供する。**0.3.5 未満はツール構成が違う**ため、その場合も更新する）
+2. `pencil status` — 未認証なら `pencil login`、または `PEN_CLI_KEY` 環境変数の設定を案内
 3. 対象の `.pen` ファイルが存在するか
 4. ユーザーの取得対象指定を上記5系統（＋サブツリー限定）のどれかにマップする。どれも曖昧な場合だけトップレベル走査で候補を提示
 
@@ -40,12 +40,12 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 `execute` は編集用のツールでもあるため、本スキルで書いてよいのは**読み取り専用の関数だけ**:
 
-- 使ってよい: `Get` / `Print` / `GetVariables` / `FindEmptySpace`、および純粋なJS（変数・ループ・条件・正規表現）
+- 使ってよい: `Get` / `Print` / `GetVariables` / `FindEmptySpace` / `TakeScreenshot` / `Export`（いずれも `.pen` を変更しない）、および純粋なJS（変数・ループ・条件・正規表現）
 - **絶対に書かない**: `Insert` / `Copy` / `Update` / `Replace` / `Move` / `Delete` / `Generate` / `SetVariables`、そして `save()`
 
 `execute` は失敗時に自セッション内の変更を巻き戻すが、それは保険であって許可ではない。上記の変更系関数が1つでも混ざったスニペットは書かない。
 
-`export_html` / `browser` / `spawn_agents` / `get_guidelines` は本スキルの守備範囲外（HTML書き出し・実サイト取り込み・エージェント起動・ガイド取得）なので使わない。
+`browser` / `get_style` は本スキルの守備範囲外（実サイト取り込み・スタイルアーキタイプ取得）なので使わない。`Export` の `html-tailwind` / `html-css` 形式も使わない（HTML書き出しは調査目的ではない）。
 
 ## ルール2: インタラクティブモードを heredoc で非対話的に呼び出す
 
@@ -141,7 +141,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 | 「ヘッダー配下のNodeを全部」 | `Get("<headerId>", (n, c) => Print(c.depth, n.id, n.name, n.type))` |
 | 「ざっと全体構造を見たい」 | `Get((n, c) => { c.skipChildren(); Print(n.id, n.name, n.type) })`（トップレベルのみ） |
 
-`Get` のシグネチャ（`get_app_state({ include_canvas_design: true })` が返す `execute` ドキュメントが正）:
+`Get` のシグネチャ（`read_skill({ path: "execute.md" })` が返す `execute` ドキュメントが正）:
 
 ```ts
 function Get(path: string, options?: GetOptions): Child;          // 1Node（子はネストして返る）
@@ -173,18 +173,18 @@ type Visit<T> = (node: Child, ctx: Ctx) => T | undefined;         // undefined �
 
 ```bash
 pencil interactive -i path/to/design.pen -o path/to/design.pen <<'EOF' > "${WORK_DIR}/state.txt"
-get_app_state({ include_schema: true, include_canvas_design: true, include_scripts_and_shaders: false, include_browser: false })
+get_app_state()
 exit()
 EOF
 ```
 
-`get_app_state` は4つのフラグすべてが必須。スキーマと `execute` ドキュメントが不要なら `include_schema` / `include_canvas_design` を `false` にすると出力が大幅に小さくなる（両方 `true` だと700行規模）。
+`get_app_state()` は**引数を取らない**（0.3.5 でフラグは廃止）。返るのはトップレベルNode・再利用可能コンポーネント・選択状態・統合ブラウザの状態だけで軽い。`.pen` スキーマや `execute` APIドキュメントが要る場合は `read_skill({ path: "pen-schema.md" })` / `read_skill({ path: "execute.md" })` を使う（どちらも数百行あるので、本スキルの範囲では通常不要）。
 
 **注意**: 広い visitor 走査や大きい `depth` は返却がコンテキストを溢れさせることがある。最初は `depth: 1〜2`、走査は `ctx.depth` で3〜4段に制限して軽く取り、必要に応じて深掘りする。
 
-## ルール5: 画像は `export_nodes` で出し、`snapshots/` へリネームして置く
+## ルール5: 画像は `execute` の `Export` で出し、`snapshots/` へリネームして置く
 
-**CLI 0.3.x では `get_screenshot` にファイル出力パラメータが無く、`{ image: "<base64>", mimeType: "image/png" }` を標準出力へ返すだけ**。`export_nodes` も出力先は**ディレクトリ指定**で、ファイル名は**Node IDに固定**される（`<outputDir>/<nodeId>.png`）。したがって命名規則は「一次出力 → `mv` でリネーム」で満たす。
+**CLI 0.3.5 では画像出力も `execute` の関数**（`Export` / `TakeScreenshot`）。`Export` の出力先は画像フォーマットでは**ディレクトリ指定**で、ファイル名は**Node IDに固定**される（`<outputPath>/<nodeId>.png`）。したがって命名規則は「一次出力 → `mv` でリネーム」で満たす。
 
 画像は `.pen` と同階層の `snapshots/` に保存し、ファイル名にタイムスタンプを必ず含める（同時実行・繰り返し実行での衝突回避）。
 
@@ -197,7 +197,7 @@ mkdir -p "$SNAP_DIR"
 
 # 複数Nodeを一括出力（一次出力は WORK_DIR）
 pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
-export_nodes({ nodeIds: ["node-a", "node-b"], outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
+execute({ input: 'Export(["node-a", "node-b"], "png", "${WORK_DIR}/img")' })
 exit()
 EOF
 
@@ -207,25 +207,25 @@ for f in "${WORK_DIR}"/img/*.png; do
 done
 ```
 
-`export_nodes` の引数: `nodeIds`（必須・配列）/ `outputDir`（必須）/ `format`（`png` | `jpeg` | `webp` | `pdf`、既定 `png`）/ `scale`（既定 `2`）/ `quality`（JPEG・WEBPのみ）。**`nodeIds` に `"document"` は渡せない**（`Failed to find a node with id document` になる）。ドキュメント全体の画像が要るときはトップレベルのフレームIDを列挙するか、下の `get_screenshot` を使う。
+`Export(nodeIds, format, outputPath, options?)` の仕様: `nodeIds`（必須・配列）/ `format`（`png` | `jpeg` | `webp` | `pdf` | `html-tailwind` | `html-css`）/ `outputPath`（画像はディレクトリ、HTMLは出力ファイル。**相対パスは `pencil interactive` を起動したcwd基準**）/ `options`（`scale` 既定 `2` / `quality`）。書き出したファイルの絶対パスがレスポンスに列挙される。**`nodeIds` に `"document"` は渡せない**（`Failed to find a node with id document` になる）。ドキュメント全体の画像が要るときはトップレベルのフレームIDを列挙するか、下の `TakeScreenshot` を使う。
 
-ドキュメント全体、または画像を目で確認したいだけの単一Nodeは `get_screenshot({ nodeId: "..." })`。`nodeId: "document"` はこちらでのみ有効。ファイルとして残すなら base64 を自分でデコードする。
+ドキュメント全体、または画像を目で確認したいだけの単一Nodeは `TakeScreenshot(["..."])`。`"document"` はこちらでのみ有効。レスポンスに `{ nodeId, image: "<base64>", mimeType }` の配列が返るので、ファイルとして残すなら base64 を自分でデコードする。
 
 ```bash
 pencil interactive -i "$DESIGN" -o "$DESIGN" <<'EOF' > "${WORK_DIR}/shot.txt"
-get_screenshot({ nodeId: "document" })
+execute({ input: 'TakeScreenshot(["document"])' })
 exit()
 EOF
 grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | base64 -d > "${SNAP_DIR}/${STEM}-document-${TS}.png"
 ```
 
-ファイル命名規則: `<.penファイル名のステム>-<Node名 or Node ID>-<YYYYMMDD-HHMMSS>.png`（例: `login.pen` の `header` Node → `snapshots/login-header-20260627-160500.png`）。スケールは視認性のため `scale: 2`（`export_nodes` の既定値）を推奨。
+ファイル命名規則: `<.penファイル名のステム>-<Node名 or Node ID>-<YYYYMMDD-HHMMSS>.png`（例: `login.pen` の `header` Node → `snapshots/login-header-20260627-160500.png`）。スケールは視認性のため既定の `2` のまま使う。
 
-なお `get_screenshot` は高コストなので、構造・サイズの確認は `ctx.bounds` を `Print` する方で済ませ、色・字形・整列など視覚的な確認が要るときだけ撮る。
+なおスクリーンショットは高コストなので、構造・サイズの確認は `ctx.bounds` を `Print` する方で済ませ、色・字形・整列など視覚的な確認が要るときだけ撮る。
 
 ## ルール6: データと画像を同一heredocでまとめて取得してもよい
 
-`execute` と `get_screenshot` / `export_nodes` は同じセッションで連続実行できる（コード例は使用例の例1参照）。標準出力に両者の結果が混ざる（特に `get_screenshot` の base64 は長大）ため、分離が容易な簡単なケースでは1回にまとめ、複雑なケースでは別々に呼ぶ。
+属性取得の `Get` / `Print` と画像出力の `Export` / `TakeScreenshot` は同じ `execute` 呼び出しに並べても、同じセッションで連続する `execute` に分けてもよい（コード例は使用例の例1参照）。標準出力に両者の結果が混ざる（特に `TakeScreenshot` の base64 は長大）ため、分離が容易な簡単なケースでは1回にまとめ、複雑なケースでは別々に呼ぶ。
 
 ## ルール7: 実行結果をユーザーに伝える
 
@@ -246,7 +246,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 3. **`snapshots/` 準備**: `mkdir -p <.penと同じディレクトリ>/snapshots`
 4. **取得スコープの決定**: 依頼を「ID / 名前Regex / type / reusable / サブツリー / トップレベル」にマップ。曖昧なときだけ `get_app_state` またはトップレベル走査で候補を提示
 5. **属性取得**: heredoc で `execute({ input: 'Get(...)' })` → `${WORK_DIR}/nodes.txt`（必要なら `depth` / `resolveVariables` / `ctx.depth` 制限を調整）
-6. **画像取得**: 複数Nodeは `export_nodes` → `mv` でリネーム、全体または単体の目視は `get_screenshot`（`nodeId: "document"` 可、base64をデコード）→ `snapshots/<stem>-<scope>-<timestamp>.png`
+6. **画像取得**: 複数Nodeは `execute` の `Export` → `mv` でリネーム、全体または単体の目視は `TakeScreenshot`（`"document"` 可、base64をデコード）→ `snapshots/<stem>-<scope>-<timestamp>.png`
 7. **要約報告**: ヒットNode一覧・属性の要点・画像パスを提示
 
 # 使用例
@@ -268,8 +268,7 @@ EOF
 TS="$(date +%Y%m%d-%H%M%S)"
 
 pencil interactive -i designs/login.pen -o designs/login.pen <<EOF > "${WORK_DIR}/combined.txt"
-execute({ input: 'Print(Get("header-01", { depth: 2, resolveVariables: true }))' })
-export_nodes({ nodeIds: ["header-01"], outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
+execute({ input: 'Print(Get("header-01", { depth: 2, resolveVariables: true }))\nExport(["header-01"], "png", "${WORK_DIR}/img")' })
 exit()
 EOF
 
@@ -299,7 +298,7 @@ EOF
 IDS_JSON=$(grep -E '^COMP [A-Za-z0-9_-]+ ' "${WORK_DIR}/components.txt" | awk '{print $2}' | jq -R . | jq -sc .)
 
 pencil interactive -i "$DESIGN" -o "$DESIGN" <<EOF
-export_nodes({ nodeIds: ${IDS_JSON}, outputDir: "${WORK_DIR}/img", format: "png", scale: 2 })
+execute({ input: 'Export(${IDS_JSON}, "png", "${WORK_DIR}/img")' })
 exit()
 EOF
 
@@ -318,31 +317,31 @@ done
 
 `--in / -i <path>`（入力 `.pen`）、`--out / -o <path>`（出力 `.pen`。ヘッドレス時必須、`save()`を呼ばないため書き換わらない）、`--app / -a <name>`（起動中アプリへ接続。本スキルでは使わない）、`--help / -h`（ツールリファレンス表示）
 
-## シェル内ツール（CLI 0.3.x）
+## シェル内ツール（CLI 0.3.5 はこの5つのみ）
 
 | ツール | 用途 |
 |---|---|
-| `get_app_state({ include_schema, include_canvas_design, include_scripts_and_shaders, include_browser })` | トップレベルNode・再利用可能コンポーネント・選択状態・`.pen` スキーマ・`execute` APIドキュメントの取得（4フラグすべて必須。曖昧時のフォールバック） |
-| `execute({ input })` | **本スキルの中核**。`Get` / `Print` / `GetVariables` / `FindEmptySpace` の読み取り専用関数だけを使う（変更系関数は禁止） |
-| `get_screenshot({ nodeId })` | 単一Nodeまたは `"document"` のPNGを**base64で返す**（ファイル出力パラメータは無い） |
-| `export_nodes({ nodeIds, outputDir, format, scale, quality })` | 複数NodeをPNG/JPEG/WEBP/PDFで**ディレクトリへ**出力（ファイル名はNode ID固定。`"document"` は不可） |
-| `export_html({ nodeIds, outputPath, format, ... })` | HTML書き出し（本スキルでは使わない） |
+| `get_app_state()` | **引数なし**。トップレベルNode・再利用可能コンポーネント・選択状態・統合ブラウザの状態（曖昧時のフォールバック） |
+| `read_skill({ path })` | pen.dev 公式スキルの取得。`{ path: "pen-schema.md" }` で `.pen` スキーマ、`{ path: "execute.md" }` で `execute` APIドキュメント（本スキルの範囲では通常不要） |
+| `execute({ input })` | **本スキルの中核**。`Get` / `Print` / `GetVariables` / `FindEmptySpace` / `TakeScreenshot` / `Export` の読み取り専用関数だけを使う（変更系関数は禁止） |
+| `get_style({ name, params })` | 視覚スタイルのアーキタイプ取得（本スキルでは使わない） |
 | `browser({ action, ... })` | 実サイトの読み込み・取り込み（本スキルでは使わない） |
-| `get_guidelines({ category, name, params })` | デザインガイド/スタイルの取得（本スキルでは使わない） |
-| `spawn_agents(...)` | サブエージェント起動（本スキルでは使わない） |
 | `exit()` | シェル終了（heredoc末尾に必ず置く） |
 | `save()` | ディスクへ書き出し（**このスキルでは絶対に呼ばない**） |
 
-**廃止済み**: `batch_get` / `get_editor_state` / `snapshot_layout` / `get_variables`（CLI 0.3.1時点で存在しない）。それぞれ `execute` の `Get` / `get_app_state` / `ctx.bounds` の `Print` / `execute` の `GetVariables()` で代替する。
+`execute` の中の画像関数: `TakeScreenshot(nodeIds)` は指定Node（`"document"` 可）の画像を**base64でレスポンスに添付**、`Export(nodeIds, format, outputPath, options?)` は**ファイルへ書き出し**（画像はディレクトリ出力・ファイル名はNode ID固定・`"document"` 不可）。
+
+**廃止済み**: `get_screenshot` / `export_nodes` / `export_html` / `get_guidelines` / `spawn_agents`（0.3.5 で削除。呼ぶと `Unknown tool: ...`）、および 0.2.x の `batch_get` / `get_editor_state` / `snapshot_layout` / `get_variables`。読み替えは順に `execute` の `TakeScreenshot` / `Export` / `Export`（`html-tailwind` / `html-css`）/ `read_skill` ＋ `get_style` / 代替なし、`execute` の `Get` / `get_app_state` / `ctx.bounds` の `Print` / `GetVariables()`。
 
 # トラブルシューティング
 
 - **`pencil: command not found`**: `npm install -g @pen.dev/cli` を案内（Node.js 18以上必要）
 - **認証エラー**: `pencil login`、または `PEN_CLI_KEY` 環境変数を設定
 - **`-o` が必須エラー**: ヘッドレス実行では `-o` 必須。入力と同じパスを指定し、`save()` を呼ばなければ変更されない
-- **`Unknown tool: batch_get` / `get_editor_state`**: CLI 0.3.x で廃止済み。`execute` の `Get` と `get_app_state` に読み替える（早見表の「廃止済み」参照）
-- **`get_screenshot` に `out` を渡しても画像ファイルができない**: 現行の `get_screenshot` はファイル出力パラメータを持たず base64 を返すだけ。ルール5のデコード手順を使うか `export_nodes` を使う
-- **`export_nodes` で `Failed to find a node with id document`**: `export_nodes` は `"document"` を受け付けない。トップレベルのフレームIDを列挙するか `get_screenshot({ nodeId: "document" })` を使う
+- **`Unknown tool: get_screenshot` / `export_nodes` / `export_html` / `get_guidelines` / `batch_get` / `get_editor_state`**: 廃止済み。早見表の「廃止済み」の読み替え表に従う（多くは `execute` の中の関数へ移動している）。`pencil version` が 0.3.5 未満なら入れ直す
+- **`get_app_state({ include_schema: true, ... })` が効かない**: 0.3.5 の `get_app_state` は引数を取らない。スキーマ・APIドキュメントは `read_skill({ path: ... })` から取る
+- **`TakeScreenshot` で画像ファイルができない**: `TakeScreenshot` はレスポンスに base64 を添付するだけ。ルール5のデコード手順を使うか `Export` を使う
+- **`Export` で `Failed to find a node with id document`**: `Export` は `"document"` を受け付けない。トップレベルのフレームIDを列挙するか `TakeScreenshot(["document"])` を使う
 - **Node ID が分からない**: 名前Regex / type / `reusable` の visitor、あるいはトップレベル走査でID不要の取得ができる。まずそれを試し、絞り切れないときだけ `get_app_state` で候補を提示
 - **走査の返却が大きすぎる**: `depth` を 1〜2 に下げる、visitorで `ctx.depth > N && c.skipChildren()` を効かせる、`Get(parentId, ...)` で範囲を限定する、`Print(Get(...))` のJSONダンプをやめて1Node1行の位置指定 `Print` に変える
 - **`.pen` ファイルが見つからない**: パスを再確認
