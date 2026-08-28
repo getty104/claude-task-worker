@@ -152,6 +152,14 @@ export interface ClaudeInvocation {
   advisorModel?: string;
   // claude CLI の権限モード。config.json の `permission`（既定 bypassPermissions）。
   permissionMode?: PermissionMode;
+  // true なら Claude Code on the web（クラウド実行）のセッションとして起動する。
+  // クラウドセッションは print モード非対応なので `-p <prompt>` を付けない
+  // （実測: `Error: --cloud cannot be combined with --print.`）。
+  cloud?: boolean;
+  // `--ref` に渡すクラウドセッションのベースブランチ。`onBranch` とは排他。
+  baseRef?: string;
+  // `--on-branch` に渡すクラウドセッションのベースブランチ。`baseRef` とは排他。
+  onBranch?: string;
 }
 
 export const CLAUDE_COMMAND = "claude";
@@ -203,7 +211,17 @@ export function buildClaudeArgs({
   effort,
   advisorModel,
   permissionMode,
+  cloud,
+  baseRef,
+  onBranch,
 }: ClaudeInvocation): string[] {
+  const ref = baseRef?.trim() ?? "";
+  const onBranchValue = onBranch?.trim() ?? "";
+  // CLI 側も `--ref` / `--on-branch` の同時指定を排他としてエラーにするが（実測 T8）、
+  // 起動して外部プロセスのエラーで気づく形にしないよう、引数を組み立てる前に弾く。
+  if (cloud === true && ref !== "" && onBranchValue !== "") {
+    throw new Error("--on-branch and --ref both set the cloud session's base branch; pass one or the other");
+  }
   const advisor = advisorModel?.trim() ?? "";
   const permission = permissionMode ?? DEFAULT_PERMISSION_MODE;
   return [
@@ -212,7 +230,9 @@ export function buildClaudeArgs({
     // 「入力待ちになるまで」ブロックする仕様と噛み合わない（タスクが終わるまで返らず、
     // 2分を超えると timeout で落ちる）。プロンプトは起動後に `herdr agent prompt` で
     // 投入し、herdr にターンを追跡させる（herdr-runner.ts の startHerdrTask 参照）。
-    ...(mode === "herdr" ? [] : ["-p", prompt]),
+    // クラウド実行（`cloud: true`）も print モード非対応のため同様に省く
+    // （実測 T2: `Error: --cloud cannot be combined with --print.`）。
+    ...(mode === "herdr" || cloud === true ? [] : ["-p", prompt]),
     "--permission-mode",
     permission,
     "--disallowedTools",
@@ -226,6 +246,11 @@ export function buildClaudeArgs({
     // advisor 未指定（空文字）ならフラグごと省く。値なしの `--advisor` を渡すと
     // 後続フラグを値として食われるため、必ずモデル名とセットでのみ付ける。
     ...(advisor === "" ? [] : ["--advisor", advisor]),
+    // クラウド実行時のみ付与する。プロンプトは `--cloud` の値として渡さない（値なしフラグ）。
+    // ベースブランチ指定は `--ref` / `--on-branch` のどちらか一方のみ（両方指定は上で例外）。
+    ...(cloud === true ? ["--cloud"] : []),
+    ...(cloud === true && ref !== "" ? ["--ref", ref] : []),
+    ...(cloud === true && onBranchValue !== "" ? ["--on-branch", onBranchValue] : []),
   ];
 }
 

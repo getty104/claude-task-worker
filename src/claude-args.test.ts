@@ -236,3 +236,88 @@ test("buildClaudeExecution exposes the prompt separately in herdr mode only", ()
   assert.equal(buildClaudeExecution({ mode: "herdr", ...common }).prompt, "/skill 1");
   assert.equal(buildClaudeExecution({ mode: "default", ...common }).prompt, undefined);
 });
+
+test("buildClaudeArgs omits -p <prompt> and adds --cloud when cloud is true", () => {
+  // Cloud sessions do not support print mode (observed: `Error: --cloud cannot be
+  // combined with --print.`), so -p must drop out in both default and herdr mode.
+  for (const mode of ["default", "herdr"] as const) {
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
+    assert.ok(!args.includes("-p"));
+    assert.ok(!args.includes("/skill 1"));
+    assert.ok(args.includes("--cloud"));
+  }
+});
+
+test("buildClaudeArgs passes --ref when baseRef is given", () => {
+  const args = buildClaudeArgs({
+    mode: "herdr",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    cloud: true,
+    baseRef: "main",
+  });
+  assert.equal(args[args.indexOf("--ref") + 1], "main");
+  assert.ok(!args.includes("--on-branch"));
+});
+
+test("buildClaudeArgs passes --on-branch when onBranch is given", () => {
+  const args = buildClaudeArgs({
+    mode: "herdr",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    cloud: true,
+    onBranch: "cc-epic-1",
+  });
+  assert.equal(args[args.indexOf("--on-branch") + 1], "cc-epic-1");
+  assert.ok(!args.includes("--ref"));
+});
+
+test("buildClaudeArgs throws when both baseRef and onBranch are given for a cloud session", () => {
+  assert.throws(
+    () =>
+      buildClaudeArgs({
+        mode: "herdr",
+        prompt: "/skill 1",
+        model: "opus",
+        effort: "high",
+        cloud: true,
+        baseRef: "main",
+        onBranch: "cc-epic-1",
+      }),
+    /--on-branch and --ref/,
+  );
+});
+
+test("buildClaudeArgs omits both --ref and --on-branch when neither is given for a cloud session", () => {
+  const args = buildClaudeArgs({ mode: "herdr", prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
+  assert.ok(!args.includes("--ref"));
+  assert.ok(!args.includes("--on-branch"));
+});
+
+test("buildClaudeArgs keeps the other flags unchanged for a cloud session", () => {
+  const args = buildClaudeArgs({
+    mode: "herdr",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    cloud: true,
+    baseRef: "main",
+  });
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
+  assert.equal(args[args.indexOf("--disallowedTools") + 1], DISALLOWED_TOOLS_ARG);
+  assert.equal(args[args.indexOf("--append-system-prompt-file") + 1], systemPromptFilePath("opus"));
+  assert.equal(args[args.indexOf("--model") + 1], "opus");
+  assert.equal(args[args.indexOf("--effort") + 1], "high");
+});
+
+test("buildClaudeArgs is unchanged when cloud is unspecified or false", () => {
+  const common = { prompt: "/skill 123", model: "sonnet", effort: "high" } as const;
+  for (const mode of ["default", "herdr"] as const) {
+    const withoutCloud = buildClaudeArgs({ mode, ...common });
+    const cloudFalse = buildClaudeArgs({ mode, ...common, cloud: false });
+    assert.deepEqual(cloudFalse, withoutCloud);
+    assert.ok(!withoutCloud.includes("--cloud"));
+  }
+});
