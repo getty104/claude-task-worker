@@ -8,7 +8,7 @@
 
 ## 実測環境
 
-- 実行パス: `/Users/getty104/.local/bin/claude`
+- 実行パス: `~/.local/bin/claude`
 - OS: macOS (darwin 25.6.0)
 - 実行ディレクトリ: git の **linked worktree**（`.claude/worktrees/<name>`）
 - TTY のある実行は `script -q /dev/null <cmd>` で pty を割り当てて実施
@@ -27,11 +27,18 @@
 ## パースとバリデーションの順序（実測）
 
 1. commander の unknown option チェック（最初）
-2. `--cloud` の TTY チェック
-3. `--cloud` 固有の各種バリデーション（`--ref`/`--on-branch` の排他など）
-4. クラウドセッション作成（ネットワーク）
+2. `--print`（`-p`）と `--cloud`（新規作成）の排他チェック
+3. `--cloud`（新規作成）の TTY チェック
+4. `--cloud` 固有の各種バリデーション（`--ref`/`--on-branch` の排他など）
+5. クラウドセッション作成（ネットワーク、未実測）
 
-根拠: 非TTY環境で `claude --cloud "ctw probe" --definitely-not-a-flag` は `error: unknown option` を返し、TTY エラーには到達しない。
+根拠:
+- 1: 非TTY環境で `claude --cloud "ctw probe" --definitely-not-a-flag` は `error: unknown option` を返し、後続のいずれのチェックにも到達しない
+- 2 → 3: T2（非TTY・`-p` 併用・新規作成）は `Error: --cloud cannot be combined with --print.` を返し、T1 が示す TTY エラー（`Error: --cloud requires an interactive terminal.`）には到達しない。非TTYなのに TTY エラーではなく `--print` 排他エラーが返っている＝この経路では TTY チェックに到達していない。したがって `-p` 併用時は print 排他チェックが TTY チェックより先に評価される
+- 4: T8（`--ref`/`--on-branch` 併用の排他）・T9/T10（GitHub App 未設定エラー）はいずれも pty（TTYチェック通過後）でのみ検証しており、この段の内部順序（2・3との相対順を含む）は未確認
+- 5: 未実測。ネットワーク呼び出し自体の失敗ケース（認証切れ等）は本調査で確認していない
+
+**この順序は `-p` を併用した新規作成（T1・T2）でのみ裏付けが取れている。** `-p` を伴わない `--cloud` 新規作成時に TTY チェックと他のバリデーションがどの順で評価されるかは実測していない。
 
 ## 引数表（PRD 4.2 差し替え用）
 
@@ -53,75 +60,75 @@
 
 ### T1: `claude --cloud "<description>"`（非TTY、新規作成）
 exit=1
-```
+```text
 Error: --cloud requires an interactive terminal.
 Non-interactive invocations (piped stdout, --init-only, --sdk-url) run locally and would silently ignore --cloud. Drop --cloud, or run from a TTY.
 ```
 
 ### T2: `claude -p --cloud "<description>" "ping"`（非TTY、print + 新規作成）
 exit=1
-```
+```text
 Error: --cloud cannot be combined with --print.
 Starting a new cloud session with --cloud is interactive only: drop --print, or drop --cloud to run locally. To message an existing cloud session instead, pass its ID: `claude -p "message" --cloud <session-id>` (find IDs at claude.ai/code).
 ```
 
 ### T3: `claude -p --cloud <session_id> "ping"`（非TTY）
 exit=0 → 受理される。既存セッションへのメッセージ投函として成功
-```
+```text
 Sent to cloud session.
-Session ID: session_01B7H8tU5MCgei8ezfzeUafF
-View: https://claude.ai/code/session_01B7H8tU5MCgei8ezfzeUafF?from=cli&m=0
+Session ID: session_<REDACTED-1>
+View: https://claude.ai/code/session_<REDACTED-1>?from=cli&m=0
 ```
 pty 環境（`script` 経由）でも同一結果（exit=0、同一出力）。`-p` + `--cloud <session_id>` の投函は TTY を要求しない。
 
 ### T4: `claude --cloud <session_id>`（pty、対話アタッチ）
 exit=1
-```
+```text
 Error: Attaching to an existing cloud session is not enabled for your account.
 ```
 注記: T3（投函）は成功するのに、対話アタッチは**アカウント単位で無効**。投函とアタッチは別権限。
 
 ### T5: `claude --cloud "<description>" --permission-mode bypassPermissions`（pty）
 exit=0 → 受理される。エラーなし、クラウドセッションが作成された
-```
+```text
 Created cloud session: CTW probe
-View: https://claude.ai/code/session_012YC7iiz2qkr1qfTvSKYEvk?from=cli&m=0
-Resume with: claude --teleport session_012YC7iiz2qkr1qfTvSKYEvk
+View: https://claude.ai/code/session_<REDACTED-2>?from=cli&m=0
+Resume with: claude --teleport session_<REDACTED-2>
 This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.
 ```
 PRD 4.2 が記載する `Error: a cloud session cannot bypass permissions` は 2.1.247 では再現しなかった。
 
 ### T6: `claude --cloud "<description>" --disallowedTools Monitor`（pty）
 exit=0 → 受理される。エラーなし、セッション作成
-```
+```text
 Created cloud session: ctw probe
-View: https://claude.ai/code/session_013r58uU5RNBJzqRHwLe5Z8v?from=cli&m=0
-Resume with: claude --teleport session_013r58uU5RNBJzqRHwLe5Z8v
+View: https://claude.ai/code/session_<REDACTED-3>?from=cli&m=0
+Resume with: claude --teleport session_<REDACTED-3>
 ```
 PRD 4.2 が記載する `Error: a cloud session does not enforce tool restrictions yet` は 2.1.247 では再現しなかった。
 
 ### T7: 複合受理プローブ（pty）
-```
+```bash
 claude --cloud "ctw probe" --append-system-prompt-file /tmp/ctw-sp.txt --model opus --effort high --advisor opus --chrome
 ```
 exit=0 → 5フラグすべて受理される（いずれのフラグに対してもエラーが出ず、セッションが作成された）
-```
+```text
 Created cloud session: ctw probe
-View: https://claude.ai/code/session_01B7H8tU5MCgei8ezfzeUafF?from=cli&m=0
-Resume with: claude --teleport session_01B7H8tU5MCgei8ezfzeUafF
+View: https://claude.ai/code/session_<REDACTED-1>?from=cli&m=0
+Resume with: claude --teleport session_<REDACTED-1>
 ```
 測定手法の注記: 5フラグを1回にまとめたのは、クラウドセッションの新規作成という外部副作用を最小化するため。バリデーションはいずれかのフラグが拒否された時点で `Error:` を出して終了する（T8・T9で確認済み）ため、まとめて受理された＝各フラグが個別にも受理されることを意味する。
 
 ### T8: `claude --cloud "<description>" --ref main --on-branch main`（pty）
 exit=1 → 排他
-```
+```text
 Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other
 ```
 このエラー文言は、`--ref` と `--on-branch` が**どちらもベースブランチを指定するフラグ**であることを示す。PRD 4.2 が想定していた「`--ref` = ベースブランチ / `--on-branch` = 既存 PR ブランチ上で作業再開」という役割分担とは読み方が異なる。
 
 ### T9: `claude --cloud "<description>" --ref ctw-no-such-branch-xyz123`（pty）
 exit=1
-```
+```text
 Error: --ref ctw-no-such-branch-xyz123 cannot be honored: the GitHub App is not
 set up for this repository, so the session would be seeded from your local
 working tree instead. Set up the GitHub integration at https://claude.ai/code,
@@ -130,7 +137,7 @@ or drop --ref to seed from local HEAD.
 
 ### T10: `claude --cloud "<description>" --on-branch ctw-no-such-branch-xyz123`（pty）
 exit=1
-```
+```text
 Error: --on-branch ctw-no-such-branch-xyz123 cannot be honored: the GitHub App
 is not set up for this repository, so the session would be seeded from your
 local working tree instead. Set up the GitHub integration at
@@ -141,7 +148,7 @@ T9 / T10 の解釈（重要）: 拒否理由は「ブランチが存在しない
 
 ### T11: GitHub App 未設定時のセッションのシード元（副次的観測）
 T5 / T6 / T7 のセッション作成時に毎回以下が出力された:
-```
+```text
 This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.
 ```
 → GitHub App 未設定のリポジトリでは、クラウドセッションは**ローカルの作業ツリーをアップロードしてシードされる**（リモートを clone するのではない）。PRD 4.4-1 が前提とする「クラウド VM は自前で clone するので worktree は不要」という設計は、GitHub App 連携が設定されている場合にのみ成立する可能性がある。本Issueのスコープ外だが、判断材料として記録する。
@@ -173,11 +180,11 @@ This checkout is a linked working tree, a submodule or a checkout with a separat
 
 本実測により、以下3件のクラウドセッションが作成された（いずれもプロンプト未投入。T3 のみ `"ping"` を1回投函）:
 
-- `session_012YC7iiz2qkr1qfTvSKYEvk`（T5）
-- `session_013r58uU5RNBJzqRHwLe5Z8v`（T6）
-- `session_01B7H8tU5MCgei8ezfzeUafF`（T7・T3・T4）
+- `session_<REDACTED-2>`（T5）
+- `session_<REDACTED-3>`（T6）
+- `session_<REDACTED-1>`（T7・T3・T4）
 
-これらは実測の副産物であり、不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。
+これらは実測の副産物であり、不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。セッションURL（`https://claude.ai/code/<id>`）の閲覧には Anthropic アカウントでの認証が必要であり、URL単体が漏れても第三者は内容を閲覧できない。
 
 ---
 
@@ -225,18 +232,18 @@ This checkout is a linked working tree, a submodule or a checkout with a separat
 
 herdr ペイン（実TTY）で実行:
 
-```
+```console
 $ claude --cloud "CTW S-2 completion probe"
 Created cloud session: CTW S-2 completion probe
-View: https://claude.ai/code/session_01GzxNRV2bGSHoRJgidxNAPY?from=cli&m=0
-Resume with: claude --teleport session_01GzxNRV2bGSHoRJgidxNAPY
+View: https://claude.ai/code/session_<REDACTED-4>?from=cli&m=0
+Resume with: claude --teleport session_<REDACTED-4>
 This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.
 $
 ```
 
 直後の観測:
 
-```
+```console
 $ herdr pane process-info --pane <pane>
   → foreground_processes: [{ "name": "zsh", ... }]     # claude は残っていない
 $ herdr agent get <pane>
@@ -249,8 +256,8 @@ $ herdr agent get <pane>
 
 同じペインで実行すると TUI が起動し、`agent get` が agent を返した:
 
-```
-$ claude --teleport session_01GzxNRV2bGSHoRJgidxNAPY
+```console
+$ claude --teleport session_<REDACTED-4>
  ▐▛███▛█   Claude Code v2.1.247
 ▝▜██████▀  Opus 5 (1M context) with high effort · Claude Max
   ▝▝ ▝▝    ~/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645
@@ -263,7 +270,7 @@ $ claude --teleport session_01GzxNRV2bGSHoRJgidxNAPY
 
 `herdr agent prompt` でプロンプトを投入し、3秒間隔でポーリングした結果（タブは非フォーカスのまま）:
 
-```
+```text
 t=3s   idle
 t=6s   working
 t=9s   working
@@ -276,11 +283,11 @@ t=12s  done      ← 以降 60s まで done を維持
 
 M-2 のプロンプトは `uname -a; whoami; hostname; pwd; git rev-parse --abbrev-ref HEAD` の実行と verbatim 報告を依頼したもの。ペインに出た結果:
 
-```
+```text
 Darwin MacBook-Air-2.local 25.6.0 Darwin Kernel Version 25.6.0: ... arm64
-getty104
+<local-user>
 MacBook-Air-2.local
-/Users/getty104/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645
+~/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645
 clever-zenith-6645
 ```
 
@@ -292,7 +299,7 @@ clever-zenith-6645
 
 teleport セッションに「`AskUserQuestion` ツールで質問だけして他は何もするな」と投入し、選択肢が表示された状態でポーリング:
 
-```
+```text
 t=3s   done      ← 直前ターンの残り
 t=6s   blocked
 t=9s   blocked
@@ -304,20 +311,20 @@ t=36s  blocked   ← 36秒まで blocked を維持
 
 ### M-5: `claude -p --cloud <id>` はクラウド VM で実行されるが、CLI からは何も観測できない
 
-新規セッション `session_01Ccww8Z876VzSDVKsSnU813` を作成し、非TTY（通常のシェル）から投函:
+新規セッション `session_<REDACTED-5>` を作成し、非TTY（通常のシェル）から投函:
 
-```
-$ claude -p --cloud session_01Ccww8Z876VzSDVKsSnU813 "Run this and report the raw output verbatim, nothing else: uname -a; whoami; hostname; pwd; git rev-parse --abbrev-ref HEAD; git remote -v"
+```console
+$ claude -p --cloud session_<REDACTED-5> "Run this and report the raw output verbatim, nothing else: uname -a; whoami; hostname; pwd; git rev-parse --abbrev-ref HEAD; git remote -v"
 Sent to cloud session.
-Session ID: session_01Ccww8Z876VzSDVKsSnU813
-View: https://claude.ai/code/session_01Ccww8Z876VzSDVKsSnU813?from=cli&m=0
+Session ID: session_<REDACTED-5>
+View: https://claude.ai/code/session_<REDACTED-5>?from=cli&m=0
 ```
 
 **即座に return する**（実行完了を待たない）。exit code も出力も「送った」ことしか示さず、**完了シグナルにできる情報が一切無い**。
 
 claude.ai の Web UI で確認すると、クラウド VM 側では正しく実行されていた:
 
-```
+```text
 Linux vm 6.18.44-fc-v21 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
 root
 vm
@@ -327,7 +334,7 @@ clever-zenith-6645
 
 続けてモデルの地の文:
 
-```
+```text
 git remote -v produced no output — there are no remotes configured on this clone.
 ```
 
@@ -341,9 +348,9 @@ git remote -v produced no output — there are no remotes configured on this clo
 
 ### M-6: クラウド側のターンはローカルへ降りてこない
 
-M-5 の投函から 100 秒後、同じセッションへ `claude --teleport session_01Ccww8Z876VzSDVKsSnU813` でアタッチした。TUI は `⏺ Session resumed` を表示したが会話履歴は空。「直前までのやり取りを教えて」と尋ねた応答:
+M-5 の投函から 100 秒後、同じセッションへ `claude --teleport session_<REDACTED-5>` でアタッチした。TUI は `⏺ Session resumed` を表示したが会話履歴は空。「直前までのやり取りを教えて」と尋ねた応答:
 
-```
+```text
 NO PRIOR HISTORY
 
 このメッセージが会話の最初のユーザーメッセージです。それ以前のやり取りはありません。
@@ -355,14 +362,14 @@ NO PRIOR HISTORY
 
 transcript 自体の生成状況:
 
-```
+```console
 # クラウドセッションID では存在しない
-$ ls ~/.claude/projects/*/session_01GzxNRV2bGSHoRJgidxNAPY.jsonl
+$ ls ~/.claude/projects/*/session_<REDACTED-4>.jsonl
 ls: ...: No such file or directory
 
 # teleport セッションのローカル UUID では、ローカルターン実行後に生成される
 $ ls -la ~/.claude/projects/-Users-…-clever-zenith-6645/f2364f35-be0f-493b-8dc9-d38116d2c07d.jsonl
--rw-------  1 getty104  staff  106574 Aug 27 22:34 …
+-rw-------  1 <local-user>  staff  106574 Aug 27 22:34 …
 ```
 
 生成された transcript に対して `readFinalReport()` 相当（末尾から最初の非 sidechain アシスタント発言）を適用すると、上記の `NO PRIOR HISTORY …` が正しく取り出せた。**`findTranscriptPath()` / `readFinalReport()` の実装自体は teleport セッションに対して無修正で機能する**（読めるのがローカルターンだけ、という制約が付くだけ）。
@@ -371,12 +378,12 @@ $ ls -la ~/.claude/projects/-Users-…-clever-zenith-6645/f2364f35-be0f-493b-8dc
 
 M-2 で得た `agent_session.value`（`f9342ab2-b410-41e2-af7d-c3e3eb1ad598`）を `https://claude.ai/code/<value>` として開いた結果:
 
-```
+```text
 このセッションは見つかりませんでした
 削除されたか、アクセス権限がない可能性があります。
 ```
 
-一方、`claude --cloud` の stdout に出たクラウドセッションID（`session_01Ccww8Z876VzSDVKsSnU813`）で開くと、投函したメッセージと VM 側の実行結果が表示された（M-5）。
+一方、`claude --cloud` の stdout に出たクラウドセッションID（`session_<REDACTED-5>`）で開くと、投函したメッセージと VM 側の実行結果が表示された（M-5）。
 
 **ID の形式からして別系統**（ローカルは UUID、クラウドは `session_01` プレフィックスの ULID 様式）。`src/herdr.ts` の `toAgentInfo()` が拾う `agent_session.value` を Slack 通知の URL に流用することはできない。
 
@@ -387,7 +394,7 @@ M-2 で得た `agent_session.value`（`f9342ab2-b410-41e2-af7d-c3e3eb1ad598`）�
 ```json
 {
   "pid": 36521,
-  "cwd": "/Users/getty104/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645",
+  "cwd": "~/programming/Claude/claude-task-worker/.claude/worktrees/clever-zenith-6645",
   "kind": "interactive",
   "startedAt": 1787837238191,
   "sessionId": "f9342ab2-b410-41e2-af7d-c3e3eb1ad598",
@@ -437,7 +444,7 @@ M-2 で得た `agent_session.value`（`f9342ab2-b410-41e2-af7d-c3e3eb1ad598`）�
 
 本実測により以下2件のクラウドセッションが作成された:
 
-- `session_01GzxNRV2bGSHoRJgidxNAPY`（M-1 / M-2 / M-3 / M-4。teleport 経由でローカルターンを3回実行）
-- `session_01Ccww8Z876VzSDVKsSnU813`（M-5 / M-6。クラウド VM 側で1ターン実行）
+- `session_<REDACTED-4>`（M-1 / M-2 / M-3 / M-4。teleport 経由でローカルターンを3回実行）
+- `session_<REDACTED-5>`（M-5 / M-6。クラウド VM 側で1ターン実行）
 
 不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。あわせて herdr のプローブ用タブは実測後にクローズ済み。

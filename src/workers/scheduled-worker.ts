@@ -96,7 +96,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           config.taskId,
           config.name,
           config.name,
-          worktreeId,
+          cloud ? undefined : worktreeId,
           async (status, output, cloudSessionId) => {
             try {
               if (status === "completed") {

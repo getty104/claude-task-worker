@@ -41,11 +41,20 @@ test("stderr tail is not appended on success", () => {
   assert.equal(result.output, "ok");
 });
 
-test("appendCloudFailureGuidance appends guidance for a failed cloud task", () => {
+test("appendCloudFailureGuidance prepends short guidance for a failed cloud task", () => {
   const result = appendCloudFailureGuidance({ status: "failed", output: "boom" }, true);
-  assert.match(result.output, /^boom/);
+  assert.match(result.output, /^\[worker\]/);
+  assert.match(result.output, /boom$/);
   assert.match(result.output, /GitHub 連携/);
   assert.match(result.output, /allow_remote_sessions/);
+});
+
+test("appendCloudFailureGuidance keeps the real error readable after Slack's last-1000-chars truncation", () => {
+  const longError = "E".repeat(2000);
+  const result = appendCloudFailureGuidance({ status: "failed", output: longError }, true);
+  const truncated = result.output.slice(-1000);
+  assert.equal(truncated, "E".repeat(1000));
+  assert.doesNotMatch(truncated, /GitHub 連携/);
 });
 
 test("appendCloudFailureGuidance leaves non-cloud failures untouched", () => {

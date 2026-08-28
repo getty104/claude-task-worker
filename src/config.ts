@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep as SEP } from "node:path";
-import { PLUGIN_NAME, MARKETPLACE_NAME, PROJECT_SETTINGS_PATH } from "./commands/install";
+import { PLUGIN_NAME, MARKETPLACE_NAME, MARKETPLACE_SOURCE, PROJECT_SETTINGS_PATH } from "./commands/install";
 
 export type WorkerName =
   | "exec-issue"
@@ -271,23 +271,39 @@ export function checkPluginDeclaration(settings: ProjectSettings): string[] {
     return [`${PROJECT_SETTINGS_PATH} を読み込めませんでした（${settings.reason}）。${guidance}`];
   }
   const marketplaces = settings.value.extraKnownMarketplaces as Record<string, unknown> | undefined;
-  const hasMarketplace = !!marketplaces && Object.prototype.hasOwnProperty.call(marketplaces, MARKETPLACE_NAME);
+  const marketplaceKeyExists = !!marketplaces && Object.prototype.hasOwnProperty.call(marketplaces, MARKETPLACE_NAME);
+  const marketplaceEntry = marketplaceKeyExists
+    ? ((marketplaces as Record<string, unknown>)[MARKETPLACE_NAME] as { source?: { source?: unknown; repo?: unknown } })
+    : undefined;
+  const hasMarketplace =
+    marketplaceEntry?.source?.source === "github" && marketplaceEntry?.source?.repo === MARKETPLACE_SOURCE;
   const plugins = settings.value.enabledPlugins as Record<string, unknown> | undefined;
-  const hasPlugin = !!plugins && !!plugins[pluginKey];
+  const pluginKeyExists = !!plugins && Object.prototype.hasOwnProperty.call(plugins, pluginKey);
+  const hasPlugin = pluginKeyExists && plugins?.[pluginKey] === true;
   if (hasMarketplace && hasPlugin) return [];
-  if (!hasMarketplace && !hasPlugin) {
+  if (!marketplaceKeyExists && !pluginKeyExists) {
     return [
       `cloud: true のワーカーがありますが ${PROJECT_SETTINGS_PATH} にプラグイン（${pluginKey}）が宣言されていません。${guidance}`,
     ];
   }
-  if (!hasMarketplace) {
-    return [
-      `${PROJECT_SETTINGS_PATH} の extraKnownMarketplaces に "${MARKETPLACE_NAME}" が登録されていません（enabledPlugins のみ設定済みです）。${guidance}`,
-    ];
+  const errors: string[] = [];
+  if (!marketplaceKeyExists) {
+    errors.push(
+      `${PROJECT_SETTINGS_PATH} の extraKnownMarketplaces に "${MARKETPLACE_NAME}" が登録されていません。${guidance}`,
+    );
+  } else if (!hasMarketplace) {
+    errors.push(
+      `${PROJECT_SETTINGS_PATH} の extraKnownMarketplaces の "${MARKETPLACE_NAME}" が正しい参照先（source: "github", repo: "${MARKETPLACE_SOURCE}"）になっていません。${guidance}`,
+    );
   }
-  return [
-    `${PROJECT_SETTINGS_PATH} の enabledPlugins で "${pluginKey}" が有効化されていません（extraKnownMarketplaces のみ設定済みです）。${guidance}`,
-  ];
+  if (!pluginKeyExists) {
+    errors.push(`${PROJECT_SETTINGS_PATH} の enabledPlugins に "${pluginKey}" が登録されていません。${guidance}`);
+  } else if (!hasPlugin) {
+    errors.push(
+      `${PROJECT_SETTINGS_PATH} の enabledPlugins で "${pluginKey}" が有効化されていません（値が true ではありません）。${guidance}`,
+    );
+  }
+  return errors;
 }
 
 // `claude auth status --json` が読めた場合は判定対象のフィールドを、

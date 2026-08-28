@@ -205,7 +205,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 **ユニットテスト**（純粋関数、既存のローカル実行引数テストは変更しない）:
 
 - `parseWorkerEntry()` が `cloud` を正しくパースする / 不正値で既定へ倒れる
-- `buildClaudeArgs()` がクラウド時に `-p` / `--permission-mode bypassPermissions` / `--disallowedTools` を含まず、`--cloud` と `--ref`（または `--on-branch`）を含む
+- `buildClaudeArgs()` がクラウド時に `-p` を含まず、`--permission-mode bypassPermissions` / `--disallowedTools` はローカルと同一に含んだうえで `--cloud` と `--ref`（または `--on-branch`）を含む（4.2参照）
 - `--ref` と `--on-branch` が同時に付かない
 - 既存テスト（ローカル実行の引数）が**一切変わらない**こと
 
@@ -248,7 +248,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 ## 10. 段階導入
 
-- **Phase 1**（本 PRD の主対象）: `cloud` 設定 + 引数の組み立て + `mode: "herdr"` 限定 + 適合性「◎/○」のワーカーのみ許可。default モード・非対応ワーカーは起動時エラー
+- **Phase 1**（本 PRD の主対象）: `cloud` 設定 + 引数の組み立て + `mode: "herdr"` 限定 + 起動時ガードは `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design`）のみを拒否する deny-list 方式（5章・受け入れ基準6参照）。適合性「△/✕」でも同リストに含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot` 等）は起動時に拒否しない。default モード・`CLOUD_DENIED_WORKERS` は起動時エラー
 - **Phase 2**: 以下の残課題に取り組む
   - `mode: "default"` でのクラウド実行
   - ドライバ再接続と**完了検知の代替チャネル**。S-2 の実測で `--teleport` によるローカルドライバ接続が成立しないことが確定したため（→9-8）、herdr の agent ステータスに代わる検知手段が要る。副次的な観測（`docs/cloud-session-launch-flags.md` M-8）として、`claude agents --json` は TTY 無しで `status`（`idle` / `busy`）を返し herdr 非依存の完了検知に使えるが、**返るのはローカルセッションのみでクラウドセッションは1件も含まれない**ため、そのままではクラウド実行の完了検知には使えない

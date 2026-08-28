@@ -8,7 +8,7 @@
 
 ## 実測環境
 
-- クラウドセッション: `session_01XesS7zS2EKtwCAecPvkmjD`（`script -q /dev/null claude --cloud "<desc>"` で作成）
+- クラウドセッション: `session_<REDACTED-1>`（`script -q /dev/null claude --cloud "<desc>"` で作成）
 - プローブ投函: `claude -p --cloud <session_id> "<prompt>"`（非TTY）。結果の回収は claude.ai/code のセッションページのみ（CLI に取得経路が無いことは `docs/cloud-session-launch-flags.md` M-5 / M-8 で既測）
 - クラウド VM: Linux x86_64 / `root` / cwd `/home/user/repo`
 - **このリポジトリでは claude.ai 側の GitHub App 連携が未設定**。VM の作業ツリーはローカル worktree のアップロードでシードされ、`git remote` は0件（`docs/cloud-session-launch-flags.md` T11 / M-5 と同じ状態）
@@ -112,7 +112,7 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 
 ## ワーカー別適合性（PRD 5章 適合性表の差し替え用）
 
-判定は「Phase 1 でクラウド実行を推奨してよいか」。**本実測の結果は、GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しないことを示している**（そもそも `git remote` が無く push も PR 作成もできない。`docs/cloud-session-launch-flags.md` M-5 で既測）。以下は「連携を設定してリポジトリゲートを解いた場合に、**GraphQL ゲートだけが残る**」という前提での判定で、GraphQL ゲートがリポジトリ連携と独立であることは B1 で裏付けられている。
+判定は「Phase 1 でクラウド実行を推奨してよいか」。**本実測の結果は、GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しないことを示している**（そもそも `git remote` が無く push も PR 作成もできない。`docs/cloud-session-launch-flags.md` M-5 で既測）。以下は「連携を設定してリポジトリゲートを解いた場合に、**GraphQL ゲートだけが残る**」という前提での判定である。この前提の根拠である「GraphQL ゲートはリポジトリ連携と独立している」という結論（B1）は、**GitHub App 連携が未設定のセッションでの実測**（リポジトリを含まないクエリと含むクエリが同一の403を返した）にとどまり、連携済みセッションでの挙動は未検証である。
 
 | ワーカー | 判定 | GraphQL 403 で劣化する操作 | ラベル遷移・成果物検証への影響 |
 |---|---|---|---|
@@ -168,7 +168,7 @@ Content-Type: application/json; charset=utf-8
 
 ### P-4: 通過する REST（`gh api user -i` / `gh api rate_limit`）
 
-`gh api user` は 200 を返し、`Server: github.com` / `X-Github-Request-Id: 1046:369991:702C9AD:17C1A3C7:6A90D2A2` / `X-Github-Api-Version-Selected: 2022-11-28` を含む完全な GitHub ヘッダ群を伴った（＝実際に GitHub へ到達している）。`gh auth status` は `X Failed to log in to github.com using token (GH_TOKEN)` と警告するが `gh api user` は `getty104` を返す。**環境変数のトークンはプレースホルダで、実際の資格情報はプロキシが注入している**。
+`gh api user` は 200 を返し、`Server: github.com` / `X-Github-Request-Id: 1046:369991:702C9AD:17C1A3C7:6A90D2A2` / `X-Github-Api-Version-Selected: 2022-11-28` を含む完全な GitHub ヘッダ群を伴った（＝実際に GitHub へ到達している）。`gh auth status` は `X Failed to log in to github.com using token (GH_TOKEN)` と警告するが `gh api user` は `<local-user>` を返す。**環境変数のトークンはプレースホルダで、実際の資格情報はプロキシが注入している**。
 
 ```
 gh api rate_limit --jq .rate
@@ -250,6 +250,6 @@ P-2 の403本文が案内する `add_repo` を実行してリポジトリゲー�
 
 本実測により以下1件のクラウドセッションが作成された:
 
-- `session_01XesS7zS2EKtwCAecPvkmjD`（P-1〜P-7。すべて読み取り専用のプローブで、`add_repo`・書き込み系 API・push・commit・ファイル編集はいずれも実行していない）
+- `session_<REDACTED-1>`（P-1〜P-7。すべて読み取り専用のプローブで、`add_repo`・書き込み系 API・push・commit・ファイル編集はいずれも実行していない）
 
 不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。GitHub 側への副作用は無い（すべての書き込みプローブは存在しないオブジェクトID宛てで、かつリポジトリゲートで拒否されている）。

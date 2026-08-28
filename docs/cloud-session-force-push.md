@@ -9,7 +9,7 @@
 
 ## 実測環境
 
-- 実行パス: `/Users/getty104/.local/bin/claude`
+- 実行パス: `~/.local/bin/claude`
 - OS: macOS (darwin 25.6.0)
 - 実行ディレクトリ: git の **linked worktree**（`.claude/worktrees/<name>`）
 - pty は `script -q /dev/null <cmd>` で割り当て

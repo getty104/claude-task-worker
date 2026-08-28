@@ -29,7 +29,7 @@
 
 ### 1. 事前条件
 
-```
+```bash
 scripts/cloud-smoke-test.sh preflight <worker-name>
 ```
 
@@ -50,10 +50,12 @@ scripts/cloud-smoke-test.sh preflight <worker-name>
 
 - **目視**: herdr の agent ステータスが `done`、または `working` を経由した後の `idle` になることを確認する（`observeAgentStatus()` の判定と同じ）。`blocked` のまま止まる場合は driver がユーザー入力待ちになっている（`AskUserQuestion` 相当）ことを意味し、これが `idle` に誤検知されていないかを確認する
 - ここが本 smoke test の核心。「S-1/S-2 の前提の再確認」セクションの5番（クラウドをドライブし続ける TUI の有無）に直結する
+- **`working`/`done`/`idle`/`blocked` はいずれも herdr のローカル driver（タスクタブ）の状態であり、クラウドVM側のタスク完了そのものを証明しない**（`docs/prd-cloud-worker-execution.md` 参照）。クラウド側の完了を確認する期待結果は次の2つ: (1) **目視**: claude.ai/code のセッションURLを開き、実際にタスクが完了していることを確認する、(2) **目視**: 手順5のSlack通知が届くこと
+- **`agent_not_found`（および `pane_not_found`）はタイムアウトではない**。`waitForHerdrTask()`（`src/herdr-runner.ts`）は claude 死亡・タブの手動クローズをこのエラーで検出し、ポーリング継続やタイムアウト待ちをせず即座に `failed` を返す。この場合ワーカーは失敗通知（Slack）を送るが、**クラウド側のセッション自体は残存しうる**（ローカル driver の消失はクラウドセッションの削除を意味しない）。残った場合は手順6と同様に claude.ai/code の一覧から手動で削除する
 
 ### 4. PR実在確認 — 基準3
 
-```
+```bash
 scripts/cloud-smoke-test.sh check-labels <issue-number>
 scripts/cloud-smoke-test.sh check-pr <issue-number> <base-branch> <task-started-epoch-ms>
 ```
@@ -67,7 +69,7 @@ scripts/cloud-smoke-test.sh check-pr <issue-number> <base-branch> <task-started-
 
 ### 6. 後片付け
 
-```
+```bash
 scripts/cloud-smoke-test.sh snapshot after
 ```
 
@@ -84,7 +86,7 @@ scripts/cloud-smoke-test.sh snapshot after
 - 実測日: `claude --version` 2.1.247 / `herdr --version` 0.8.2（2026-08-27時点）
 - **失効注記**: `claude --version` / `herdr --version` が上記より新しい場合は、下記5点を再実測すること
 
-1. **引数の受理可否**（S-1）: `-p` と `--cloud` の併用が拒否される／非TTYの `--cloud` が拒否される／`--ref` と `--on-branch` の併用が拒否される／`--permission-mode` `--disallowedTools` `--append-system-prompt-file` `--model` `--effort` は受理される
+1. **引数の受理可否**（S-1）: `-p` と `--cloud` の併用が拒否される／非TTYの `--cloud` が拒否される／`--ref` と `--on-branch` の併用が拒否される／`--permission-mode` `--disallowedTools` `--append-system-prompt-file` `--model` `--effort` `--advisor` `--chrome` は受理される（`--advisor` は `buildClaudeArgs()`（`src/claude-args.ts`）が `advisorModel` 指定時のみ付与する。`--chrome` は本ツールからは付与されないが、claude CLI 側が受理することは `docs/cloud-session-launch-flags.md` T7 で確認済みのため確認対象に含める）
 2. **driver の状態遷移**（S-2 / M-2・M-4）: `working`/`idle`/`done`/`blocked` が正しく返り、`AskUserQuestion` 相当の停止が `blocked` を返し続けること（`idle` への誤返却がないこと）
 3. **`agent_session` の値がクラウドセッションIDと一致しない**（S-2 / PRD 9-9）: `agentGet()` の `agent_session.value` はローカル claude のセッションUUID形式で、クラウドセッションID（`session_01…`形式）とは別物であること
 4. **クラウドターンのローカル transcript が生成されない**（S-2 / PRD 9-4）: `~/.claude/projects/*/<sessionId>.jsonl` がクラウドセッションのターンでは生成されないこと
@@ -108,7 +110,7 @@ scripts/cloud-smoke-test.sh snapshot after
 
 以下をコピーして実測のたびに埋める。
 
-```
+```markdown
 ### 実測 YYYY-MM-DD
 
 - claude --version:
