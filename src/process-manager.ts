@@ -257,7 +257,8 @@ export const CLOUD_POLL_INTERVAL_MS = 30 * 1000;
 // クラウドタスクの打ち切り上限。これを超えたら failed として人手確認へ回す。
 // タイムアウトに落ちる典型: AskUserQuestion で停止したセッション・VM 側クラッシュ・
 // プラグイン未導入による空振り・ラベル付与自体の失敗。
-export const CLOUD_TASK_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+// テストから短縮できるよう CTW_CLOUD_TASK_TIMEOUT_MS で上書き可能にしてある。
+export const CLOUD_TASK_TIMEOUT_MS = Number(process.env.CTW_CLOUD_TASK_TIMEOUT_MS) || 4 * 60 * 60 * 1000;
 
 type CloudTargetType = "issue" | "pr";
 
