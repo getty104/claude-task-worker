@@ -9,7 +9,7 @@ import {
   type WorkerRuntimeConfig,
 } from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
-import { PLUGIN_NAME, MARKETPLACE_NAME, MARKETPLACE_SOURCE } from "./install.js";
+import { PLUGIN_NAME, MARKETPLACE_NAME, MARKETPLACE_SOURCE, PROJECT_SETTINGS_PATH } from "./install.js";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
 // 制約下で「**同時に付きうるラベル同士**の最小 ΔE(CIE2000) を最大化する15色」を数値最適化した。
@@ -139,8 +139,6 @@ async function createConfig(force: boolean): Promise<void> {
   const result = await writeFileWithMode(CONFIG_PATH, JSON.stringify(initialConfig, null, 2), force);
   logWriteResult(result, CONFIG_PATH);
 }
-
-export const PROJECT_SETTINGS_PATH = ".claude/settings.json";
 
 // プラグインを**プロジェクト設定**（`.claude/settings.json`）へ登録する。ローカルの
 // `claude plugin install`（`install` コマンド）はユーザー設定（`~/.claude/settings.json`）に
