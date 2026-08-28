@@ -1,6 +1,7 @@
 import { CODEGRAPH_PACKAGE, installCodegraphCli } from "./codegraph.js";
 import { DESIGN_MD_PACKAGE, installDesignMdCli } from "./design-md";
 import { PEN_PACKAGE, installPenCli } from "./pen";
+import { installPlaywrightBrowsers } from "./playwright";
 import { npmInstallGlobalLatest, runCommand } from "./run-command.js";
 
 export const PLUGIN_NAME = "claude-task-worker";
@@ -71,8 +72,9 @@ export async function install(): Promise<void> {
   const codegraphOk = await installCodegraphCli("install");
   const designMdOk = await installDesignMdCli("install");
   const penOk = await installPenCli("install");
+  const playwrightOk = await installPlaywrightBrowsers("install");
   await printGlobalPackageVersions("install");
-  if (!pluginOk || !cliOk || !codegraphOk || !designMdOk || !penOk) {
+  if (!pluginOk || !cliOk || !codegraphOk || !designMdOk || !penOk || !playwrightOk) {
     process.exitCode = 1;
   }
   console.log("[install] Done.");

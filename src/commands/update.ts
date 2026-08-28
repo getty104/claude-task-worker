@@ -2,6 +2,7 @@ import { upgradeCodegraphCli } from "./codegraph.js";
 import { printGlobalPackageVersions } from "./install";
 import { installDesignMdCli } from "./design-md";
 import { installPenCli } from "./pen";
+import { installPlaywrightBrowsers } from "./playwright";
 import { npmInstallGlobalLatest, runCommand } from "./run-command.js";
 
 const PLUGIN_NAME = "claude-task-worker";
@@ -53,8 +54,10 @@ export async function update(): Promise<void> {
   const designMdOk = await installDesignMdCli("update");
   // Pen CLI も self-upgrade 機構を持たないため、更新はインストールと同じ関数（旧パッケージ削除込み）。
   const penOk = await installPenCli("update");
+  // Playwright のブラウザ取得も冪等（取得済みならスキップ）なので install と同じ関数を呼ぶ。
+  const playwrightOk = await installPlaywrightBrowsers("update");
   await printGlobalPackageVersions("update");
-  if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk || !designMdOk || !penOk) {
+  if (!marketplaceOk || !pluginOk || !cliOk || !codegraphOk || !designMdOk || !penOk || !playwrightOk) {
     process.exitCode = 1;
   }
   console.log("[update] Done.");
