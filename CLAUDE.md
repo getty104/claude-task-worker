@@ -32,10 +32,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/gh.ts`** - GitHub CLI (`gh`) ラッパー。全GitHub操作を集約
 - **`src/process-manager.ts`** - 子プロセス管理。リアルタイムステータステーブル表示、プロセスライフサイクル管理
 - **`src/table.ts`** - 端末テーブル描画のヘルパー。`getDisplayWidth()`/`truncateToWidth()`/`padToWidth()`（全角を幅2として扱う桁揃え）、`buildTaskTableLines()`（ステータステーブルの行組み立て）。`buildTaskTableLines()` は副作用を持たない純粋関数で、`process-manager.ts` の `renderTable()` が画面差し替え + 出力のみを担う。あわせてログのローリングバッファ（`logLines` / `pushLogLine()`）、画面差し替え（`writeScreen()`）、**console 出力のキャプチャ（`captureConsole()`）** を持つ。ワーカー/ディスパッチャーは毎秒テーブルを再描画（画面クリア）するため、`console.error` 等をそのまま端末へ出すと一瞬しか見えない。`captureConsole()` は `console.log/info/warn/error` を差し替えて `logLines` へ流し込み、Logs テーブルの一部として残す（`id` を持たない行として `-` 列で表示）。テーブル描画側はパッチ前の console を握った `writeScreen()` を使う（パッチ済み console を使うと描画結果がバッファへ流れ込んで自己増殖する）。描画前にプロセスが終了しても消えないよう、`process.on("exit")` で残ログを端末へ書き出す。呼び出しは `index.ts`（ワーカー系は `assertRunPrerequisites()`、`--project` はディスパッチャー分岐）で、`init`/`install`/`update`/`usage` のようなテーブルを描かない一発コマンドでは呼ばない（キャプチャすると出力が出なくなるため）。**実行中/完了のセクション振り分けは `TaskTableEntry.status` で行い、表示用の status 文字列では判定しない**。herdr モードの実行中行は `running:working` のように agentStatus を併記した装飾済み文字列になるため、表示値で `=== "running"` を見ると実行中タスクが完了セクション（区切り罫線の下）へ紛れ込む
-- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて Issue テンプレート・GitHub Actions ワークフロー・設定ファイル（`claude-task-worker.json`）の生成、CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）、および**クラウド実行のオプトイン時のみ**プロジェクト設定（`.claude/settings.json`）への本プラグインの登録を行う
-  - 実行条件は `shouldRegisterPlugin()`（純粋関数）が判定する。`init --cloud` の明示指定、または `claude-task-worker.json` の `workers.*.cloud` のいずれかが `true` のとき登録する。どちらでもなければ `.claude/settings.json` を一切読み書きしない（無条件実行はしない）
-  - 登録は `mergePluginSettings()` が `extraKnownMarketplaces.claude-task-worker` と `enabledPlugins["claude-task-worker@claude-task-worker"]` の2キーだけを**既存設定へマージ**する（`permissions` / `hooks` / 他プラグインを壊さないため。同じ内容なら書き込まない冪等な処理で、既存ファイルが JSON として壊れている場合は上書きせず警告のみ）
-  - **ユーザー設定ではなくプロジェクト設定へ書くのは Claude Code on the web のため**。`install` コマンドの `claude plugin install` はユーザー設定（`~/.claude/settings.json`）へ書くのでリポジトリをクローンした別環境には届かないが、web はリポジトリの `.claude/settings.json` を読むため、ここに登録しておけば web セッションでも本プラグインのスキルがそのまま使える
+- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて Issue テンプレート・GitHub Actions ワークフロー・設定ファイル（`claude-task-worker.json`）の生成、CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）を行う
 - **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI / DESIGN.md CLI / Pen CLI のインストール・Playwright ブラウザの取得を一括で行うコマンド
 - **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI / DESIGN.md CLI / Pen CLI・Playwright ブラウザの更新コマンド
 - **`src/commands/codegraph.ts`** - CodeGraph（`@colbymchenry/codegraph`）連携。`installCodegraphCli()`（`npm install -g` によるインストール）、`upgradeCodegraphCli()`（`codegraph upgrade` による更新。CodeGraph 自身の更新機構を使うことで配布方法の変更に追随できる。未インストール環境では `codegraph` コマンドが無く失敗するため `installCodegraphCli()` へフォールバックする）、`runCodegraphInit()`（`codegraph init`）、`ensureCodegraphGitIgnore()`（グローバル gitignore への `.codegraph/` 追記）、`globalGitIgnorePath()`/`appendIgnoreEntry()`（テスト可能な純粋関数）
@@ -353,14 +350,14 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 #### 前提条件
 
-4つあり、契約が2種類に分かれる。1（claude.ai アカウントでのサインイン）と 3（リポジトリ `.claude/settings.json` へのプラグイン宣言）は**起動時に静的検査でき、満たさなければエラー終了する**（タスクを1件も起動しない）。2（GitHub 連携）と 4（`allow_remote_sessions` 組織ポリシー）は**ローカルから照会する手段が無い**ため静的検査せず、案内に留める（`docs/cloud-prerequisite-checks.md`、Issue #225 の実測）。
+4つあり、**起動時に静的検査でき、満たさなければエラー終了する**（タスクを1件も起動しない）のは 1（claude.ai アカウントでのサインイン）のみ。2（GitHub 連携）・3（プラグイン導入）・4（`allow_remote_sessions` 組織ポリシー）は**ローカルから照会する手段が無い**ため静的検査せず、案内に留める（`docs/cloud-prerequisite-checks.md`、Issue #225 の実測）。
 
 - **1（サインイン）**: `checkCloudAuth()` が `claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で判定する。API キー認証・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成ではクラウドセッションを作成できない。**`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返す**ため `apiKeySource` の不在を併せて見る必要がある。コマンドの実行・パースに失敗した「判定不能」は**エラーにしない**（サインイン状態が読めないことを拒否根拠にしない安全側の倒し方）
 - **2（GitHub 連携）**: 非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない
-- **3（プラグイン宣言）**: `checkPluginDeclaration()` が `.claude/settings.json` の `extraKnownMarketplaces` / `enabledPlugins` の2キーを見る。クラウドセッションが読むのは**リポジトリの**設定で、`claude plugin install` が書くユーザー設定（`~/.claude/settings.json`）は届かない。未宣言だとスキルがクラウド VM に存在せずセッションが空振りするため、静的検査で落とす
+- **3（プラグイン導入）**: クラウド VM の環境セットアップスクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行してプラグイン・CLI を導入する。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式（`checkPluginDeclaration()` による静的検査）は、クラウドセッションがその宣言を読んで自動的にプラグインを有効化するという前提が事実でなかったため撤去した（Issue #268）。VM 側で `install` を実行済みかどうかはローカルから確認できないため静的検査は行わない
 - **4（`allow_remote_sessions` 組織ポリシー）**: CLI がポリシーを `policy-limits.json` にキャッシュする実装を持つが実測環境では生成されず、「未取得」と「拒否」を区別できないため静的検査しない
 
-これらの検査は `cloud: true` のワーカーが1件も無ければ **I/O ごと行わない**（`cloud` を書かない既存リポジトリでの挙動を完全に不変に保つため）。
+上記1の検査は `cloud: true` のワーカーが1件も無ければ **I/O ごと行わない**（`cloud` を書かない既存リポジトリでの挙動を完全に不変に保つため）。
 
 ### `--project` ディスパッチ
 
@@ -517,7 +514,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `claude-task-worker` プラグイン（本リポジトリの `plugin/`）がインストール済み
   - `npx claude-task-worker install` で一括セットアップ可能
   - 手動の場合: `claude plugin marketplace add getty104/claude-task-worker` → `claude plugin install claude-task-worker@claude-task-worker`
-  - Claude Code on the web からも実行する場合、およびクラウド実行（`workers.<name>.cloud: true`）を使う場合は、リポジトリの `.claude/settings.json` への本プラグインの登録が**必須の前提条件**になる。**未宣言のままだとワーカー起動時の静的検査（`checkPluginDeclaration()`）で失敗し、そのワーカーはタスクを1件も起動しない**（クラウドセッションはリポジトリのプロジェクト設定を読むため、`claude plugin install` が書くユーザー設定 `~/.claude/settings.json` は届かない）。登録は `claude-task-worker init --cloud` の明示指定、または `claude-task-worker.json` の `workers.*.cloud` のいずれかが `true` の状態での `claude-task-worker init`（`shouldRegisterPlugin()` の判定）で行う
+  - Claude Code on the web からも実行する場合、およびクラウド実行（`workers.<name>.cloud: true`）を使う場合は、クラウド VM の環境セットアップスクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行し、VM 側にプラグイン・CLI を導入しておく（リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した。Issue #268）
   - あわせて claude.ai アカウントでのサインインもクラウド実行の必須前提。未サインイン・API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）構成では、同じくワーカー起動時の静的検査（`checkCloudAuth()`）でエラー終了する（詳細は Architecture の「クラウド実行（`workers.<name>.cloud`）」参照）
 - CodeGraph (`codegraph`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`codegraph serve --mcp`）。`explore-agent` およびワーカー起動セッションは**この MCP ツール経由で** CodeGraph を使う。ツールが無い場合、および未インデックスでエラー・空結果が返る場合は `Glob`/`Grep` にフォールバックする

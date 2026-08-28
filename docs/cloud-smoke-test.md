@@ -16,12 +16,13 @@
 | 1 | `mode: "herdr"` | `~/.config/claude-task-worker/config.json` の `mode` |
 | 2 | 対象ワーカーの `cloud: true` | リポジトリ直下 `claude-task-worker.json` の `workers.<name>.cloud` |
 | 3 | claude.ai サインイン | `claude auth status --json`（判定式は `docs/cloud-prerequisite-checks.md` 参照） |
-| 4 | プラグイン宣言 | `.claude/settings.json` の `extraKnownMarketplaces.claude-task-worker` と `enabledPlugins["claude-task-worker@claude-task-worker"]`（`claude-task-worker init --cloud` が書く） |
-| 5 | herdr の疎通 | `herdr --version` が応答すること |
+| 4 | herdr の疎通 | `herdr --version` が応答すること |
+
+クラウド VM 側の事前セットアップとして、環境設定スクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行し、プラグイン・CLI を導入しておくこと。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した（Issue #268）。
 
 **GitHub App 連携（claude.ai 側）が未設定のリポジトリでは `--ref` / `--on-branch` が拒否される**（`docs/cloud-session-launch-flags.md` 実測）。事前に対象リポジトリで https://claude.ai/code の GitHub 連携を済ませておくこと。連携未設定のまま進めると、後述の「セッション作成」段で `Error: --ref <branch> cannot be honored: ...` を受け取って停止する。
 
-`scripts/cloud-smoke-test.sh preflight` が上記1〜5のうち自動判定できる部分（1・2・3・4・herdr/gh/jqの存在）をまとめて確認する。
+`scripts/cloud-smoke-test.sh preflight` が上記1〜4と herdr/gh/jq の存在をまとめて確認する。
 
 ## 手順
 
@@ -33,7 +34,7 @@
 scripts/cloud-smoke-test.sh preflight <worker-name>
 ```
 
-事前条件1〜5がOK/NGで出る。NGがあれば解消してから進む。
+事前条件1〜4がOK/NGで出る。NGがあれば解消してから進む。
 
 ### 2. セッション作成・タスク投入 — 基準2・7
 
@@ -99,7 +100,7 @@ scripts/cloud-smoke-test.sh snapshot after
 | claude.ai/code 上のセッション表示 | 目視 |
 | driver の agent ステータス遷移（`working`/`idle`/`done`/`blocked`） | 目視 |
 | Slack 通知本文とセッションURLの到達性 | 目視 |
-| 事前条件1〜5（mode / cloud設定 / サインイン / プラグイン宣言 / herdr疎通） | `scripts/cloud-smoke-test.sh preflight` |
+| 事前条件1〜4（mode / cloud設定 / サインイン / herdr疎通） | `scripts/cloud-smoke-test.sh preflight` |
 | Issueラベルの遷移 | `scripts/cloud-smoke-test.sh check-labels` |
 | closing参照PRの候補列挙 | `scripts/cloud-smoke-test.sh check-pr` |
 | worktree・ローカルブランチの残骸有無 | `scripts/cloud-smoke-test.sh snapshot` |

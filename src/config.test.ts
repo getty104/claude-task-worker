@@ -15,7 +15,6 @@ const {
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
   checkCloudConfig,
-  checkPluginDeclaration,
   checkCloudAuth,
 } = (await import("./config")) as typeof ConfigModule;
 
@@ -233,65 +232,6 @@ test("checkCloudConfig reports nothing for the existing default configuration (c
   assert.deepEqual(checkCloudConfig({ workers: WORKER_DEFAULTS, mode: "default" }), []);
 });
 
-const PLUGIN_KEY = "claude-task-worker@claude-task-worker";
-const okSettings = (): {
-  extraKnownMarketplaces: Record<string, unknown>;
-  enabledPlugins: Record<string, unknown>;
-} => ({
-  extraKnownMarketplaces: {
-    "claude-task-worker": { source: { source: "github", repo: "getty104/claude-task-worker" } },
-  },
-  enabledPlugins: { [PLUGIN_KEY]: true },
-});
-
-test("checkPluginDeclaration reports nothing when both keys are declared", () => {
-  assert.deepEqual(checkPluginDeclaration({ kind: "ok", value: okSettings() }), []);
-});
-
-test("checkPluginDeclaration reports missing declaration when neither key is present", () => {
-  const errors = checkPluginDeclaration({ kind: "ok", value: {} });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /init --cloud/);
-});
-
-test("checkPluginDeclaration reports file absence", () => {
-  const errors = checkPluginDeclaration({ kind: "missing" });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /\.claude\/settings\.json/);
-});
-
-test("checkPluginDeclaration reports broken JSON", () => {
-  const errors = checkPluginDeclaration({ kind: "invalid", reason: "Unexpected token }" });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /Unexpected token/);
-});
-
-test("checkPluginDeclaration reports which of the two keys is missing", () => {
-  const settings = okSettings();
-  delete (settings.enabledPlugins as Record<string, unknown>)[PLUGIN_KEY];
-  const errors = checkPluginDeclaration({ kind: "ok", value: settings });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /enabledPlugins/);
-});
-
-test("checkPluginDeclaration rejects a marketplace entry pointing at a different repo", () => {
-  const settings = okSettings();
-  (settings.extraKnownMarketplaces as Record<string, unknown>)["claude-task-worker"] = {
-    source: { source: "github", repo: "someone-else/fork" },
-  };
-  const errors = checkPluginDeclaration({ kind: "ok", value: settings });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /extraKnownMarketplaces/);
-});
-
-test("checkPluginDeclaration rejects a plugin value that is truthy but not exactly true", () => {
-  const settings = okSettings();
-  (settings.enabledPlugins as Record<string, unknown>)[PLUGIN_KEY] = "true";
-  const errors = checkPluginDeclaration({ kind: "ok", value: settings });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /enabledPlugins/);
-});
-
 // M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
 test("checkCloudAuth allows a normal claude.ai sign-in", () => {
   const errors = checkCloudAuth({
@@ -363,11 +303,10 @@ test("checkCloudAuth treats an indeterminate status as not an error", () => {
   assert.deepEqual(checkCloudAuth({ status: { kind: "unknown" } }), []);
 });
 
-test("checkCloudConfig does not inspect settings/auth when no worker has cloud: true", () => {
+test("checkCloudConfig does not inspect auth when no worker has cloud: true", () => {
   const errors = checkCloudConfig({
     workers: WORKER_DEFAULTS,
     mode: "default",
-    settings: { kind: "invalid", reason: "boom" },
     auth: { status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" } },
   });
   assert.deepEqual(errors, []);
