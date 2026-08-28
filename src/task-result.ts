@@ -14,24 +14,21 @@ export interface TaskResult {
 // allow_remote_sessions 組織ポリシーはローカルから静的判定できない
 // （docs/cloud-prerequisite-checks.md の「案内メッセージの文面案」2・4）。
 // そのため起動時エラーにはできず、タスクが実際に失敗したときの案内としてのみ付与する。
+// Slack 通知は output の末尾1000文字しか載せない（src/slack.ts）ため、案内文は
+// 実際のエラー本文を押し出さないよう短く保ち、かつエラー本文より前に置く。
 const CLOUD_FAILURE_GUIDANCE =
-  "[worker] クラウドセッションの作成が GitHub 連携の未設定で失敗した可能性があります" +
-  "（`--ref` / `--on-branch` が拒否された場合はこれが原因です）。" +
-  "https://claude.ai/code で対象リポジトリの GitHub 連携をセットアップしてください。" +
-  "GitHub App の認可、または `/web-setup` による `gh` トークンの同期のどちらでも構いません。" +
-  "ローカルからは連携状態を確認する手段がないため、事前チェックは行っていません。\n" +
-  "[worker] クラウドセッションの作成が組織ポリシー（`allow_remote_sessions`）で拒否された可能性があります。" +
-  "組織の管理者にクラウドセッションの有効化を依頼してください。" +
-  "`Couldn't verify your organization's policy` と表示された場合はポリシーの取得自体に失敗しています" +
-  "（ネットワークを確認してください）。ローカルからはポリシーを照会する手段がないため、事前チェックは行っていません。";
+  "[worker] クラウド実行の前提条件（GitHub 連携 / allow_remote_sessions 組織ポリシー）が" +
+  "満たされていない可能性があります。詳細は docs/cloud-prerequisite-checks.md を参照してください。";
 
 /**
  * クラウド実行の失敗結果にのみ、前提条件の案内を output へ追記する。
  * ローカル実行（cloud が false）や完了結果には一切追記しない。
+ * 案内文は output の前に置く。Slack 通知は末尾1000文字を切り出すため、後ろに置くと
+ * 実際のエラー本文が案内文に押し出されて読めなくなる。
  */
 export function appendCloudFailureGuidance(result: TaskResult, cloud: boolean | undefined): TaskResult {
   if (!cloud || result.status === "completed") return result;
-  return { ...result, output: `${result.output}\n${CLOUD_FAILURE_GUIDANCE}` };
+  return { ...result, output: `${CLOUD_FAILURE_GUIDANCE}\n${result.output}` };
 }
 
 /**
