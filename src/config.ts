@@ -32,6 +32,9 @@ export interface WorkerRuntimeConfig {
   pollingIntervalSeconds: number;
   cooldownSeconds: number;
   maxConcurrentTasks: number;
+  // ワーカー単位のクラウド実行オプトイン。既定は必ず false（クラウド実行はワーカーの
+  // 明示的なオプトインが無い限り有効化しない）。
+  cloud: boolean;
 }
 
 // Pencil デザイン先行ワークフロー（create-ui-design / apply-ui-design）の設定。
@@ -71,6 +74,7 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   pollingIntervalSeconds: 60,
   cooldownSeconds: 0,
   maxConcurrentTasks: 1,
+  cloud: false,
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
@@ -82,6 +86,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "create-issue": {
     skill: "/claude-task-worker:create-issue-from-issue-number",
@@ -91,6 +96,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "update-issue": {
     skill: "/claude-task-worker:update-issue",
@@ -100,6 +106,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "exec-issue": {
     skill: "/claude-task-worker:exec-issue",
@@ -109,6 +116,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "fix-review-point": {
     skill: "/claude-task-worker:fix-review-point",
@@ -118,6 +126,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "triage-created-issue": {
     skill: "/claude-task-worker:triage-created-issue",
@@ -127,6 +136,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "triage-pr": {
     skill: "/claude-task-worker:triage-pr",
@@ -136,6 +146,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "resolve-conflict": {
     skill: "/claude-task-worker:resolve-pr-conflict",
@@ -145,6 +156,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "check-dependabot": {
     skill: "/claude-task-worker:check-dependabot",
@@ -154,6 +166,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "epic-issue": {
     skill: "/claude-task-worker:create-epic-pr",
@@ -163,6 +176,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "create-ui-design": {
     skill: "/claude-task-worker:create-ui-design",
@@ -172,6 +186,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "apply-ui-design": {
     skill: "/claude-task-worker:apply-ui-design",
@@ -181,6 +196,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   // 以下3つは定期ワーカー（createScheduledWorker）。実行間隔そのものは
   // SCHEDULE_INTERVAL_HOURS（24時間）と実行ログで決まり、pollingIntervalSeconds は
@@ -195,6 +211,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "update-requirement-rules": {
     skill: "/claude-task-worker:update-requirement-rules",
@@ -204,6 +221,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
   "update-design-md": {
     skill: "/claude-task-worker:update-design-md",
@@ -213,6 +231,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    cloud: false,
   },
 };
 
@@ -304,6 +323,13 @@ export function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfi
       console.warn(
         `[config] invalid workers.${name}.maxConcurrentTasks: ${String(val)}, using default ${base.maxConcurrentTasks}`,
       );
+    }
+  }
+  if ("cloud" in entry) {
+    if (typeof entry.cloud === "boolean") {
+      result.cloud = entry.cloud;
+    } else {
+      console.warn(`[config] invalid workers.${name}.cloud: ${String(entry.cloud)}, using default ${base.cloud}`);
     }
   }
   return result;

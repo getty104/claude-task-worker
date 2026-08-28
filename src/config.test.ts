@@ -164,3 +164,30 @@ test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
     assert.ok(WORKER_DEFAULTS[name], `missing defaults for ${name}`);
   }
 });
+
+test("parseWorkerEntry reads a boolean cloud", (t) => {
+  silenceWarn(t);
+  assert.equal(parseWorkerEntry("exec-issue", { cloud: true })?.cloud, true);
+  assert.equal(parseWorkerEntry("exec-issue", { cloud: false })?.cloud, false);
+});
+
+test("parseWorkerEntry defaults cloud to false when unspecified", (t) => {
+  silenceWarn(t);
+  assert.equal(parseWorkerEntry("exec-issue", {})?.cloud, false);
+});
+
+test("parseWorkerEntry falls back to false for a non-boolean cloud", (t) => {
+  silenceWarn(t);
+  // クラウド実行は既定で無効なオプトインなので、不正値は必ず既定（無効）へ倒す。
+  assert.equal(parseWorkerEntry("exec-issue", { cloud: "true" })?.cloud, false);
+  assert.equal(parseWorkerEntry("exec-issue", { cloud: 1 })?.cloud, false);
+  assert.equal(parseWorkerEntry("exec-issue", { cloud: null })?.cloud, false);
+});
+
+test("every worker defaults to cloud disabled", () => {
+  // オプトインが既定で有効化されないことの保証。
+  assert.equal(DEFAULT_WORKER_CONFIG.cloud, false);
+  for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
+    assert.equal(config.cloud, false, `WORKER_DEFAULTS.${name}.cloud`);
+  }
+});
