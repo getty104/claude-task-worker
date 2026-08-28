@@ -291,13 +291,15 @@ test("herdr モード: blocked を完了扱いせず待機を継続し、working
   assert.ok(agentGetCount >= 3, `agent get の記録件数が不足している: ${agentGetCount}`);
 });
 
-test("herdr モード（クラウド実行）: クラウドセッションIDが onComplete まで伝播し、タブラベルが :cloud で終わる", async (t) => {
+test("herdr モード（クラウド実行）: 作成 → 投函の2コマンド方式でクラウドセッションIDが onComplete まで伝播する", async (t) => {
   const { xdgHome, previousXdg } = setupHerdrConfig();
   const stubs = installCliStubs({
     herdr: {
-      agentStatuses: ["working", "done"],
-      paneOutput: "Created cloud session: abc123XYZ\n[stub] pane output",
+      // 作成フェーズはペイン内容のポーリングでセッションIDを拾う。実測の出力形状に合わせる
+      // （`Created cloud session:` の後ろは description であり、`View:` の URL がID本体）。
+      paneOutput: "Created cloud session: ctw:my-app:#123\nView: https://claude.ai/code/session_stubABC?from=cli&m=0",
     },
+    claude: { stdout: "[stub] cloud dispatch report" },
   });
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), "ctw-task-cwd-")));
 
@@ -312,9 +314,10 @@ test("herdr モード（クラウド実行）: クラウドセッションIDが 
     prompt: PROMPT,
     model: "opus",
     effort: "high",
+    cloud: true,
   };
   const execution = buildClaudeExecution(invocation);
-  const env = buildClaudeEnv("herdr");
+  const env = buildClaudeEnv("herdr", true);
   const { onComplete, result } = waitForOnComplete();
 
   run(
@@ -333,14 +336,27 @@ test("herdr モード（クラウド実行）: クラウドセッションIDが 
 
   const { status, cloudSessionId } = await result;
   assert.equal(status, "completed");
-  assert.equal(cloudSessionId, "abc123XYZ");
+  assert.equal(cloudSessionId, "session_stubABC");
 
-  const tabCreate = findHerdrRecord(
-    stubs.records().filter((r) => r.command === "herdr"),
-    "tab",
-    "create",
-  );
+  const herdrRecords = stubs.records().filter((r) => r.command === "herdr");
+
+  const tabCreate = findHerdrRecord(herdrRecords, "tab", "create");
   assert.ok(tabCreate);
   const label = tabCreate.argv[tabCreate.argv.indexOf("--label") + 1];
-  assert.ok(label.endsWith(":cloud"), `タブラベルが :cloud で終わっていない: ${label}`);
+  assert.ok(!label.endsWith(":cloud"), `タブラベルが :cloud で終わってはいけない: ${label}`);
+
+  const sendText = findHerdrRecord(herdrRecords, "pane", "send-text");
+  assert.ok(sendText);
+  assert.ok(sendText.argv[3].includes("--cloud"), `作成コマンドに --cloud が含まれていない: ${sendText.argv[3]}`);
+
+  const claudeRecord = stubs.records().find((r) => r.command === "claude");
+  assert.ok(claudeRecord, "投函コマンド（claude スタブ）の記録が見つからない");
+  assert.deepEqual(claudeRecord.argv, ["-p", "--cloud", "session_stubABC", PROMPT]);
+
+  assert.ok(findHerdrRecord(herdrRecords, "tab", "close"), "作成フェーズ終了後にタブが閉じられていない");
+  assert.equal(
+    findHerdrRecord(herdrRecords, "agent", "start"),
+    undefined,
+    "クラウド実行では herdr agent start を呼んではいけない",
+  );
 });
