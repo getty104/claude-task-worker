@@ -8,11 +8,13 @@ hooks:
       hooks:
         - type: command
           command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
+        - type: command
+          command: "[ \"$CTW_LOCAL_EXECUTION\" = \"1\" ] && bash \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-pr-comments.sh\"; exit 0"
 ---
 
 # Fix Review Point
 
-GitHub PR `$0` の未解決レビューコメントに対応し、修正のコミット・push・Resolve・description更新までを完遂するスキル。Instructionsに従って順に実行し、各フェーズの「完了条件」を満たさないまま次のフェーズに進まないこと。
+GitHub PR `$0` の未解決レビューコメントに対応し、修正のコミット・push・description更新までを完遂するスキル。Instructionsに従って順に実行し、各フェーズの「完了条件」を満たさないまま次のフェーズに進まないこと。
 
 **自律実行モード**: ユーザーへの確認を求めず最後まで自律的に完遂する。判断が必要な場面では本ドキュメントの既定挙動に従って自動で意思決定し、処理を継続する。確認のために停止することは**禁止**（フェーズ0の安全ガード条件に該当する場合のみ中断可）。
 
@@ -224,10 +226,11 @@ gh issue close <issue番号> --reason completed
 1. `commit-push` skill を呼び出し、変更をコミット・push
 2. Push後のCI結果は **待たずに** 次のフェーズへ進む（CIの収束は別ループで扱う）
 
-## フェーズ6: Resolve と description 更新
+## フェーズ6: description 更新
 
-1. `resolve-pr-comments` skill を呼び出し、対応済みのレビューコメントをすべてResolveする
-2. 今回の修正内容を反映してPRのdescriptionを最新化する
+未解決レビューコメントの Resolve は Stop フック（ローカル実行時）またはワーカーの完了コールバック（クラウド実行時）が担うため、本スキル本文の責務ではない。
+
+1. 今回の修正内容を反映してPRのdescriptionを最新化する
    - `gh pr edit $0 --body "<更新後の本文>"` を使用
    - 変更点の要約・テスト観点の追記・既存セクションの整合性を保つ
    - **`## 修正履歴` セクションを必ず設ける**。既存のdescriptionに無ければ末尾に新規追加し、既にあれば追記する形で残す。各エントリは以下のフォーマットに従う:
@@ -241,7 +244,7 @@ gh issue close <issue番号> --reason completed
      - 日付は `date +%Y-%m-%d` で取得した実行日を使用する
      - 過去のエントリは削除・改変せず、新しいエントリを上に追記する（新しいものが上）
      - 1件ごとに「何を指摘され、どう直したか」が読み手に伝わる粒度で書く
-3. 最終報告として、対応した指摘の件数とPRのURLを出力する。あわせて以下のフォーマットで自己監査結果を必ず含める（「実装の委任（判断ロジック）」の適用状況をセッション自身で振り返るためのもので、判定の正当化より事実の記録を優先する）
+2. 最終報告として、対応した指摘の件数とPRのURLを出力する。あわせて以下のフォーマットで自己監査結果を必ず含める（「実装の委任（判断ロジック）」の適用状況をセッション自身で振り返るためのもので、判定の正当化より事実の記録を優先する）
    ```markdown
    ## 実装委任の自己監査
    - 起動したサブエージェント: <エージェント名 × 件数。例: general-purpose-assistant × 2, lightweight-assistant × 1>
