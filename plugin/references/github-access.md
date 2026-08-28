@@ -85,18 +85,10 @@ MCP へ移さない。理由が「クラウドでも `gh` で足りる」では�
 - **レビュースレッドの Resolve**（GraphQL `resolveReviewThread`、`resolve-pr-comments` スキル）。REST に該当エンドポイントが無く、フック／タスクハンドラ実行へ移す方針で別Issueの担当
 - `src/gh.ts` などワーカープロセス側の `gh` 呼び出し。ワーカーはローカルで走り続けるためプロキシのゲートを受けない
 
-## 認証
+## GitHub MCP の有効化
 
-`plugin/.mcp.json` の `github` サーバーはリモート版（`https://api.githubcopilot.com/mcp/`）を `type: "http"` で参照し、認証は OAuth（Claude Code の `/mcp` から実行。トークンを設定ファイルへ保存しない）を既定とする。
+GitHub MCP は Claude 側（claude.ai / Claude Code）のコネクタとして有効化する。有効化していればセッションに GitHub MCP ツールが現れる。
 
-OAuth が成立しない環境では PAT 方式へ切り替える。`plugin/.mcp.json` の `github` エントリへ `headers` を足す:
+本プラグインは `.mcp.json` で GitHub MCP を宣言しない（Claude 側のコネクタと二重登録になるため）。未設定の場合は上記「判定手順」のとおり `gh` へフォールバックする。
 
-```json
-"github": {
-  "type": "http",
-  "url": "https://api.githubcopilot.com/mcp/",
-  "headers": { "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" }
-}
-```
-
-**本リポジトリは public なのでトークンを直書きしない**。環境変数経由でのみ渡すこと。
+有効化の手順は README の「セットアップ」を参照。
