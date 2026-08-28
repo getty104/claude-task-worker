@@ -8,20 +8,41 @@ import { fileURLToPath } from "node:url";
 // （テスト実行時の cwd に依存させないため）。
 const STUBS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "stubs");
 
+export interface GhScenario {
+  /** `gh api user --jq .login` の応答（生文字列） */
+  login?: string;
+  /** `gh repo view --json owner,name,defaultBranchRef` の応答 */
+  repo?: { owner: string; name: string; defaultBranch: string };
+  /** `gh issue list ...` の応答（Issue[] 相当） */
+  issues?: unknown[];
+  /**
+   * `gh issue view <n> --json <fields>` / `gh pr view <n> --json <fields>` の応答。
+   * キーは Issue/PR 番号の文字列。値は返したいフィールドをまとめたオブジェクト
+   * （要求フィールドで絞り込まず、そのまま JSON として返してよい）。未登録番号は {} を返す。
+   */
+  view?: Record<string, Record<string, unknown>>;
+  /** `gh pr list ...` の応答 */
+  prList?: unknown[];
+  /** `gh api graphql`（listPrsClosingIssue）が返す closedByPullRequestsReferences.nodes */
+  closingPrs?: unknown[];
+}
+
 export interface CliStubOptions {
   claude?: {
     stdout?: string;
     stderr?: string;
     exitCode?: number;
+    authStatus?: unknown;
   };
   herdr?: {
     agentStatuses?: string[];
     paneOutput?: string;
   };
+  gh?: GhScenario;
 }
 
 export interface StubRecord {
-  command: "claude" | "herdr";
+  command: "claude" | "herdr" | "gh";
   argv: string[];
   cwd: string;
   env: Record<string, string>;
@@ -59,6 +80,7 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
 
   writeWrapper(join(dir, "claude"), join(STUBS_DIR, "claude-stub.mjs"));
   writeWrapper(join(dir, "herdr"), join(STUBS_DIR, "herdr-stub.mjs"));
+  writeWrapper(join(dir, "gh"), join(STUBS_DIR, "gh-stub.mjs"));
 
   const previousEnv = new Map<string, string | undefined>();
   const setEnv = (key: string, value: string | undefined): void => {
@@ -77,6 +99,11 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
   );
   setEnv("CTW_STUB_HERDR_AGENT_STATUSES", options?.herdr?.agentStatuses?.join(","));
   setEnv("CTW_STUB_HERDR_PANE_OUTPUT", options?.herdr?.paneOutput);
+  setEnv(
+    "CTW_STUB_CLAUDE_AUTH_STATUS",
+    options?.claude?.authStatus === undefined ? undefined : JSON.stringify(options.claude.authStatus),
+  );
+  setEnv("CTW_STUB_GH_SCENARIO", options?.gh === undefined ? undefined : JSON.stringify(options.gh));
 
   return {
     dir,

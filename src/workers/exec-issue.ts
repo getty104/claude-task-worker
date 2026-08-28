@@ -65,6 +65,58 @@ function prMissingComment(worktreeId: string, output: string, cloud: boolean): s
   ].join("\n");
 }
 
+export async function verifyPrCreated(
+  issueNumber: number,
+  worktreeId: string,
+  output: string,
+  ctx: { cloud: boolean; baseBranch: string; startedAt: number },
+): Promise<boolean | void> {
+  // スキルがPRを作成できず cc-need-human-check を付与した場合は、
+  // PRが存在しないのに cc-pr-created を付けて完了扱いにしないよう抑止する。
+  if (await hasLabel("issue", issueNumber, "cc-need-human-check")) {
+    console.log(`[exec-issue] #${issueNumber}: cc-need-human-check present, skip cc-pr-created`);
+    return false;
+  }
+  // 「コード変更不要」パスではスキルが説明コメント付きでIssueをクローズして終了する。
+  // PRが無いのが正しい状態なので cc-pr-created は付けない。
+  if ((await getIssueState(issueNumber)) === "CLOSED") {
+    console.log(`[exec-issue] #${issueNumber}: issue closed by skill (no-change path), skip cc-pr-created`);
+    return;
+  }
+  // exit 0 は「PR作成完了」を保証しない。処理未完のままターンが終わっても print モードでは
+  // プロセスが正常終了するため、PRの実在を確認できた場合のみ cc-pr-created を付与する。
+  // ローカル実行: 作業ブランチ（worktreeId）を head とするPRを第一に、ブランチが変えられた
+  // ケースの保険として closing 参照PR（headRefName一致）も探す。
+  // クラウド実行: worktreeId のブランチは存在しないため findPrNumberByHeadRef は使わず、
+  // closing 参照PRの所有権（base一致＋起動時刻以降の作成）だけを根拠にする。
+  let prNumber: number | null = null;
+  if (!ctx.cloud) {
+    prNumber = await findPrNumberByHeadRef(worktreeId, "all");
+  }
+  if (prNumber === null) {
+    const candidates = await listPrsClosingIssue(issueNumber);
+    prNumber = selectOwnedClosingPr(candidates, {
+      cloud: ctx.cloud,
+      expectedHeadRefName: worktreeId,
+      baseBranch: ctx.baseBranch,
+      startedAt: ctx.startedAt,
+      now: Date.now(),
+    });
+  }
+  if (prNumber !== null) {
+    await addLabel("issue", issueNumber, "cc-pr-created");
+    return;
+  }
+  console.error(
+    `[exec-issue] #${issueNumber}: session exited without a PR (branch: ${worktreeId}); marking cc-need-human-check`,
+  );
+  await addLabel("issue", issueNumber, "cc-need-human-check");
+  await commentOnIssue(issueNumber, prMissingComment(worktreeId, output, ctx.cloud)).catch((err) =>
+    console.error(`[exec-issue] commentOnIssue failed for #${issueNumber}: ${err}`),
+  );
+  return false;
+}
+
 export const execIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
     name: "exec-issue",
@@ -72,50 +124,5 @@ export const execIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: s
     triggerLabels: ["cc-exec-issue"],
     epicFilters: opts.epicFilters,
     labelFilters: opts.labelFilters,
-    onCompleted: async (issueNumber, worktreeId, output, ctx) => {
-      // スキルがPRを作成できず cc-need-human-check を付与した場合は、
-      // PRが存在しないのに cc-pr-created を付けて完了扱いにしないよう抑止する。
-      if (await hasLabel("issue", issueNumber, "cc-need-human-check")) {
-        console.log(`[exec-issue] #${issueNumber}: cc-need-human-check present, skip cc-pr-created`);
-        return false;
-      }
-      // 「コード変更不要」パスではスキルが説明コメント付きでIssueをクローズして終了する。
-      // PRが無いのが正しい状態なので cc-pr-created は付けない。
-      if ((await getIssueState(issueNumber)) === "CLOSED") {
-        console.log(`[exec-issue] #${issueNumber}: issue closed by skill (no-change path), skip cc-pr-created`);
-        return;
-      }
-      // exit 0 は「PR作成完了」を保証しない。処理未完のままターンが終わっても print モードでは
-      // プロセスが正常終了するため、PRの実在を確認できた場合のみ cc-pr-created を付与する。
-      // ローカル実行: 作業ブランチ（worktreeId）を head とするPRを第一に、ブランチが変えられた
-      // ケースの保険として closing 参照PR（headRefName一致）も探す。
-      // クラウド実行: worktreeId のブランチは存在しないため findPrNumberByHeadRef は使わず、
-      // closing 参照PRの所有権（base一致＋起動時刻以降の作成）だけを根拠にする。
-      let prNumber: number | null = null;
-      if (!ctx.cloud) {
-        prNumber = await findPrNumberByHeadRef(worktreeId, "all");
-      }
-      if (prNumber === null) {
-        const candidates = await listPrsClosingIssue(issueNumber);
-        prNumber = selectOwnedClosingPr(candidates, {
-          cloud: ctx.cloud,
-          expectedHeadRefName: worktreeId,
-          baseBranch: ctx.baseBranch,
-          startedAt: ctx.startedAt,
-          now: Date.now(),
-        });
-      }
-      if (prNumber !== null) {
-        await addLabel("issue", issueNumber, "cc-pr-created");
-        return;
-      }
-      console.error(
-        `[exec-issue] #${issueNumber}: session exited without a PR (branch: ${worktreeId}); marking cc-need-human-check`,
-      );
-      await addLabel("issue", issueNumber, "cc-need-human-check");
-      await commentOnIssue(issueNumber, prMissingComment(worktreeId, output, ctx.cloud)).catch((err) =>
-        console.error(`[exec-issue] commentOnIssue failed for #${issueNumber}: ${err}`),
-      );
-      return false;
-    },
+    onCompleted: verifyPrCreated,
   })();
