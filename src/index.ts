@@ -66,7 +66,7 @@ function printUsage(): void {
   console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
 
 Commands:
-  init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
+  init [--force] [--cloud]  Create required GitHub labels and config file (use --force to overwrite existing files; --cloud registers the plugin in .claude/settings.json for Claude Code on the web)
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   usage             Notify current usage to Slack
@@ -293,8 +293,10 @@ if (hasProjectFilter()) {
     }
   })();
 } else if (workerType === "init") {
-  const force = process.argv.slice(3).includes("--force");
-  init({ force });
+  const initArgs = process.argv.slice(3);
+  const force = initArgs.includes("--force");
+  const cloud = initArgs.includes("--cloud");
+  init({ force, cloud });
 } else if (workerType === "install") {
   (async () => {
     await install();
