@@ -14,6 +14,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 本スキルの位置づけ（確認事項の回答責任はここにある）
 
 `triage-created-issue` は確認事項の調査を行わず、未回答の確認事項を内容を問わず本スキルへ委任する。「`gh` コマンドだけでは答えが決まらない項目」が回るのは正常であり、それを理由に回答を放棄して人へ差し戻さない。コードベース・ドキュメント・`.claude/requirements/`・外部リンク（仕様書・ライブラリ公式ドキュメント・関連Issue/PR）まで調査し、**事実で決まる項目は本スキルで決着させる**。
@@ -52,6 +56,8 @@ hooks:
 
 ### ステップ1: Issueとコメントの取得・確認事項の収集
 
+> GitHub MCP が使える場合は `issue_read`（method: `get`。コメント取得は `get_comments`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view $0 --json number,title,body,labels
 gh issue view $0 --json comments --jq '.comments[-1]'
@@ -71,6 +77,8 @@ gh issue view $0 --json comments --jq '.comments[] | select(.body | test("## 確
 ### ステップ1.5: ベースブランチ（調査のターゲットブランチ）の確定
 
 回答の基準となるベースブランチ（`BASE_BRANCH`）を確定する。サブIssue（parent を持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生し実装PRもそこへ向くため、**デフォルトブランチではなく epic ブランチが調査のターゲット**になる。デフォルトブランチ基準では、epic ブランチへマージ済みの兄弟サブIssueの実装が「未実装」に見え、「Epic PR が未マージだがどうするか」といった本来不要な検討事項が回答へ混入する（`exec-issue` / `create-pr` と同じ確定的導出を用いる）。
+
+`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
 
 ```bash
 git fetch --prune || true
@@ -106,7 +114,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - 現在の作業ディレクトリのコード状態（＝`BASE_BRANCH` 由来）が調査対象。「この実装はデフォルトブランチにまだ入っていない」ことを問題として扱わず、回答の前提にもしない
 - `BASE_BRANCH` が `cc-epic-<N>` の場合、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであることは Epic フローの正常状態**。これを根拠としたリスク・注意点・推奨アクション（「先に Epic PR をマージすべき」等）を回答に含めない
 - epic ブランチへマージ済みの兄弟サブIssueの実装は「既に存在するコード」として扱い、根拠として引用してよい
-- 未マージPRに言及する場合は **base が `BASE_BRANCH` のPRだけ**を対象にする（`gh pr list --state open --json number,title,baseRefName --jq ".[] | select(.baseRefName == \"${BASE_BRANCH}\")"`）。base が異なるPR（Epic PR 自身など）は回答対象外
+- 未マージPRに言及する場合は **base が `BASE_BRANCH` のPRだけ**を対象にする（GitHub MCP が使える場合は `list_pull_requests` / `search_pull_requests` を使う。利用不可時のフォールバックは `gh pr list --state open --json number,title,baseRefName --jq ".[] | select(.baseRefName == \"${BASE_BRANCH}\")"`）。base が異なるPR（Epic PR 自身など）は回答対象外
 - `gh issue view --json parent` に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした回答・注意点は書かない**（安全側の倒し方）。その旨は最終報告に1行残す
 
 ### ステップ2: タスクの分析
@@ -129,9 +137,9 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 3. **取得**: 種類ごとに手段を使い分ける
    - 一般のWebページ・仕様書・記事 → `WebFetch`
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → `gh issue view` / `gh pr view` / `gh api`（GitHubのURLは `WebFetch` より `gh` の方が確実）
+   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
    - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
-   - 画像URL → `gh-asset download <asset_id> ~/Downloads/` でダウンロードして Read で内容を確認する（URLを見て終わりにしない）
+   - 画像URL → `gh-asset download <asset_id> ~/Downloads/` でダウンロードして Read で内容を確認する（URLを見て終わりにしない。`gh-asset` はローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` に据え置く）
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら「確信度と追加調査の必要性」として回答に明示する
 5. **記録**: 判断に使ったリンクは回答の「根拠」に `<URL> — <参照した要点>` の形で残す（`path:line` の引用と同格の根拠として扱う）

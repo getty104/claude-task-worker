@@ -18,6 +18,10 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 入力（args 経由の YAML ブロック）
 
 ### 呼び出し規約
@@ -215,6 +219,8 @@ $ARGUMENTS
 
 変更ログと（あれば）依頼内容ブロックを verbatim で再掲するため、対象 Issue の現在の body を取得する。
 
+> GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view <issue_number> --json body
 ```
@@ -242,6 +248,8 @@ gh issue view <issue_number> --json body
 #### mode=create
 
 YAML 入力に `labels` があれば、各ラベルを `--label <ラベル名>` として `EXTRA_FLAGS` 配列に追加する。値が無ければフラグごと省略する（空文字を渡すと `gh` が引数エラーで落ちる）。`--label` は同じ値を複数回渡す形式で複数指定する。
+
+GitHub MCP が使える場合はログインユーザー取得に `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 ME=$(gh api user --jq '.login')

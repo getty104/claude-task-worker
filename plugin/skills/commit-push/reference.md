@@ -27,7 +27,7 @@ git commit --amend --no-edit # メッセージを変えずに統合
 - **使用タイミング**: PR作成前の履歴整理／小さなコミットの論理的な統合／順序変更／不要なコミット（WIP、fixupなど）の削除
 
 ```bash
-# デフォルトブランチとの差分で対話的にrebase
+# デフォルトブランチとの差分で対話的にrebase（gh repo view --json defaultBranchRef は単独取得ツールがMCPに無いため gh のまま残す）
 git rebase -i "origin/$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
 
 # または、最新のN個のコミットをrebase
