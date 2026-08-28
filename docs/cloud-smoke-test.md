@@ -18,7 +18,7 @@
 | 3 | claude.ai サインイン | `claude auth status --json`（判定式は `docs/cloud-prerequisite-checks.md` 参照） |
 | 4 | herdr の疎通 | `herdr --version` が応答すること |
 
-クラウド VM 側の事前セットアップとして、環境設定スクリプト（`scripts/cloud-setup.sh`）で `npx claude-task-worker install` を実行し、プラグイン・CLI を導入しておくこと。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した（Issue #268）。
+クラウド VM 側の事前セットアップとして、claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載し、プラグイン・CLI を導入しておくこと。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した（Issue #268）。
 
 **GitHub App 連携（claude.ai 側）が未設定のリポジトリでは `--ref` / `--on-branch` が拒否される**（`docs/cloud-session-launch-flags.md` 実測）。事前に対象リポジトリで https://claude.ai/code の GitHub 連携を済ませておくこと。連携未設定のまま進めると、後述の「セッション作成」段で `Error: --ref <branch> cannot be honored: ...` を受け取って停止する。
 
