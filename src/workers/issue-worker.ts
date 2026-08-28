@@ -249,7 +249,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
               },
               cwd,
-              buildClaudeEnv(mode, cloud),
+              buildClaudeEnv(mode),
               execution.prompt,
               cloud,
               cloud ? "issue" : undefined,

@@ -322,14 +322,10 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
 // エージェントの状態遷移音は herdr 側の設定（`~/.config/herdr/config.toml` の
 // `[ui.sound]`）か、ワーカー用 herdr セッションを `HERDR_DISABLE_SOUND=1` 付きで
 // 起動することでしか止められない。
-//
-// `CTW_LOCAL_EXECUTION` は「クラウドである」ではなく「ローカルであることの肯定的マーカー」。
-// クラウド VM や人が対話でスキルを手動実行した環境にはこの変数が届かないため、
-// それらは自動的に「ローカル専用フックを実行しない」側へ倒れる。
-export function buildClaudeEnv(mode: RunMode, cloud = false): Record<string, string> {
+export function buildClaudeEnv(mode: RunMode): Record<string, string> {
   const base =
     mode === "herdr"
       ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
       : { ...CLAUDE_SPAWN_ENV };
-  return cloud ? base : { ...base, CTW_LOCAL_EXECUTION: "1" };
+  return base;
 }

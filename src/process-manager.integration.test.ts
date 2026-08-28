@@ -317,7 +317,7 @@ test("herdr モード（クラウド実行）: 作成 → 投函の2コマンド
     cloud: true,
   };
   const execution = buildClaudeExecution(invocation);
-  const env = buildClaudeEnv("herdr", true);
+  const env = buildClaudeEnv("herdr");
   const { onComplete, result } = waitForOnComplete();
 
   run(
