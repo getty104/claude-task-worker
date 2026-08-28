@@ -9,7 +9,7 @@ hooks:
         - type: command
           command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
         - type: command
-          command: "[ \"$CTW_LOCAL_EXECUTION\" = \"1\" ] && bash \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-pr-comments.sh\"; exit 0"
+          command: "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-pr-comments.sh\"; exit 0"
 ---
 
 # Fix Review Point

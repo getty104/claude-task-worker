@@ -219,7 +219,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 
 判定ロジック（`selectPidsToKill` / `parseLsofCwds` / `isUnder` / `resolveTargetDir`）は純粋関数として export し、`plugin/scripts/stop-servers.test.mjs` でユニットテストする。対象スキルは同期実行ガードと同じ15スキル（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）。
 
-`fix-review-point` だけは同じ `Stop` の下に2本目のフック（`plugin/scripts/resolve-pr-comments.sh`）を持ち、レビュースレッドの一括 Resolve を行う。実行は `CTW_LOCAL_EXECUTION`（`buildClaudeEnv()` がローカル実行時のみ注入）が立っているときだけで、**「クラウドである」ことを示す変数ではなく「ローカルであることの肯定的マーカー」にしてある**。マーカーが届かない環境（クラウド VM、人が対話でスキルを手動実行した場合）では自動的に実行しない側へ倒れる。クラウド実行時は代わりに `src/workers/fix-review-point.ts` の `onCompleted` がワーカープロセス（ローカル）から同じスクリプトを PR 番号付きで実行する。`resolveReviewThread` mutation はクラウドの GraphQL ゲートで 403 になり REST 代替が原理的に存在しない（`docs/cloud-graphql-proxy-limits.md`）ため、この二経路が必要になる。
+`fix-review-point` だけは同じ `Stop` の下に2本目のフック（`plugin/scripts/resolve-pr-comments.sh`）を持ち、レビュースレッドの一括 Resolve を行う。**このフックは実行形態を問わず常に走る**。クラウド実行では VM 上で `gh api graphql` が 403 になるため、フック側の Resolve は空振りするだけで済む。そのため `src/workers/fix-review-point.ts` の `onCompleted` がワーカープロセス（ローカル）から同じスクリプトを PR 番号付きで実行する。`resolveReviewThread` mutation はクラウドの GraphQL ゲートで 403 になり REST 代替が原理的に存在しない（`docs/cloud-graphql-proxy-limits.md`）ため、この二経路が必要になる。
 
 ### `advisor`（アドバイザーモデル）
 

@@ -170,7 +170,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 }
               },
               cwd,
-              buildClaudeEnv(mode, isCloud),
+              buildClaudeEnv(mode),
               execution.prompt,
               isCloud,
               isCloud ? "pr" : undefined,
