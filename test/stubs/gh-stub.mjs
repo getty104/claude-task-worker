@@ -46,14 +46,28 @@ if (sub === "api" && action === "user") {
     }),
   );
 } else if (sub === "issue" && action === "list") {
-  process.stdout.write(JSON.stringify(scenario.issues ?? []));
+  // `gh issue list --label cc-cloud-done` はクラウド完了検知のポーリング専用の絞り込みで、
+  // 通常のラベル検索（cc-exec-issue 等）とは別に scenario.cloudDone.issues を返す。
+  const labelIndex = argv.indexOf("--label");
+  const label = labelIndex !== -1 ? argv[labelIndex + 1] : undefined;
+  if (label === "cc-cloud-done") {
+    process.stdout.write(JSON.stringify((scenario.cloudDone?.issues ?? []).map((number) => ({ number }))));
+  } else {
+    process.stdout.write(JSON.stringify(scenario.issues ?? []));
+  }
 } else if (sub === "pr" && action === "list") {
   // 実際の `gh pr list --head` はサーバー側で headRefName による絞り込みを行うため、
   // スタブも同様に絞り込む（findPrNumberByHeadRef() のテストが渡した head を無視しないように）。
-  const headIndex = argv.indexOf("--head");
-  const head = headIndex !== -1 ? argv[headIndex + 1] : undefined;
-  const prList = scenario.prList ?? [];
-  process.stdout.write(JSON.stringify(head === undefined ? prList : prList.filter((pr) => pr.headRefName === head)));
+  const labelIndex = argv.indexOf("--label");
+  const label = labelIndex !== -1 ? argv[labelIndex + 1] : undefined;
+  if (label === "cc-cloud-done") {
+    process.stdout.write(JSON.stringify((scenario.cloudDone?.prs ?? []).map((number) => ({ number }))));
+  } else {
+    const headIndex = argv.indexOf("--head");
+    const head = headIndex !== -1 ? argv[headIndex + 1] : undefined;
+    const prList = scenario.prList ?? [];
+    process.stdout.write(JSON.stringify(head === undefined ? prList : prList.filter((pr) => pr.headRefName === head)));
+  }
 } else if (sub === "pr" && action === "checks") {
   // listPullRequestsWithChecks() が呼ぶ `gh pr checks <n> --json state`。
   // GhScenario に専用フィールドを増やさず、既存の `view[number].checks` を再利用する

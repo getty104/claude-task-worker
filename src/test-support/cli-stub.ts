@@ -25,6 +25,8 @@ export interface GhScenario {
   prList?: unknown[];
   /** `gh api graphql`（listPrsClosingIssue）が返す closedByPullRequestsReferences.nodes */
   closingPrs?: unknown[];
+  /** `gh <type> list --label cc-cloud-done` が返す番号の一覧（クラウド完了検知のポーリング用） */
+  cloudDone?: { issues?: number[]; prs?: number[] };
 }
 
 export interface CliStubOptions {

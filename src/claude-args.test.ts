@@ -16,6 +16,7 @@ const {
   buildClaudeExecution,
   buildCloudCreateArgs,
   buildCloudDispatchArgs,
+  appendCloudDoneInstruction,
   shellQuote,
   isOpusModel,
   systemPromptFilePath,
@@ -367,4 +368,21 @@ test("buildClaudeArgs is unchanged when cloud is unspecified or false", () => {
     assert.deepEqual(cloudFalse, withoutCloud);
     assert.ok(!withoutCloud.includes("--cloud"));
   }
+});
+
+test("appendCloudDoneInstruction keeps the original prompt and appends the label instruction", () => {
+  const prompt = "/claude-task-worker:exec-issue 123";
+  const result = appendCloudDoneInstruction(prompt, { type: "issue", number: 123 });
+  assert.ok(result.startsWith(prompt));
+  assert.ok(result.includes("cc-cloud-done"));
+  assert.ok(result.includes("Issue #123"));
+});
+
+test("appendCloudDoneInstruction switches wording between issue and pr targets", () => {
+  const issueResult = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
+  const prResult = appendCloudDoneInstruction("/skill 1", { type: "pr", number: 1 });
+  assert.ok(issueResult.includes("Issue #1"));
+  assert.ok(issueResult.includes("gh issue edit 1 --add-label cc-cloud-done"));
+  assert.ok(prResult.includes("PR #1"));
+  assert.ok(prResult.includes("gh pr edit 1 --add-label cc-cloud-done"));
 });

@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { getWorkerConfig } from "../config";
+import { CLOUD_DONE_LABEL, getWorkerConfig } from "../config";
 import {
   type PullRequestWithChecks,
   getCurrentUser,
@@ -113,6 +113,12 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               cloud: isCloud,
               onBranch: isCloud ? pr.headRefName : undefined,
             });
+            if (isCloud) {
+              // 前回実行の残骸掃除。同一番号の同時実行は isRunning() が止めるため nonce は不要。
+              await removeLabel("pr", pr.number, CLOUD_DONE_LABEL).catch((err) =>
+                console.error(`[${config.name}] removeLabel ${CLOUD_DONE_LABEL} failed for PR #${pr.number}: ${err}`),
+              );
+            }
             run(
               execution.command,
               execution.args,
@@ -167,6 +173,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               buildClaudeEnv(mode, isCloud),
               execution.prompt,
               isCloud,
+              isCloud ? "pr" : undefined,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);
