@@ -113,6 +113,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           await addLabel("issue", issue.number, "cc-in-progress");
 
           const worktreeId = generateWorktreeName();
+          const { cloud } = getWorkerConfig(config.name);
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             syncDefaultBranch(defaultBranch);
@@ -121,6 +122,16 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
 
             const parentNumber = issue.parent?.number;
             const mode = getRunMode();
+
+            // ベースブランチは buildClaudeExecution() の baseRef に渡すため、worktree 生成より
+            // 先に確定させる。ensureEpicBranch() はクラウド実行でも必要（cc-epic-<N> をリモートへ
+            // 用意する処理で、クラウドセッションが --ref で参照する前提になる）。
+            let baseBranch = defaultBranch;
+            if (parentNumber !== undefined) {
+              baseBranch = `cc-epic-${parentNumber}`;
+              await ensureEpicBranch(baseBranch, defaultBranch);
+            }
+
             const execution = buildClaudeExecution({
               mode,
               prompt: `${command} ${issue.number}`,
@@ -129,19 +140,22 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
               advisorModel: isAdvisorEnabled() ? advisorModel : "",
               permissionMode: getPermissionMode(),
+              ...(cloud ? { cloud: true, baseRef: baseBranch } : {}),
             });
 
-            // claude CLI の --worktree は locked な worktree を作り、異常終了時に
-            // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
-            // epic の有無に関わらずワーカー自身が worktree を生成して cwd として渡す。
-            let baseBranch = defaultBranch;
-            if (parentNumber !== undefined) {
-              baseBranch = `cc-epic-${parentNumber}`;
-              await ensureEpicBranch(baseBranch, defaultBranch);
+            let cwd: string | undefined;
+            if (cloud) {
+              console.log(
+                `[${config.name}] #${issue.number}: cloud execution, running without worktree on ${baseBranch}`,
+              );
+            } else {
+              // claude CLI の --worktree は locked な worktree を作り、異常終了時に
+              // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
+              // epic の有無に関わらずワーカー自身が worktree を生成して cwd として渡す。
+              await createWorktreeFromBranch(worktreeId, baseBranch);
+              cwd = getWorktreePath(worktreeId);
+              console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
             }
-            await createWorktreeFromBranch(worktreeId, baseBranch);
-            const cwd = getWorktreePath(worktreeId);
-            console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
 
             run(
               execution.command,
@@ -178,19 +192,24 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                   await removeLabel("issue", issue.number, "cc-in-progress").catch((err) =>
                     console.error(`[${config.name}] removeLabel cc-in-progress failed for #${issue.number}: ${err}`),
                   );
-                  await removeWorktree(worktreeId).catch((err) =>
-                    console.error(`[${config.name}] removeWorktree failed for #${issue.number}: ${err}`),
-                  );
+                  if (!cloud) {
+                    await removeWorktree(worktreeId).catch((err) =>
+                      console.error(`[${config.name}] removeWorktree failed for #${issue.number}: ${err}`),
+                    );
+                  }
                 }
               },
               cwd,
               buildClaudeEnv(mode),
               execution.prompt,
+              cloud,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
             await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
-            await removeWorktree(worktreeId).catch(() => {});
+            if (!cloud) {
+              await removeWorktree(worktreeId).catch(() => {});
+            }
             await notifyError(config.name, name, err);
           }
         }
