@@ -35,6 +35,9 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | `triage-pr` | `cc-triage-scope` (PR) | `/claude-task-worker:triage-pr` | 1分 |
 | `resolve-conflict` | `cc-resolve-conflict` (PR) | `/claude-task-worker:resolve-pr-conflict` | 1分 |
 | `check-dependabot` | `dependencies` (PR) | `/claude-task-worker:check-dependabot` | 1時間 |
+| `update-coding-guidelines` | 24時間経過 | `/claude-task-worker:update-coding-guidelines` | 1時間 |
+| `update-requirement-rules` | 24時間経過 | `/claude-task-worker:update-requirement-rules` | 1時間 |
+| `update-design-md` | 24時間経過 | `/claude-task-worker:update-design-md` | 1時間 |
 
 共通の挙動:
 
@@ -43,6 +46,8 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 - Issue 系ワーカーは `-is:blocked` 検索 qualifier で絞り込むため、未解決の blockedBy を持つ Issue は対象外
 - 完了時にトリガーラベルを除去し、次のワーカーへ引き継ぐラベルを付与する
 - `create-ui-design` / `apply-ui-design` は `uiDesign.enabled` が `true` のときだけ起動する（既定 `false`）
+- 定期ワーカー3つ（`update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）はラベルではなく時刻を条件に24時間おきに1回動く。表の「間隔」は24時間経過したかを確認する頻度
+- `update-design-md` は `uiDesign.enabled` が `true` のときだけ起動する
 
 ### プラグインの構成
 
@@ -50,8 +55,8 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 |---|---|
 | `plugin/skills/` | ワーカーが呼ぶスキル群と、対話セッション用の補助スキル（`commit-push` / `create-pr` / `breakdown-issues` / `edit-pencil-design` など） |
 | `plugin/agents/` | サブエージェント定義（`explore-agent` / `frontend-implementer` / `general-purpose-assistant` / `lightweight-assistant` / `pencil-design-updater` / `requirement-todo-organizer`） |
-| `plugin/hooks/` | `SessionStart`（worktree セットアップ）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
-| `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs`） |
+| `plugin/hooks/` | `SessionStart`（worktree セットアップ / `git fetch --prune`）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
+| `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs` / `resolve-pr-comments.sh` — `fix-review-point` の `Stop` フックでレビュースレッドを一括 Resolve） |
 | `plugin/references/` | 複数スキルが共有する参照ドキュメント（GitHub アクセス方針など） |
 | `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `github` / `next-devtools` / `shadcn` / `playwright`） |
 
@@ -68,6 +73,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [jq](https://jqlang.org/) | プラグインスキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス。任意（未導入でも探索がテキスト検索に落ちるだけ） |
 | [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `pencil` 経由） |
+| [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（呼び出しは `designmd` 経由。未導入でもスキルは動く） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避。任意（未設定でも `gh` へフォールバックする） |
 
@@ -79,7 +85,7 @@ CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に�
 npx claude-task-worker install
 ```
 
-マーケットプレイスの追加・プラグインのインストール・CLI 本体のグローバルインストール・CodeGraph CLI のインストールを一括で行う。いずれかが失敗しても処理は継続し、`[install]` プレフィックス付きでログ出力される（失敗時の終了コードは 1）。インストール後、Claude Code のセッションを再起動するとプラグインが有効になる。
+マーケットプレイスの追加・プラグインのインストール・CLI 本体のグローバルインストール・CodeGraph CLI / DESIGN.md CLI / Pen CLI のインストールを一括で行う。いずれかが失敗しても処理は継続し、`[install]` プレフィックス付きでログ出力される（失敗時の終了コードは 1）。インストール後、Claude Code のセッションを再起動するとプラグインが有効になる。
 
 個別にやる場合:
 
@@ -90,6 +96,8 @@ claude plugin install claude-task-worker@claude-task-worker
 ```
 
 herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
+
+クラウド実行（`workers.<名前>.cloud: true`）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境セットアップスクリプトで `npx claude-task-worker install` を実行する（リポジトリの `scripts/cloud-setup.sh` がその中身）。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。詳細は後述の「[`cloud`（クラウド実行）](#cloudクラウド実行)」を参照。
 
 ### Pen CLI のログイン
 
@@ -116,7 +124,7 @@ export PEN_CLI_KEY=pencil_cli_...
 claude-task-worker update
 ```
 
-マーケットプレイス・プラグイン・CLI 本体・CodeGraph CLI をまとめて更新する。プラグインの反映にはセッション再起動が必要。
+マーケットプレイス・プラグイン・CLI 本体・CodeGraph CLI / DESIGN.md CLI / Pen CLI をまとめて更新する。プラグインの反映にはセッション再起動が必要。
 
 ### 初期化
 
@@ -165,7 +173,7 @@ claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--
 | コマンド | 内容 |
 |---|---|
 | 各ワーカー名 | 単一ワーカーを起動（`exec-issue` / `triage-pr` など。上記 Worker 表を参照） |
-| `all` | 通常ワーカー9つを同時にポーリング（トリアージ系3つを除く） |
+| `all` | 通常ワーカー9つ + 定期ワーカー3つの計12ワーカーを同時にポーリング（`triage-created-issue` / `triage-pr` / `check-dependabot` を除く） |
 | `yolo` | 全ワーカーを同時にポーリング（`all` + `triage-created-issue` + `triage-pr` + `check-dependabot`） |
 | `init` | ラベル・テンプレート・設定ファイルの作成と CodeGraph セットアップ |
 | `install` / `update` | 上記「セットアップ」を参照 |
@@ -256,7 +264,7 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 
 `true` にすると、タスク起動時に Claude CLI へ `--advisor <model>` を渡す。渡すモデルは `claude-task-worker.json` の `workers.<名前>.advisorModel`。`mode` と同じくトップレベル一括で、プロジェクト単位・ワーカー単位のオン/オフはできない。空文字が指定されたワーカーには渡さない。
 
-advisor は main モデル以上の能力が必要（Claude CLI の制約）。全ワーカーの既定 `model` が `opus` なので、`advisorModel` の既定値はすべて空文字（advisor なし）。`model` を `sonnet` 等へ下げたワーカーには `advisorModel: "opus"` を指定できる。
+advisor は main モデル以上の能力が必要（Claude CLI の制約）。`model` が `opus` のワーカーに `opus` advisor を付けても意味がなく、既定で `sonnet` のワーカーも `opus` advisor を付けると下げたぶんのコスト削減を打ち消すため、`advisorModel` の既定値は全ワーカー空文字（advisor なし）。`sonnet` のワーカーの品質が落ちた場合の調整弁として `advisorModel: "opus"` を指定できる。
 
 #### `permission`（権限モード）
 
@@ -280,6 +288,7 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。�
 | `fixReviewPointCallbackCommentMessage` | string | - | `fix-review-point` 完了時に PR へ投稿するコメント（未設定なら投稿しない） |
 | `uiDesign` | object | `{ "enabled": false, "designDir": "designs", "yolo": false }` | UIデザイン先行ワークフロー（下記） |
 | `workers` | object | `{}` | ワーカーごとの上書き設定（下記） |
+| `lastRun` | object | `{}` | 定期ワーカーの最終実行時刻（ワーカー名 → ISO8601）。ワーカーが自動更新するため手で編集しない |
 
 #### ワーカーごとの設定
 
@@ -294,15 +303,18 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。�
 | `pollingIntervalSeconds` | number | ポーリング間隔（秒） |
 | `cooldownSeconds` | number | タスク完了後にポーリングを止める時間（秒）。`0` でなし |
 | `maxConcurrentTasks` | number | 同時実行できるタスクの最大数 |
+| `cloud` | boolean | タスクをクラウド（Claude Code on the web）で実行するか。既定 `false`（下記「[`cloud`（クラウド実行）](#cloudクラウド実行)」） |
 
-既定値（`skill` は「[Worker とスキルの対応](#worker-とスキルの対応)」を参照。`effort` は全て `high`、`cooldownSeconds` は `0`、`maxConcurrentTasks` は `1`）:
+既定値（`skill` は「[Worker とスキルの対応](#worker-とスキルの対応)」を参照。`cooldownSeconds` は `0`、`maxConcurrentTasks` は `1`、`cloud` は `false`）:
 
-| ワーカー | `model` | `advisorModel` | `pollingIntervalSeconds` |
-|---|---|---|---|
-| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `update-issue` / `resolve-conflict` / `create-ui-design` / `triage-created-issue` / `triage-pr` | `opus` | `""`（なし） | 60 |
-| `epic-issue` / `apply-ui-design` | `opus` | `""`（なし） | 300 |
-| `check-dependabot` | `opus` | `""`（なし） | 3600 |
-| （未知のワーカー名） | `opus` | `""`（なし） | 60 |
+| ワーカー | `model` | `effort` | `advisorModel` | `pollingIntervalSeconds` |
+|---|---|---|---|---|
+| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design` / `triage-pr` | `opus` | `high` | `""`（なし） | 60 |
+| `update-issue` / `triage-created-issue` / `resolve-conflict` | `sonnet` | `high` | `""`（なし） | 60 |
+| `check-dependabot` | `sonnet` | `high` | `""`（なし） | 3600 |
+| `epic-issue` / `apply-ui-design` | `sonnet` | `medium` | `""`（なし） | 300 |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | `opus` | `high` | `""`（なし） | 3600 |
+| （未知のワーカー名） | `opus` | `high` | `""`（なし） | 60 |
 
 設定例:
 
@@ -316,6 +328,39 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。�
   }
 }
 ```
+
+#### `cloud`（クラウド実行）
+
+`workers.<名前>.cloud: true` で、そのワーカーのタスクを Claude Code on the web（クラウド VM）で実行する。ワーカー単位のオプトインで既定は `false`（`mode` / `advisor` / `permission` と違い、ワーカーごとに切り替えられる）。
+
+前提条件:
+
+- `config.json` の `mode` が `"herdr"` であること。新しいクラウドセッションの作成には TTY が必要で、`"default"` の子プロセス実行では作れない。`cloud: true` のワーカーがあるのに `mode` が `"herdr"` でない場合は**ワーカー起動時にエラー終了する**（`"default"` へフォールバックしない）
+- claude.ai アカウントでのサインインが必須。API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成では利用できない。`cloud: true` のワーカーがある場合、これはワーカー起動時に静的検査される
+- 対象リポジトリの GitHub App 連携（クラウド VM から push / PR 作成を行うため）
+- クラウド VM の環境セットアップスクリプトで `npx claude-task-worker install`（`scripts/cloud-setup.sh`）を実行し、プラグイン・CLI を導入しておくこと
+
+上記のうち静的検査されるのは1〜2番目だけで、GitHub App 連携とクラウド VM 側の導入状況はローカルから確認できないため検査されない。
+
+クラウド実行を拒否するワーカーが3つある: `resolve-conflict` / `create-ui-design` / `apply-ui-design`。これらに `cloud: true` を指定すると起動時にエラー終了する。
+
+運用上は次の3ワーカーへの `cloud: true` を推奨しない: `fix-review-point` / `triage-pr` / `check-dependabot`。起動自体は許可されるが、クラウドセッションの GitHub プロキシ制限でレビューコメント・CI ステータスなど判断材料を取得できず、タスクが空振りする。
+
+クラウド実行のタスクは worktree を作らない（クラウド VM が自前でリポジトリを持つため）。
+
+設定例:
+
+```json
+// config.json
+{ "mode": "herdr" }
+```
+
+```json
+// claude-task-worker.json
+{ "workers": { "exec-issue": { "cloud": true } } }
+```
+
+詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
 
 ## ワークフロー
 
@@ -368,6 +413,8 @@ claude-task-worker all
 ```
 
 通知には Claude API の使用状況（5時間/7日間の利用率とリセット時刻）も含まれる。使用状況の取得は macOS では `security`（Keychain）、それ以外では `~/.claude/.credentials.json` を使う。あわせて [RunCat Neo](https://kyome.io/runcat/) 用のスナップショットを `~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で変更可）へ原子的に書き出す（Webhook 未設定でも更新される）。取得結果は360秒キャッシュされるため、値は最大6分古くなりうる。
+
+クラウド実行（`cloud: true`）のタスクは、通知の先頭行にクラウドセッションのURL（`https://claude.ai/code/<id>`）が入る。Slack で本文が折りたたまれても先頭行は見えるため。
 
 ## プロセス管理
 
