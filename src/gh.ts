@@ -207,18 +207,21 @@ export async function getIssueState(issueNumber: number): Promise<string> {
   return parsed.state;
 }
 
-// Issue を closing keyword（Closes #N 等）で参照する PR を探す。マージ済み・オープン中のPRのみを対象とし、
-// 無関係な却下済み（未マージでクローズ）のPRを誤検出しないよう除外する。さらに、今回の実行の作業ブランチ
-// （expectedHeadRefName）と headRefName が一致するPRのみを有効とみなし、無関係な既存PRの誤検出を防ぐ。
-export async function findPrNumberClosingIssue(
-  issueNumber: number,
-  expectedHeadRefName: string,
-): Promise<number | null> {
+export interface ClosingPrRef {
+  number: number;
+  state: string;
+  headRefName: string;
+  baseRefName: string;
+  createdAt: string;
+}
+
+// Issue を closing keyword（Closes #N 等）で参照する PR の候補一覧を取得する（絞り込みは呼び出し側の責務）。
+export async function listPrsClosingIssue(issueNumber: number): Promise<ClosingPrRef[]> {
   const { owner, name } = await getRepoInfo();
   const query = `query($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) {
       issue(number: $number) {
-        closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number state headRefName } }
+        closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number state headRefName baseRefName createdAt } }
       }
     }
   }`;
@@ -235,8 +238,25 @@ export async function findPrNumberClosingIssue(
     `number=${issueNumber}`,
   ]);
   const parsed = JSON.parse(output);
-  const nodes: { number: number; state?: string; headRefName?: string }[] =
+  const nodes: { number: number; state?: string; headRefName?: string; baseRefName?: string; createdAt?: string }[] =
     parsed?.data?.repository?.issue?.closedByPullRequestsReferences?.nodes ?? [];
+  return nodes.map((node) => ({
+    number: node.number,
+    state: node.state ?? "",
+    headRefName: node.headRefName ?? "",
+    baseRefName: node.baseRefName ?? "",
+    createdAt: node.createdAt ?? "",
+  }));
+}
+
+// マージ済み・オープン中のPRのみを対象とし、無関係な却下済み（未マージでクローズ）のPRを誤検出しないよう除外する。
+// さらに、今回の実行の作業ブランチ（expectedHeadRefName）と headRefName が一致するPRのみを有効とみなし、
+// 無関係な既存PRの誤検出を防ぐ。
+export async function findPrNumberClosingIssue(
+  issueNumber: number,
+  expectedHeadRefName: string,
+): Promise<number | null> {
+  const nodes = await listPrsClosingIssue(issueNumber);
   const validPr = nodes.find(
     (node) => (node.state === "MERGED" || node.state === "OPEN") && node.headRefName === expectedHeadRefName,
   );
