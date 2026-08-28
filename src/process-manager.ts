@@ -141,14 +141,14 @@ export function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-type OnComplete = (status: "completed" | "failed", output: string) => Promise<void>;
+type OnComplete = (status: "completed" | "failed", output: string, cloudSessionId?: string) => Promise<void>;
 
 // onComplete の実行と台帳・テーブルの更新。default モード（プロセス終了）と
 // herdr モード（agent ステータス）で完了検知の手段は違うが、その後の処理は共通にする。
 async function finishTask(id: number, result: TaskResult, onComplete?: OnComplete): Promise<void> {
   try {
     await Promise.race([
-      onComplete?.(result.status, result.output) ?? Promise.resolve(),
+      onComplete?.(result.status, result.output, result.cloudSessionId) ?? Promise.resolve(),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("onComplete timed out after 120s")), 120_000).unref(),
       ),
@@ -192,6 +192,9 @@ async function runViaHerdr(
   const label = taskTabLabel(resolveProjectName(), id, cloud);
   let task: HerdrTask | undefined;
   let result: TaskResult;
+  // startHerdrTask のコールバックで拾ったクラウドセッションID。waitForHerdrTask が
+  // 拾えた場合はそちらを優先し、拾えなかった場合（起動失敗を含む）のフォールバックに使う。
+  let cloudSessionId: string | undefined;
 
   // 起動が完了する前にシャットダウンが走っても waitForAllProcesses() が
   // 「実行中タスクなし」と誤判定しないよう、ペイン確定前から台帳に載せておく
@@ -208,6 +211,9 @@ async function runViaHerdr(
       prompt,
       env,
       workspaceId: getCurrentWorkspaceId(),
+      onCloudSessionId: (sessionId) => {
+        cloudSessionId = sessionId;
+      },
     });
     herdrTasks.set(id, task);
     result = await waitForHerdrTask(task.paneId, {
@@ -218,9 +224,14 @@ async function runViaHerdr(
         if (task && task.status === "running") task.agentStatus = status;
       },
     });
+    if (!result.cloudSessionId && cloudSessionId) result.cloudSessionId = cloudSessionId;
   } catch (err) {
     console.error(`[worker] failed to run #${id} via herdr: ${err}`);
-    result = { status: "failed", output: `[worker] failed to run the task via herdr: ${err}` };
+    result = {
+      status: "failed",
+      output: `[worker] failed to run the task via herdr: ${err}`,
+      ...(cloudSessionId ? { cloudSessionId } : {}),
+    };
   } finally {
     if (task) {
       // claude がまだ worktree を掴んだままだと onComplete の worktree 削除に失敗しうるため、

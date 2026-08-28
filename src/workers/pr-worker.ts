@@ -112,14 +112,14 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               `PR #${pr.number} (${pr.headRefName})`,
               config.name,
               worktreeId,
-              async (status, output) => {
+              async (status, output, cloudSessionId) => {
                 lastCompletionAt = Date.now();
                 try {
                   if (status === "completed") {
                     await config.onCompleted?.(pr, output);
-                    await notifyTaskCompleted(config.name, name, pr.number, pr.title, prUrl, output);
+                    await notifyTaskCompleted(config.name, name, pr.number, pr.title, prUrl, output, cloudSessionId);
                   } else {
-                    await notifyTaskFailed(config.name, name, pr.number, pr.title, prUrl, output);
+                    await notifyTaskFailed(config.name, name, pr.number, pr.title, prUrl, output, cloudSessionId);
                   }
                 } catch (err) {
                   console.error(`[${config.name}] post-task error for PR #${pr.number}: ${err}`);
