@@ -242,6 +242,32 @@ export const SCHEDULED_WORKER_NAMES = [
   "update-design-md",
 ] as const;
 
+// cloud: true を許可しないワーカー。resolve-conflict は .pen コンフリクト解消に pencil CLI と
+// そのログイン認証がクラウド環境で使える保証が無いため、create-ui-design / apply-ui-design は
+// クラウド環境からの force-push の可否が未検証のため、いずれも拒否する。
+export const CLOUD_DENIED_WORKERS = ["resolve-conflict", "create-ui-design", "apply-ui-design"] as const;
+
+// cloud: true のワーカー構成に非対応の組み合わせが無いかを検査する。
+// 引数をオブジェクト1つにしてあるのは、後続Issue（プラグイン宣言の静的検査等）で
+// 検査項目を追加してもシグネチャを壊さずフィールドを足せるようにするため。
+export function checkCloudConfig(input: { workers: Record<string, WorkerRuntimeConfig>; mode: string }): string[] {
+  const errors: string[] = [];
+  for (const [name, worker] of Object.entries(input.workers)) {
+    if (!worker.cloud) continue;
+    if (input.mode !== "herdr") {
+      errors.push(
+        `worker "${name}" has cloud: true but mode is "${input.mode}" (creating a new cloud session requires a TTY, which "default" mode's spawn does not have). Set mode to "herdr" in config.json, or remove cloud from worker "${name}".`,
+      );
+    }
+    if ((CLOUD_DENIED_WORKERS as readonly string[]).includes(name)) {
+      errors.push(
+        `worker "${name}" has cloud: true but this worker does not support cloud execution. Remove cloud from worker "${name}" in config.json.`,
+      );
+    }
+  }
+  return errors;
+}
+
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
