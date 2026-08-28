@@ -1,6 +1,12 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
-import { DEFAULT_CONFIG, DEFAULT_UI_DESIGN_CONFIG, CONFIG_PATH, SCHEDULED_WORKER_NAMES } from "../config.js";
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_UI_DESIGN_CONFIG,
+  CONFIG_PATH,
+  SCHEDULED_WORKER_NAMES,
+  CLOUD_DONE_LABEL,
+} from "../config.js";
 import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
@@ -52,6 +58,7 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-ui-design", color: "ffc524" }, // vivid amber (H44 S100 L57 / L*83 C*79)
   { name: "cc-ui-design-pr-created", color: "947100" }, // vivid bronze (H46 S100 L29 / L*50 C*56)
   { name: "cc-ui-design-ready", color: "0c73e9" }, // vivid azure (H212 S90 L48 / L*50 C*69)
+  { name: CLOUD_DONE_LABEL, color: "33cfff" }, // vivid sky blue (H194 S100 L60 / L*78 C*42)
 ];
 
 const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"

@@ -242,10 +242,21 @@ export const SCHEDULED_WORKER_NAMES = [
   "update-design-md",
 ] as const;
 
+// クラウドセッションが最後の操作として付与し、ワーカーが完了検知に使うラベル
+// （cc-cloud-done ラベルのポーリングでクラウドタスクの完了を判定する。#284）。
+export const CLOUD_DONE_LABEL = "cc-cloud-done";
+
 // cloud: true を許可しないワーカー。resolve-conflict は .pen コンフリクト解消に pencil CLI と
 // そのログイン認証がクラウド環境で使える保証が無いため、create-ui-design / apply-ui-design は
-// クラウド環境からの force-push の可否が未検証のため、いずれも拒否する。
-export const CLOUD_DENIED_WORKERS = ["resolve-conflict", "create-ui-design", "apply-ui-design"] as const;
+// クラウド環境からの force-push の可否が未検証のため、いずれも拒否する。定期ワーカー
+// （SCHEDULED_WORKER_NAMES）は対象 Issue/PR を持たず cc-cloud-done を置く先が無いため
+// 完了検知できず拒否する（Phase 1 の制約）。
+export const CLOUD_DENIED_WORKERS = [
+  "resolve-conflict",
+  "create-ui-design",
+  "apply-ui-design",
+  ...SCHEDULED_WORKER_NAMES,
+] as const;
 
 // `claude auth status --json` が読めた場合は判定対象のフィールドを、
 // 実行・パースに失敗した場合は「判定不能」を表す `unknown` を渡す。

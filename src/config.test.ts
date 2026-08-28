@@ -14,6 +14,7 @@ const {
   DEFAULT_WORKER_CONFIG,
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
+  CLOUD_DENIED_WORKERS,
   checkCloudConfig,
   checkCloudAuth,
 } = (await import("./config")) as typeof ConfigModule;
@@ -164,6 +165,12 @@ test("parseWorkerEntry falls back to the default for a non-string advisorModel",
 test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
   for (const name of SCHEDULED_WORKER_NAMES) {
     assert.ok(WORKER_DEFAULTS[name], `missing defaults for ${name}`);
+  }
+});
+
+test("scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-cloud-done)", () => {
+  for (const name of SCHEDULED_WORKER_NAMES) {
+    assert.ok((CLOUD_DENIED_WORKERS as readonly string[]).includes(name), `${name} must be in CLOUD_DENIED_WORKERS`);
   }
 });
 
