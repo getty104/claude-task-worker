@@ -29,6 +29,14 @@ export async function installPlaywrightBrowsers(logPrefix: string): Promise<bool
     const { runCommand } = await loadRunCommand();
     await runCommand("npx", ["-y", `${PLAYWRIGHT_CORE_PACKAGE}@latest`, "install", "chromium"]);
     console.log(`[${logPrefix}] Playwright browsers installed.`);
+    // `install-deps`（chromium が要求する共有ライブラリの導入）は実行しない。Linux 専用で
+    // （macOS / Windows では何もしない）、かつ sudo を要求するため、無人セットアップの途中で
+    // パスワード入力待ちにするわけにいかない。Linux では案内だけ出して人に委ねる。
+    if (process.platform === "linux") {
+      console.log(
+        `[${logPrefix}] On Linux, browser launch also needs system libraries. Run \`sudo npx ${PLAYWRIGHT_CORE_PACKAGE}@latest install-deps chromium\` once if the Playwright MCP fails to start a browser.`,
+      );
+    }
     return true;
   } catch (err) {
     console.error(`[${logPrefix}] Failed to install Playwright browsers: ${(err as Error).message}`);
