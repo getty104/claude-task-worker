@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep as SEP } from "node:path";
+import { PLUGIN_NAME, MARKETPLACE_NAME, PROJECT_SETTINGS_PATH } from "./commands/install";
 
 export type WorkerName =
   | "exec-issue"
@@ -247,13 +248,102 @@ export const SCHEDULED_WORKER_NAMES = [
 // クラウド環境からの force-push の可否が未検証のため、いずれも拒否する。
 export const CLOUD_DENIED_WORKERS = ["resolve-conflict", "create-ui-design", "apply-ui-design"] as const;
 
+// リポジトリの `.claude/settings.json` の3状態（読めた/存在しない/JSONとして壊れている）を
+// 呼び出し側（index.ts）が区別して渡せるようにする判別可能ユニオン。
+export type ProjectSettings =
+  | { kind: "ok"; value: Record<string, unknown> }
+  | { kind: "missing" }
+  | { kind: "invalid"; reason: string };
+
+// cloud: true のワーカーが `.claude/settings.json` にプラグイン宣言されているかを検査する。
+// クラウドセッション（Claude Code on the web）はリポジトリのプロジェクト設定を読むため、
+// `init.ts` の `mergePluginSettings()` が書き込む2キー（extraKnownMarketplaces /
+// enabledPlugins）が揃っていないと、クラウド側でスキルが読み込めず空振りする。
+export function checkPluginDeclaration(settings: ProjectSettings): string[] {
+  const pluginKey = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
+  const guidance = `\`claude-task-worker init --cloud\` を実行して ${PROJECT_SETTINGS_PATH} にプラグインを登録してください。`;
+  if (settings.kind === "missing") {
+    return [
+      `cloud: true のワーカーがありますが ${PROJECT_SETTINGS_PATH} が存在せずプラグインが宣言されていません。${guidance}`,
+    ];
+  }
+  if (settings.kind === "invalid") {
+    return [`${PROJECT_SETTINGS_PATH} を読み込めませんでした（${settings.reason}）。${guidance}`];
+  }
+  const marketplaces = settings.value.extraKnownMarketplaces as Record<string, unknown> | undefined;
+  const hasMarketplace = !!marketplaces && Object.prototype.hasOwnProperty.call(marketplaces, MARKETPLACE_NAME);
+  const plugins = settings.value.enabledPlugins as Record<string, unknown> | undefined;
+  const hasPlugin = !!plugins && !!plugins[pluginKey];
+  if (hasMarketplace && hasPlugin) return [];
+  if (!hasMarketplace && !hasPlugin) {
+    return [
+      `cloud: true のワーカーがありますが ${PROJECT_SETTINGS_PATH} にプラグイン（${pluginKey}）が宣言されていません。${guidance}`,
+    ];
+  }
+  if (!hasMarketplace) {
+    return [
+      `${PROJECT_SETTINGS_PATH} の extraKnownMarketplaces に "${MARKETPLACE_NAME}" が登録されていません（enabledPlugins のみ設定済みです）。${guidance}`,
+    ];
+  }
+  return [
+    `${PROJECT_SETTINGS_PATH} の enabledPlugins で "${pluginKey}" が有効化されていません（extraKnownMarketplaces のみ設定済みです）。${guidance}`,
+  ];
+}
+
+// `claude auth status --json` が読めた場合は判定対象のフィールドを、
+// 実行・パースに失敗した場合は「判定不能」を表す `unknown` を渡す。
+export type CloudAuthStatus =
+  | { kind: "ok"; loggedIn: boolean; authMethod: string; apiProvider: string; apiKeySource?: string }
+  | { kind: "unknown" };
+
+// claude.ai サインイン以外の構成（第三者プロバイダ・APIキー認証・未サインイン・カスタム
+// エンドポイント）でのクラウドセッション作成失敗を、起動前に検出する。
+// `docs/cloud-prerequisite-checks.md` の判定式・文面案が正。判定不能（コマンド実行/パース
+// 失敗）はエラーにしない — サインイン状態が読めないことを拒否根拠にしない安全側の倒し方。
+export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: string }): string[] {
+  if (input.status.kind === "unknown") return [];
+  const { loggedIn, authMethod, apiProvider, apiKeySource } = input.status;
+  const baseUrlSet = !!input.baseUrl;
+  if (loggedIn && apiProvider === "firstParty" && authMethod === "claude.ai" && !apiKeySource && !baseUrlSet) {
+    return [];
+  }
+  const prefix = `クラウド実行（workers.<name>.cloud: true）には claude.ai アカウントでのサインインが必要です。現在の認証構成: ${authMethod} / ${apiProvider}。`;
+  if (apiProvider === "bedrock" || apiProvider === "vertex") {
+    return [
+      `${prefix} 第三者プロバイダ（Bedrock / Vertex）を使っている場合: クラウドセッションは Anthropic のインフラ上で動くため利用できません。CLAUDE_CODE_USE_BEDROCK / CLAUDE_CODE_USE_VERTEX を解除するか、対象ワーカーの cloud を false にしてください。`,
+    ];
+  }
+  if (apiKeySource || authMethod === "oauth_token") {
+    return [
+      `${prefix} API キー認証（ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN）の場合: API キーではクラウドセッションを作成できません。環境変数を解除して claude auth login でサインインしてください。`,
+    ];
+  }
+  if (!loggedIn) {
+    return [`${prefix} 未サインインの場合: claude auth login を実行してください。`];
+  }
+  if (baseUrlSet) {
+    return [
+      `${prefix} ANTHROPIC_BASE_URL を設定している場合: カスタムエンドポイント構成ではクラウドセッションを利用できません。解除してください。`,
+    ];
+  }
+  return [`${prefix} claude auth status --json の出力からクラウド実行の前提条件を判定できませんでした。`];
+}
+
 // cloud: true のワーカー構成に非対応の組み合わせが無いかを検査する。
-// 引数をオブジェクト1つにしてあるのは、後続Issue（プラグイン宣言の静的検査等）で
-// 検査項目を追加してもシグネチャを壊さずフィールドを足せるようにするため。
-export function checkCloudConfig(input: { workers: Record<string, WorkerRuntimeConfig>; mode: string }): string[] {
+// 引数をオブジェクト1つにしてあるのは、検査項目を追加してもシグネチャを壊さずフィールドを
+// 足せるようにするため。`settings` / `auth` は cloud: true のワーカーが1件も無ければ
+// 一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
+export function checkCloudConfig(input: {
+  workers: Record<string, WorkerRuntimeConfig>;
+  mode: string;
+  settings?: ProjectSettings;
+  auth?: { status: CloudAuthStatus; baseUrl?: string };
+}): string[] {
   const errors: string[] = [];
+  let hasCloudWorker = false;
   for (const [name, worker] of Object.entries(input.workers)) {
     if (!worker.cloud) continue;
+    hasCloudWorker = true;
     if (input.mode !== "herdr") {
       errors.push(
         `worker "${name}" has cloud: true but mode is "${input.mode}" (creating a new cloud session requires a TTY, which "default" mode's spawn does not have). Set mode to "herdr" in config.json, or remove cloud from worker "${name}".`,
@@ -264,6 +354,10 @@ export function checkCloudConfig(input: { workers: Record<string, WorkerRuntimeC
         `worker "${name}" has cloud: true but this worker does not support cloud execution. Remove cloud from worker "${name}" in config.json.`,
       );
     }
+  }
+  if (hasCloudWorker) {
+    if (input.settings !== undefined) errors.push(...checkPluginDeclaration(input.settings));
+    if (input.auth !== undefined) errors.push(...checkCloudAuth(input.auth));
   }
   return errors;
 }
