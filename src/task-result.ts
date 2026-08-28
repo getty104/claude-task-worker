@@ -5,6 +5,9 @@ export const STDERR_TAIL_LIMIT = 8 * 1024;
 export interface TaskResult {
   status: "completed" | "failed";
   output: string;
+  // クラウド実行（workers.<name>.cloud）のセッションURL用ID。herdr モードでペインから
+  // 抽出できた場合のみ設定する。default モード（claude -p の spawn）は常に undefined。
+  cloudSessionId?: string;
 }
 
 /**

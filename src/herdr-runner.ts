@@ -90,6 +90,18 @@ export function observeAgentStatus(
   return { tracker, decision: "running" };
 }
 
+// クラウドセッションURLの抽出元となる、claude 起動出力の2形式。
+// `View: https://claude.ai/code/<id>?from=cli&m=0` は行中に罫線等が混ざりうるため URL 部分だけを
+// 緩く拾い、クエリ文字列（`?` 以降）は落とす。複数マッチした場合は最初の1件を採用する
+// （同一タスクの起動出力に複数のセッションURLが出ることは想定していないため、最後まで
+// スキャンして上書きし続けるより単純で、事故時の挙動も予測しやすい）。
+const CLOUD_SESSION_URL_RE = /https:\/\/claude\.ai\/code\/([A-Za-z0-9_-]+)/;
+const CLOUD_SESSION_CREATED_RE = /Created cloud session:\s*([A-Za-z0-9_-]+)/;
+
+export function extractCloudSessionId(text: string): string | undefined {
+  return CLOUD_SESSION_URL_RE.exec(text)?.[1] ?? CLOUD_SESSION_CREATED_RE.exec(text)?.[1];
+}
+
 /**
  * herdr モードのタスク結果を組み立てる。`claude -p` と違い exit code が無いため、
  * 「出力が空か」だけで成否を判定する。プリアンブル失敗などでモデルが
@@ -102,10 +114,14 @@ export function observeAgentStatus(
  * 使い物にならない（transcript.ts 参照）。transcript を引けなかった場合のみ
  * 従来どおりペイン内容へフォールバックする。
  */
-export function buildHerdrTaskResult(paneOutput: string, options?: { report?: string }): TaskResult {
+export function buildHerdrTaskResult(
+  paneOutput: string,
+  options?: { report?: string; cloudSessionId?: string },
+): TaskResult {
   const report = options?.report?.trim() ?? "";
+  const cloudSessionId = options?.cloudSessionId;
   if (report !== "") {
-    return { status: "completed", output: report };
+    return { status: "completed", output: report, ...(cloudSessionId ? { cloudSessionId } : {}) };
   }
   if (paneOutput.trim() === "") {
     return {
@@ -113,9 +129,10 @@ export function buildHerdrTaskResult(paneOutput: string, options?: { report?: st
       output:
         "[worker] the claude session became idle but its pane produced no output " +
         "(session aborted before the model ran; e.g. a skill preamble command failed)",
+      ...(cloudSessionId ? { cloudSessionId } : {}),
     };
   }
-  return { status: "completed", output: paneOutput };
+  return { status: "completed", output: paneOutput, ...(cloudSessionId ? { cloudSessionId } : {}) };
 }
 
 export interface HerdrTask {
@@ -179,6 +196,7 @@ export async function startHerdrTask({
   workspaceId,
   herdr,
   timing,
+  onCloudSessionId,
 }: {
   label: string;
   cwd: string;
@@ -189,6 +207,8 @@ export async function startHerdrTask({
   workspaceId?: string;
   herdr?: typeof HerdrModule;
   timing?: StartTiming;
+  // クラウド実行時、起動出力からクラウドセッションIDを拾えたら呼ばれる。
+  onCloudSessionId?: (sessionId: string) => void;
 }): Promise<HerdrTask> {
   const mod = herdr ?? (await loadHerdr());
   const { tabId, paneId } = await mod.tabCreate({ label, cwd, workspaceId, env });
@@ -210,12 +230,35 @@ export async function startHerdrTask({
     // 追跡し、作業中は working、非フォーカスでの完了は done を返すようになる。
     await mod.agentPrompt(paneId, prompt);
     await ensurePromptAccepted(paneId, prompt, mod, timing);
+    // クラウド実行（--cloud）では claude が起動出力に `Created cloud session: <id>` /
+    // `View: https://claude.ai/code/<id>...` を描画する。ローカルには他に記録が残らないため
+    // ペインからの抽出が唯一の取得手段。抽出できなくても正常系（ローカル実行では常に無い）。
+    if (onCloudSessionId) {
+      try {
+        const content = await mod.paneRead(paneId, { source: "recent", lines: PANE_OUTPUT_LINES });
+        const cloudSessionId = extractCloudSessionId(content);
+        if (cloudSessionId) onCloudSessionId(cloudSessionId);
+      } catch (err) {
+        console.error(`[herdr-runner] failed to read pane ${paneId} for cloud session id: ${err}`);
+      }
+    }
   } catch (err) {
     // 起動できなかった場合、シェルだけのタブが残り続けるため閉じてから失敗させる。
     // ここが try ブロック全体（waitForPaneReady / agentStart / agentPrompt /
     // ensurePromptAccepted）の唯一のエラー処理経路のため、paneId と原因をここで
     // 一括してログへ残す（残さないと実運用で原因調査ができない）。
     console.error(`[herdr-runner] failed to start task in pane ${paneId}: ${err}`);
+    // 失敗経路（タイムアウト等）でもクラウドセッションが既に作られていることがあるため、
+    // タブを閉じてペイン内容が失われる前に拾っておく（受け入れ基準上こちらが本命の経路）。
+    if (onCloudSessionId) {
+      try {
+        const content = await mod.paneRead(paneId, { source: "recent", lines: PANE_OUTPUT_LINES });
+        const cloudSessionId = extractCloudSessionId(content);
+        if (cloudSessionId) onCloudSessionId(cloudSessionId);
+      } catch {
+        // ペイン読み取り自体の失敗は元のエラーを潰さないよう無視する。
+      }
+    }
     await mod.tabClose(tabId).catch(() => {});
     throw err;
   }
@@ -374,7 +417,8 @@ export async function waitForHerdrTask(
     if (observed.decision === "completed") {
       const output = await readPaneOutput(paneId, mod);
       const report = (options?.readReport ?? readFinalReport)(sessionId);
-      return buildHerdrTaskResult(output, { report });
+      const cloudSessionId = extractCloudSessionId(output);
+      return buildHerdrTaskResult(output, { report, cloudSessionId });
     }
     if (observed.decision === "blocked-first-seen") {
       options?.onBlocked?.();
