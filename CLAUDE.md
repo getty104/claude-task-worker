@@ -308,7 +308,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - `mode: "default"` は `spawn(..., { stdio: ["ignore", "pipe", "pipe"] })` で TTY を持たないため、この経路ではクラウドセッションを作成できない。`mode: "herdr"` では既存のタスクタブ（TUI・実TTY）がそのまま起動場所になる
 - `cloud: true` のワーカーが1つでもあり `mode` が `"herdr"` でない場合は、`checkCloudConfig()` 経由で `assertCloudAvailable()`（`src/index.ts`）が**ワーカー起動時にエラー終了**する。**サイレントにローカル実行へフォールバックしない**（実行形態が設定と食い違ったまま走る方が事故が大きいため）
 - 起動時に拒否されるのはもう1系統あり、`CLOUD_DENIED_WORKERS` への `cloud: true` も同様にエラー終了する。内訳は (a) `resolve-conflict` / `create-ui-design` / `apply-ui-design`（`.pen` の編集に `pencil` CLI とその認証が要る／クラウドからの force-push 可否が未検証）、(b) 定期ワーカー3件（`SCHEDULED_WORKER_NAMES`）。(b) は**完了検知の `cc-cloud-done` を置く先が無い**ため：同ワーカーは対象 Issue/PR を持たず、ラベルを付けるマーカーが存在しない（実行記録PRをマーカー先にする案は Phase 2 で再検討）
-- タスクタブのラベルは `taskTabLabel()`（`src/herdr-runner.ts`）が `ctw:<project>:#<n>:cloud` を返し、クラウド実行であることが一覧から分かるようにしてある
+- タスクタブのラベルは `taskTabLabel()`（`src/herdr-runner.ts`）が `ctw:<project>:#<n>`（ローカル実行と同一書式）を返すため、タブラベルだけではクラウド実行かどうかを区別できない。タブはセッションID取得後すぐ閉じられ、クラウドセッション自体はローカルに常駐しないため、タブに `:cloud` のようなサフィックスを付ける意味も無い
 
 #### クラウド時に worktree を作らない理由
 
@@ -413,6 +413,8 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 | update-issue | `cc-update-issue` | `@author Updated` コメント投稿 |
 | create-ui-design | `cc-create-ui-design` | PR に `cc-ui-design` + `cc-triage-scope`、Issue に `cc-ui-design-pr-created` を付与 |
 | apply-ui-design | `cc-ui-design-pr-created` | Issue に `cc-ui-design-ready` + `cc-exec-issue` を付与 |
+
+`cc-cloud-done` は上表のどのワーカーのトリガーでもなく、クラウド実行（`workers.<name>.cloud`）のタスクがセッション自身の最後の操作として対象 Issue/PR へ付けるマーカー。ワーカーが検知して除去し、以降のラベル遷移はローカル実行と同一経路を通る。
 
 ### `cc-need-human-check`（PR側）と解けないコンフリクトのループ遮断
 

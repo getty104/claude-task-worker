@@ -177,120 +177,21 @@ Contact your organization admin to enable them.
 > クラウドセッションの作成が組織ポリシー（`allow_remote_sessions`）で拒否された可能性があります。組織の管理者にクラウドセッションの有効化を依頼してください。
 > `Couldn't verify your organization's policy` と表示された場合はポリシーの取得自体に失敗しています（ネットワークを確認してください）。ローカルからはポリシーを照会する手段がないため、事前チェックは行っていません。
 
-## 測定ログ（verbatim）
+## 測定ログ（要旨）
 
-### M1: `claude auth status --json`（通常のサインイン）
-
-exit=0
-
-```json
-{
-  "loggedIn": true,
-  "authMethod": "claude.ai",
-  "apiProvider": "firstParty",
-  "analyticsDisabled": false,
-  "email": "<redacted>",
-  "orgId": "<redacted>",
-  "orgName": "<redacted>",
-  "subscriptionType": "max"
-}
-```
-
-### M2: 環境変数による構成差分
-
-`ANTHROPIC_API_KEY=<dummy> claude auth status --json` → exit=0
-
-```json
-{
-  "loggedIn": true,
-  "authMethod": "claude.ai",
-  "apiProvider": "firstParty",
-  "analyticsDisabled": false,
-  "apiKeySource": "ANTHROPIC_API_KEY",
-  "email": null,
-  "orgId": null,
-  "orgName": null,
-  "subscriptionType": null
-}
-```
-
-`ANTHROPIC_AUTH_TOKEN=dummy claude auth status --json` → exit=0
-
-```json
-{
-  "loggedIn": true,
-  "authMethod": "oauth_token",
-  "apiProvider": "firstParty",
-  "analyticsDisabled": false
-}
-```
-
-`CLAUDE_CODE_USE_BEDROCK=1 claude auth status --json` → exit=0
-
-```json
-{
-  "loggedIn": true,
-  "authMethod": "third_party",
-  "apiProvider": "bedrock",
-  "analyticsDisabled": true
-}
-```
-
-`CLAUDE_CODE_USE_VERTEX=1` は上と同一で `apiProvider` のみ `"vertex"`。
-
-`ANTHROPIC_BASE_URL=https://example.invalid claude auth status --json` → exit=0、**M1 と完全に同一の出力**（検出不可）。
-
-### M3: 未ログイン状態（空の `CLAUDE_CONFIG_DIR`）
-
-`CLAUDE_CONFIG_DIR=$(mktemp -d) claude auth status --json` → **exit=1**
-
-```json
-{
-  "loggedIn": false,
-  "authMethod": "none",
-  "apiProvider": "firstParty",
-  "analyticsDisabled": false
-}
-```
-
-`--text` 形式:
-
-```
-Not logged in. Run claude auth login to authenticate.
-```
-
-副作用: 指定した空ディレクトリに `.claude.json` / `.claude.json.lock` / `backups/` が生成される（実測後に削除済み）。実ホームの設定は変更されない。
-
-### M4: 第三者プロバイダでの `--cloud`（pty）
-
-`CLAUDE_CODE_USE_BEDROCK=1 claude --cloud "<description>"`
-
-```
-Error: Cloud sessions aren't available with Amazon Bedrock. They run on
-Anthropic's infrastructure and require an Anthropic account.
-```
-
-`CLAUDE_CODE_USE_VERTEX=1 claude --cloud "<description>"`
-
-```
-Error: Cloud sessions aren't available with Google Vertex AI. They run on
-Anthropic's infrastructure and require an Anthropic account.
-```
-
-いずれもセッションは作成されない。`--cloud` の TTY チェックより後、セッション作成（ネットワーク）より前で拒否される。
-
-### M5: ポリシーキャッシュの生成有無
-
-```
-$ ls ~/.claude/policy-limits.json
-ls: ~/.claude/policy-limits.json: No such file or directory
-$ claude -p "reply with exactly: ok"
-ok
-$ ls ~/.claude/policy-limits.json
-ls: ~/.claude/policy-limits.json: No such file or directory
-```
-
-`claude auth status` の実行後・`claude -p` セッション1本の完了後のいずれでも生成されない。
+- **M1** `claude auth status --json`（通常のサインイン）→ exit=0: `{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","analyticsDisabled":false,"email":"<redacted>","orgId":"<redacted>","orgName":"<redacted>","subscriptionType":"max"}`
+- **M2** 環境変数による構成差分（いずれも exit=0）:
+  - `ANTHROPIC_API_KEY=<dummy>` → `apiKeySource: "ANTHROPIC_API_KEY"` が出現、`email`/`orgId`/`orgName`/`subscriptionType` は `null`、`authMethod` は `"claude.ai"` のまま
+  - `ANTHROPIC_AUTH_TOKEN=dummy` → `authMethod: "oauth_token"`
+  - `CLAUDE_CODE_USE_BEDROCK=1` → `authMethod: "third_party"` / `apiProvider: "bedrock"` / `analyticsDisabled: true`
+  - `CLAUDE_CODE_USE_VERTEX=1` → 上と同一で `apiProvider` のみ `"vertex"`
+  - `ANTHROPIC_BASE_URL=https://example.invalid` → **M1と完全に同一の出力**（検出不可）
+- **M3** 未ログイン状態（空の `CLAUDE_CONFIG_DIR`）: `CLAUDE_CONFIG_DIR=$(mktemp -d) claude auth status --json` → **exit=1**、`{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty","analyticsDisabled":false}`。`--text` 形式は `Not logged in. Run claude auth login to authenticate.`。副作用: 指定した空ディレクトリに `.claude.json` 等が生成される（実測後に削除済み、実ホームの設定は不変）
+- **M4** 第三者プロバイダでの `--cloud`（pty）、いずれもセッション未作成:
+  - `CLAUDE_CODE_USE_BEDROCK=1 claude --cloud "<desc>"` → `Error: Cloud sessions aren't available with Amazon Bedrock. They run on Anthropic's infrastructure and require an Anthropic account.`
+  - `CLAUDE_CODE_USE_VERTEX=1 claude --cloud "<desc>"` → 同文言で Bedrock→Google Vertex AI に置換
+  - `--cloud` の TTY チェックより後、セッション作成（ネットワーク）より前で拒否される
+- **M5** ポリシーキャッシュの生成有無: `ls ~/.claude/policy-limits.json` は当初・`claude auth status` 実行後・`claude -p` セッション1本完了後のいずれでも `No such file or directory`（生成されない）
 
 ## 未実測項目
 
