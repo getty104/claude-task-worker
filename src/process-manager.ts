@@ -184,11 +184,12 @@ async function runViaHerdr(
   onComplete?: OnComplete,
   cwd?: string,
   env?: Record<string, string>,
+  cloud?: boolean,
 ): Promise<void> {
   const { startHerdrTask, stopHerdrTask, taskTabLabel, waitForHerdrTask } = await import("./herdr-runner");
   const { getCurrentWorkspaceId } = await import("./herdr");
 
-  const label = taskTabLabel(resolveProjectName(), id);
+  const label = taskTabLabel(resolveProjectName(), id, cloud);
   let task: HerdrTask | undefined;
   let result: TaskResult;
 
@@ -246,6 +247,9 @@ export function run(
   // herdr モードで起動後に投入するプロンプト（`buildClaudeExecution` の `prompt`）。
   // default モードでは args に含まれるため不要。
   prompt?: string,
+  // クラウド実行フラグ（workers.<name>.cloud）。herdr モードのタスクタブラベルへ反映する
+  // だけで、default モード（spawn）の挙動には影響しない。
+  cloud?: boolean,
 ): void {
   // 同じ Issue/PR を再実行したときは古いエントリを削除してから入れ直し、
   // Map の挿入順で「最新に繰り上げる」（selectRecentTasks の直近順表示と揃える）。
@@ -265,7 +269,7 @@ export function run(
   if (getRunMode() === "herdr") {
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、
     // command は渡さず claude のフラグ（args）とプロンプトを渡す。
-    void runViaHerdr(args, prompt ?? "", id, onComplete, cwd, env);
+    void runViaHerdr(args, prompt ?? "", id, onComplete, cwd, env, cloud);
     return;
   }
 
