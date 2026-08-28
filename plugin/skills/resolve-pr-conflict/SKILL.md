@@ -29,6 +29,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `resolve-conflict` ワーカー（`cc-resolve-conflict` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-resolve-conflict` の除去を進める。処理が未完のままターンを終えると、rebase未完了のまま `triage-pr` ワーカーが再度PRを拾ってコンフリクトを再検知する無限ループや、リモート未反映のまま次工程に進む状態壊れが起きる。
@@ -52,6 +56,8 @@ pwd
 
 ## ステップ1: PRの存在確認とチェックアウト
 
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh pr view $ARGUMENTS --json number,state,baseRefName,headRefName
 ```
@@ -65,12 +71,14 @@ git fetch -p
 gh pr checkout $ARGUMENTS
 ```
 
+（`gh pr checkout` はローカル作業ツリーへの checkout であり、リモート API では代替できないため `gh` のまま残す）
+
 `gh pr checkout`が失敗した場合（作業ツリーが汚れている、ローカルに同名のブランチがある等）は、原因をそのまま出力して中断する。`git stash`や`git reset --hard`を独断で行ってユーザーの未コミット変更を失わせないこと。
 
 チェックアウト成功後、fail-safeとしてブランチがデフォルトブランチでないことを確認する。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
@@ -81,6 +89,8 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ターゲットブランチは`baseRefName`から動的に取得する。デフォルトブランチではなく、PRが実際にマージされる先のブランチを基準にすること（Epic PRなど、デフォルトブランチ以外をターゲットにするケースに対応するため）。
 
 コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`cc-resolve-conflict`ラベルの付与と除去が繰り返される無限ループになる。
+
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 TARGET_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)

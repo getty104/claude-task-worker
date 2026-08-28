@@ -13,6 +13,10 @@ set -euo pipefail
 #   インデックスの output_file に絶対パスを載せる。
 #   Issue本文＋全コメントはそのまま読むとコンテキストを食い潰すため、
 #   呼び出し側が jq で必要な Issue だけを取り出せるようにしている。
+#
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
+# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になり収集が0件になる。
+# 詳細は plugin/references/github-access.md を参照。
 
 DAYS="${1:-1}"
 OUT_FILE="${2:-}"

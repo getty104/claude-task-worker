@@ -19,6 +19,10 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-ui-design` ワーカー（`cc-create-ui-design` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（`cc-ui-design-pr-created` の付与、デザインPRへの `cc-ui-design` 付与と、`uiDesign.yolo` が `true` の場合の `cc-triage-scope` 付与）を進める。処理が未完のままターンを終えると、デザインPR未作成のままトリガーラベルが外れてIssueが停滞したり、デザインなしで実装フェーズへ流れたりする状態壊れが起きる。
@@ -37,7 +41,7 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 ### 0-1. 作業ディレクトリとIssueの確認
 
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断**（デフォルトブランチで作業してはならない）
-- `gh issue view $0 --json number,title,body,state,labels,comments` でIssueが `OPEN` であることを確認する。CLOSEDなら **中断**
+- `gh issue view $0 --json number,title,body,state,labels,comments` でIssueが `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`。コメント取得は `get_comments`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更があれば `git stash push -u -m "create-ui-design auto-stash $0"` で自動退避し、その旨を最終報告に明記する
 
 ### 0-2. Pencil の疎通確認
@@ -115,6 +119,8 @@ fi
 
    - 判断理由: <UI変更を伴わないと判断した根拠を1-2行で>
    ```
+
+   > GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
    ```bash
    BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"
@@ -252,6 +258,8 @@ push（またはリモート存在確認）に失敗した場合はエラー出�
 
 ベースブランチは実装PRと揃える（Epic配下のIssueでは、デザインが実装ブランチに存在しない事態を防ぐため）。
 
+`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。ログインユーザー取得（`gh api user`）は GitHub MCP が使える場合は `get_me` を使う。
+
 ```bash
 BASE_BRANCH=""
 if ! PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty'); then
@@ -298,6 +306,8 @@ EOF
 ラベルは付与しない（`cc-ui-design` はワーカーが `onCompleted` で付与する。`cc-triage-scope` も同様にワーカー側の担当で、`claude-task-worker.json` の `uiDesign.yolo` が `true` の場合のみ付与される）。
 
 ### PR作成の検証
+
+> GitHub MCP が使える場合は `list_pull_requests` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr list --head "cc-ui-design-$0" --state open --json number,url

@@ -1,3 +1,9 @@
+# このスクリプトは GitHub MCP（pull_request_read の get_review_comments）が利用不可な場合の
+# フォールバック経路。クラウドセッションでは GitHub プロキシが `gh api graphql` を含む
+# `gh` コマンドをフィールドを問わず 403 で拒否するため、MCP が使えるならそちらを優先する。
+# 呼び出し元（create-review-fix-plan / triage-pr）の判定・フォールバック方針は
+# plugin/references/github-access.md を参照。
+
 OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 OWNER="$(echo $OWNER_REPO | cut -d'/' -f1)"
 REPO="$(echo $OWNER_REPO | cut -d'/' -f2)"

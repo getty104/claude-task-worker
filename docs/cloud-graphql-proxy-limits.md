@@ -128,6 +128,14 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 
 「△」の3ワーカー（`fix-review-point` / `triage-pr` / `check-dependabot`）を Phase 1 で起動時に拒否せず許可する方針は確定済みのため、**本実測は判定の運用（拒否するかどうか）を覆さない**。ただし上表のとおり、これらは GraphQL ゲート下では成果物を出せないため、許可したままクラウド実行するとタスクが空振りする。運用上は「許可はするが、GraphQL ゲートが解除されるかスキルが REST 化されるまで `cloud: true` にしない」ことを推奨する。
 
+## GitHub MCP 移行との関係
+
+Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP 優先（利用不可なら `gh` へフォールバック）へ切り替えた。GitHub MCP は本ドキュメントが実測した `gh` 経由のプロキシ（GraphQL ゲート／リポジトリゲート／パスゲート）を経由しないため、上記の適合性表が挙げる劣化要因（GraphQL 403）は原理的に回避されうる。対応表は `plugin/references/github-access.md` に集約してある。
+
+**この移行はクラウドセッションでの GitHub MCP の起動・認証を実測したものではない**。ローカルからクラウド VM の MCP 接続状態を照会する手段が無いため、GitHub MCP がクラウド VM 上で実際に使えるかは未確認である。そのため本ドキュメントの実測表（`gh` コマンド表・スキル別出現数表・ワーカー別適合性表）は本移行を反映せず、値は変更していない。クラウドでの MCP 疎通が実測でき次第、本ドキュメントを更新する。
+
+レビュースレッドの Resolve（`resolveReviewThread`）は本移行のスコープ外（別Issue担当）で、`fix-review-point` の判定に変更はない。
+
 ## 測定ログ（verbatim）
 
 ### P-1: GraphQL ゲートの403（`gh api graphql -f query='query{viewer{login}}' -i`）
