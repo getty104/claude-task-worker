@@ -14,7 +14,7 @@ import {
   selectRecentTasks,
   writeScreen,
 } from "./table";
-import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result";
+import { STDERR_TAIL_LIMIT, appendCloudFailureGuidance, buildTaskResult } from "./task-result";
 import type { TaskResult } from "./task-result";
 import { findProjectNameByPath, getRunMode } from "./user-config";
 
@@ -228,6 +228,10 @@ async function runViaHerdr(
       await stopHerdrTask(task);
     }
   }
+
+  // クラウド実行の失敗のみ、GitHub連携・組織ポリシーの案内をここで一度だけ追記する
+  // （catch経路・waitForHerdrTaskのfailedのどちらもここを通る）。
+  result = appendCloudFailureGuidance(result, cloud);
 
   // 台帳からの削除は onComplete の完了後（default モードの childProcesses と同じ扱い）。
   await finishTask(id, result, onComplete);

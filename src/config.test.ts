@@ -15,6 +15,8 @@ const {
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
   checkCloudConfig,
+  checkPluginDeclaration,
+  checkCloudAuth,
 } = (await import("./config")) as typeof ConfigModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
@@ -229,4 +231,126 @@ test("checkCloudConfig reports both reasons when a denied worker also has mode !
 
 test("checkCloudConfig reports nothing for the existing default configuration (cloud unset/false everywhere)", () => {
   assert.deepEqual(checkCloudConfig({ workers: WORKER_DEFAULTS, mode: "default" }), []);
+});
+
+const PLUGIN_KEY = "claude-task-worker@claude-task-worker";
+const okSettings = (): {
+  extraKnownMarketplaces: Record<string, unknown>;
+  enabledPlugins: Record<string, unknown>;
+} => ({
+  extraKnownMarketplaces: {
+    "claude-task-worker": { source: { source: "github", repo: "getty104/claude-task-worker" } },
+  },
+  enabledPlugins: { [PLUGIN_KEY]: true },
+});
+
+test("checkPluginDeclaration reports nothing when both keys are declared", () => {
+  assert.deepEqual(checkPluginDeclaration({ kind: "ok", value: okSettings() }), []);
+});
+
+test("checkPluginDeclaration reports missing declaration when neither key is present", () => {
+  const errors = checkPluginDeclaration({ kind: "ok", value: {} });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /init --cloud/);
+});
+
+test("checkPluginDeclaration reports file absence", () => {
+  const errors = checkPluginDeclaration({ kind: "missing" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /\.claude\/settings\.json/);
+});
+
+test("checkPluginDeclaration reports broken JSON", () => {
+  const errors = checkPluginDeclaration({ kind: "invalid", reason: "Unexpected token }" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /Unexpected token/);
+});
+
+test("checkPluginDeclaration reports which of the two keys is missing", () => {
+  const settings = okSettings();
+  delete (settings.enabledPlugins as Record<string, unknown>)[PLUGIN_KEY];
+  const errors = checkPluginDeclaration({ kind: "ok", value: settings });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /enabledPlugins/);
+});
+
+// M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
+test("checkCloudAuth allows a normal claude.ai sign-in", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
+  });
+  assert.deepEqual(errors, []);
+});
+
+// M2: ANTHROPIC_API_KEY
+test("checkCloudAuth rejects ANTHROPIC_API_KEY even though authMethod reads claude.ai", () => {
+  const errors = checkCloudAuth({
+    status: {
+      kind: "ok",
+      loggedIn: true,
+      authMethod: "claude.ai",
+      apiProvider: "firstParty",
+      apiKeySource: "ANTHROPIC_API_KEY",
+    },
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /API キー/);
+});
+
+// M2: ANTHROPIC_AUTH_TOKEN
+test("checkCloudAuth rejects ANTHROPIC_AUTH_TOKEN (authMethod: oauth_token)", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "oauth_token", apiProvider: "firstParty" },
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /API キー/);
+});
+
+// M2: Bedrock / Vertex
+test("checkCloudAuth rejects third-party providers (Bedrock/Vertex)", () => {
+  const bedrock = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "third_party", apiProvider: "bedrock" },
+  });
+  assert.equal(bedrock.length, 1);
+  assert.match(bedrock[0], /第三者プロバイダ/);
+
+  const vertex = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "third_party", apiProvider: "vertex" },
+  });
+  assert.equal(vertex.length, 1);
+  assert.match(vertex[0], /第三者プロバイダ/);
+});
+
+// M3: 未ログイン
+test("checkCloudAuth rejects a logged-out state", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /未サインイン/);
+});
+
+// ANTHROPIC_BASE_URL: `claude auth status` の出力上は通常のサインインと区別できないため、
+// ワーカー側が別途 baseUrl を渡して判定する。
+test("checkCloudAuth rejects a custom ANTHROPIC_BASE_URL even with an otherwise normal sign-in", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
+    baseUrl: "https://example.invalid",
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /ANTHROPIC_BASE_URL/);
+});
+
+test("checkCloudAuth treats an indeterminate status as not an error", () => {
+  assert.deepEqual(checkCloudAuth({ status: { kind: "unknown" } }), []);
+});
+
+test("checkCloudConfig does not inspect settings/auth when no worker has cloud: true", () => {
+  const errors = checkCloudConfig({
+    workers: WORKER_DEFAULTS,
+    mode: "default",
+    settings: { kind: "invalid", reason: "boom" },
+    auth: { status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" } },
+  });
+  assert.deepEqual(errors, []);
 });
