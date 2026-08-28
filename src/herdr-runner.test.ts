@@ -22,6 +22,12 @@ test("taskTabLabel formats the tab label as ctw:<project>:#<number>", () => {
   assert.equal(taskTabLabel("my-app", 123), "ctw:my-app:#123");
 });
 
+test("taskTabLabel appends :cloud only when cloud is true", () => {
+  assert.equal(taskTabLabel("my-app", 123, true), "ctw:my-app:#123:cloud");
+  assert.equal(taskTabLabel("my-app", 123, false), "ctw:my-app:#123");
+  assert.equal(taskTabLabel("my-app", 123), "ctw:my-app:#123");
+});
+
 const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 
 test("toAgentName converts a task tab label into a valid herdr agent name", () => {
@@ -38,6 +44,20 @@ test("toAgentName satisfies the herdr agent name rules for tricky inputs", () =>
     taskTabLabel("123numeric", 9),
     taskTabLabel("a".repeat(60), 999999),
     "###",
+  ];
+  for (const label of cases) {
+    const name = toAgentName(label);
+    assert.match(name, AGENT_NAME_RE, `"${label}" -> "${name}" should be a valid agent name`);
+  }
+});
+
+test("toAgentName satisfies the herdr agent name rules for cloud-labeled tricky inputs", () => {
+  // 32文字切り詰めで `-cloud` が落ちうるが、規則（文字種・長さ）を満たすことだけを検証する。
+  const cases = [
+    taskTabLabel("My_App", 12, true),
+    taskTabLabel("プロジェクト", 7, true),
+    taskTabLabel("123numeric", 9, true),
+    taskTabLabel("a".repeat(60), 999999, true),
   ];
   for (const label of cases) {
     const name = toAgentName(label);

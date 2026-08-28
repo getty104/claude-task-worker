@@ -20,9 +20,11 @@ export const AGENT_POLL_INTERVAL_MS = 3 * 1000;
 // 空振り検知へ流用する。
 export const PANE_OUTPUT_LINES = 300;
 
-// herdr モードのタスクが作るタブのラベル。
-export function taskTabLabel(projectName: string, number: number): string {
-  return `ctw:${projectName}:#${number}`;
+// herdr モードのタスクが作るタブのラベル。cloud=true のときだけ末尾へ `:cloud` を付け、
+// クラウド実行（workers.<name>.cloud）を識別できるようにする。既定 false でローカル実行の
+// 戻り値は不変。
+export function taskTabLabel(projectName: string, number: number, cloud = false): string {
+  return `ctw:${projectName}:#${number}${cloud ? ":cloud" : ""}`;
 }
 
 // `herdr agent start <name>` の agent 名は「小文字始まり・小文字/数字/'-'/'_' のみ・1〜32文字」に
