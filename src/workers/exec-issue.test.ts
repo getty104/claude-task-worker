@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as ExecIssueModule from "./exec-issue";
+import type * as CliStubModule from "../test-support/cli-stub";
 import type { ClosingPrRef } from "../gh";
 
-const { formatSessionReport, selectOwnedClosingPr } = (await import("./exec-issue.ts")) as typeof ExecIssueModule;
+const { formatSessionReport, selectOwnedClosingPr, verifyPrCreated } =
+  (await import("./exec-issue.ts")) as typeof ExecIssueModule;
+const { installCliStubs } = (await import("../test-support/cli-stub.ts")) as typeof CliStubModule;
 
 function pr(overrides: Partial<ClosingPrRef>): ClosingPrRef {
   return {
@@ -107,4 +110,114 @@ test("selectOwnedClosingPr: a CLOSED (unmerged) candidate is never adopted in ei
     }),
   ];
   assert.equal(selectOwnedClosingPr(closedCloud, { ...baseCtx, cloud: true }), null);
+});
+
+// verifyPrCreated: gh スタブで4分岐（早期return2種 + ローカル/クラウド一致 + 不一致）を検証する。
+function addLabelArgv(records: ReturnType<CliStubModule.InstalledCliStubs["records"]>, type: string): boolean {
+  return records.some(
+    (r) => r.command === "gh" && r.argv[0] === type && r.argv[1] === "edit" && r.argv.includes("cc-pr-created"),
+  );
+}
+
+test("verifyPrCreated: cc-need-human-check already present, skips cc-pr-created", async (t) => {
+  const stubs = installCliStubs({ gh: { view: { "5": { labels: [{ name: "cc-need-human-check" }] } } } });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: false,
+    baseBranch: "main",
+    startedAt: Date.now() - 60_000,
+  });
+
+  assert.equal(result, false);
+  assert.equal(addLabelArgv(stubs.records(), "issue"), false);
+});
+
+test("verifyPrCreated: issue closed by skill (no-change path), skips cc-pr-created", async (t) => {
+  const stubs = installCliStubs({ gh: { view: { "5": { labels: [], state: "CLOSED" } } } });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: false,
+    baseBranch: "main",
+    startedAt: Date.now() - 60_000,
+  });
+
+  assert.equal(result, undefined);
+  assert.equal(addLabelArgv(stubs.records(), "issue"), false);
+});
+
+test("verifyPrCreated (local): adopts a PR whose head matches the worktree branch", async (t) => {
+  const stubs = installCliStubs({
+    gh: { view: { "5": { labels: [], state: "OPEN" } }, prList: [{ number: 7, headRefName: "adj-noun-1234" }] },
+  });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: false,
+    baseBranch: "main",
+    startedAt: Date.now() - 60_000,
+  });
+
+  assert.equal(result, undefined);
+  assert.equal(addLabelArgv(stubs.records(), "issue"), true);
+});
+
+test("verifyPrCreated (cloud): adopts a closing PR by base + createdAt ownership, without calling `gh pr list`", async (t) => {
+  const startedAt = Date.now() - 60_000;
+  const stubs = installCliStubs({
+    gh: {
+      view: { "5": { labels: [], state: "OPEN" } },
+      closingPrs: [
+        {
+          number: 9,
+          state: "OPEN",
+          headRefName: "cloud-generated-branch",
+          baseRefName: "main",
+          createdAt: new Date(Date.now() - 30_000).toISOString(),
+        },
+      ],
+    },
+  });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: true,
+    baseBranch: "main",
+    startedAt,
+  });
+
+  assert.equal(result, undefined);
+  assert.equal(addLabelArgv(stubs.records(), "issue"), true);
+  assert.equal(
+    stubs.records().some((r) => r.command === "gh" && r.argv[0] === "pr" && r.argv[1] === "list"),
+    false,
+  );
+});
+
+test("verifyPrCreated: no matching PR found, marks cc-need-human-check and comments", async (t) => {
+  const stubs = installCliStubs({
+    gh: { view: { "5": { labels: [], state: "OPEN" } }, prList: [], closingPrs: [] },
+  });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: false,
+    baseBranch: "main",
+    startedAt: Date.now() - 60_000,
+  });
+
+  assert.equal(result, false);
+  const records = stubs.records();
+  assert.equal(
+    records.some(
+      (r) =>
+        r.command === "gh" && r.argv[0] === "issue" && r.argv[1] === "edit" && r.argv.includes("cc-need-human-check"),
+    ),
+    true,
+  );
+  assert.equal(
+    records.some((r) => r.command === "gh" && r.argv[0] === "issue" && r.argv[1] === "comment"),
+    true,
+  );
 });
