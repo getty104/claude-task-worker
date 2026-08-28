@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep as SEP } from "node:path";
-import { PLUGIN_NAME, MARKETPLACE_NAME, MARKETPLACE_SOURCE, PROJECT_SETTINGS_PATH } from "./commands/install";
 
 export type WorkerName =
   | "exec-issue"
@@ -248,64 +247,6 @@ export const SCHEDULED_WORKER_NAMES = [
 // クラウド環境からの force-push の可否が未検証のため、いずれも拒否する。
 export const CLOUD_DENIED_WORKERS = ["resolve-conflict", "create-ui-design", "apply-ui-design"] as const;
 
-// リポジトリの `.claude/settings.json` の3状態（読めた/存在しない/JSONとして壊れている）を
-// 呼び出し側（index.ts）が区別して渡せるようにする判別可能ユニオン。
-export type ProjectSettings =
-  | { kind: "ok"; value: Record<string, unknown> }
-  | { kind: "missing" }
-  | { kind: "invalid"; reason: string };
-
-// cloud: true のワーカーが `.claude/settings.json` にプラグイン宣言されているかを検査する。
-// クラウドセッション（Claude Code on the web）はリポジトリのプロジェクト設定を読むため、
-// `init.ts` の `mergePluginSettings()` が書き込む2キー（extraKnownMarketplaces /
-// enabledPlugins）が揃っていないと、クラウド側でスキルが読み込めず空振りする。
-export function checkPluginDeclaration(settings: ProjectSettings): string[] {
-  const pluginKey = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
-  const guidance = `\`claude-task-worker init --cloud\` を実行して ${PROJECT_SETTINGS_PATH} にプラグインを登録してください。`;
-  if (settings.kind === "missing") {
-    return [
-      `cloud: true のワーカーがありますが ${PROJECT_SETTINGS_PATH} が存在せずプラグインが宣言されていません。${guidance}`,
-    ];
-  }
-  if (settings.kind === "invalid") {
-    return [`${PROJECT_SETTINGS_PATH} を読み込めませんでした（${settings.reason}）。${guidance}`];
-  }
-  const marketplaces = settings.value.extraKnownMarketplaces as Record<string, unknown> | undefined;
-  const marketplaceKeyExists = !!marketplaces && Object.prototype.hasOwnProperty.call(marketplaces, MARKETPLACE_NAME);
-  const marketplaceEntry = marketplaceKeyExists
-    ? ((marketplaces as Record<string, unknown>)[MARKETPLACE_NAME] as { source?: { source?: unknown; repo?: unknown } })
-    : undefined;
-  const hasMarketplace =
-    marketplaceEntry?.source?.source === "github" && marketplaceEntry?.source?.repo === MARKETPLACE_SOURCE;
-  const plugins = settings.value.enabledPlugins as Record<string, unknown> | undefined;
-  const pluginKeyExists = !!plugins && Object.prototype.hasOwnProperty.call(plugins, pluginKey);
-  const hasPlugin = pluginKeyExists && plugins?.[pluginKey] === true;
-  if (hasMarketplace && hasPlugin) return [];
-  if (!marketplaceKeyExists && !pluginKeyExists) {
-    return [
-      `cloud: true のワーカーがありますが ${PROJECT_SETTINGS_PATH} にプラグイン（${pluginKey}）が宣言されていません。${guidance}`,
-    ];
-  }
-  const errors: string[] = [];
-  if (!marketplaceKeyExists) {
-    errors.push(
-      `${PROJECT_SETTINGS_PATH} の extraKnownMarketplaces に "${MARKETPLACE_NAME}" が登録されていません。${guidance}`,
-    );
-  } else if (!hasMarketplace) {
-    errors.push(
-      `${PROJECT_SETTINGS_PATH} の extraKnownMarketplaces の "${MARKETPLACE_NAME}" が正しい参照先（source: "github", repo: "${MARKETPLACE_SOURCE}"）になっていません。${guidance}`,
-    );
-  }
-  if (!pluginKeyExists) {
-    errors.push(`${PROJECT_SETTINGS_PATH} の enabledPlugins に "${pluginKey}" が登録されていません。${guidance}`);
-  } else if (!hasPlugin) {
-    errors.push(
-      `${PROJECT_SETTINGS_PATH} の enabledPlugins で "${pluginKey}" が有効化されていません（値が true ではありません）。${guidance}`,
-    );
-  }
-  return errors;
-}
-
 // `claude auth status --json` が読めた場合は判定対象のフィールドを、
 // 実行・パースに失敗した場合は「判定不能」を表す `unknown` を渡す。
 export type CloudAuthStatus =
@@ -347,12 +288,11 @@ export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: strin
 
 // cloud: true のワーカー構成に非対応の組み合わせが無いかを検査する。
 // 引数をオブジェクト1つにしてあるのは、検査項目を追加してもシグネチャを壊さずフィールドを
-// 足せるようにするため。`settings` / `auth` は cloud: true のワーカーが1件も無ければ
+// 足せるようにするため。`auth` は cloud: true のワーカーが1件も無ければ
 // 一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
 export function checkCloudConfig(input: {
   workers: Record<string, WorkerRuntimeConfig>;
   mode: string;
-  settings?: ProjectSettings;
   auth?: { status: CloudAuthStatus; baseUrl?: string };
 }): string[] {
   const errors: string[] = [];
@@ -372,7 +312,6 @@ export function checkCloudConfig(input: {
     }
   }
   if (hasCloudWorker) {
-    if (input.settings !== undefined) errors.push(...checkPluginDeclaration(input.settings));
     if (input.auth !== undefined) errors.push(...checkCloudAuth(input.auth));
   }
   return errors;
