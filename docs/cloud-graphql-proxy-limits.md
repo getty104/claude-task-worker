@@ -108,7 +108,7 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 | `update-requirement-rules` | 3 | あり | — |
 | `update-design-md` | 2 | あり | 1 |
 
-補助スキルでは `resolve-pr-comments`（`reviewThreads` + `resolveReviewThread`）と `create-review-fix-plan`（`reviewThreads`）が GraphQL に直接依存する。`create-pr` / `commit-push` は `--json` も `graphql` も使わない。
+補助スキル・スクリプトでは `resolve-pr-comments.sh`（`reviewThreads` + `resolveReviewThread`）と `create-review-fix-plan`（`reviewThreads`）が GraphQL に直接依存する。`create-pr` / `commit-push` は `--json` も `graphql` も使わない。
 
 ## ワーカー別適合性（PRD 5章 適合性表の差し替え用）
 
@@ -226,7 +226,7 @@ P-2 の403本文が案内する `add_repo` を実行してリポジトリゲー�
 ## PRD からの差分
 
 1. **5章「GraphQL の 403 制限」の影響範囲が過小**。PRD は `--json parent,blockedBy` とレビュースレッド解決を挙げていたが、実際は `gh issue view --json` / `gh pr view --json` / `gh pr list` / `gh pr checks` が**フィールドを問わず**全滅する。ワーカー起動スキル15個すべてが影響を受ける
-2. **「REST へのフォールバックが必要」は正しいが、レビュースレッド解決だけは REST 代替が原理的に存在しない**。`fix-review-point` / `resolve-pr-comments` はスキルを書き換えても回復しない
+2. **「REST へのフォールバックが必要」は正しいが、レビュースレッド解決だけは REST 代替が原理的に存在しない**。`fix-review-point` / `resolve-pr-comments.sh` はスキル・スクリプトを書き換えても回復しない
 3. **適合性表を全面的に格下げする必要がある**。`exec-issue` の ◎ を含め、Issue/PR の内容を `gh` で読む全ワーカーが GraphQL ゲートの影響下にある（上表参照）
 4. **制約表に「リポジトリゲート」と「パスゲート」を追加すべき**。GitHub App 連携が未設定のセッションでは `repos/*` が全リポジトリで403になり、GraphQL 以前に何も読めない
 5. **クラウド VM の `gh` が 2.45.0 で古い**。プロキシ制限とは独立に、sub-issue / issue-dependencies 系の `--json` フィールドが使えない。PRD にはこの前提が無い
