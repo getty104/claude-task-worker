@@ -136,7 +136,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | **リポジトリゲート**（実測済み）: GitHub App 連携が未設定のセッションでは `repos/{owner}/{repo}/...` が**全リポジトリで**403（無関係な公開リポジトリも含む） | 連携未設定のリポジトリではクラウド実行そのものが成立しない。REST へのフォールバックも塞がれ、`git remote` も0件のため push・PR 作成もできない |
 | **パスゲート**（実測済み）: リポジトリスコープでない REST パス（`search/*` 等）は403 | `gh search` 系は使えない。`gh` で通る REST は `user` と `rate_limit` のみ |
 | **クラウド VM の `gh` が古い**（実測: 2.45.0 / 2025-07-18） | `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` は `Unknown JSON field` でクライアント側で失敗する。プロキシ制限とは独立した交絡 |
-| **push は「セッションの作業ブランチ」のみ** | 別ブランチへの push・固定名ブランチへの force-push を伴う処理は成立しない。`--on-branch` で作業ブランチを PR の head に合わせる必要がある |
+| **push は「セッションの作業ブランチ」のみ** | 別ブランチへの push・固定名ブランチへの force-push を伴う処理は成立しない。`--on-branch` で作業ブランチを PR の head に合わせる必要がある。**この制約自体は実測で裏付けられていない**（GitHub App 未設定の環境では `--on-branch` が前段で拒否されて制約に到達せず、`--on-branch` を外した経路でも VM に remote が無く push が資格情報へ届かない。Issue #227 / `docs/cloud-session-force-push.md`） |
 | **bypassPermissions 不可 / ツール制限不可** | `--disallowedTools` による `AskUserQuestion` / `Monitor` 等の無効化が効かない。自律実行原則（システムプロンプト注入）だけが歯止めになる |
 | **`!` インラインコマンド不可** | SKILL.md のプリアンブル `!` が実行されない。現状の該当は `triage-pr` / `check-dependabot` の `git fetch`（いずれも失敗しても継続する設計）のみ |
 | **MCP はデバイスリンク経由** | CodeGraph / Pencil の MCP サーバーはローカルのドライバ経由でしか届かない。プラグイン同梱の `.mcp.json` はクラウド VM 側でも起動されるが、`codegraph` CLI もインデックスも VM に存在しないためテキスト検索へフォールバックする |
@@ -156,7 +156,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | `epic-issue`（`create-epic-pr`） | △（実測前 ○） | `cc-epic-<N>` を作業ブランチにできれば成立するが、`gh issue view --json` が403 |
 | `fix-review-point` | ✕（実測前 △） | `reviewThreads` クエリで**レビュー指摘を1件も取得できない**。さらにスレッド解決（`resolveReviewThread`）は REST 代替が原理的に存在せず、スキルを書き換えても回復しない |
 | `triage-pr` | ✕（実測前 △） | `gh pr view --json` / `gh pr checks` / `reviewThreads` / `gh pr list` がすべて403で、**マージ判断の材料がゼロ**になる。マージゲートを担うワーカーが根拠なく判断する状態は許容しない。`gh pr merge` 自体の可否は未判定（リポジトリゲートが先に効くため） |
-| `resolve-conflict` | ✕（Phase 1 では非対応） | rebase 後の force-push が push 制約に抵触するか未検証。`.pen` の解決に `pencil` CLI が必要。加えてコンフリクト判定の入力（`gh pr view --json mergeable`）も403 |
+| `resolve-conflict` | ✕（Phase 1 では非対応） | rebase 後の force-push の可否は**測定不能**（GitHub App 未設定のため `--on-branch` がブランチ検証の前段で拒否される。Issue #227 / `docs/cloud-session-force-push.md`）。`.pen` の解決に `pencil` CLI が必要。加えてコンフリクト判定の入力（`gh pr view --json mergeable`）も403 |
 | `create-ui-design` / `apply-ui-design` | ✕（Phase 1 では非対応） | `.pen` の編集に `pencil` CLI と認証が必要 |
 | `check-dependabot` | ✕（実測前 △） | 依存更新の検証にプロジェクト固有のツールチェーンが要る場合がある。加えて `gh pr view --json` / `gh pr checks` が403で更新内容もCI結果も読めない |
 
@@ -231,7 +231,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 3. `--model` / `--effort` / `--advisor` / `--chrome` の受理可否（クラウドでは `/model` で切り替える旨の記述があり、起動引数として受理されるかは未確認）
 4. クラウドセッションのローカル transcript（`~/.claude/projects/*/<sessionId>.jsonl`）が生成されるか。されない場合、最終レポートはペイン内容フォールバックのみになる
 5. ~~**GitHub プロキシの GraphQL 403 が、実際にどのスキル操作で発生するか**~~: **実測済み**（Issue #226 / [cloud-graphql-proxy-limits.md](./cloud-graphql-proxy-limits.md)）。`gh issue view --json` / `gh pr view --json` はフィールドを問わず403、`gh pr list` / `gh pr checks` / `gh api graphql` も全滅で、ワーカー起動スキル15個すべてが影響を受ける。レビュースレッド解決だけは REST 代替が原理的に存在しない。5章の制約表・適合性表を差し替え済み。残課題は、リポジトリ連携済みセッションでの REST 代替の実行検証と、書き込み系操作（マージ・CI再実行・ラベル付与・コメント投稿）の個別可否
-6. クラウドセッションから PR ブランチへの **force-push** が可能か（`resolve-conflict` の可否を決める）
+6. ~~クラウドセッションから PR ブランチへの **force-push** が可能か~~: **測定不能で確定**（Issue #227 / `docs/cloud-session-force-push.md`）。GitHub App 連携が未設定のため `--on-branch` がブランチ検証の前段で拒否され、PR の head ブランチ・固定名ブランチのどちらでも同一文言になる（拒否理由はブランチの実在有無に依存しない）。`--on-branch` を外した経路でも VM に `git remote` が無く push が資格情報へ到達しない。`resolve-conflict` は **Phase 1 で ✕ 据え置き**（「拒否される」ではなく「可否を確認できない」ことが根拠）。Phase 2 で再判定するには GitHub App 連携済みリポジトリでの再実測が要る
 7. `--ref` / `--on-branch` の正確な意味と組み合わせ（ヘルプ非掲載のフラグ。CLI 内の検証メッセージからは「新規セッションのベースブランチ指定」「ブランチ上での作業再開」と読める）
 8. herdr の agent ステータス検出が、クラウドセッションをドライブしている TUI でも `working` / `idle` / `done` を正しく返すか（返らない場合は完了検知を別手段に切り替える必要がある）
 9. クラウドセッションの session ID をローカル側で取得する手段（Slack 通知へのリンク付与と Phase 2 の再接続に必要）
