@@ -144,6 +144,32 @@ export async function buildTokenLimitText(): Promise<string> {
   return formatTokenLimitText(usage);
 }
 
+/**
+ * 完了/失敗通知の本文を組み立てる純粋関数。
+ * cloudSessionId が非空なら、クラウドセッションURLを先頭行として付与する
+ * （Slack側で通知の最初の一行だけが折りたたみ表示でも見えるため、先頭に置く）。
+ */
+export function buildTaskNotificationText(params: {
+  status: "completed" | "failed";
+  workerName: string;
+  repoName: string;
+  id: number;
+  title: string;
+  url: string;
+  tokenText: string;
+  output?: string;
+  cloudSessionId?: string;
+}): string {
+  const { status, workerName, repoName, id, title, url, tokenText, output, cloudSessionId } = params;
+  const emoji = status === "completed" ? "✅" : "❌";
+  const label = status === "completed" ? "completed" : "failed";
+  const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
+  const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
+  const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${tokenText}${outputBlock}`;
+  const sessionUrlPrefix = cloudSessionId?.trim() ? `https://claude.ai/code/${cloudSessionId.trim()}\n` : "";
+  return `${sessionUrlPrefix}${body}`;
+}
+
 export async function notifyTaskCompleted(
   workerName: string,
   repoName: string,
@@ -151,12 +177,21 @@ export async function notifyTaskCompleted(
   title: string,
   url: string,
   output?: string,
+  cloudSessionId?: string,
 ): Promise<void> {
   const tokenText = await buildTokenLimitText();
-  const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
-  const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
   await send({
-    text: `✅ [${workerName}] ${repoName} | Task completed: <${url}|#${id} ${title}>${tokenText}${outputBlock}`,
+    text: buildTaskNotificationText({
+      status: "completed",
+      workerName,
+      repoName,
+      id,
+      title,
+      url,
+      tokenText,
+      output,
+      cloudSessionId,
+    }),
   });
 }
 
@@ -167,12 +202,21 @@ export async function notifyTaskFailed(
   title: string,
   url: string,
   output?: string,
+  cloudSessionId?: string,
 ): Promise<void> {
   const tokenText = await buildTokenLimitText();
-  const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
-  const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
   await send({
-    text: `❌ [${workerName}] ${repoName} | Task failed: <${url}|#${id} ${title}>${tokenText}${outputBlock}`,
+    text: buildTaskNotificationText({
+      status: "failed",
+      workerName,
+      repoName,
+      id,
+      title,
+      url,
+      tokenText,
+      output,
+      cloudSessionId,
+    }),
   });
 }
 

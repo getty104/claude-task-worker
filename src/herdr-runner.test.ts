@@ -13,6 +13,7 @@ const {
   createCompletionTracker,
   observeAgentStatus,
   buildHerdrTaskResult,
+  extractCloudSessionId,
   waitForHerdrTask,
   startHerdrTask,
   stopHerdrTask,
@@ -132,6 +133,34 @@ test("buildHerdrTaskResult falls back to the pane content when the transcript re
     output: "PR created",
   });
   assert.equal(buildHerdrTaskResult("   ", { report: "" }).status, "failed");
+});
+
+test("extractCloudSessionId extracts the id from a View URL line, dropping the query string", () => {
+  const text = ["│ View: https://claude.ai/code/session_011AbCdEf?from=cli&m=0 │"].join("\n");
+  assert.equal(extractCloudSessionId(text), "session_011AbCdEf");
+});
+
+test("extractCloudSessionId extracts the id from a Created cloud session line", () => {
+  const text = "Created cloud session: session_011AbCdEf";
+  assert.equal(extractCloudSessionId(text), "session_011AbCdEf");
+});
+
+test("extractCloudSessionId returns undefined when neither pattern is present", () => {
+  assert.equal(extractCloudSessionId("⏺ 修正しました\nctx 7% │ 5h 26%"), undefined);
+});
+
+test("buildHerdrTaskResult attaches cloudSessionId to completed and failed results", () => {
+  const completed = buildHerdrTaskResult("done", { cloudSessionId: "session_abc" });
+  assert.deepEqual(completed, { status: "completed", output: "done", cloudSessionId: "session_abc" });
+
+  const failed = buildHerdrTaskResult("   ", { cloudSessionId: "session_abc" });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.cloudSessionId, "session_abc");
+});
+
+test("buildHerdrTaskResult omits cloudSessionId when not provided", () => {
+  const result = buildHerdrTaskResult("done");
+  assert.equal("cloudSessionId" in result, false);
 });
 
 interface FakeHerdrOptions {
