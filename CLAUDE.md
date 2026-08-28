@@ -539,5 +539,5 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
   - 取得は `npx -y playwright-core@latest install chromium`（`src/commands/playwright.ts`）。chromium のみで、`--browser chrome` のブランドChannel は対象外
   - Linux ではシステムライブラリも必要なため、続けて `install-deps` を実行する（非 root では `sudo npx playwright-core@latest install-deps chromium`。root では `sudo` なし）。sudo のパスワードを求められることがある
 - GitHub MCP がセットアップ済み（任意）
-  - `plugin/.mcp.json` からリモート版（`https://api.githubcopilot.com/mcp/`）を参照する。認証は OAuth が既定（Claude Code の `/mcp` から実行）で、PAT 方式（`headers` で `Authorization: Bearer` を渡す）も代替として使える
+  - Claude 側（claude.ai / Claude Code）で有効化したコネクタを使う。プラグイン側では宣言しない。有効化手順は README を参照
   - **未設定・未認証でもスキルは `gh` へフォールバックするため動作する**（前提条件ではなく最適化）。対応表は `plugin/references/github-access.md` を参照
