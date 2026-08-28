@@ -128,11 +128,14 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 ## 5. クラウド実行の制約とワーカー適合性
 
-クラウドセッションはローカル実行と等価ではない。以下は **claude CLI / ドキュメントで確認済み**の制約で、ワーカー選定の前提になる。
+クラウドセッションはローカル実行と等価ではない。以下は **claude CLI / ドキュメントで確認済み**の制約で、ワーカー選定の前提になる。GitHub アクセス系（先頭4行）は Issue #226 で実測済み（→ [cloud-graphql-proxy-limits.md](./cloud-graphql-proxy-limits.md)）。
 
 | 制約 | 影響 |
 |------|------|
-| **GraphQL の 403 制限**: GitHub プロキシは PR ワークフロー向けの限定セットしか通さない。`GH_TOKEN` を自前で設定しても同じ | `gh issue view --json parent,blockedBy`、レビュースレッドの解決（`resolve-pr-comments`）、Projects v2 など GraphQL 依存の操作が失敗しうる。REST（`gh api repos/{owner}/{repo}/...`）へのフォールバックが必要 |
+| **GraphQL の 403 制限**（実測済み）: GitHub プロキシは操作名単位のアローリストで判定し、`gh` から到達できる GraphQL 操作は1つも通らない。リポジトリ連携の有無とは独立（リポジトリを含まない `query{viewer{login}}` も同じ403） | `gh issue view --json` / `gh pr view --json` が**フィールドを問わず**失敗する（`--json number,title,state` でも403。`gh` に REST 経路が無い）。`gh pr list` / `gh pr checks` も同様。ワーカー起動スキル15個すべてが影響を受ける。REST（`gh api repos/{owner}/{repo}/...`）へ書き換えれば大半は回復するが、**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない** |
+| **リポジトリゲート**（実測済み）: GitHub App 連携が未設定のセッションでは `repos/{owner}/{repo}/...` が**全リポジトリで**403（無関係な公開リポジトリも含む） | 連携未設定のリポジトリではクラウド実行そのものが成立しない。REST へのフォールバックも塞がれ、`git remote` も0件のため push・PR 作成もできない |
+| **パスゲート**（実測済み）: リポジトリスコープでない REST パス（`search/*` 等）は403 | `gh search` 系は使えない。`gh` で通る REST は `user` と `rate_limit` のみ |
+| **クラウド VM の `gh` が古い**（実測: 2.45.0 / 2025-07-18） | `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` は `Unknown JSON field` でクライアント側で失敗する。プロキシ制限とは独立した交絡 |
 | **push は「セッションの作業ブランチ」のみ** | 別ブランチへの push・固定名ブランチへの force-push を伴う処理は成立しない。`--on-branch` で作業ブランチを PR の head に合わせる必要がある |
 | **bypassPermissions 不可 / ツール制限不可** | `--disallowedTools` による `AskUserQuestion` / `Monitor` 等の無効化が効かない。自律実行原則（システムプロンプト注入）だけが歯止めになる |
 | **`!` インラインコマンド不可** | SKILL.md のプリアンブル `!` が実行されない。現状の該当は `triage-pr` / `check-dependabot` の `git fetch`（いずれも失敗しても継続する設計）のみ |
@@ -141,21 +144,25 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | **レート制限を共有** | クラウド実行はアカウントのレート制限を消費する（VM の追加課金はない）。並列度を上げるとローカル実行と同じ枠を食い合う |
 | **利用できない構成** | ZDR 有効な組織、IP アローリスト有効な組織、第三者プロバイダ構成では使えない |
 
-### ワーカー別の適合性（初期評価）
+### ワーカー別の適合性（Issue #226 の実測反映後）
+
+判定は「Phase 1 でクラウド実行を推奨してよいか」。**GitHub App 連携を設定してリポジトリゲートを解いた状態で、GraphQL ゲートだけが残る**ことを前提にした評価である（連携未設定では全ワーカーが成立しない）。根拠の詳細は [cloud-graphql-proxy-limits.md](./cloud-graphql-proxy-limits.md)。
 
 | ワーカー | 適合 | 根拠 / 前提 |
 |---------|------|------------|
-| `exec-issue` | ◎ | 新規ブランチを自分で作って push・PR 作成。クラウドの push 制約に当たらない。最も重いワーカーで効果が大きい |
-| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | ◎ | 1日1回・長時間・成果物は新規ブランチの PR。実行記録 PR はローカルのワーカーが出すため影響なし |
-| `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | ○（GraphQL 要検証） | コード変更を伴わない。`parent` / `blockedBy` の取得が GraphQL 依存のため 403 の影響を受けうる |
-| `epic-issue`（`create-epic-pr`） | ○ | `cc-epic-<N>` を作業ブランチにできれば成立 |
-| `fix-review-point` | △ | PR head への push が必要（`--on-branch`）。レビューコメント取得・スレッド解決が GraphQL 依存 |
-| `triage-pr` | △ | マージ判断・`gh pr merge`・CI 再実行が GraphQL/REST 混在。`gh pr checkout` はクラウド VM 側で実行されるため、ローカルの checkout 競合ガードは無効化する |
-| `resolve-conflict` | ✕（Phase 1 では非対応） | rebase 後の force-push が push 制約に抵触するか未検証。`.pen` の解決に `pencil` CLI が必要 |
+| `exec-issue` | △（実測前 ◎） | 新規ブランチを自分で作って push・PR 作成するため push 制約には当たらない。ただし `gh issue view --json body` が403で**Issue本文を読めない**ため、スキルを REST（`gh api repos/{o}/{r}/issues/{n}`）へ書き換えるまで着手できない |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（実測前 ◎） | 1日1回・長時間・成果物は新規ブランチの PR。ただし収集スクリプトが `gh api graphql` と `gh (issue\|pr) view --json` に依存し、403 で収集が0件になり空振りする |
+| `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（実測前 ○） | コード変更を伴わない。`gh issue view --json` がフィールドを問わず403のため、分析の入力（本文・コメント）がゼロになる。`--json parent` は加えて VM の `gh` 2.45.0 でも失敗する |
+| `epic-issue`（`create-epic-pr`） | △（実測前 ○） | `cc-epic-<N>` を作業ブランチにできれば成立するが、`gh issue view --json` が403 |
+| `fix-review-point` | ✕（実測前 △） | `reviewThreads` クエリで**レビュー指摘を1件も取得できない**。さらにスレッド解決（`resolveReviewThread`）は REST 代替が原理的に存在せず、スキルを書き換えても回復しない |
+| `triage-pr` | ✕（実測前 △） | `gh pr view --json` / `gh pr checks` / `reviewThreads` / `gh pr list` がすべて403で、**マージ判断の材料がゼロ**になる。マージゲートを担うワーカーが根拠なく判断する状態は許容しない。`gh pr merge` 自体の可否は未判定（リポジトリゲートが先に効くため） |
+| `resolve-conflict` | ✕（Phase 1 では非対応） | rebase 後の force-push が push 制約に抵触するか未検証。`.pen` の解決に `pencil` CLI が必要。加えてコンフリクト判定の入力（`gh pr view --json mergeable`）も403 |
 | `create-ui-design` / `apply-ui-design` | ✕（Phase 1 では非対応） | `.pen` の編集に `pencil` CLI と認証が必要 |
-| `check-dependabot` | △ | 依存更新の検証にプロジェクト固有のツールチェーンが要る場合がある |
+| `check-dependabot` | ✕（実測前 △） | 依存更新の検証にプロジェクト固有のツールチェーンが要る場合がある。加えて `gh pr view --json` / `gh pr checks` が403で更新内容もCI結果も読めない |
 
 「✕」のワーカーで `cloud: true` が指定された場合は、**警告のうえローカル実行へフォールバックせず、起動時にエラー終了する**（サイレントな挙動差を作らない）。
+
+ただし `fix-review-point` / `triage-pr` / `check-dependabot` の3ワーカーは、**Phase 1 では起動時に拒否せず許可する方針が確定済み**である。上表の「✕」はクラウド実行の推奨可否の評価であって、起動時ガードの対象を意味しない。運用上は「許可はするが、GraphQL ゲートが解除されるかスキルが REST 化されるまで `cloud: true` にしない」ことを推奨する。
 
 ## 6. スコープ外
 
@@ -223,7 +230,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 2. `--append-system-prompt-file` がクラウドセッションで受理されるか。**拒否される場合はクラウド実行を起動時エラーとする**（プロンプト本文への前置は、外部テキストによる上書きを許すためセキュリティ上採用しない）。残課題は、同等の system-level control（本文とは別チャネルでシステムプロンプトを注入する手段）がクラウドセッションに存在するかの実測
 3. `--model` / `--effort` / `--advisor` / `--chrome` の受理可否（クラウドでは `/model` で切り替える旨の記述があり、起動引数として受理されるかは未確認）
 4. クラウドセッションのローカル transcript（`~/.claude/projects/*/<sessionId>.jsonl`）が生成されるか。されない場合、最終レポートはペイン内容フォールバックのみになる
-5. GitHub プロキシの GraphQL 403 が、実際にどのスキル操作で発生するか（`gh issue view --json parent,blockedBy`、`gh pr view --json reviews`、レビュースレッド解決）
+5. ~~**GitHub プロキシの GraphQL 403 が、実際にどのスキル操作で発生するか**~~: **実測済み**（Issue #226 / [cloud-graphql-proxy-limits.md](./cloud-graphql-proxy-limits.md)）。`gh issue view --json` / `gh pr view --json` はフィールドを問わず403、`gh pr list` / `gh pr checks` / `gh api graphql` も全滅で、ワーカー起動スキル15個すべてが影響を受ける。レビュースレッド解決だけは REST 代替が原理的に存在しない。5章の制約表・適合性表を差し替え済み。残課題は、リポジトリ連携済みセッションでの REST 代替の実行検証と、書き込み系操作（マージ・CI再実行・ラベル付与・コメント投稿）の個別可否
 6. クラウドセッションから PR ブランチへの **force-push** が可能か（`resolve-conflict` の可否を決める）
 7. `--ref` / `--on-branch` の正確な意味と組み合わせ（ヘルプ非掲載のフラグ。CLI 内の検証メッセージからは「新規セッションのベースブランチ指定」「ブランチ上での作業再開」と読める）
 8. herdr の agent ステータス検出が、クラウドセッションをドライブしている TUI でも `working` / `idle` / `done` を正しく返すか（返らない場合は完了検知を別手段に切り替える必要がある）
