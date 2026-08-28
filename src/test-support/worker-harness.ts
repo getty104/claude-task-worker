@@ -52,11 +52,6 @@ export interface StartWorkerOptions {
   workerConfig: Record<string, unknown>;
   /** 一時 XDG_CONFIG_HOME 配下 claude-task-worker/config.json の内容（mode 等）。 */
   userConfig: Record<string, unknown>;
-  /**
-   * 作業リポジトリの .claude/settings.json の内容。省略時はプラグイン宣言済みの
-   * 既定値を書く。null を渡すとファイル自体を作らない（未宣言状態を再現するため）。
-   */
-  projectSettings?: Record<string, unknown> | null;
   /** installCliStubs() 等が返す records()（StubRecord[] を返す関数）。 */
   records: () => StubRecord[];
   /** テストタイムアウトに引っかからないよう、待機系関数の既定タイムアウトを調整できる。 */
@@ -81,7 +76,7 @@ const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 
 /**
  * ワーカーを子プロセスとして起動する command-level テストハーネス。
- * 一時 git リポジトリ・一時 XDG_CONFIG_HOME・claude-task-worker.json / .claude/settings.json を
+ * 一時 git リポジトリ・一時 XDG_CONFIG_HOME・claude-task-worker.json を
  * 用意してから `node --experimental-strip-types src/index.ts <worker>` を spawn する。
  * `claude` / `herdr` / `gh` は呼び出し側が事前に installCliStubs() で PATH スタブへ差し替えて
  * おくこと（このハーネスはスタブの導入自体は行わない。records() だけを受け取る）。
@@ -91,18 +86,6 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
   const { originDir, repoDir } = await initTempRepo(root);
 
   writeFileSync(join(repoDir, "claude-task-worker.json"), JSON.stringify(options.workerConfig, null, 2));
-
-  if (options.projectSettings !== null) {
-    const settingsDir = join(repoDir, ".claude");
-    mkdirSync(settingsDir, { recursive: true });
-    const settings = options.projectSettings ?? {
-      extraKnownMarketplaces: {
-        "claude-task-worker": { source: { source: "github", repo: "getty104/claude-task-worker" } },
-      },
-      enabledPlugins: { "claude-task-worker@claude-task-worker": true },
-    };
-    writeFileSync(join(settingsDir, "settings.json"), JSON.stringify(settings, null, 2));
-  }
 
   // これらの設定ファイルは origin へコミット・push しておく。src/git.ts の
   // syncDefaultBranch() は各ワーカーの tick 冒頭で `git reset --hard origin/<branch>` を
