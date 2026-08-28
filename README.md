@@ -58,7 +58,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | `plugin/hooks/` | `SessionStart`（worktree セットアップ / `git fetch --prune`）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
 | `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs` / `resolve-pr-comments.sh` — `fix-review-point` の `Stop` フックでレビュースレッドを一括 Resolve） |
 | `plugin/references/` | 複数スキルが共有する参照ドキュメント（GitHub アクセス方針など） |
-| `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `github` / `next-devtools` / `shadcn` / `playwright`） |
+| `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `next-devtools` / `shadcn` / `playwright`） |
 
 ## セットアップ
 
@@ -75,7 +75,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `pencil` 経由） |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（呼び出しは `designmd` 経由。未導入でもスキルは動く） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
-| [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避。任意（未設定でも `gh` へフォールバックする） |
+| [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避。Claude 側のコネクタで有効化する（任意。未設定でも `gh` へフォールバックする） |
 
 CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に単一バンドルされ、Node.js 標準モジュールのみで動作する）。
 
@@ -98,6 +98,12 @@ claude plugin install claude-task-worker@claude-task-worker
 herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
 
 クラウド実行（`workers.<名前>.cloud: true`）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境セットアップスクリプトで `npx claude-task-worker install` を実行する（リポジトリの `scripts/cloud-setup.sh` がその中身）。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。詳細は後述の「[`cloud`（クラウド実行）](#cloudクラウド実行)」を参照。
+
+### GitHub コネクタの有効化
+
+GitHub MCP は Claude 側のコネクタとして有効化する（本プラグインは `.mcp.json` で宣言しない）。claude.ai の設定 > コネクタ、または Claude Code の `/mcp` から GitHub コネクタを有効化する。
+
+任意の設定であり、未設定でもスキルは `gh` へフォールバックして動作する。対応表は [`plugin/references/github-access.md`](./plugin/references/github-access.md) を参照。
 
 ### Pen CLI のログイン
 

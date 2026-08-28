@@ -534,5 +534,5 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
   - `edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict` の各スキルが `.pen` の読み書きに使う。未インストールだと `resolve-pencil-conflict` はフローを実行できず `git rebase --abort` で中断する
   - **旧パッケージ `@pencil.dev/cli` は `install` / `update` が自動でアンインストールする**。同じ bin 名 `pencil` を提供するため同居させると解決先が不定になり、0.2.x を掴むと廃止済みツール構成で各スキルが動かない
 - GitHub MCP がセットアップ済み（任意）
-  - `plugin/.mcp.json` からリモート版（`https://api.githubcopilot.com/mcp/`）を参照する。認証は OAuth が既定（Claude Code の `/mcp` から実行）で、PAT 方式（`headers` で `Authorization: Bearer` を渡す）も代替として使える
+  - Claude 側（claude.ai / Claude Code）で有効化したコネクタを使う。プラグイン側では宣言しない。有効化手順は README を参照
   - **未設定・未認証でもスキルは `gh` へフォールバックするため動作する**（前提条件ではなく最適化）。対応表は `plugin/references/github-access.md` を参照
