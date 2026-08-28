@@ -182,6 +182,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | `src/claude-args.ts` | `ClaudeInvocation` に `cloud` / `baseRef` / `onBranch` を追加。`buildClaudeArgs()` にクラウド分岐（4.2 の表）。`buildClaudeEnv()` はクラウド時に print 専用の env を渡さない（herdr と同じ扱い） |
 | `src/workers/issue-worker.ts` | `cloud` のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へ渡すベースブランチ（`cc-epic-<N>` または default）を `buildClaudeExecution()` に渡す |
 | `src/workers/pr-worker.ts` | 同上。加えてローカルブランチ掃除・`localBranchExists()` プリフライトをスキップし、`--on-branch <pr.headRefName>` を渡す |
+| `src/workers/scheduled-worker.ts` | `cloud` のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へデフォルトブランチを渡す。実行記録PR（`publishLastRunPr()`）はローカルのまま変更しない |
 | `src/workers/exec-issue.ts` | `onCompleted` の PR 実在検証から「worktreeId を head とする PR」の条件をクラウド時に外す |
 | `src/herdr-runner.ts` | `taskTabLabel()` にクラウド識別子を追加。それ以外は変更なし（クラウドかどうかは引数の差でしかない） |
 | `src/index.ts` | `assertRunModeAvailable()` の隣に `assertCloudAvailable()`（`cloud: true` × `mode !== "herdr"` の拒否、非対応ワーカーの拒否、前提条件チェック） |
