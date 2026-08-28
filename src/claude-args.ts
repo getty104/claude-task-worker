@@ -246,12 +246,37 @@ export function buildClaudeArgs({
     // advisor 未指定（空文字）ならフラグごと省く。値なしの `--advisor` を渡すと
     // 後続フラグを値として食われるため、必ずモデル名とセットでのみ付ける。
     ...(advisor === "" ? [] : ["--advisor", advisor]),
-    // クラウド実行時のみ付与する。プロンプトは `--cloud` の値として渡さない（値なしフラグ）。
+    // クラウド実行時は「作成コマンドの共通フラグ」だけをここで返す。`--cloud` 自体は
+    // 付けない（値として渡す description = herdr のタスクタブラベルが
+    // `src/process-manager.ts` 側でしか決まらないため。`buildCloudCreateArgs()` が
+    // このフラグ列の先頭へ `--cloud <description>` を足して作成コマンドを完成させる）。
     // ベースブランチ指定は `--ref` / `--on-branch` のどちらか一方のみ（両方指定は上で例外）。
-    ...(cloud === true ? ["--cloud"] : []),
     ...(cloud === true && ref !== "" ? ["--ref", ref] : []),
     ...(cloud === true && onBranchValue !== "" ? ["--on-branch", onBranchValue] : []),
   ];
+}
+
+// クラウドセッション作成コマンド（TTY 必須の `claude --cloud <description> ...`）の引数。
+// `description` は herdr のタスクタブラベル（`ctw:<project>:#<n>`）で、呼び出し側
+// （`src/process-manager.ts`）が決める。
+export function buildCloudCreateArgs(commonArgs: string[], description: string): string[] {
+  return ["--cloud", description, ...commonArgs];
+}
+
+// クラウドセッションへのプロンプト投函コマンド（TTY 不要・即 return の
+// `claude -p --cloud <sessionId> <prompt>`）の引数。
+// ベースブランチ系フラグ（`--ref` / `--on-branch`）はセッション作成時にしか意味を
+// 持たないためここには含めない。
+export function buildCloudDispatchArgs(sessionId: string, prompt: string): string[] {
+  return ["-p", "--cloud", sessionId, prompt];
+}
+
+// POSIX シェル向けのシングルクォート引用。herdr の `pane send-text` はシェルへ
+// そのまま文字列を送るため、スペース・`#`・`:` 等を含む引数（description・prompt）を
+// 安全に1トークンとして渡すにはクォートが要る。内部の `'` は `'\''` へエスケープする
+// （シングルクォートを閉じる → エスケープ済み `'` を1文字出す → シングルクォートを開き直す）。
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export interface ClaudeExecution {

@@ -14,6 +14,9 @@ const {
   buildClaudeArgs,
   buildClaudeEnv,
   buildClaudeExecution,
+  buildCloudCreateArgs,
+  buildCloudDispatchArgs,
+  shellQuote,
   isOpusModel,
   systemPromptFilePath,
   systemPromptFor,
@@ -246,15 +249,50 @@ test("buildClaudeExecution exposes the prompt separately in herdr mode only", ()
   assert.equal(buildClaudeExecution({ mode: "default", ...common }).prompt, undefined);
 });
 
-test("buildClaudeArgs omits -p <prompt> and adds --cloud when cloud is true", () => {
+test("buildClaudeArgs omits -p <prompt> and --cloud itself when cloud is true", () => {
   // Cloud sessions do not support print mode (observed: `Error: --cloud cannot be
   // combined with --print.`), so -p must drop out in both default and herdr mode.
+  // `--cloud <description>` itself is not added here: description（herdr のタスクタブ
+  // ラベル）は process-manager.ts 側でしか決まらないため、buildCloudCreateArgs() が
+  // このフラグ列の先頭へ足して作成コマンドを完成させる。
   for (const mode of ["default", "herdr"] as const) {
     const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
     assert.ok(!args.includes("-p"));
     assert.ok(!args.includes("/skill 1"));
-    assert.ok(args.includes("--cloud"));
+    assert.ok(!args.includes("--cloud"));
   }
+});
+
+test("buildClaudeArgs (cloud) contains only the create command's common flags", () => {
+  const args = buildClaudeArgs({ mode: "herdr", prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
+  assert.ok(args.includes("--permission-mode"));
+  assert.ok(args.includes("--disallowedTools"));
+  assert.ok(args.includes("--append-system-prompt-file"));
+  assert.ok(args.includes("--model"));
+  assert.ok(args.includes("--effort"));
+});
+
+test("buildCloudCreateArgs prepends --cloud <description> to the common flags", () => {
+  const commonArgs = ["--permission-mode", "bypassPermissions", "--model", "opus"];
+  assert.deepEqual(buildCloudCreateArgs(commonArgs, "ctw:my-app:#123"), [
+    "--cloud",
+    "ctw:my-app:#123",
+    "--permission-mode",
+    "bypassPermissions",
+    "--model",
+    "opus",
+  ]);
+});
+
+test("buildCloudDispatchArgs builds the dispatch command's argv", () => {
+  assert.deepEqual(buildCloudDispatchArgs("session_abc", "/skill 1"), ["-p", "--cloud", "session_abc", "/skill 1"]);
+});
+
+test("shellQuote wraps values in single quotes and escapes embedded single quotes", () => {
+  assert.equal(shellQuote("simple"), "'simple'");
+  assert.equal(shellQuote("with space"), "'with space'");
+  assert.equal(shellQuote("ctw:my-app:#123"), "'ctw:my-app:#123'");
+  assert.equal(shellQuote("it's here"), "'it'\\''s here'");
 });
 
 test("buildClaudeArgs passes --ref when baseRef is given", () => {
