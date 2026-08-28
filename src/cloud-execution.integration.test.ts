@@ -2,16 +2,48 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import type * as CliStubModule from "./test-support/cli-stub";
 import type { StubRecord } from "./test-support/cli-stub";
 import type * as WorkerHarnessModule from "./test-support/worker-harness";
+import type * as ClaudeArgsModule from "./claude-args";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする（既存テストと同じパターン）。
 const { installCliStubs } = (await import("./test-support/cli-stub.ts")) as typeof CliStubModule;
 const { startWorker } = (await import("./test-support/worker-harness.ts")) as typeof WorkerHarnessModule;
+const { CLOUD_REPORT_HEADING } = (await import("./claude-args")) as typeof ClaudeArgsModule;
+
+// テスト内で使い捨ての HTTP サーバを立て、Slack Webhook 宛の POST 本文（text）を集める。
+async function startSlackCapture(): Promise<{ url: string; texts: () => string[]; close: () => Promise<void> }> {
+  const texts: string[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
+      body += chunk.toString("utf-8");
+    });
+    req.on("end", () => {
+      try {
+        const parsed = JSON.parse(body) as { text?: string };
+        if (typeof parsed.text === "string") texts.push(parsed.text);
+      } catch {
+        // 非JSONの本文は無視する。
+      }
+      res.writeHead(200);
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    url: `http://127.0.0.1:${port}/`,
+    texts: () => texts,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -107,15 +139,16 @@ const ISSUE_GH_SCENARIO = {
 // ============================================================
 test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree を作らない", { timeout: 75_000 }, async (t) => {
   const stubs = installCliStubs({
-    // cc-cloud-done のポーリングが即座に完了を検知できるよう、Issue #501 を最初から
-    // ポーリング結果に含めておく（実際の完了検知タイミングとは無関係にテストを速くするため）。
-    gh: { ...ISSUE_GH_SCENARIO, cloudDone: { issues: [501] } },
+    gh: ISSUE_GH_SCENARIO,
     // 作成フェーズがペイン内容をポーリングしてセッションIDを取得するため、実測の出力形状
     // （`View:` の URL）を含めておく。含めないと作成フェーズがタイムアウトする。
     herdr: {
       paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubA?from=cli&m=0",
     },
-    claude: { stdout: "[stub] exec-issue cloud report" },
+    // claude スタブが投函コマンド実行時に cc-cloud-done を付与する（実際のクラウドセッションが
+    // 最後の操作として行う付与を模倣）。静的な cloudDone 分岐は撤去したため、この付与タイミングで
+    // 起動前ポーリングと投函後ポーリングを区別できる。
+    claude: { stdout: "[stub] exec-issue cloud report", cloudComplete: { type: "issue", number: 501 } },
   });
   const handle = await startWorker({
     worker: "exec-issue",
@@ -410,4 +443,180 @@ test("F: exec-issue のローカル実行は --cloud/--ref/-p を付けず workt
   assert.ok(!claudeArgs.includes("--ref"));
   assert.ok(!claudeArgs.includes("--on-branch"));
   assert.ok(!claudeArgs.includes("-p"), "-p が付いてはいけない（herdr モード）");
+});
+
+// ============================================================
+// G. cc-cloud-done 検知 → ラベル除去 → レポートコメント取得 → Slack 通知本文への反映
+// ============================================================
+test("G: クラウド完了検知後にレポートコメントを取得し Slack 通知本文へ反映する", { timeout: 75_000 }, async (t) => {
+  const slack = await startSlackCapture();
+  t.after(() => slack.close());
+
+  const stubs = installCliStubs({
+    gh: ISSUE_GH_SCENARIO,
+    herdr: {
+      paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubG?from=cli&m=0",
+    },
+    claude: {
+      stdout: "[stub] exec-issue cloud report",
+      cloudComplete: {
+        type: "issue",
+        number: 501,
+        report: `${CLOUD_REPORT_HEADING}\n\n[stub] 最終報告本文`,
+      },
+    },
+  });
+  const handle = await startWorker({
+    worker: "exec-issue",
+    workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+    userConfig: { mode: "herdr" },
+    records: stubs.records,
+    env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
+
+  await handle.waitFor(
+    (records) =>
+      records.some(
+        (r) =>
+          r.command === "gh" &&
+          r.argv[0] === "issue" &&
+          r.argv[1] === "edit" &&
+          r.argv.includes("--remove-label") &&
+          r.argv.includes("cc-in-progress"),
+      ),
+    45_000,
+  );
+
+  const records = stubs.records();
+  assert.ok(
+    records.some(
+      (r) => r.command === "gh" && r.argv[0] === "api" && /issues\/501\/comments\?since=/.test(r.argv[1] ?? ""),
+    ),
+    "レポートコメント取得（gh api .../comments?since=）の記録が見つからない",
+  );
+
+  const removeCloudDone = records.filter(
+    (r) =>
+      r.command === "gh" &&
+      r.argv[0] === "issue" &&
+      r.argv[1] === "edit" &&
+      r.argv.includes("--remove-label") &&
+      r.argv.includes("cc-cloud-done"),
+  );
+  assert.ok(removeCloudDone.length >= 2, `--remove-label cc-cloud-done が2回以上ない: ${removeCloudDone.length}件`);
+
+  await handle.waitFor(() => slack.texts().some((text) => text.includes("[stub] 最終報告本文")), 20_000);
+});
+
+// ============================================================
+// H. CLOUD_TASK_TIMEOUT_MS 超過で cc-need-human-check 付与＋失敗通知
+// ============================================================
+test(
+  "H: クラウド完了待機がタイムアウトすると cc-need-human-check を付け失敗通知する",
+  { timeout: 60_000 },
+  async (t) => {
+    const slack = await startSlackCapture();
+    t.after(() => slack.close());
+
+    const stubs = installCliStubs({
+      gh: ISSUE_GH_SCENARIO,
+      herdr: {
+        paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubH?from=cli&m=0",
+      },
+      claude: { stdout: "[stub] exec-issue cloud report" },
+    });
+    const handle = await startWorker({
+      worker: "exec-issue",
+      workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      env: { CTW_CLOUD_TASK_TIMEOUT_MS: "1", CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    // cc-need-human-check の付与は finishTask()（cc-in-progress の除去）より前に起きるため、
+    // 後者を待てば両方の記録が揃っている。
+    await handle.waitFor(
+      (records) =>
+        records.some(
+          (r) =>
+            r.command === "gh" &&
+            r.argv[0] === "issue" &&
+            r.argv[1] === "edit" &&
+            r.argv.includes("--remove-label") &&
+            r.argv.includes("cc-in-progress"),
+        ),
+      45_000,
+    );
+
+    const records = stubs.records();
+    assert.ok(
+      records.some(
+        (r) =>
+          r.command === "gh" &&
+          r.argv[0] === "issue" &&
+          r.argv[1] === "edit" &&
+          r.argv.includes("--add-label") &&
+          r.argv.includes("cc-need-human-check"),
+      ),
+      "cc-need-human-check が付与されていない",
+    );
+
+    await handle.waitFor(
+      () => slack.texts().some((text) => text.includes("timed out waiting for the cc-cloud-done label")),
+      20_000,
+    );
+  },
+);
+
+// ============================================================
+// I. 完了待機中に isRunning() が再起動を抑止する
+// ============================================================
+test("I: クラウド完了待機中はトリガーラベルが再装填されても投函が重複しない", { timeout: 30_000 }, async (t) => {
+  const stubs = installCliStubs({
+    gh: {
+      login: "octocat",
+      repo: { owner: "acme", name: "demo", defaultBranch: "main" },
+      prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-triage-scope" }], title: "Fix bug" }],
+      view: { "701": { checks: [] } },
+    },
+    herdr: {
+      paneOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubI?from=cli&m=0",
+    },
+    claude: { stdout: "[stub] triage-pr cloud report" },
+  });
+  const handle = await startWorker({
+    worker: "triage-pr",
+    workerConfig: { workers: { "triage-pr": { cloud: true, pollingIntervalSeconds: 1 } } },
+    userConfig: { mode: "herdr" },
+    records: stubs.records,
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
+
+  await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined);
+
+  // ポーリング2周分以上（4〜5秒）待って、trigger label が静的シナリオ由来で毎周再装填されて
+  // いても投函が重複しないことを確認する。
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+
+  const records = stubs.records();
+  const sendTextCount = records.filter(
+    (r) => r.command === "herdr" && r.argv[0] === "pane" && r.argv[1] === "send-text",
+  ).length;
+  assert.equal(sendTextCount, 1, `作成コマンドの pane send-text が複数回記録されている: ${sendTextCount}件`);
+
+  const dispatchCount = records.filter(
+    (r) => r.command === "claude" && r.argv[0] === "-p" && r.argv.includes("--cloud"),
+  ).length;
+  assert.ok(dispatchCount <= 1, `投函コマンドが複数回記録されている: ${dispatchCount}件`);
 });

@@ -43,7 +43,7 @@ test("waitForCloudTask: cc-cloud-done が付かないまま期限を過ぎると
   // CLOUD_TASK_TIMEOUT_MS（4時間）を実時間で待てないため、deadline 計算時だけ
   // Date.now() を過去へずらして「既に期限切れの待機」を作る。以降の判定は実時間の
   // Date.now() に戻すので、ループ内の `now >= deadline` が初回ポーリングで即座に成立する。
-  const stubs = installCliStubs({ gh: { cloudDone: {} } });
+  const stubs = installCliStubs({ gh: {} });
   const realNow = Date.now;
   Date.now = () => realNow() - CLOUD_TASK_TIMEOUT_MS - 1000;
   let promise: Promise<"completed" | "timeout" | "aborted">;
