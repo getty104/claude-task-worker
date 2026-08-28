@@ -15,6 +15,10 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 入力（args 経由の YAML ブロック）
 
 ### 呼び出し規約
@@ -110,6 +114,8 @@ $ARGUMENTS
 **`--body "..."` 形式は使わない**。本文中のバッククォート・`$`・`!`・改行でエスケープが頻繁に壊れるため、必ず `--body-file -` + heredoc（`<<'EOF'` でクォート、シェル展開を抑止）を使う。
 
 YAML 入力に `parent` / `blocked_by` / `blocking` が含まれていれば、それぞれ `--parent <番号>` / `--blocked-by <番号,番号,...>` / `--blocking <番号,番号,...>` としてフラグに追加する。値が無い項目はフラグごと省略する（空文字列を渡すと `gh` が引数エラーで落ちるため、配列が空 / null の場合は組み立て時点で除外する）。`--blocked-by` / `--blocking` はカンマ区切りで複数番号を1つのフラグにまとめる。
+
+GitHub MCP が使える場合はログインユーザー取得に `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 ME=$(gh api user --jq '.login')

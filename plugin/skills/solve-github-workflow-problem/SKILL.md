@@ -10,6 +10,10 @@ argument-hint: "[run-id | run-url]"
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## ステップ0: 引数のパース
 
 `$ARGUMENTS` から run ID（と、URL 形式なら `owner/repo`）を取り出す。受け付ける形式:
@@ -24,7 +28,7 @@ argument-hint: "[run-id | run-url]"
 ARG=$(printf '%s' "$ARGUMENTS" | tr -d '[:space:]')
 RUN_ID=$(printf '%s' "$ARG" | grep -oE '^[0-9]+$|/actions/runs/[0-9]+' | grep -oE '[0-9]+$')
 REPO=$(printf '%s' "$ARG" | grep -oE '^https?://github\.com/[^/]+/[^/]+' | sed -E 's#^https?://github\.com/##')
-CURRENT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+CURRENT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)  # 単独取得ツールがMCPに無いため gh のまま残す
 REPO="${REPO:-$CURRENT_REPO}"
 ```
 
@@ -43,6 +47,8 @@ fi
 
 ## ステップ1: 実行結果の取得
 
+> GitHub MCP が使える場合は `actions_get` を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh run view "$RUN_ID" --repo "$REPO" \
   --json databaseId,displayTitle,workflowName,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,url,attempt
@@ -56,6 +62,8 @@ gh run view "$RUN_ID" --repo "$REPO" \
 run が存在しない（コマンドが失敗する）場合も何もせず報告して終了する。
 
 ## ステップ2: 失敗原因の調査と特定
+
+> GitHub MCP が使える場合は `actions_get`（ジョブ・ステップ一覧）/ `get_job_logs`（`failed_only: true`、失敗ステップのログ）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 # 失敗したジョブ・ステップの一覧（成功系のskipped/cancelledを誤って拾わないよう、失敗値だけを明示的に指定する）
@@ -82,12 +90,16 @@ gh run view "$RUN_ID" --repo "$REPO" --log-failed
 
 同一ワークフローの直近の実行を確認し、**対象runと同じ `headSha`（同じコード）**で成功しているrunがあるかを見る。別コミットの成功runを「同じコード」と誤認しないよう、`headSha` の一致を必ず確認すること。ワークフローの指定にはステップ1で取得した `workflowDatabaseId`（数値ID）を使う（同名ワークフローが複数存在すると名前では一意に解決できないため）。
 
+> GitHub MCP が使える場合は `actions_list` を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh run list --repo "$REPO" --workflow "$WORKFLOW_DATABASE_ID" --all --limit 10 \
   --json databaseId,headSha,conclusion,createdAt
 ```
 
 一過性と判断でき（対象runと同じ `headSha` を持つ成功runが存在する）、かつ対象runがまだ再実行されていない（ステップ1の `attempt` が `1`）場合に限り、**1回だけ**再実行して終了する。
+
+> GitHub MCP が使える場合は `actions_run_trigger` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh run rerun "$RUN_ID" --repo "$REPO" --failed
@@ -106,7 +118,7 @@ gh run rerun "$RUN_ID" --repo "$REPO" --failed
 デフォルトブランチ上で作業しないこと。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
 git fetch origin "$DEFAULT_BRANCH"
 git switch -c "fix-workflow-$(date +%Y%m%d%H%M%S)" "origin/$DEFAULT_BRANCH"
 ```
@@ -129,6 +141,8 @@ git switch -c "fix-workflow-$(date +%Y%m%d%H%M%S)" "origin/$DEFAULT_BRANCH"
 `create-pr` は PR 本文のテンプレート適用・ベースブランチの決定・`gh api user --jq '.login'` で取得したユーザーの Assignee 追加・`cc-triage-scope` ラベルの付与を行う。
 
 PR 作成後、Assignee とラベルが実際に付いていることを確認する。付いていなければ補う。
+
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 PR_NUMBER=$(gh pr view --json number -q .number)

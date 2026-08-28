@@ -10,6 +10,10 @@ argument-hint: "[task-description]"
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行ステップ
 
 ### 1. デフォルトブランチへの移動
@@ -41,6 +45,8 @@ $ARGUMENTS
 - **本文**: 依頼内容の全体像（背景・ゴール）を1-3段落で簡潔に。この時点では子Issue番号のリンクは含めない（GitHub UI の sub-issue 表示で十分追える。必要なら最終ステップで `gh issue edit` で追記してもよい）
 
 `post-scope-issue-body` のフォーマットは個別TODO用のスコープIssue向け（要件・参照情報・優先度・見積もり規模）であり、Epicサマリには合わないため、親Issueはこのスキル内で直接 `gh issue create` する。
+
+GitHub MCP が使える場合はログインユーザー取得に `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 ME=$(gh api user --jq '.login')

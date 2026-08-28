@@ -26,6 +26,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `create-issue` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠にラベル遷移（例: `cc-issue-created` 付与）を進める。処理が未完のままターンを終えると、description 更新前にラベルが遷移して triage 系スキルが古い状態で起動される、`post-issue-body` の投稿完了前に別ワーカーが動き出す、といった状態壊れが起きる。
@@ -64,6 +68,8 @@ description は人間がレビューし、後続の `exec-issue` が実装スコ
 まずリモート同期を試行する。失敗しても**中断せずスキップして続行**する（本スキルはコード変更を伴わないため）。`git rebase` や `git pull` は実行しない（未コミット変更や conflict による中断を避けるため）。
 
 次に分析の基準となるベースブランチ（`BASE_BRANCH`）を確定する。サブIssue（parent を持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生し、実装PRもそこへ向くため、**デフォルトブランチではなく epic ブランチが分析のターゲット**になる。デフォルトブランチをターゲットと見なすと、epic ブランチへマージ済みの兄弟サブIssueの変更が「未反映」に見え、「Epic PR が未マージだがどう扱うか」といった本来不要な検討事項・確認事項が混入する（`exec-issue` / `create-pr` のベースブランチ決定と同じ確定的導出を用いる）。
+
+`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
 
 ```bash
 git fetch --prune || true
@@ -107,13 +113,15 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 
 引数から抽出したIssue番号で対象Issueを取得する。
 
+> GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view $0 --json number,title,state,labels,body,url
 ```
 
 `state` が `CLOSED` の場合は更新せず、その旨を報告して終了する。
 
-本文に画像URLがある場合、`gh-asset` でダウンロードし Read で実際に確認する（UIの見た目・エラー画面などテキストで伝わらない仕様が判断に必要なことがあるため、URLを見て終わりにしない）。
+本文に画像URLがある場合、`gh-asset` でダウンロードし Read で実際に確認する（UIの見た目・エラー画面などテキストで伝わらない仕様が判断に必要なことがあるため、URLを見て終わりにしない）。`gh-asset` はローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` に据え置く。
 
 ```bash
 gh-asset download <asset_id> ~/Downloads/
@@ -170,7 +178,7 @@ gh-asset download <asset_id> ~/Downloads/
 3. **取得**: 種類ごとに手段を使い分ける
    - 一般のWebページ・仕様書・記事 → `WebFetch`
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → `gh issue view` / `gh pr view` / `gh api`（GitHubのURLは `WebFetch` より `gh` の方が確実）
+   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
    - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
    - Issue本文に貼られた画像URL → ステップ1のとおり `gh-asset` でダウンロードして Read する
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
@@ -228,6 +236,8 @@ E2Eテストが存在し、かつIssueの内容がユーザー操作フロー（
 
 - 対象ファイルごとに `git log --oneline -10 <file>` を実行し、直近 commit のサマリを把握する
 - 未マージの関連 PR は **base が `BASE_BRANCH` のものだけ**を対象にする。base が異なる PR（`BASE_BRANCH` が epic ブランチのときの Epic PR 自身、他 epic 配下の PR など）は本Issueのマージ先に影響しないため除外する
+
+  > GitHub MCP が使える場合は `list_pull_requests` / `search_pull_requests` を使う。以下は MCP 利用不可時のフォールバック。
 
   ```bash
   gh pr list --search "<file>" --state open --json number,title,baseRefName,headRefName \
@@ -312,7 +322,7 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 
 `post-issue-body` は本文全体を heredoc で上書きするため、整形ミスや YAML パース時の脱字で「依頼内容」が更新後のIssueに正しく載っていない可能性がある。原文が失われないよう、投稿完了直後に機械的に検証する:
 
-1. `gh issue view <issue_number> --json body -q .body` で更新後の body を取得する。
+1. `gh issue view <issue_number> --json body -q .body` で更新後の body を取得する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック）。
 2. body から `<summary>依頼内容</summary>` で識別した `<details>` ブロックの内側（`<summary>` の閉じタグ直後から `</details>` の直前まで、先頭・末尾の空行1つは正規化してよい）を切り出す。`<details>` は依頼内容と変更ログの2つ存在し得るので、必ず summary で識別する。
 3. ステップ1.5で確定した「依頼内容」文字列と比較する。
    - **ステップ1.5で「依頼内容」が空だった場合** — 更新後bodyに依頼内容ブロックが存在しないこと（存在すれば異常）。

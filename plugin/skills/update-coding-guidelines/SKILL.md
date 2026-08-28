@@ -30,6 +30,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `update-coding-guidelines` ワーカーから24時間おきに自動起動され、ワーカーは起動時刻を `claude-task-worker.json` の `lastRun` へ記録する別PRを作ったうえで、次の24時間の実行を抑止する。処理が未完のままターンを終えると、その日の分の収集・ルール化が行われないまま実行済みとして扱われ、取りこぼしたレビューコメントは二度と対象期間に入らない（対象期間は常に直近N日で、遡らない）。
@@ -53,6 +57,8 @@ Issue番号はフェーズ5でcreate-prに渡す。指定なしの場合はPR本
 **完了条件**: リポジトリルートにいることが確認でき、既存`CODING_GUIDELINES.md`があれば内容を把握済みで、日数と任意Issue番号が確定していること。
 
 ## フェーズ1: レビューコメント収集
+
+GitHub MCP が使える場合は対応表のツール（`list_pull_requests` / `pull_request_read` の `get_review_comments` 等）で同等の収集を行う。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0で確定した日数>
@@ -176,7 +182,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 `commit-push`はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチに直コミットが入る。必ずfeature branchへ切り替える。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
@@ -206,6 +212,8 @@ PR作成後、create-prが返却するPR URLを記録しておく。
 
 `create-pr`側でもAssignee（`gh api user`のログインユーザー）と`cc-triage-scope`ラベルを付ける手順になっているが、`context: fork`で結果を検証できないため、本スキル側で実際に付いているかを確認し、欠けていれば`gh pr edit`で補う。
 
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）/ `get_me` を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')
 GH_USER=$(gh api user --jq '.login')
@@ -225,6 +233,8 @@ gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
 ### 5-4. Issue番号なしのケースの後処理（**Issue番号が未指定の場合のみ実行**）
 
 `create-pr`が残した`Closes #`（数字なし）行を削除する。
+
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')

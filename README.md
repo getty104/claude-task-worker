@@ -52,7 +52,8 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | `plugin/agents/` | サブエージェント定義（`explore-agent` / `frontend-implementer` / `general-purpose-assistant` / `lightweight-assistant` / `pencil-design-updater` / `requirement-todo-organizer`） |
 | `plugin/hooks/` | `SessionStart`（worktree セットアップ）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
 | `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs`） |
-| `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `next-devtools` / `shadcn`） |
+| `plugin/references/` | 複数スキルが共有する参照ドキュメント（GitHub アクセス方針など） |
+| `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `github` / `next-devtools` / `shadcn` / `playwright`） |
 
 ## セットアップ
 
@@ -68,6 +69,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス。任意（未導入でも探索がテキスト検索に落ちるだけ） |
 | [Pen CLI](https://docs.pencil.dev/for-developers/pen-cli) | `.pen` デザインファイルの編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン。呼び出しは `pencil` 経由） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ |
+| [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避。任意（未設定でも `gh` へフォールバックする） |
 
 CLI 本体に npm の実行時依存はない（esbuild で `dist/index.js` に単一バンドルされ、Node.js 標準モジュールのみで動作する）。
 
