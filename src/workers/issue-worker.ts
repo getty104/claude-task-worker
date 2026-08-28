@@ -17,7 +17,15 @@ import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
 import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../worktree";
 
-const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
+// Issue のライフサイクル状態を表すマーカーラベル。ワーカー実行で消費されるトリガーではなく、
+// トリアージ済み（cc-triage-scope）/ 分析済み（cc-issue-created）という事実を保持する。
+// triage-created-issue はこの2つをトリガー（AND条件）に使うが、完了時に外すと
+// タスク失敗時にマーカーごと失われ、create-issue が分析済み Issue を再分析 →
+// cc-issue-created 再付与 → 再トリアージ、のループに入る。よって除去対象から外す。
+const STICKY_LABELS = ["cc-triage-scope", "cc-issue-created"];
+
+export const consumableTriggerLabels = (triggerLabels: string[]): string[] =>
+  triggerLabels.filter((label) => !STICKY_LABELS.includes(label));
 
 // preflight を持つワーカー（現状は epic-issue）は、古い順の先頭候補が preflight で
 // skip され続けると後続の実行可能 Issue が取得枠から溢れて飢餓する。取得件数を
@@ -102,7 +110,6 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
             }
           }
 
-          const hadTriageScope = issue.labels.some((l) => l.name === LABEL_TRIAGE_SCOPE);
           await addLabel("issue", issue.number, "cc-in-progress");
 
           const worktreeId = generateWorktreeName();
@@ -145,16 +152,9 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               worktreeId,
               async (status, output) => {
                 lastCompletionAt = Date.now();
-                for (const label of config.triggerLabels) {
+                for (const label of consumableTriggerLabels(config.triggerLabels)) {
                   await removeLabel("issue", issue.number, label).catch((err) =>
                     console.error(`[${config.name}] removeLabel ${label} failed for #${issue.number}: ${err}`),
-                  );
-                }
-                if (hadTriageScope) {
-                  await addLabel("issue", issue.number, LABEL_TRIAGE_SCOPE).catch((err) =>
-                    console.error(
-                      `[${config.name}] addLabel ${LABEL_TRIAGE_SCOPE} failed for #${issue.number}: ${err}`,
-                    ),
                   );
                 }
                 try {

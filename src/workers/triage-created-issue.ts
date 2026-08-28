@@ -1,5 +1,4 @@
 import { createIssuePollingWorker } from "./issue-worker";
-import { addLabel } from "../gh";
 
 export const triageCreatedIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: string[] } = {}) =>
   createIssuePollingWorker({
@@ -24,7 +23,6 @@ export const triageCreatedIssueWorker = (opts: { epicFilters?: number[]; labelFi
     ],
     epicFilters: opts.epicFilters,
     labelFilters: opts.labelFilters,
-    onCompleted: async (issueNumber) => {
-      await addLabel("issue", issueNumber, "cc-issue-created");
-    },
+    // トリガーラベルはどちらも STICKY_LABELS なのでワーカーが外さない。
+    // 完了時に付け直す必要はない。
   })();

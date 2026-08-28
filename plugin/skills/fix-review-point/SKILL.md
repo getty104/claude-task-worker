@@ -98,7 +98,7 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 
 並列で以下を確認する。1つでも失敗したら、その場で原因を解消してから先に進むこと。
 
-- `gh pr view $0 --json number,state,headRefName,isDraft` でPRが存在し `OPEN` であることを確認する。CLOSED/MERGEDなら処理を中断
+- `gh pr view $0 --json number,state,headRefName,isDraft,labels` でPRが存在し `OPEN` であることを確認する。CLOSED/MERGEDなら処理を中断。取得したラベル一覧は「修正点がない場合」の Epic PR 判定で使う（再取得しない）
 - `gh pr checkout $0 >/dev/null 2>&1` でPRブランチをチェックアウト
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら安全のため処理を中断する（デフォルトブランチで作業してはならない）
 - `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと一致する場合は中断する。デフォルトブランチ名の取得失敗も中断する（fail-safe）
@@ -114,7 +114,15 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 - 修正タスクの一覧（目的・対象範囲・完了条件付き）
 - タスク間の依存関係
 
-**修正点がない場合**: `gh pr checks $0` でCIの全チェックが Pass していることを確認する。Pass している場合は `gh pr merge $0 --merge --delete-branch` でPRをマージし、下記「マージ後の関連Issue連動Close」を実行して終了する。チェックが失敗中の場合はマージせず、CI失敗状況をレビュアーに報告して終了する。
+**修正点がない場合**: `gh pr checks $0` でCIの全チェックが Pass していることを確認する。チェックが失敗中の場合はマージせず、CI失敗状況をレビュアーに報告して終了する。Pass している場合は、ステップ0で取得したラベル一覧で **Epic PR（`cc-epic-issue` ラベル付き）かどうか**を確認して分岐する:
+
+- **Epic PR の場合**: マージするとデフォルトブランチへの集約反映（＝リリース）になるため、**マージしない**。`triage-pr` の Epic PR 判定と同じリリースゲートとして `cc-release-ready` ラベルのみを付与して終了する（関連Issueの連動Closeにも進まない）。
+
+  ```bash
+  gh pr edit $0 --add-label "cc-release-ready"
+  ```
+
+- **通常のPRの場合**: `gh pr merge $0 --merge --delete-branch` でPRをマージし、下記「マージ後の関連Issue連動Close」を実行して終了する。
 
 ### マージ後の関連Issue連動Close
 
