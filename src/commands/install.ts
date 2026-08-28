@@ -8,6 +8,12 @@ export const PLUGIN_NAME = "claude-task-worker";
 export const MARKETPLACE_NAME = "claude-task-worker";
 export const MARKETPLACE_SOURCE = "getty104/claude-task-worker";
 
+// プラグイン宣言を書き込む先（**プロジェクト設定**）。ローカルの `claude plugin install`
+// はユーザー設定（`~/.claude/settings.json`）に書かれるためリポジトリをクローンした別環境
+// には届かないが、Claude Code on the web はリポジトリの `.claude/settings.json` を読むため、
+// ここに登録しておけば web セッションでも本プラグインのスキルがそのまま使える。
+export const PROJECT_SETTINGS_PATH = ".claude/settings.json";
+
 /** `npm install -g` で入れるパッケージ一覧（インストール後にバージョンを表示する対象）。 */
 export const GLOBAL_NPM_PACKAGES = [PLUGIN_NAME, CODEGRAPH_PACKAGE, DESIGN_MD_PACKAGE, PEN_PACKAGE];
 
