@@ -430,11 +430,6 @@ export async function createPullRequest(
   return Number(matched[1]);
 }
 
-// PRをマージしてリモートブランチも削除する。
-export async function mergePullRequest(prNumber: number): Promise<void> {
-  await execGh(["pr", "merge", String(prNumber), "--merge", "--delete-branch"]);
-}
-
 export async function createLabel(name: string, color?: string, force?: boolean): Promise<boolean> {
   try {
     const args = ["label", "create", name];

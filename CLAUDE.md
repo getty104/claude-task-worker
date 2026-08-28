@@ -333,6 +333,16 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 | create-ui-design | `cc-create-ui-design` | PR に `cc-ui-design` + `cc-triage-scope`、Issue に `cc-ui-design-pr-created` を付与 |
 | apply-ui-design | `cc-ui-design-pr-created` | Issue に `cc-ui-design-ready` + `cc-exec-issue` を付与 |
 
+#### マーカーラベルは消費しない（`STICKY_LABELS`）
+
+`issue-worker.ts` はタスク完了時にトリガーラベルを除去するが、`cc-triage-scope` / `cc-issue-created` の2つは**状態マーカー**（トリアージ待ち / 分析済み）であってワークリクエストではないため、`STICKY_LABELS` として除去対象から外す（`consumableTriggerLabels()`）。
+
+除去してしまうと、`triage-created-issue`（両ラベルをANDトリガーにする）のタスクが失敗したときにマーカーごと失われる。`cc-issue-created` が消えた Issue は `create-issue` の `excludeLabels` をすり抜けるため、分析済みの Issue が再分析され → `cc-issue-created` 再付与 → 再トリアージ → 失敗、の高コストなループに入る。以前は「除去してから完了時に付け直す」実装だったが、付け直しが成功パス（`onCompleted`）にしか無く、失敗時に片道で失われていた。
+
+### Epic PR のマージゲート（`cc-epic-issue`）
+
+`cc-epic-issue` の付いたPRをデフォルトブランチへマージする＝リリースなので、**PRをマージしうるスキルはすべて Epic PR 判定を持ち、マージの代わりに `cc-release-ready` を付けて終える**。対象は `triage-pr`（ステップ3）と `fix-review-point`（フェーズ1の「修正点がない場合」）の2箇所。`fix-review-point` 側にゲートが無かったため、`cc-fix-onetime` を経由した Epic PR が人の判断を挟まずマージされていた。判定に使うラベル一覧はステップ0の `gh pr view --json ...,labels` で取得したものを使い回す。
+
 ### `cc-need-human-check`（PR側）と解けないコンフリクトのループ遮断
 
 PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリング候補から除外する（`src/workers/triage-pr.ts` の `excludeLabels`）。同ラベルが付く経路は2つ:
