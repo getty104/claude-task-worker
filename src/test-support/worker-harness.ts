@@ -96,7 +96,9 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
     const settingsDir = join(repoDir, ".claude");
     mkdirSync(settingsDir, { recursive: true });
     const settings = options.projectSettings ?? {
-      extraKnownMarketplaces: { "claude-task-worker": {} },
+      extraKnownMarketplaces: {
+        "claude-task-worker": { source: { source: "github", repo: "getty104/claude-task-worker" } },
+      },
       enabledPlugins: { "claude-task-worker@claude-task-worker": true },
     };
     writeFileSync(join(settingsDir, "settings.json"), JSON.stringify(settings, null, 2));

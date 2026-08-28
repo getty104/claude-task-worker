@@ -162,7 +162,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               issue.number,
               issue.title,
               config.name,
-              worktreeId,
+              cloud ? undefined : worktreeId,
               async (status, output, cloudSessionId) => {
                 lastCompletionAt = Date.now();
                 for (const label of config.triggerLabels) {

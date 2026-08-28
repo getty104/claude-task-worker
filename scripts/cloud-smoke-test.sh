@@ -327,3 +327,6 @@ main() {
 }
 
 main "$@"
+if [ "$ng_count" -gt 0 ]; then
+  exit 1
+fi

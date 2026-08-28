@@ -4,7 +4,7 @@
 
 - 実測日: 2026-08-27
 - 実測バージョン: `claude --version` → `2.1.247 (Claude Code)`
-- 実行パス: `/Users/getty104/.local/share/claude/versions/2.1.247`
+- 実行パス: `~/.local/share/claude/versions/2.1.247`
 - OS: macOS (darwin 25.6.0)
 - 実測アカウント: claude.ai サインイン済み（`subscriptionType: max`、個人組織）。**組織ポリシーによる制限が一切かかっていない環境**
 - TTY が必要な実行は `script -q /dev/null <cmd> </dev/null` で pty を割り当てて実施
@@ -283,11 +283,11 @@ Anthropic's infrastructure and require an Anthropic account.
 
 ```
 $ ls ~/.claude/policy-limits.json
-ls: /Users/getty104/.claude/policy-limits.json: No such file or directory
+ls: ~/.claude/policy-limits.json: No such file or directory
 $ claude -p "reply with exactly: ok"
 ok
 $ ls ~/.claude/policy-limits.json
-ls: /Users/getty104/.claude/policy-limits.json: No such file or directory
+ls: ~/.claude/policy-limits.json: No such file or directory
 ```
 
 `claude auth status` の実行後・`claude -p` セッション1本の完了後のいずれでも生成されない。

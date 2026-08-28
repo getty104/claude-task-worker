@@ -274,6 +274,24 @@ test("checkPluginDeclaration reports which of the two keys is missing", () => {
   assert.match(errors[0], /enabledPlugins/);
 });
 
+test("checkPluginDeclaration rejects a marketplace entry pointing at a different repo", () => {
+  const settings = okSettings();
+  (settings.extraKnownMarketplaces as Record<string, unknown>)["claude-task-worker"] = {
+    source: { source: "github", repo: "someone-else/fork" },
+  };
+  const errors = checkPluginDeclaration({ kind: "ok", value: settings });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /extraKnownMarketplaces/);
+});
+
+test("checkPluginDeclaration rejects a plugin value that is truthy but not exactly true", () => {
+  const settings = okSettings();
+  (settings.enabledPlugins as Record<string, unknown>)[PLUGIN_KEY] = "true";
+  const errors = checkPluginDeclaration({ kind: "ok", value: settings });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /enabledPlugins/);
+});
+
 // M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
 test("checkCloudAuth allows a normal claude.ai sign-in", () => {
   const errors = checkCloudAuth({
