@@ -297,6 +297,71 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - 同 `[ui.sound.agents] claude = "off"`（claudeエージェント全体。対話セッションも無音になる）
 - ワーカー用に別 herdr セッションを `HERDR_DISABLE_SOUND=1 herdr --session <name>` で起動し、その中でディスパッチャーを動かす（サーバーへのenv継承は未検証）
 
+### クラウド実行（`workers.<name>.cloud`）
+
+リポジトリ直下 `claude-task-worker.json` の `workers.<name>.cloud`（boolean、既定 `false`、`WorkerRuntimeConfig`）で、1タスクを claude CLI の `--cloud`（Claude Code on the web）へ振るかをワーカー単位で切り替える。`parseWorkerEntry()`（`src/config.ts`）が他フィールドと同じく「不正値は警告して既定値」でパースする。
+
+**`mode` / `advisor` / `permission`（`~/.config/claude-task-worker/config.json` のトップレベル一括）と異なり、`cloud` はワーカー単位で切り替えられる**。クラウド適合性がワーカーごとに大きく違う（後述の適合性表）ため、全ワーカーを一律に倒す設定では成立するワーカーと成立しないワーカーを同時に扱えない。
+
+#### Phase 1 が `mode: "herdr"` 限定である理由
+
+- **新規クラウドセッションの作成には TTY が必要**。claude CLI は stdout が TTY でない場合 print モード扱いになり、非TTY での `--cloud` は `Error: --cloud requires an interactive terminal.` で拒否される（実測 `docs/cloud-session-launch-flags.md` T1、claude 2.1.247）
+- `mode: "default"` は `spawn(..., { stdio: ["ignore", "pipe", "pipe"] })` で TTY を持たないため、この経路ではクラウドセッションを作成できない。`mode: "herdr"` では既存のタスクタブ（TUI・実TTY）がそのまま起動場所になる
+- `cloud: true` のワーカーが1つでもあり `mode` が `"herdr"` でない場合は、`checkCloudConfig()` 経由で `assertCloudAvailable()`（`src/index.ts`）が**ワーカー起動時にエラー終了**する。**サイレントにローカル実行へフォールバックしない**（実行形態が設定と食い違ったまま走る方が事故が大きいため）
+- 起動時に拒否されるのはもう1系統あり、`CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design`）への `cloud: true` も同様にエラー終了する（`.pen` の編集に `pencil` CLI とその認証が要る／クラウドからの force-push 可否が未検証のため）
+- タスクタブのラベルは `taskTabLabel()`（`src/herdr-runner.ts`）が `ctw:<project>:#<n>:cloud` を返し、クラウド実行であることが一覧から分かるようにしてある
+
+#### クラウド時に worktree を作らない理由
+
+- `issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts` は `cloud` のとき `createWorktreeFromBranch()` / `getWorktreePath()` / `removeWorktree()` をスキップし、cwd を `undefined`（＝ワーカーのリポジトリルート）にする。**クラウド VM が自前でリポジトリを持つため、ローカルの作業ツリーは使われない**
+- Issue 系の `ensureEpicBranch()` は**引き続き実行する**（`cc-epic-<N>` をリモートに用意する処理であり、その後 `--ref cc-epic-<N>` で参照するため）
+- PR 系のローカルブランチ掃除（`removeWorktreeByBranch()` / `deleteLocalBranch()` / `localBranchExists()` のプリフライト）は**スキップする**。ローカルの checkout 競合はクラウド実行では発生しない（`gh pr checkout` はクラウド VM 側で走る）
+- **副作用**: `exec-issue` の PR 実在検証で「worktreeId を head とする PR」の条件が成立しなくなる（クラウドセッションは作業ブランチ名を自分で決め、ローカルからはその名前を取得する手段が無い）。代わりに `selectOwnedClosingPr()`（`src/workers/exec-issue.ts`）が closing 参照PRの **base ブランチ一致 ＋ 作成時刻がタスク起動時刻以降**で所有権を判定する。所有権を確認できなければ `cc-pr-created` を付けず `cc-need-human-check` へ倒す
+
+#### `--cloud` 付与時の起動引数の差分
+
+- `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` のみ**。`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
+- 実測（`docs/cloud-session-launch-flags.md` の T5 / T6 / T7、claude 2.1.247）でこれらのフラグはいずれも**受理された**。ただし「受理された＝クラウド VM 側で実際に反映される」ことまでは未確認（起動引数として拒否されないことのみを確認）
+- **「クラウドセッションが受理しないフラグを渡すと起動そのものが失敗する（黙って無視されない）」という原則は維持する**。実際にそれへ該当するのは2つだけ: (a) `-p` との併用（`Error: --cloud cannot be combined with --print.`）、(b) `--ref` と `--on-branch` の同時指定（`Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）
+- `--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**。実装は起動前に `buildClaudeArgs()` が例外で弾く（外部プロセスのエラーで気づく形にしないため）。Issue 系ワーカーはベースブランチを `--ref` へ、PR 系は PR の head ブランチを `--on-branch` へ渡す
+- プロンプトは `--cloud` の値（引数）として渡さず、herdr の `agent prompt` で起動後に投入する（上記「mode（タスクの実行形態）」の「プロンプトを起動引数で渡してはいけない」と同じ理由）
+- **完了検知と最終レポートには現状クラウド側の情報が乗らない**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない
+
+#### ワーカー別の適合性
+
+判定は「Phase 1 でクラウド実行を推奨してよいか」であり、**起動時ガードの対象とは別**。起動時に拒否されるのは `CLOUD_DENIED_WORKERS` の3ワーカーだけで、`fix-review-point` / `triage-pr` / `check-dependabot` は起動時には許可されるが `cloud: true` を推奨しない。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
+
+前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md` M-5）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
+
+あわせて、クラウド VM の `gh` が古い（実測 2.45.0）ため `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` でクライアント側から失敗する、という**プロキシ制限とは独立した交絡**もある。
+
+| ワーカー | 判定 | 主な劣化要因 |
+|---|---|---|
+| `exec-issue` | △（Issue本文の読み取りが GraphQL ゲートで403、REST 書き換えが前提） | `gh issue view --json body` / `gh pr list --head` |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（収集が0件で空振り終了） | 収集スクリプトの `gh api graphql` / `gh (issue\|pr) view --json` |
+| `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（分析系スキルの入力がゼロ） | `gh issue view --json body,comments,labels` |
+| `epic-issue`（`create-epic-pr`） | △（Issue情報が欠ける。コミットログは `git log` で取れる） | `gh issue view --json` |
+| `fix-review-point` | ✕（レビュー指摘を1件も取得できず、スレッド解決も回復不能） | `reviewThreads` / `resolveReviewThread` / `gh pr view --json` |
+| `triage-pr` | ✕（マージ判断の材料がゼロ） | `gh pr view --json` / `gh pr checks` / `reviewThreads` / `gh pr list` |
+| `check-dependabot` | ✕（依存更新の内容もCI結果も読めない） | `gh pr view --json` / `gh pr checks` |
+| `resolve-conflict` | ✕（起動時ガード対象。加えてコンフリクト判定の入力も取れない） | `gh pr view --json` |
+| `create-ui-design` / `apply-ui-design` | ✕（起動時ガード対象。`pencil` CLI と認証が理由） | `gh issue view --json` |
+
+`fix-review-point` / `triage-pr` / `check-dependabot` の3ワーカーは起動時に拒否しない方針だが、GraphQL ゲート下では成果物を出せずタスクが空振りするため、運用上は `cloud: true` にしないことを推奨する。
+
+**`src/gh.ts` の GraphQL 依存関数（`findPrNumberClosingIssue` / `hasOpenBlockers` / `getIssueSubIssuesSummary` / `getPrMergeable` / `listIssuesByLabel` / `listIssuesByNumbers`）はワーカープロセス（ローカル）が呼ぶため `cloud: true` にしても影響を受けない**。クラウドで走るのはタスクセッション（スキル）だけであり、上表の劣化はすべてスキル本文の `gh` 呼び出しに起因する。ここを取り違えると影響範囲を誤って見積もる。
+
+#### 前提条件
+
+4つあり、契約が2種類に分かれる。1（claude.ai アカウントでのサインイン）と 3（リポジトリ `.claude/settings.json` へのプラグイン宣言）は**起動時に静的検査でき、満たさなければエラー終了する**（タスクを1件も起動しない）。2（GitHub 連携）と 4（`allow_remote_sessions` 組織ポリシー）は**ローカルから照会する手段が無い**ため静的検査せず、案内に留める（`docs/cloud-prerequisite-checks.md`、Issue #225 の実測）。
+
+- **1（サインイン）**: `checkCloudAuth()` が `claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で判定する。API キー認証・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成ではクラウドセッションを作成できない。**`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返す**ため `apiKeySource` の不在を併せて見る必要がある。コマンドの実行・パースに失敗した「判定不能」は**エラーにしない**（サインイン状態が読めないことを拒否根拠にしない安全側の倒し方）
+- **2（GitHub 連携）**: 非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない
+- **3（プラグイン宣言）**: `checkPluginDeclaration()` が `.claude/settings.json` の `extraKnownMarketplaces` / `enabledPlugins` の2キーを見る。クラウドセッションが読むのは**リポジトリの**設定で、`claude plugin install` が書くユーザー設定（`~/.claude/settings.json`）は届かない。未宣言だとスキルがクラウド VM に存在せずセッションが空振りするため、静的検査で落とす
+- **4（`allow_remote_sessions` 組織ポリシー）**: CLI がポリシーを `policy-limits.json` にキャッシュする実装を持つが実測環境では生成されず、「未取得」と「拒否」を区別できないため静的検査しない
+
+これらの検査は `cloud: true` のワーカーが1件も無ければ **I/O ごと行わない**（`cloud` を書かない既存リポジトリでの挙動を完全に不変に保つため）。
+
 ### `--project` ディスパッチ
 
 `src/index.ts` は起動時に `hasProjectFilter()` で `--project` フラグの有無を判定し、指定されている場合はワーカー起動の代わりにディスパッチャーを起動する（複数プロジェクトへ同一コマンドを一括転送する仕組み）。
@@ -452,7 +517,8 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `claude-task-worker` プラグイン（本リポジトリの `plugin/`）がインストール済み
   - `npx claude-task-worker install` で一括セットアップ可能
   - 手動の場合: `claude plugin marketplace add getty104/claude-task-worker` → `claude plugin install claude-task-worker@claude-task-worker`
-  - Claude Code on the web からも実行する場合は `claude-task-worker init --cloud` でプロジェクト設定（`.claude/settings.json`）にも本プラグインを登録する
+  - Claude Code on the web からも実行する場合、およびクラウド実行（`workers.<name>.cloud: true`）を使う場合は、リポジトリの `.claude/settings.json` への本プラグインの登録が**必須の前提条件**になる。**未宣言のままだとワーカー起動時の静的検査（`checkPluginDeclaration()`）で失敗し、そのワーカーはタスクを1件も起動しない**（クラウドセッションはリポジトリのプロジェクト設定を読むため、`claude plugin install` が書くユーザー設定 `~/.claude/settings.json` は届かない）。登録は `claude-task-worker init --cloud` の明示指定、または `claude-task-worker.json` の `workers.*.cloud` のいずれかが `true` の状態での `claude-task-worker init`（`shouldRegisterPlugin()` の判定）で行う
+  - あわせて claude.ai アカウントでのサインインもクラウド実行の必須前提。未サインイン・API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）構成では、同じくワーカー起動時の静的検査（`checkCloudAuth()`）でエラー終了する（詳細は Architecture の「クラウド実行（`workers.<name>.cloud`）」参照）
 - CodeGraph (`codegraph`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`codegraph serve --mcp`）。`explore-agent` およびワーカー起動セッションは**この MCP ツール経由で** CodeGraph を使う。ツールが無い場合、および未インデックスでエラー・空結果が返る場合は `Glob`/`Grep` にフォールバックする
   - プロジェクトごとのインデックス構築は `claude-task-worker init`（内部で `codegraph init`）。未インストール・未初期化でもワーカーは動作する（探索がテキスト検索に落ちるだけ）
