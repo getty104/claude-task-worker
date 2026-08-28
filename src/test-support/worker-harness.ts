@@ -56,6 +56,8 @@ export interface StartWorkerOptions {
   records: () => StubRecord[];
   /** テストタイムアウトに引っかからないよう、待機系関数の既定タイムアウトを調整できる。 */
   defaultTimeoutMs?: number;
+  /** 既定の env（XDG_CONFIG_HOME 等）の後ろへマージして上書きできる追加 env。 */
+  env?: Record<string, string>;
 }
 
 export interface WorkerHandle {
@@ -113,6 +115,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
         // src/slack.ts の send() はこれが truthy だと実際に fetch する（完了/失敗通知の
         // たびに呼ばれる）ため、テストが実チャンネルへ通知を飛ばさないよう必ず空にする。
         CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: "",
+        ...options.env,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

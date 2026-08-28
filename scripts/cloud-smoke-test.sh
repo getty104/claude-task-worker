@@ -5,8 +5,8 @@ set -euo pipefail
 # smoke test を補助するスクリプト。docs/cloud-smoke-test.md から参照される。
 #
 # 自動判定できる範囲（事前条件・実行前後のスナップショット差分・ラベル遷移・
-# closing参照PR候補の列挙）だけを担う。claude.ai上のセッション表示・driverの
-# 状態遷移・Slack通知の到達性は目視項目のため、このスクリプトでは判定しない
+# closing参照PR候補の列挙）だけを担う。claude.ai上のセッション表示・最終報告
+# コメント投稿・Slack通知の到達性は目視項目のため、このスクリプトでは判定しない
 # （チェックリストとして印字するのみ）。クラウドセッションの作成・削除など
 # 副作用を伴う操作は一切行わない。
 #
@@ -192,6 +192,11 @@ cmd_check_labels() {
   else
     report OK "cc-in-progress has been removed from #$issue_number"
   fi
+  if echo "$labels" | grep -qx "cc-cloud-done"; then
+    report NG "cc-cloud-done is still present on #$issue_number (worker may not have detected completion yet, or removal failed)"
+  else
+    report OK "cc-cloud-done has been removed from #$issue_number"
+  fi
   if echo "$labels" | grep -qx "cc-pr-created"; then
     report OK "cc-pr-created is present on #$issue_number"
   elif echo "$labels" | grep -qx "cc-need-human-check"; then
@@ -265,10 +270,10 @@ cmd_checklist() {
   cat <<'EOF'
 人の目視が必要な項目（このスクリプトでは自動判定しない。docs/cloud-smoke-test.md 参照）:
   [ ] claude.ai/code 上でクラウドセッションが作成され、対象タスクの内容で走っている（基準2）
-  [ ] driver の agent ステータスが working へ遷移する（基準7）
-  [ ] driver の agent ステータスが done、または working 経由の idle になる（基準7）
-  [ ] blocked（AskUserQuestion相当）が idle に誤検知されていない（基準7）
-  [ ] Slack に完了/失敗通知が届き、本文の https://claude.ai/code/<id> からセッションを開ける（基準5）
+  [ ] クラウドセッションが最終報告コメント（見出し: ## claude-task-worker 実行結果）を投稿した（基準7）
+  [ ] クラウドセッションが cc-cloud-done ラベルを付与した（基準7）
+  [ ] ワーカーが cc-cloud-done を検知し、ラベルを除去した（基準7。check-labels で確認）
+  [ ] Slack に完了/失敗通知が届き、本文に最終報告コメントの内容と https://claude.ai/code/<id> が載っている（基準5）
   [ ] クラウドセッションを claude.ai/code の一覧から削除した（後片付け）
   [ ] テスト用Issue/PRをクローズした（後片付け）
 EOF

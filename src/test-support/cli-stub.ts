@@ -25,8 +25,6 @@ export interface GhScenario {
   prList?: unknown[];
   /** `gh api graphql`（listPrsClosingIssue）が返す closedByPullRequestsReferences.nodes */
   closingPrs?: unknown[];
-  /** `gh <type> list --label cc-cloud-done` が返す番号の一覧（クラウド完了検知のポーリング用） */
-  cloudDone?: { issues?: number[]; prs?: number[] };
 }
 
 export interface CliStubOptions {
@@ -35,6 +33,11 @@ export interface CliStubOptions {
     stderr?: string;
     exitCode?: number;
     authStatus?: unknown;
+    /**
+     * クラウド投函コマンド起動時に、appendCloudDoneInstruction() の指示（報告コメント投稿 →
+     * cc-cloud-done 付与）を gh スタブの状態ファイルへ模倣書き込みさせる。
+     */
+    cloudComplete?: { type: "issue" | "pr"; number: number; report?: string };
   };
   herdr?: {
     agentStatuses?: string[];
@@ -104,6 +107,10 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
   setEnv(
     "CTW_STUB_CLAUDE_AUTH_STATUS",
     options?.claude?.authStatus === undefined ? undefined : JSON.stringify(options.claude.authStatus),
+  );
+  setEnv(
+    "CTW_STUB_CLAUDE_CLOUD_COMPLETE",
+    options?.claude?.cloudComplete === undefined ? undefined : JSON.stringify(options.claude.cloudComplete),
   );
   setEnv("CTW_STUB_GH_SCENARIO", options?.gh === undefined ? undefined : JSON.stringify(options.gh));
 
