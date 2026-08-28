@@ -154,7 +154,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 効かない宣言を残すと「このスキルは sonnet で動いている」という誤った前提でコスト試算やモデル調整をしてしまうため、`src/skill-frontmatter.test.ts` の「a skill declaring model/effort also declares context: fork」で機械的に固定してある。あわせて**ワーカー起動スキル（15個）には `model:` も `context:` も書かない**ことも同ファイルで固定している（ワーカーのモデルは `claude-task-worker.json` の `workers.<name>.model` が決めるため、スキル側に書くとその設定を上書きしてしまう）。
 
-fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
+fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `commit-push` / `resolve-pencil-conflict`。
 
 **`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。
 
@@ -186,7 +186,7 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
+`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
@@ -218,6 +218,8 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 2. **worktree配下を作業ディレクトリに持つ残留プロセスへ `SIGTERM`**: 実行cwd（worktree、`.claude/worktrees/<adj-noun-NNNN>` で一意）を cwd に持つプロセスだけを対象にする。切り離されたプロセスも起動時の cwd を保持し、worktree名はこの実行に固有なため、「この実行が起動したプロセス」だけを、ユーザー自身や別実行のプロセスに触れずに特定できる。ただし本フック自身の祖先チェーン（node フック・そのシェル・`claude` プロセスはいずれもworktreeをcwdに持つ）は除外し、自プロセスの巻き添え停止を防ぐ。プロセス列挙は Linux では `/proc/<pid>/cwd`、macOS 等では `lsof` を用いる。
 
 判定ロジック（`selectPidsToKill` / `parseLsofCwds` / `isUnder` / `resolveTargetDir`）は純粋関数として export し、`plugin/scripts/stop-servers.test.mjs` でユニットテストする。対象スキルは同期実行ガードと同じ15スキル（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）。
+
+`fix-review-point` だけは同じ `Stop` の下に2本目のフック（`plugin/scripts/resolve-pr-comments.sh`）を持ち、レビュースレッドの一括 Resolve を行う。実行は `CTW_LOCAL_EXECUTION`（`buildClaudeEnv()` がローカル実行時のみ注入）が立っているときだけで、**「クラウドである」ことを示す変数ではなく「ローカルであることの肯定的マーカー」にしてある**。マーカーが届かない環境（クラウド VM、人が対話でスキルを手動実行した場合）では自動的に実行しない側へ倒れる。クラウド実行時は代わりに `src/workers/fix-review-point.ts` の `onCompleted` がワーカープロセス（ローカル）から同じスクリプトを PR 番号付きで実行する。`resolveReviewThread` mutation はクラウドの GraphQL ゲートで 403 になり REST 代替が原理的に存在しない（`docs/cloud-graphql-proxy-limits.md`）ため、この二経路が必要になる。
 
 ### `advisor`（アドバイザーモデル）
 

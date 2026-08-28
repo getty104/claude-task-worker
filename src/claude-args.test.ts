@@ -201,10 +201,19 @@ test("buildClaudeArgs passes --advisor with the model in both modes", () => {
 });
 
 test("buildClaudeEnv drops the print-only ceiling in herdr mode", () => {
-  assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV, CTW_LOCAL_EXECUTION: "1" });
   assert.deepEqual(buildClaudeEnv("herdr"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+    CTW_LOCAL_EXECUTION: "1",
   });
+});
+
+test("buildClaudeEnv includes CTW_LOCAL_EXECUTION only for local execution", () => {
+  for (const mode of ["default", "herdr"] as const) {
+    assert.equal(buildClaudeEnv(mode).CTW_LOCAL_EXECUTION, "1");
+    assert.equal(buildClaudeEnv(mode, false).CTW_LOCAL_EXECUTION, "1");
+    assert.ok(!("CTW_LOCAL_EXECUTION" in buildClaudeEnv(mode, true)));
+  }
 });
 
 test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server, not the pane)", () => {

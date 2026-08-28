@@ -112,8 +112,10 @@ test("buildClaudeEnv is pinned for default and herdr modes", () => {
   assert.deepEqual(buildClaudeEnv("default"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0",
+    CTW_LOCAL_EXECUTION: "1",
   });
   assert.deepEqual(buildClaudeEnv("herdr"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+    CTW_LOCAL_EXECUTION: "1",
   });
 });

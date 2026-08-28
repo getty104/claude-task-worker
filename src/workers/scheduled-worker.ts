@@ -131,7 +131,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
             }
           },
           cwd,
-          buildClaudeEnv(mode),
+          buildClaudeEnv(mode, cloud),
           execution.prompt,
           cloud,
         );
