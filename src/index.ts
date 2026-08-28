@@ -36,6 +36,7 @@ import {
   buildForwardedCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import { loadConfig, checkCloudConfig } from "./config";
 // dispatcher.ts / herdr.ts はワーカー起動には不要な --project 専用モジュールで、
 // dispatcher.ts のトップレベル await が即時実行されるのを避けるため、
 // 静的importではなく --project 使用時にのみ実行される動的importで遅延読込する。
@@ -196,6 +197,18 @@ async function assertRunModeAvailable(): Promise<void> {
   console.log("[worker] run mode: herdr (each task runs as a TUI session in its own herdr tab)");
 }
 
+// cloud: true のワーカー構成が非対応（mode !== "herdr" や、pencil CLI 認証・force-push の
+// 可否が未検証なワーカーへの cloud: true）だとタスク起動が壊れた形で失敗し続けるため、
+// サイレントにローカル実行へフォールバックせず起動時に落とす。
+function assertCloudAvailable(): void {
+  const errors = checkCloudConfig({ workers: loadConfig().workers, mode: getRunMode() });
+  if (errors.length === 0) return;
+  for (const message of errors) {
+    console.error(`[worker] ${message}`);
+  }
+  process.exit(1);
+}
+
 // 起動前の前提チェックをまとめて実行する。
 async function assertRunPrerequisites(): Promise<void> {
   // 毎秒のテーブル再描画（画面クリア）でエラーログが一瞬しか見えないため、
@@ -203,6 +216,7 @@ async function assertRunPrerequisites(): Promise<void> {
   captureConsole();
   ensureRenderInterval();
   await assertRunModeAvailable();
+  assertCloudAvailable();
 }
 
 if (!hasProjectFilter()) {
