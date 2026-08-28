@@ -1,6 +1,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { CLOUD_DONE_LABEL } from "./config";
 import { DEFAULT_PERMISSION_MODE, type PermissionMode, type RunMode } from "./user-config";
 
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
@@ -261,6 +262,14 @@ export function buildClaudeArgs({
 // （`src/process-manager.ts`）が決める。
 export function buildCloudCreateArgs(commonArgs: string[], description: string): string[] {
   return ["--cloud", description, ...commonArgs];
+}
+
+// クラウドタスクの完了検知（cc-cloud-done ラベル、#284）用の指示を投函プロンプトへ追加する。
+// スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で投函プロンプトへ付加する方針。
+export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
+  const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
+  const instruction = `完了・中断にかかわらず、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
+  return `${prompt}\n\n${instruction}`;
 }
 
 // クラウドセッションへのプロンプト投函コマンド（TTY 不要・即 return の

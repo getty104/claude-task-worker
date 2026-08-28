@@ -385,6 +385,29 @@ export async function hasLabel(type: "issue" | "pr", number: number, label: stri
 }
 
 /**
+ * 指定ラベルが付いた issue/PR 番号を列挙する。実行中のクラウドタスク全体を1クエリで
+ * 判定するための列挙であり、個別番号の `gh issue view` ポーリングにはしない。
+ * `--state all` にするのは、exec-issue の「コード変更なし」経路が Issue をクローズして
+ * からラベルを付けるため、既定の open 限定だと検知できないため。
+ */
+export async function listNumbersWithLabel(type: "issue" | "pr", label: string, limit = 50): Promise<number[]> {
+  const output = await execGh([
+    type,
+    "list",
+    "--label",
+    label,
+    "--state",
+    "all",
+    "--json",
+    "number",
+    "--limit",
+    String(limit),
+  ]);
+  const parsed: { number: number }[] = JSON.parse(output);
+  return parsed.map((entry) => entry.number);
+}
+
+/**
  * Issue が Open な blockedBy（GitHub Issue Dependencies）を持つかを実体から判定する。
  *
  * listIssuesByLabel の `-is:blocked` は検索インデックス経由のため、

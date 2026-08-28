@@ -307,7 +307,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - **新規クラウドセッションの作成には TTY が必要**。claude CLI は stdout が TTY でない場合 print モード扱いになり、非TTY での `--cloud` は `Error: --cloud requires an interactive terminal.` で拒否される（実測 `docs/cloud-session-launch-flags.md` T1、claude 2.1.247）
 - `mode: "default"` は `spawn(..., { stdio: ["ignore", "pipe", "pipe"] })` で TTY を持たないため、この経路ではクラウドセッションを作成できない。`mode: "herdr"` では既存のタスクタブ（TUI・実TTY）がそのまま起動場所になる
 - `cloud: true` のワーカーが1つでもあり `mode` が `"herdr"` でない場合は、`checkCloudConfig()` 経由で `assertCloudAvailable()`（`src/index.ts`）が**ワーカー起動時にエラー終了**する。**サイレントにローカル実行へフォールバックしない**（実行形態が設定と食い違ったまま走る方が事故が大きいため）
-- 起動時に拒否されるのはもう1系統あり、`CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design`）への `cloud: true` も同様にエラー終了する（`.pen` の編集に `pencil` CLI とその認証が要る／クラウドからの force-push 可否が未検証のため）
+- 起動時に拒否されるのはもう1系統あり、`CLOUD_DENIED_WORKERS` への `cloud: true` も同様にエラー終了する。内訳は (a) `resolve-conflict` / `create-ui-design` / `apply-ui-design`（`.pen` の編集に `pencil` CLI とその認証が要る／クラウドからの force-push 可否が未検証）、(b) 定期ワーカー3件（`SCHEDULED_WORKER_NAMES`）。(b) は**完了検知の `cc-cloud-done` を置く先が無い**ため：同ワーカーは対象 Issue/PR を持たず、ラベルを付けるマーカーが存在しない（実行記録PRをマーカー先にする案は Phase 2 で再検討）
 - タスクタブのラベルは `taskTabLabel()`（`src/herdr-runner.ts`）が `ctw:<project>:#<n>:cloud` を返し、クラウド実行であることが一覧から分かるようにしてある
 
 #### クラウド時に worktree を作らない理由
@@ -324,11 +324,23 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - **「クラウドセッションが受理しないフラグを渡すと起動そのものが失敗する（黙って無視されない）」という原則は維持する**。実際にそれへ該当するのは2つだけ: (a) `-p` との併用（`Error: --cloud cannot be combined with --print.`）、(b) `--ref` と `--on-branch` の同時指定（`Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）
 - `--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**。実装は起動前に `buildClaudeArgs()` が例外で弾く（外部プロセスのエラーで気づく形にしないため）。Issue 系ワーカーはベースブランチを `--ref` へ、PR 系は PR の head ブランチを `--on-branch` へ渡す
 - プロンプトは `--cloud` の値（引数）として渡さず、herdr の `agent prompt` で起動後に投入する（上記「mode（タスクの実行形態）」の「プロンプトを起動引数で渡してはいけない」と同じ理由）
-- **完了検知と最終レポートには現状クラウド側の情報が乗らない**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない
+- **最終レポートにはクラウド側の情報が乗らない**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
+
+#### 完了検知（`cc-cloud-done` ラベルのポーリング）
+
+クラウドをドライブし続けるローカル TUI が存在しない（M-1）ため、herdr の agent ステータスではクラウド側の完了を検知できない。代わりに**セッション自身が最後の操作として対象 Issue/PR へ `cc-cloud-done` ラベルを付け、ワーカーがそれをポーリングする**（`src/process-manager.ts` の `waitForCloudTask()`）。
+
+- **投函プロンプトへの指示はワーカー側で付ける**（`appendCloudDoneInstruction()`、`src/claude-args.ts`）。スキル本文（`plugin/skills/*`）は変更しない — クラウド実行はワーカー単位の設定であり、ローカル実行のスキルに同じ指示を持たせても意味が無いため。指示は GitHub MCP 優先・`gh` フォールバックの既存規約に沿わせてある
+- **ポーリングは実行中のクラウドタスク全体を1クエリずつで判定する**（`listNumbersWithLabel()`、`src/gh.ts`）。`gh issue list --label cc-cloud-done --json number` / 同 `pr list` を type ごとに1回だけ叩き、待機中のタスクを一括で照合する。個別番号の `gh issue view` ポーリングにするとタスク数に比例して API を叩くことになる。`--state all` にしているのは、`exec-issue` の「コード変更なし」経路が Issue をクローズしてからラベルを付けるため（既定の open 限定だと取りこぼす）
+- **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。投函完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` / `cc-fix-repeat` で毎ポーリングごとにクラウドセッションが量産されていた
+- **検知したら `cc-cloud-done` を除去してから `finishTask()` へ渡す**。以降のラベル遷移（`onCompleted` の PR 実在検証 → `cc-pr-created` / `cc-need-human-check`）はローカル実行と完全に同一の経路を通る
+- **起動前に対象から `cc-cloud-done` を除去する**（`issue-worker.ts` / `pr-worker.ts`）。前回実行の残骸で即座に完了と誤判定するのを防ぐ。同一番号の同時実行は `isRunning()` が止めるため nonce は不要
+- **`CLOUD_TASK_TIMEOUT_MS`（4時間）で打ち切る**。`AskUserQuestion` で停止したセッション・VM 側クラッシュ・プラグイン未導入による空振り・ラベル付与自体の失敗はすべてここへ落ちる。打ち切り時は `cc-need-human-check` を付けて failed とし、セッション URL 付きの Slack 失敗通知を送る。**`cc-need-human-check` の付与を `runViaCloud()` 側で行っている**のは、ワーカーの `onComplete` の失敗経路が同ラベルを付けないため（付けないと打ち切られたタスクが誰にも拾われない）
+- 人が手動で `cc-cloud-done` を付けても同じ経路で完了扱いになる（張り付いたタスクの救済手段）。シャットダウン時は `herdrAbortSignal` で待機ループを抜ける（1秒刻みで確認するため30秒の間隔待ちに引きずられない）
 
 #### ワーカー別の適合性
 
-判定は「Phase 1 でクラウド実行を推奨してよいか」であり、**起動時ガードの対象とは別**。起動時に拒否されるのは `CLOUD_DENIED_WORKERS` の3ワーカーだけで、`fix-review-point` / `triage-pr` / `check-dependabot` は起動時には許可されるが `cloud: true` を推奨しない。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
+判定は「Phase 1 でクラウド実行を推奨してよいか」であり、**起動時ガードの対象とは別**。起動時に拒否されるのは `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件）だけで、`fix-review-point` / `triage-pr` / `check-dependabot` は起動時には許可されるが `cloud: true` を推奨しない。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
 
 前節「GitHub アクセス（GitHub MCP 優先 / `gh` フォールバック）」の移行により、下表の劣化要因（GraphQL 403）は MCP 経由で回避されうる見込みである。ただしクラウドでの MCP 起動・認証は未実測のため、**下表の判定・値はこの見込みを反映せず変更していない**。
 
@@ -339,7 +351,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 | ワーカー | 判定 | 主な劣化要因 |
 |---|---|---|
 | `exec-issue` | △（Issue本文の読み取りが GraphQL ゲートで403、REST 書き換えが前提） | `gh issue view --json body` / `gh pr list --head` |
-| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（収集が0件で空振り終了） | 収集スクリプトの `gh api graphql` / `gh (issue\|pr) view --json` |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | ✕（起動時ガード対象。`cc-cloud-done` を置く対象 Issue/PR が無く完了検知できない。加えて収集も0件で空振り終了） | 収集スクリプトの `gh api graphql` / `gh (issue\|pr) view --json` |
 | `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（分析系スキルの入力がゼロ） | `gh issue view --json body,comments,labels` |
 | `epic-issue`（`create-epic-pr`） | △（Issue情報が欠ける。コミットログは `git log` で取れる） | `gh issue view --json` |
 | `fix-review-point` | ✕（レビュー指摘を1件も取得できず、スレッド解決も回復不能） | `reviewThreads` / `resolveReviewThread` / `gh pr view --json` |

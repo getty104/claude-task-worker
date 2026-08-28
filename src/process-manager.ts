@@ -2,8 +2,15 @@ import type { ChildProcess } from "node:child_process";
 import { execFile, spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { buildCloudCreateArgs, buildCloudDispatchArgs, CLAUDE_COMMAND, shellQuote } from "./claude-args";
-import { getWorkerConfig } from "./config";
+import {
+  appendCloudDoneInstruction,
+  buildCloudCreateArgs,
+  buildCloudDispatchArgs,
+  CLAUDE_COMMAND,
+  shellQuote,
+} from "./claude-args";
+import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
+import { addLabel, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
 import {
@@ -244,10 +251,98 @@ export const CLOUD_SESSION_POLL_INTERVAL_MS = 1000;
 // 場合に無限に待たないための保険。
 export const CLOUD_DISPATCH_TIMEOUT_MS = 60 * 1000;
 
-// クラウド実行（workers.<name>.cloud）のタスク実行。「作成 → 投函」の2コマンド方式で、
-// herdr の agent ステータスによる待機・完了判定からは切り離されている
-// （#284 で完了検知をラベル経由へ差し替えるまでの暫定実装。ここでの「投函コマンドの
-// 終了 = タスク完了」は実際には「クラウドへ投げっぱなしにした」を意味するに過ぎない）。
+// クラウドタスクの完了（cc-cloud-done ラベル）を確認するポーリング間隔。
+export const CLOUD_POLL_INTERVAL_MS = 30 * 1000;
+// クラウドタスクの打ち切り上限。これを超えたら failed として人手確認へ回す。
+// タイムアウトに落ちる典型: AskUserQuestion で停止したセッション・VM 側クラッシュ・
+// プラグイン未導入による空振り・ラベル付与自体の失敗。
+export const CLOUD_TASK_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+type CloudTargetType = "issue" | "pr";
+
+interface CloudWaiter {
+  type: CloudTargetType;
+  deadline: number;
+  settle: (outcome: "completed" | "timeout" | "aborted") => void;
+}
+
+// キーは `${type}:${number}`（issue #N と PR #N の番号衝突を避ける）。
+const cloudWaiters = new Map<string, CloudWaiter>();
+let cloudPollLoopRunning = false;
+
+// 実行中のクラウドタスク全体を1回のポーリングで判定する共有ポーラー。個別タスクごとに
+// `gh issue view` を叩かず、type ごとに `listNumbersWithLabel` を1クエリだけ呼ぶ。
+function ensureCloudPollLoop(): void {
+  if (cloudPollLoopRunning) return;
+  cloudPollLoopRunning = true;
+  void (async () => {
+    // 例外でループを抜けた場合も cloudPollLoopRunning を戻す。立てっぱなしにすると
+    // 以降どのタスクもポーラーを起動できず、待機が永久に解決しなくなる。
+    try {
+      await pollCloudWaiters();
+    } finally {
+      cloudPollLoopRunning = false;
+    }
+  })();
+}
+
+async function pollCloudWaiters(): Promise<void> {
+  while (cloudWaiters.size > 0) {
+    if (herdrAbortSignal.aborted) {
+      for (const waiter of cloudWaiters.values()) waiter.settle("aborted");
+      cloudWaiters.clear();
+      break;
+    }
+
+    const pendingTypes = new Set<CloudTargetType>();
+    for (const waiter of cloudWaiters.values()) pendingTypes.add(waiter.type);
+
+    const doneKeys = new Map<CloudTargetType, Set<number>>();
+    for (const type of pendingTypes) {
+      try {
+        const numbers = await listNumbersWithLabel(type, CLOUD_DONE_LABEL);
+        doneKeys.set(type, new Set(numbers));
+      } catch (err) {
+        console.error(`[worker] failed to poll ${CLOUD_DONE_LABEL} for ${type}: ${err}`);
+      }
+    }
+
+    const now = Date.now();
+    for (const [key, waiter] of [...cloudWaiters.entries()]) {
+      const done = doneKeys.get(waiter.type);
+      const number = Number(key.split(":")[1]);
+      if (done?.has(number)) {
+        waiter.settle("completed");
+        cloudWaiters.delete(key);
+      } else if (now >= waiter.deadline) {
+        waiter.settle("timeout");
+        cloudWaiters.delete(key);
+      }
+    }
+
+    if (cloudWaiters.size === 0) break;
+
+    // シャットダウン応答性のため 30 秒丸ごと眠らず 1 秒刻みで abort を確認する。
+    for (let waited = 0; waited < CLOUD_POLL_INTERVAL_MS; waited += 1000) {
+      if (herdrAbortSignal.aborted) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
+export function waitForCloudTask(id: number, type: CloudTargetType): Promise<"completed" | "timeout" | "aborted"> {
+  return new Promise((resolve) => {
+    cloudWaiters.set(`${type}:${id}`, {
+      type,
+      deadline: Date.now() + CLOUD_TASK_TIMEOUT_MS,
+      settle: resolve,
+    });
+    ensureCloudPollLoop();
+  });
+}
+
+// クラウド実行（workers.<name>.cloud）のタスク実行。「作成 → 投函」の2コマンド方式に加え、
+// 投函成功後は cc-cloud-done ラベルのポーリングでタスク完了を検知する（#284）。
 async function runViaCloud(
   args: string[],
   prompt: string,
@@ -255,6 +350,7 @@ async function runViaCloud(
   onComplete?: OnComplete,
   cwd?: string,
   env?: Record<string, string>,
+  cloudTarget?: CloudTargetType,
 ): Promise<void> {
   const herdrRunnerMod = await import("./herdr-runner");
   const { taskTabLabel, waitForPaneReady, extractCloudSessionId } = herdrRunnerMod;
@@ -312,7 +408,8 @@ async function runViaCloud(
     // 投函フェーズ: TTY 不要・即 return のディスパッチコマンドを実行する。
     // ここに到達する時点で cloudSessionId は上のポーリングループが break で確定させている
     // （確定できなければ throw して catch へ抜けるため、この時点で undefined ではない）。
-    const dispatchArgs = buildCloudDispatchArgs(cloudSessionId as string, prompt);
+    const dispatchPrompt = cloudTarget ? appendCloudDoneInstruction(prompt, { type: cloudTarget, number: id }) : prompt;
+    const dispatchArgs = buildCloudDispatchArgs(cloudSessionId as string, dispatchPrompt);
     const dispatch = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
       execFile(
         CLAUDE_COMMAND,
@@ -335,12 +432,53 @@ async function runViaCloud(
           `[worker] failed to dispatch the task to cloud session ${cloudSessionId}\n` +
           `[stdout] ${dispatch.stdout.trim()}\n[stderr] ${dispatch.stderr.trim()}`,
       };
-    } else {
+    } else if (!cloudTarget) {
+      // 定期ワーカーは CLOUD_DENIED_WORKERS で起動時に拒否されるため実際には到達しない。
+      console.warn(`[worker] #${id} has no completion-detection target, treating dispatch success as completion`);
       const output =
         dispatch.stdout.trim() !== ""
           ? dispatch.stdout
           : `[worker] dispatched the task to cloud session ${cloudSessionId}`;
       result = { status: "completed", output };
+    } else {
+      const dispatchOutput =
+        dispatch.stdout.trim() !== ""
+          ? dispatch.stdout
+          : `[worker] dispatched the task to cloud session ${cloudSessionId}`;
+
+      // 待機中も台帳エントリを running のまま維持する（finishTask はここより後で呼ぶ）。
+      // herdrTasks は投函後も残るため waitForAllProcesses()/shutdown() の abort フラグは
+      // 引き続き効く。
+      const outcome = await waitForCloudTask(id, cloudTarget);
+
+      if (outcome === "completed") {
+        await removeLabel(cloudTarget, id, CLOUD_DONE_LABEL).catch((err: unknown) => {
+          console.error(`[worker] failed to remove ${CLOUD_DONE_LABEL} from ${cloudTarget} #${id}: ${err}`);
+        });
+        result = {
+          status: "completed",
+          output: `${dispatchOutput}\n[worker] detected completion via the ${CLOUD_DONE_LABEL} label`,
+        };
+      } else if (outcome === "timeout") {
+        // タイムアウト打ち切りを人手確認へ確実に回すためここで cc-need-human-check を付ける。
+        // ワーカーの onComplete の失敗経路は同ラベルを付けないため。
+        await addLabel(cloudTarget, id, "cc-need-human-check").catch((err: unknown) => {
+          console.error(`[worker] failed to add cc-need-human-check to ${cloudTarget} #${id}: ${err}`);
+        });
+        result = {
+          status: "failed",
+          output:
+            `${dispatchOutput}\n[worker] timed out waiting for the ${CLOUD_DONE_LABEL} label after ` +
+            `${CLOUD_TASK_TIMEOUT_MS / 1000 / 60} minutes. Possible causes: the session stopped on ` +
+            `AskUserQuestion, the cloud VM crashed, the plugin was not installed, or label assignment itself failed.`,
+        };
+      } else {
+        // aborted: ワーカー側の停止であり、タスクの失敗ではないので cc-need-human-check は付けない。
+        result = {
+          status: "failed",
+          output: `${dispatchOutput}\n[worker] shutdown aborted the wait for the ${CLOUD_DONE_LABEL} label`,
+        };
+      }
     }
     result.cloudSessionId = cloudSessionId;
   } catch (err) {
@@ -375,6 +513,8 @@ export function run(
   // runViaCloud（作成 → 投函の2コマンド方式）へ切り替える。`cloud: true` かつ
   // `mode: "default"` は起動時ガード（assertCloudAvailable）で弾かれるためここでは扱わない。
   cloud?: boolean,
+  // クラウド実行時に cc-cloud-done を探す対象の種別。番号は id を使う。
+  cloudTarget?: "issue" | "pr",
 ): void {
   // 同じ Issue/PR を再実行したときは古いエントリを削除してから入れ直し、
   // Map の挿入順で「最新に繰り上げる」（selectRecentTasks の直近順表示と揃える）。
@@ -393,7 +533,7 @@ export function run(
 
   if (getRunMode() === "herdr") {
     if (cloud) {
-      void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env);
+      void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env, cloudTarget);
       return;
     }
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、

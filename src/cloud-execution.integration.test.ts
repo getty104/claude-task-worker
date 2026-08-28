@@ -107,7 +107,9 @@ const ISSUE_GH_SCENARIO = {
 // ============================================================
 test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree を作らない", { timeout: 75_000 }, async (t) => {
   const stubs = installCliStubs({
-    gh: ISSUE_GH_SCENARIO,
+    // cc-cloud-done のポーリングが即座に完了を検知できるよう、Issue #501 を最初から
+    // ポーリング結果に含めておく（実際の完了検知タイミングとは無関係にテストを速くするため）。
+    gh: { ...ISSUE_GH_SCENARIO, cloudDone: { issues: [501] } },
     // 作成フェーズがペイン内容をポーリングしてセッションIDを取得するため、実測の出力形状
     // （`View:` の URL）を含めておく。含めないと作成フェーズがタイムアウトする。
     herdr: {
@@ -167,6 +169,25 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
   assert.ok(claudeRecord, "投函コマンド（claude -p --cloud <id> <prompt>）の記録が見つからない");
   assert.equal(claudeRecord!.argv[1], "--cloud");
   assert.equal(claudeRecord!.argv[2], "session_stubA");
+  const dispatchPrompt = claudeRecord!.argv[3] ?? "";
+  assert.ok(
+    dispatchPrompt.includes("cc-cloud-done"),
+    "投函プロンプトに cc-cloud-done ラベル付与の指示が含まれていない",
+  );
+  assert.ok(dispatchPrompt.includes("501"), "投函プロンプトに対象 Issue 番号が含まれていない");
+
+  const removeCloudDone = records.filter(
+    (r) =>
+      r.command === "gh" &&
+      r.argv[0] === "issue" &&
+      r.argv[1] === "edit" &&
+      r.argv.includes("--remove-label") &&
+      r.argv.includes("cc-cloud-done"),
+  );
+  assert.ok(
+    removeCloudDone.length >= 2,
+    `--remove-label cc-cloud-done の記録が2回以上ない（起動前の残骸掃除＋完了検知後の除去）: ${removeCloudDone.length}件`,
+  );
 
   assert.ok(!existsSync(join(handle.repoDir, ".claude", "worktrees")), "worktree ディレクトリが作られている");
   const branches = await gitBranchList(handle.repoDir);
@@ -213,36 +234,31 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
 });
 
 // ============================================================
-// C. 定期ワーカーのクラウド起動引数（update-coding-guidelines, herdr, cloud: true）
+// C. 定期ワーカーの起動拒否（update-coding-guidelines, herdr, cloud: true）
 // ============================================================
-test("C: update-coding-guidelines のクラウド実行が --ref を付ける", { timeout: 60_000 }, async (t) => {
+// 定期ワーカーは CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため cloud: true を拒否する。
+// 対象 Issue/PR を持たず cc-cloud-done を置く先が無く、完了検知できないため（Phase 1 の制約）。
+test("C: 定期ワーカーに cloud: true があると起動せず終了コード1", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({
     gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
-    herdr: {
-      paneOutput: "Created cloud session: ctw:demo:#0\nView: https://claude.ai/code/session_stubC?from=cli&m=0",
-    },
-    claude: { stdout: "[stub] scheduled cloud report" },
   });
   const handle = await startWorker({
     worker: "update-coding-guidelines",
-    workerConfig: { workers: { "update-coding-guidelines": { cloud: true, pollingIntervalSeconds: 3600 } } },
+    workerConfig: { workers: { "update-coding-guidelines": { cloud: true } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
-    defaultTimeoutMs: 40_000,
   });
   t.after(async () => {
     await handle.cleanup();
     stubs.cleanup();
   });
 
-  // publishLastRunPr() が worktree/commit/push/pr-create を行ってから run() に進むため、
-  // 他ケースよりタイムアウトを長めに取る。
-  await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined, 40_000);
+  const code = await handle.waitForExit(15_000);
+  assert.equal(code, 1);
 
-  const sendText = findRecord(stubs.records(), "herdr", "pane", "send-text")!;
-  const createCommand = extractCreateCommand(sendText);
-  assert.equal(commandFlagValue(createCommand, "--ref"), "main");
-  assert.ok(createCommand.includes("'--cloud'"));
+  const records = stubs.records();
+  assert.equal(findRecord(records, "herdr", "tab", "create"), undefined);
+  assert.equal(findRecord(records, "herdr", "pane", "send-text"), undefined);
 });
 
 // ============================================================

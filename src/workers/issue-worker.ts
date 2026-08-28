@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { getWorkerConfig } from "../config";
+import { CLOUD_DONE_LABEL, getWorkerConfig } from "../config";
 import {
   getCurrentUser,
   getRepoInfo,
@@ -162,6 +162,13 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
             }
 
+            if (cloud) {
+              // 前回実行の残骸掃除。同一番号の同時実行は isRunning() が止めるため nonce は不要。
+              await removeLabel("issue", issue.number, CLOUD_DONE_LABEL).catch((err) =>
+                console.error(`[${config.name}] removeLabel ${CLOUD_DONE_LABEL} failed for #${issue.number}: ${err}`),
+              );
+            }
+
             const startedAt = Date.now();
             run(
               execution.command,
@@ -245,6 +252,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               buildClaudeEnv(mode, cloud),
               execution.prompt,
               cloud,
+              cloud ? "issue" : undefined,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);

@@ -166,6 +166,7 @@ claude-task-worker init --force   # 強制上書き
 | `cc-ui-design-pr-created` | デザインPR作成済み・マージ待ちマーク |
 | `cc-ui-design-ready` | デザイン反映済みマーク（再デザイン抑止） |
 | `cc-ui-design` | デザインPRのマーカー（`triage-pr` のレビュー観点切り替え用） |
+| `cc-cloud-done` | クラウド実行タスクの完了マーク（セッションが最後に付与し、ワーカーが検知して除去する） |
 
 作成されるファイル:
 
