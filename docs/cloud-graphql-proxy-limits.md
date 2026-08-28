@@ -136,100 +136,15 @@ Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP �
 
 レビュースレッドの Resolve（`resolveReviewThread`）は本移行のスコープ外（別Issue担当）で、`fix-review-point` の判定に変更はない。
 
-## 測定ログ（verbatim）
+## 測定ログ（要旨）
 
-### P-1: GraphQL ゲートの403（`gh api graphql -f query='query{viewer{login}}' -i`）
-
-```
-HTTP/1.1 403 Forbidden
-Content-Length: 263
-Content-Type: application/json; charset=utf-8
-
-{"message":"This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via gh api repos/{owner}/{repo}/... instead.","documentation_url":"https://docs.anthropic.com/en/docs/claude-code/github-actions"}
-```
-
-リポジトリを指定したクエリ（`repository(owner:"getty104", name:"claude-task-worker"){…}`）でも**同一本文・同一 `Content-Length: 263`**。`gh pr list` のみ操作名が埋め込まれた変種を返した:
-
-```
-This GraphQL query (PullRequestList, sent by gh pr list) is not enabled for this session…
-```
-
-操作名が埋まることから、ゲートはクエリをパースして**操作名単位のアローリスト**で判定している。ただし本実測で通った GraphQL 操作は1つも無く、アローリストに載っている操作を特定できていない。
-
-### P-2: リポジトリゲートの403（`gh api repos/getty104/claude-task-worker/issues/226 -i`）
-
-```
-HTTP/1.1 403 Forbidden
-Content-Length: 378
-Content-Type: application/json; charset=utf-8
-
-{"message":"GitHub access to this repository is not enabled for this session. Use add_repo to request access. If add_repo answers that read access is already available and you need GitHub API or write access, call add_repo again with access:"push" to attach the repository with credentials.","documentation_url":"https://docs.anthropic.com/en/docs/claude-code/github-actions"}
-```
-
-**無関係な公開リポジトリでも同一本文**（`gh api repos/cli/cli --jq .full_name` → exit 1、同じ378バイト）。特定リポジトリが未アタッチなのではなく、**1件もアタッチされていない**状態である。
-
-### P-3: パスゲートの403（`gh api /octocat` / `gh api search/issues?q=...`）
-
-```
-{"message":"This GitHub API path is not available: sessions are bound to their configured repositories. Use repository-scoped endpoints (repos/{owner}/{repo}/...).","documentation_url":"https://docs.anthropic.com/en/docs/claude-code/github-actions"}
-```
-
-### P-4: 通過する REST（`gh api user -i` / `gh api rate_limit`）
-
-`gh api user` は 200 を返し、`Server: github.com` / `X-Github-Request-Id: 1046:369991:702C9AD:17C1A3C7:6A90D2A2` / `X-Github-Api-Version-Selected: 2022-11-28` を含む完全な GitHub ヘッダ群を伴った（＝実際に GitHub へ到達している）。`gh auth status` は `X Failed to log in to github.com using token (GH_TOKEN)` と警告するが `gh api user` は `<local-user>` を返す。**環境変数のトークンはプレースホルダで、実際の資格情報はプロキシが注入している**。
-
-```
-gh api rate_limit --jq .rate
-{"limit":5000,"remaining":4851,"reset":1787878698,"used":149}
-```
-
-403 の2本（P-1 / P-2）はヘッダが3行のみで `Server` も `X-GitHub-Request-Id` も無く、**コンテナ内で合成されて GitHub へ出ていない**ことが分かる。
-
-### P-5: プロキシの構成
-
-```
-CCR_AGENT_PROXY_ENABLED=1
-CCR_UPSTREAM_PROXY_ENABLED=1
-CCR_TEST_GITPROXY=1
-CLAUDE_CODE_PROXY_RESOLVES_HOSTS=true
-https_proxy=http://127.0.0.1:43957
-HTTPS_PROXY=http://127.0.0.1:43957
-GH_TOKEN=<redacted>
-GITHUB_TOKEN=<redacted>
-```
-
-`curl http://127.0.0.1:43957/__agentproxy/status`:
-
-```
-{ "enabled": true, "port": 43957, "caBundlePath": "/root/.ccr/ca-bundle.crt",
-  "installedProxyPreconfiguredClis": [ "gh" ],
-  "gitConfigInjection": true, "gitSshRewrite": true,
-  "recentRelayFailures": [ ... ] }
-```
-
-`recentRelayFailures` に GitHub の拒否は1件も記録されていない。**403 を出しているのは CONNECT リレーそのものではなく、その上位の GitHub 対応レイヤ**である。
-
-### P-6: `gh` のバージョンと git の状態
-
-```
-gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)
-/usr/bin/gh
--rwxr-xr-x 1 root root 45201664 Jul 18  2025 /usr/bin/gh
-```
-
-ラッパースクリプトではなく実バイナリ。`--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` は**このバージョンが未対応**で、403 以前に `Unknown JSON field` で失敗する。
-
-```
-git -C /home/user/repo remote -v      → (出力なし。remote 0件)
-git -C /home/user/repo rev-parse --abbrev-ref HEAD  → deft-river-0856
-git -C /home/user/repo push --dry-run → fatal: No configured push destination.  (exit 128)
-```
-
-push はネットワークにも資格情報にも到達せず失敗している。**この結果は push の可否を測っていない**（push 先が存在しないだけ）。
-
-### P-7: `add_repo` はこのセッション種別に存在しない
-
-P-2 の403本文が案内する `add_repo` を実行してリポジトリゲートを解こうとしたが、**当該ツールがクラウドセッションのツール一覧に存在しなかった**（`ToolSearch` で `select:add_repo` および関連語検索がいずれも0件）。したがってアタッチは試行されておらず、アカウントレベルの設定変更・GitHub App の認可も一切発生していない。
+- **P-1** GraphQL ゲートの403: `gh api graphql -f query='query{viewer{login}}' -i` → `HTTP/1.1 403`（`Content-Length: 263`）、本文 `{"message":"This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via gh api repos/{owner}/{repo}/... instead.", ...}`。リポジトリを指定したクエリでも**バイト単位で同一本文**。`gh pr list` のみ操作名入りの変種（`This GraphQL query (PullRequestList, sent by gh pr list) is not enabled for this session…`）を返し、ゲートが**操作名単位のアローリスト**でクエリをパース判定していることを示す（ただし本実測で通った操作は1件も無くアローリストの中身は特定できず）
+- **P-2** リポジトリゲートの403: `gh api repos/getty104/claude-task-worker/issues/226 -i` → `HTTP/1.1 403`（`Content-Length: 378`）、本文 `{"message":"GitHub access to this repository is not enabled for this session. Use add_repo to request access. ...", ...}`。**無関係な公開リポジトリ**（`gh api repos/cli/cli`）でも同一378バイト本文 → 特定リポジトリ未アタッチではなく**1件もアタッチされていない**状態
+- **P-3** パスゲートの403: `gh api /octocat` / `gh api search/issues?q=...` → `{"message":"This GitHub API path is not available: sessions are bound to their configured repositories. Use repository-scoped endpoints (repos/{owner}/{repo}/...).", ...}`
+- **P-4** 通過するREST: `gh api user` は200で完全な GitHub ヘッダ群（`Server: github.com` 等）を伴い実際に到達。`gh auth status` はトークンログインに失敗警告を出すが `gh api user` は成功（**環境変数のトークンはプレースホルダで、実資格情報はプロキシが注入**）。`gh api rate_limit --jq .rate` も200。対照的にP-1/P-2の403応答ヘッダは3行のみで `Server`/`X-GitHub-Request-Id` を欠き、**コンテナ内で合成されGitHubへ出ていない**
+- **P-5** プロキシ構成: `CCR_AGENT_PROXY_ENABLED=1` 等のプロキシ関連env、`https_proxy=http://127.0.0.1:43957`。`curl .../__agentproxy/status` は `{"enabled":true,"port":43957,"installedProxyPreconfiguredClis":["gh"],"gitConfigInjection":true,...}` を返し、`recentRelayFailures` にGitHub拒否の記録は無い → **403はCONNECTリレーではなくその上位のGitHub対応レイヤが出している**
+- **P-6** `gh version 2.45.0`（実バイナリ、ラッパーではない）。`--json parent`/`blockedBy`/`subIssuesSummary`/`closingIssuesReferences` は**このバージョンが未対応**で403以前に `Unknown JSON field` で失敗。`git remote -v` は出力なし（0件）、`git push --dry-run` は `fatal: No configured push destination.`（exit 128、push先が無いだけで**push可否は測れていない**）
+- **P-7** `add_repo` はこのセッション種別に存在しない: P-2の403本文が案内する `add_repo` ツールがクラウドセッションのツール一覧に無く（`ToolSearch` 検索0件）、リポジトリゲートを解く試行自体ができなかった。アカウントレベルの設定変更・GitHub App 認可も発生していない
 
 ## PRD からの差分
 
@@ -256,8 +171,4 @@ P-2 の403本文が案内する `add_repo` を実行してリポジトリゲー�
 
 ## 実測の副作用
 
-本実測により以下1件のクラウドセッションが作成された:
-
-- `session_<REDACTED-1>`（P-1〜P-7。すべて読み取り専用のプローブで、`add_repo`・書き込み系 API・push・commit・ファイル編集はいずれも実行していない）
-
-不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。GitHub 側への副作用は無い（すべての書き込みプローブは存在しないオブジェクトID宛てで、かつリポジトリゲートで拒否されている）。
+本実測により1件のクラウドセッション（`session_<REDACTED-1>`、P-1〜P-7）が作成された。すべて読み取り専用のプローブで、`add_repo`・書き込み系API・push・commit・ファイル編集はいずれも実行していない。不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。GitHub側への副作用は無い（書き込みプローブは存在しないオブジェクトID宛てかつリポジトリゲートで拒否済み）。
