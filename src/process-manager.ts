@@ -1,15 +1,8 @@
 import type { ChildProcess } from "node:child_process";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import {
-  appendCloudDoneInstruction,
-  buildCloudCreateArgs,
-  buildCloudDispatchArgs,
-  CLAUDE_COMMAND,
-  CLOUD_REPORT_HEADING,
-  shellQuote,
-} from "./claude-args";
+import { appendCloudDoneInstruction, buildCloudCreateArgs, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
 import { addLabel, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
@@ -244,13 +237,9 @@ async function runViaHerdr(
 
 // クラウドセッション作成コマンドの起動出力からセッションIDが読めるようになるまでの上限。
 // 作業ツリーのアップロードを伴うため default モードより長めに取る。
-export const CLOUD_SESSION_TIMEOUT_MS = 120 * 1000;
+// テストから短縮できるよう CTW_CLOUD_SESSION_TIMEOUT_MS で上書き可能にしてある。
+export const CLOUD_SESSION_TIMEOUT_MS = Number(process.env.CTW_CLOUD_SESSION_TIMEOUT_MS) || 120 * 1000;
 export const CLOUD_SESSION_POLL_INTERVAL_MS = 1000;
-
-// クラウドセッションへのプロンプト投函コマンド（`claude -p --cloud <id> <prompt>`）の
-// execFile タイムアウト。TTY 不要で即 return する想定のコマンドだが、万一ハングした
-// 場合に無限に待たないための保険。
-export const CLOUD_DISPATCH_TIMEOUT_MS = 60 * 1000;
 
 // クラウドタスクの完了（cc-cloud-done ラベル）を確認するポーリング間隔。
 export const CLOUD_POLL_INTERVAL_MS = 30 * 1000;
@@ -343,8 +332,10 @@ export function waitForCloudTask(id: number, type: CloudTargetType): Promise<"co
   });
 }
 
-// クラウド実行（workers.<name>.cloud）のタスク実行。「作成 → 投函」の2コマンド方式に加え、
-// 投函成功後は cc-cloud-done ラベルのポーリングでタスク完了を検知する（#284）。
+// クラウド実行（workers.<name>.cloud）のタスク実行。`claude --cloud <prompt> ...`
+// 1コマンドでセッション作成と初期プロンプトの実行を同時に行う（description が
+// そのまま初期プロンプトとして即実行されるため）。作成後は cc-cloud-done ラベルの
+// ポーリングでタスク完了を検知する（#284）。
 async function runViaCloud(
   args: string[],
   prompt: string,
@@ -365,6 +356,10 @@ async function runViaCloud(
   herdrTasks.set(id, { paneId: "", tabId: "" });
 
   const label = taskTabLabel(resolveProjectName(), id);
+  // 作成コマンドの description は herdr のタスクタブラベルではなく、クラウドセッションの
+  // 初期プロンプトそのもの。cc-cloud-done の投稿指示もここへ含めておく（渡した瞬間に
+  // 実行されるため、後から追加投函する余地は無い）。
+  const initialPrompt = cloudTarget ? appendCloudDoneInstruction(prompt, { type: cloudTarget, number: id }) : prompt;
   let result: TaskResult;
   let cloudSessionId: string | undefined;
 
@@ -378,7 +373,7 @@ async function runViaCloud(
         console.warn(`[worker] pane ${created.paneId} produced no prompt before the timeout, launching anyway`);
       }
 
-      const command = ["claude", ...buildCloudCreateArgs(args, label)].map(shellQuote).join(" ");
+      const command = ["claude", ...buildCloudCreateArgs(args, initialPrompt)].map(shellQuote).join(" ");
       await paneSendText(created.paneId, command);
       await paneSendKeys(created.paneId, "enter");
 
@@ -407,50 +402,18 @@ async function runViaCloud(
       });
     }
 
-    // 投函フェーズ: TTY 不要・即 return のディスパッチコマンドを実行する。
-    // ここに到達する時点で cloudSessionId は上のポーリングループが break で確定させている
-    // （確定できなければ throw して catch へ抜けるため、この時点で undefined ではない）。
-    const dispatchPrompt = cloudTarget ? appendCloudDoneInstruction(prompt, { type: cloudTarget, number: id }) : prompt;
-    const dispatchArgs = buildCloudDispatchArgs(cloudSessionId as string, dispatchPrompt);
-    const dispatch = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-      execFile(
-        CLAUDE_COMMAND,
-        dispatchArgs,
-        { timeout: CLOUD_DISPATCH_TIMEOUT_MS, killSignal: "SIGKILL", cwd, env: { ...process.env, ...env } },
-        (error, stdout, stderr) => {
-          resolve({
-            code: error ? ((error as NodeJS.ErrnoException & { code?: number }).code ?? 1) : 0,
-            stdout,
-            stderr,
-          });
-        },
-      );
-    });
+    // 1コマンド方式のため投函フェーズは無い。ここに到達した時点でセッションは作成済みで、
+    // 初期プロンプト（＝タスク本体）の実行が既に始まっている。
+    const createOutput = `[worker] created cloud session ${cloudSessionId} with the task's initial prompt`;
 
-    if (dispatch.code !== 0) {
-      result = {
-        status: "failed",
-        output:
-          `[worker] failed to dispatch the task to cloud session ${cloudSessionId}\n` +
-          `[stdout] ${dispatch.stdout.trim()}\n[stderr] ${dispatch.stderr.trim()}`,
-      };
-    } else if (!cloudTarget) {
+    if (!cloudTarget) {
       // 定期ワーカーは CLOUD_DENIED_WORKERS で起動時に拒否されるため実際には到達しない。
-      console.warn(`[worker] #${id} has no completion-detection target, treating dispatch success as completion`);
-      const output =
-        dispatch.stdout.trim() !== ""
-          ? dispatch.stdout
-          : `[worker] dispatched the task to cloud session ${cloudSessionId}`;
-      result = { status: "completed", output };
+      console.warn(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
+      result = { status: "completed", output: createOutput };
     } else {
-      const dispatchOutput =
-        dispatch.stdout.trim() !== ""
-          ? dispatch.stdout
-          : `[worker] dispatched the task to cloud session ${cloudSessionId}`;
-
       // 待機中も台帳エントリを running のまま維持する（finishTask はここより後で呼ぶ）。
-      // herdrTasks は投函後も残るため waitForAllProcesses()/shutdown() の abort フラグは
-      // 引き続き効く。
+      // herdrTasks はセッション作成後も残るため waitForAllProcesses()/shutdown() の
+      // abort フラグは引き続き効く。
       const outcome = await waitForCloudTask(id, cloudTarget);
 
       if (outcome === "completed") {
@@ -470,7 +433,7 @@ async function runViaCloud(
         }
         result = {
           status: "completed",
-          output: reportBody ?? `${dispatchOutput}\n[worker] detected completion via the ${CLOUD_DONE_LABEL} label`,
+          output: reportBody ?? `${createOutput}\n[worker] detected completion via the ${CLOUD_DONE_LABEL} label`,
         };
       } else if (outcome === "timeout") {
         // タイムアウト打ち切りを人手確認へ確実に回すためここで cc-need-human-check を付ける。
@@ -481,7 +444,7 @@ async function runViaCloud(
         result = {
           status: "failed",
           output:
-            `${dispatchOutput}\n[worker] timed out waiting for the ${CLOUD_DONE_LABEL} label after ` +
+            `${createOutput}\n[worker] timed out waiting for the ${CLOUD_DONE_LABEL} label after ` +
             `${CLOUD_TASK_TIMEOUT_MS / 1000 / 60} minutes. Possible causes: the session stopped on ` +
             `AskUserQuestion, the cloud VM crashed, the plugin was not installed, or label assignment itself failed.`,
         };
@@ -489,7 +452,7 @@ async function runViaCloud(
         // aborted: ワーカー側の停止であり、タスクの失敗ではないので cc-need-human-check は付けない。
         result = {
           status: "failed",
-          output: `${dispatchOutput}\n[worker] shutdown aborted the wait for the ${CLOUD_DONE_LABEL} label`,
+          output: `${createOutput}\n[worker] shutdown aborted the wait for the ${CLOUD_DONE_LABEL} label`,
         };
       }
     }
@@ -498,7 +461,10 @@ async function runViaCloud(
     console.error(`[worker] failed to run #${id} via cloud: ${err}`);
     result = {
       status: "failed",
-      output: `[worker] failed to run the task via cloud: ${err}`,
+      output:
+        `[worker] failed to run the task via cloud: ${err}\n` +
+        "[worker] note: with the 1-command launch, the cloud session may already have started " +
+        "working independently even though this task is being reported as failed locally (orphaned session).",
       ...(cloudSessionId ? { cloudSessionId } : {}),
     };
   }
@@ -523,8 +489,9 @@ export function run(
   // default モードでは args に含まれるため不要。
   prompt?: string,
   // クラウド実行フラグ（workers.<name>.cloud）。herdr モードのときだけ実行経路を
-  // runViaCloud（作成 → 投函の2コマンド方式）へ切り替える。`cloud: true` かつ
-  // `mode: "default"` は起動時ガード（assertCloudAvailable）で弾かれるためここでは扱わない。
+  // runViaCloud（`claude --cloud <prompt> ...` の1コマンド方式）へ切り替える。
+  // `cloud: true` かつ `mode: "default"` は起動時ガード（assertCloudAvailable）で
+  // 弾かれるためここでは扱わない。
   cloud?: boolean,
   // クラウド実行時に cc-cloud-done を探す対象の種別。番号は id を使う。
   cloudTarget?: "issue" | "pr",

@@ -252,7 +252,8 @@ export function buildClaudeArgs({
     // 後続フラグを値として食われるため、必ずモデル名とセットでのみ付ける。
     ...(advisor === "" ? [] : ["--advisor", advisor]),
     // クラウド実行時は「作成コマンドの共通フラグ」だけをここで返す。`--cloud` 自体は
-    // 付けない（値として渡す description = herdr のタスクタブラベルが
+    // 付けない（値として渡す description（＝クラウドセッションの初期プロンプト。
+    // appendCloudDoneInstruction() 適用後のタスクプロンプトそのもの）は
     // `src/process-manager.ts` 側でしか決まらないため。`buildCloudCreateArgs()` が
     // このフラグ列の先頭へ `--cloud <description>` を足して作成コマンドを完成させる）。
     // ベースブランチ指定は `--ref` / `--on-branch` のどちらか一方のみ（両方指定は上で例外）。
@@ -261,28 +262,27 @@ export function buildClaudeArgs({
   ];
 }
 
-// クラウドセッション作成コマンド（TTY 必須の `claude --cloud <description> ...`）の引数。
-// `description` は herdr のタスクタブラベル（`ctw:<project>:#<n>`）で、呼び出し側
-// （`src/process-manager.ts`）が決める。
-export function buildCloudCreateArgs(commonArgs: string[], description: string): string[] {
-  return ["--cloud", description, ...commonArgs];
+// クラウドセッション作成コマンド（TTY 必須の `claude --cloud <prompt> ...`）の引数。
+// `prompt` は表示名ではなく**クラウドセッションの初期プロンプト**で、渡すと同時に
+// そのまま実行される（smoke test で確認済み）。旧実装は description に herdr の
+// タスクタブラベルを渡し、別コマンド（`claude -p --cloud <sessionId> <prompt>`）で
+// 本来のタスクプロンプトを投函する2コマンド方式だったが、ラベルを渡すターンで
+// モデルがそれをタスク指示と解釈して作業を完走し、投函ターンで同じ作業を再実行して
+// PR が重複するバグがあった。そのため初期プロンプトをそのまま渡す1コマンド方式へ
+// 統合した。呼び出し側（`src/process-manager.ts`）が appendCloudDoneInstruction()
+// 適用後のタスクプロンプトを組み立てて渡す。
+export function buildCloudCreateArgs(commonArgs: string[], prompt: string): string[] {
+  return ["--cloud", prompt, ...commonArgs];
 }
 
-// クラウドタスクの完了検知（cc-cloud-done ラベル、#284）用の指示を投函プロンプトへ追加する。
-// スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で投函プロンプトへ付加する方針。
+// クラウドタスクの完了検知（cc-cloud-done ラベル、#284）用の指示を、作成コマンドの
+// description（＝クラウドセッションの初期プロンプト）へ追加する。
+// スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で初期プロンプトへ付加する方針。
 export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
   const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
   const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
   return `${prompt}\n\n${reportInstruction}\n\n${labelInstruction}`;
-}
-
-// クラウドセッションへのプロンプト投函コマンド（TTY 不要・即 return の
-// `claude -p --cloud <sessionId> <prompt>`）の引数。
-// ベースブランチ系フラグ（`--ref` / `--on-branch`）はセッション作成時にしか意味を
-// 持たないためここには含めない。
-export function buildCloudDispatchArgs(sessionId: string, prompt: string): string[] {
-  return ["-p", "--cloud", sessionId, prompt];
 }
 
 // POSIX シェル向けのシングルクォート引用。herdr の `pane send-text` はシェルへ
