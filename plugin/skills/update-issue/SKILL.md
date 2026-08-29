@@ -47,13 +47,13 @@ description は人間がレビューし、後続の `exec-issue` が実装スコ
 
 続いて分析の基準となるベースブランチ（`BASE_BRANCH`）を確定する。サブIssue（parent を持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生し、実装PRもそこへ向くため、**デフォルトブランチではなく epic ブランチが分析のターゲット**になる。デフォルトブランチをターゲットと見なすと、epic ブランチへマージ済みの兄弟サブIssueの変更が「未反映」に見え、「Epic PR が未マージだがどう扱うか」といった本来不要な検討事項・確認事項が混入する（`exec-issue` / `create-pr` のベースブランチ決定と同じ確定的導出を用いる）。
 
-`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
+`parent` は Issue Dependencies（sub-issue）系のフィールドで、`gh issue view --json parent` は GraphQL 経由のためクラウドセッションでは 403 になり、クラウド VM の gh 2.45.0 はそもそもこのフィールドを知らない。`gh-compat.sh issue-parent` は REST（`repos/{o}/{r}/issues/{n}/parent`）を第一手段にし、失敗時のみ `gh` へフォールバックする。
 
 ```bash
 git fetch --prune || true
 
 BASE_BRANCH=""
-PARENT=$(gh issue view "<Issue番号>" --json parent --jq '.parent.number // empty') || PARENT="__unresolved__"
+PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "<Issue番号>") || PARENT="__unresolved__"
 if [ "${PARENT}" != "__unresolved__" ] && [ -n "${PARENT}" ] \
   && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
   BASE_BRANCH="cc-epic-${PARENT}"
@@ -81,7 +81,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - 現在の作業ディレクトリのコード状態（＝`BASE_BRANCH` 由来）が分析対象。「この変更はデフォルトブランチにまだ入っていない」ことを問題として扱わない
 - `BASE_BRANCH` が `cc-epic-<N>` の場合、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであることは Epic フローの正常状態**。これを根拠とした確認事項・リスク・検討事項（「先に Epic PR をマージすべきか」等）を一切生成しない
 - epic ブランチへマージ済みの兄弟サブIssueの変更は「既に存在するコード」として扱い、実装プランで再実装しない
-- `gh issue view --json parent` に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした確認事項は生成しない**（epic フローの正常状態を誤って確認事項化しないための安全側の倒し方）。その旨は最終報告に1行残す
+- parent の取得に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした確認事項は生成しない**（epic フローの正常状態を誤って確認事項化しないための安全側の倒し方）。その旨は最終報告に1行残す
 
 ### 2. 既存Issueの取得
 
@@ -105,13 +105,9 @@ gh issue view <Issue番号> --json number,title,state,labels,body,url
 gh issue view <Issue番号> --comments
 ```
 
-本文・コメントに画像URLがある場合、`gh-asset` でダウンロードし、実際に Read で内容を確認する（テキストだけでは伝わらない仕様 — UIの見た目・エラー画面・図など — が更新判断に必要なことがあるため、URLを見て終わりにしない）。`gh-asset` はローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` に据え置く。
+本文・コメントに画像や資料への**リンク**がある場合は、リンク先を開いて内容を確認する（テキストだけでは伝わらない仕様 — UIの見た目・エラー画面・図など — が判断に必要なことがあるため、URLを見て終わりにしない）。手段は後述の「外部リンクの参照」に従う（一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP）。
 
-```bash
-gh-asset download <asset_id> ~/Downloads/
-```
-
-参考: https://github.com/YuitoSato/gh-asset
+**画像は Issue へ直接添付せず、Drive 等へ上げたうえでリンクを貼る運用を前提とする。** GitHub の添付ファイル（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は認証付きの実体取得が必要で、クラウドセッションからは取得手段が無い。添付が直接貼られていて内容を読めない場合は、推測で補わず「添付 `<URL>` は取得不可（Issue への直接添付のため）。Drive 等へ上げ直してリンクを貼ってほしい」と報告に明記し、確認できた範囲で処理を続行する。
 
 ### 2.5. 既存「依頼内容」ブロックの検出（新規作成はしない）
 
@@ -242,7 +238,7 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 
 ### 5.6. 依存関係の反映（blockedBy / blocking）
 
-コメント履歴やコード分析で、この Issue が他の Open な Issue と依存関係を持つことが判明した場合、GitHub ネイティブ relationships（blocked-by / blocking）として**既存Issueに反映**する。本スキルは新規Issueを作らないため、`gh issue edit --add-blocked-by` / `--add-blocking` で追加する（本文の `## 依存関係` セクションには書かない）。
+コメント履歴やコード分析で、この Issue が他の Open な Issue と依存関係を持つことが判明した場合、GitHub ネイティブ relationships（blocked-by / blocking）として**既存Issueに反映**する。本スキルは新規Issueを作らないため、既存Issueへ後から追加する（本文の `## 依存関係` セクションには書かない）。
 
 以下を機械的に実行する（ユーザーへの確認は不要）。依存関係の言及・示唆が無ければ本ステップはスキップする。未反映事項0件で `post-issue-body` の起動をスキップした場合でも、コメントで依存関係が判明していれば本ステップは実行してよい（relationship の付与は description 更新とは独立のため）。
 
@@ -251,20 +247,22 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
    - **blockedBy**（この Issue をブロックする＝先に片付けるべき Issue）: この Issue に着手する前に完了している必要がある Open Issue の番号。
    - **blocking**（この Issue がブロックする＝後続で待たせる Issue）: この Issue が完了しないと進められない Open Issue の番号。
 3. **現在状態の検証**: 対象 Issue 番号は `gh issue view <番号> --json number,state,title` で **Open であること**を確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック）。CLOSED の Issue は含めない。
-4. **既存relationshipとの差分**: 現在の relationship を取得し、**まだ貼られていない依存だけ**を追加する（既存relationshipは剥がさない。`--remove-blocked-by` / `--remove-blocking` は使わない）。`blockedBy`/`blocking` は Issue Dependencies のフィールドで MCP 側の対応が不定のため `gh` に据え置く。
+4. **既存relationshipとの差分**: 現在の relationship を取得し、**まだ貼られていない依存だけ**を追加する（既存relationshipは剥がさない。除去系の操作は使わない）。`{"blockedBy":[...],"blocking":[...]}` の形で Open な依存だけが返る。
 
    ```bash
-   gh issue view <このIssue番号> --json blockedBy,blocking
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-deps <このIssue番号>
    ```
 
-5. **付与（best-effort）**: 差分の番号だけを渡す。`--add-blocked-by` / `--add-blocking` はカンマ区切りで複数番号を1フラグにまとめてよい。追加が無い側のフラグは省略する。Issue Dependencies の操作のため `gh` に据え置く。
+5. **付与（best-effort）**: 差分の番号だけを渡す（複数可）。追加が無い側は呼ばない。
 
    ```bash
-   gh issue edit <このIssue番号> --add-blocked-by <番号,番号,...>
-   gh issue edit <このIssue番号> --add-blocking <番号,番号,...>
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocked-by <このIssue番号> <番号> <番号> ...
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocking <このIssue番号> <番号> <番号> ...
    ```
 
-   `gh issue edit --add-blocked-by` / `--add-blocking` が失敗しても（権限不足・`gh` バージョン未達・存在しない番号等）、description 更新はすでに完了しているため、エラーを最終報告に残したうえで処理を続行する（ロールバックしない）。付与・スキップの結果は最終報告に1行で記録する。
+   付与が失敗しても（権限不足・存在しない番号等）、description 更新はすでに完了しているため、エラーを最終報告に残したうえで処理を続行する（ロールバックしない）。付与・スキップの結果は最終報告に1行で記録する。
+
+   `gh issue view --json blockedBy,blocking` / `gh issue edit --add-blocked-by` を直接使わないのは、どちらも GraphQL 経由でクラウドセッションでは 403 になり、クラウド VM の gh 2.45.0 はこのフィールド・フラグ自体を知らないため。`gh-compat.sh` は REST（`repos/{o}/{r}/issues/{n}/dependencies/...`）を第一手段にし、失敗時のみ `gh` へフォールバックする。**`blocking` の追加は相手側の `blocked_by` として登録される**（REST に `blocking` の POST が無いため）が、GitHub 上の見え方は同じである。
 
 ## 中断条件
 

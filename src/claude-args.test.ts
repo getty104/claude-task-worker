@@ -18,6 +18,7 @@ const {
   buildCloudPrompt,
   buildCloudToolRestriction,
   appendCloudDoneInstruction,
+  buildCloudCheckoutInstruction,
   CLOUD_REPORT_HEADING,
   shellQuote,
   isOpusModel,
@@ -414,6 +415,24 @@ test("buildCloudToolRestriction lists every DISALLOWED_TOOLS entry", () => {
   for (const tool of DISALLOWED_TOOLS) {
     assert.ok(restriction.includes(tool), `expected restriction text to mention ${tool}`);
   }
+});
+
+test("buildCloudCheckoutInstruction tells PR tasks to skip gh pr checkout", () => {
+  const result = buildCloudCheckoutInstruction({ type: "pr", number: 42 });
+  assert.match(result, /PR #42/);
+  assert.match(result, /gh pr checkout/);
+  assert.match(result, /--on-branch/);
+});
+
+test("buildCloudCheckoutInstruction stays empty for issue tasks", () => {
+  // Issue 系ワーカーは `--ref` でベースブランチだけを指定し、クラウド側が新規作業ブランチを
+  // 切る。checkout の概念が無いので指示を足さない。
+  assert.equal(buildCloudCheckoutInstruction({ type: "issue", number: 42 }), "");
+});
+
+test("appendCloudDoneInstruction adds the checkout skip only for pr targets", () => {
+  assert.match(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7 }), /gh pr checkout/);
+  assert.doesNotMatch(appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }), /gh pr checkout/);
 });
 
 test("buildCloudPrompt includes the base system prompt body", () => {

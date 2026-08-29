@@ -280,9 +280,30 @@ export function buildCloudCreateArgs(commonArgs: string[], prompt: string): stri
 // スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で初期プロンプトへ付加する方針。
 export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
+  const checkoutInstruction = buildCloudCheckoutInstruction(target);
   const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
   const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
-  return `${prompt}\n\n${reportInstruction}\n\n${labelInstruction}`;
+  return [prompt, checkoutInstruction, reportInstruction, labelInstruction]
+    .filter((part) => part !== "")
+    .join("\n\n");
+}
+
+// PR 系タスク向けの `gh pr checkout` スキップ指示。
+//
+// スキル本文（`triage-pr` / `fix-review-point` / `resolve-pr-conflict` /
+// `check-dependabot` のステップ0）は PR ブランチへ移るために `gh pr checkout` を実行するが、
+// クラウドセッションではこれが二重に成立しない。(1) `gh pr checkout` は PR の解決に GraphQL を
+// 使うためプロキシの GraphQL ゲートで 403 になる、(2) そもそも不要 — PR 系ワーカーは
+// `pr-worker.ts` でセッション作成時に `--on-branch <PR の head ブランチ>` を渡しており、
+// クラウド VM は最初から PR のブランチ上で作業を始める（実測 2026-08-29: `--on-branch` は
+// 新規ブランチを切らず、push すればその PR がそのまま更新される）。
+//
+// checkout をワーカー側の起動フラグで済ませ、スキルには「済んでいる」ことだけを伝える。
+// ローカル実行（default / herdr）はワーカーが worktree を作るだけで PR ブランチには
+// 移らないため、この指示は付けず従来どおりスキルが checkout する。
+export function buildCloudCheckoutInstruction(target: { type: "issue" | "pr"; number: number }): string {
+  if (target.type !== "pr") return "";
+  return `このセッションは PR #${target.number} の head ブランチ上で開始している（ワーカーが \`--on-branch\` で指定済み）。スキル本文が指示する \`gh pr checkout\` は実行しないこと（クラウドでは GraphQL ゲートにより 403 で失敗し、かつ既にブランチ上にいるので不要）。ブランチの確認が要る場合は \`git rev-parse --abbrev-ref HEAD\` を使うこと。`;
 }
 
 // `--disallowedTools` の文面（cloud プロンプト用）。DISALLOWED_TOOLS と二重管理しないよう

@@ -20,7 +20,7 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 
 並列で以下を確認する。1つでも失敗したら、その場で原因を解消してから先に進むこと。
 
-- カレントPRの `number` / `state` / `title` / `headRefName` を取得できることを確認する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら `gh pr view --json number,state,title,headRefName` にフォールバックする。取得できない場合は呼び出し元にエラーを返す
+- カレントPRの `number` / `state` / `title` / `headRefName` を取得できることを確認する。PR 番号は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch` で確定し（カレントブランチからの導出は MCP に代替が無く、`gh pr view --json number` はクラウドでは 403 になる）、詳細は GitHub MCP の `pull_request_read`（method: `get`）を優先、利用不可なら `gh pr view <番号> --json state,title,headRefName` にフォールバックする。取得できない場合は呼び出し元にエラーを返す
 - PRの `state` が `OPEN` であることを確認する。`MERGED`/`CLOSED` の場合は呼び出し元にその旨を返して終了
 
 **完了条件**: PRが特定でき、OPEN状態であることが確認できていること。

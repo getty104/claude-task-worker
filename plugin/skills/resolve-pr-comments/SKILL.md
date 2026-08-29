@@ -23,7 +23,7 @@ Resolve（`resolveReviewThread`）は REST に該当エンドポイントが無�
 
 ## ステップ0: 対象 PR 番号の確定
 
-`$0` が渡されていればそれを使う。渡されていない場合のみ `gh pr view --json number --jq '.number'` でカレントブランチの Open PR から導出する。どちらでも番号を確定できない場合は、Resolve を1件も実行せずその旨を報告して終了する（誤った PR のスレッドを Resolve しないため）。
+`$0` が渡されていればそれを使う。渡されていない場合のみ `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch` でカレントブランチの Open PR から導出する。どちらでも番号を確定できない場合は、Resolve を1件も実行せずその旨を報告して終了する（誤った PR のスレッドを Resolve しないため）。
 
 ## ステップ1: 未解決 Review thread の取得
 

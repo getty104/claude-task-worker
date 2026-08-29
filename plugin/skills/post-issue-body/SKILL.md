@@ -78,7 +78,7 @@ args に渡す YAML は上記の通り**トップレベルから直接書く**�
 
 - 空セクションを省略しない。「なし」「該当なし」で埋める（後続スキルが「未記入」と区別できなくなるため）。
 - 入力の YAML が壊れていたり項目が欠けている場合は、最低限の推定で埋める。`mode` と（edit時の）`issue_number` だけは推定不可なので欠けていたら中断する。
-- `blocked_by` / `blocking` の Issue 番号は**呼び出し側で確定済み・Open な既存Issue**が前提。本スキルは渡された値をそのまま `gh issue create` の `--blocked-by` / `--blocking` に渡す。これらは `mode=create` でのみ有効で、`mode=edit` では無視する（既存Issueへの relationship 追加は呼び出し元が `gh issue edit --add-blocked-by` / `--add-blocking` で明示的に行う方針）。依存関係は本文の `## 依存関係` セクションには書かず、GitHub ネイティブ relationships で表現する。
+- `blocked_by` / `blocking` の Issue 番号は**呼び出し側で確定済み・Open な既存Issue**が前提。これらは `mode=create` でのみ有効で、`mode=edit` では無視する（既存Issueへの relationship 追加は呼び出し元が `update-issue` の 5.6 で明示的に行う方針）。依存関係は本文の `## 依存関係` セクションには書かず、GitHub ネイティブ relationships で表現する。付与は Issue 作成**後**に `gh-compat.sh` で行う（後述の「依存関係の付与」）。
 - args から入力 YAML を取得できない場合（直接ユーザー起動など）は、親スキル（`create-issue` / `create-issue-from-issue-number` / `update-issue`）の使用を促して中断する。
 
 ## Issueフォーマット（厳守）
@@ -260,13 +260,7 @@ ME=$(gh api user --jq '.login')
 EXTRA_FLAGS=()
 # for L in "${LABELS[@]}"; do EXTRA_FLAGS+=(--label "$L"); done
 
-# blocked_by / blocking があれば GitHub relationships フラグを追加する（mode=create のみ）。
-# 例: blocked_by=[10,11], blocking=[300] のとき EXTRA_FLAGS+=(--blocked-by 10,11 --blocking 300)
-# --blocked-by / --blocking はカンマ区切りで複数番号を1フラグにまとめる。
-# 値が無い項目は何も push しない（空文字を渡すと gh が引数エラーで落ちるため、配列が空 / null なら組み立て時点で除外）。
-# [blocked_by があるとき] EXTRA_FLAGS+=(--blocked-by "$(IFS=,; echo "${BLOCKED_BY[*]}")")
-# [blocking があるとき]   EXTRA_FLAGS+=(--blocking "$(IFS=,; echo "${BLOCKING[*]}")")
-
+# blocked_by / blocking は `gh issue create` のフラグでは渡さない（後述）。
 gh issue create \
   --title "<タイトル>" \
   --assignee "$ME" \
@@ -300,6 +294,19 @@ EOF
 ```
 
 成功時、コマンドが標準出力に返す Issue URL を保持する。
+
+##### 依存関係の付与（`mode=create` かつ `blocked_by` / `blocking` がある場合のみ）
+
+作成した Issue 番号が確定したら、続けて relationship を貼る。値が無い側は呼ばない。
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocked-by <作成したIssue番号> <番号> <番号> ...
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocking <作成したIssue番号> <番号> <番号> ...
+```
+
+`gh issue create --blocked-by` / `--blocking` を使わないのは、クラウド VM の gh 2.45.0 がこのフラグを知らず、Issue 作成そのものが引数エラーで落ちるため。作成と依存登録が2フェーズに分かれるので、**その間はブロック済みの Issue が非ブロック状態に見える**が、`issue-worker.ts` が候補ループ内で `hasOpenBlockers()`（検索インデックスを経由しない実体判定）を実行するため、この窓で拾われたIssueは起動直前にスキップされる。
+
+付与に失敗しても Issue の作成自体は完了しているのでロールバックせず、失敗した番号と理由を呼び出し元への報告に1行残す。
 
 #### mode=edit
 

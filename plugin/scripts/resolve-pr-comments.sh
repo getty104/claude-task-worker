@@ -9,12 +9,12 @@
 # 終了コードで区別できなければならない（0件は exit 0、失敗は exit 非0）。
 set -euo pipefail
 
-OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+OWNER_REPO="$(bash "$(dirname "$0")/gh-compat.sh" owner-repo)"
 OWNER="$(echo $OWNER_REPO | cut -d'/' -f1)"
 REPO="$(echo $OWNER_REPO | cut -d'/' -f2)"
 # `set -e` があるため gh 自体の失敗はここで即終了する。値が取れても空/null なら
 # 番号を確定できていないので、同じく失敗として扱う（別PRのスレッドを触らないため）。
-if ! PR_NUMBER="${1:-$(gh pr view --json number --jq '.number')}" || [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+if ! PR_NUMBER="${1:-$(bash "$(dirname "$0")/gh-compat.sh" pr-for-branch)}" || [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
   echo "Error: Could not determine PR number. Make sure the current branch has an open PR." >&2
   exit 1
 fi

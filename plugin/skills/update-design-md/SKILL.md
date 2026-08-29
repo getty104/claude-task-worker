@@ -343,7 +343,7 @@ $DESIGN_MD_CMD lint --format json DESIGN.md
 `commit-push` はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチへ直コミットが入る。必ずfeature branchへ切り替える。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
@@ -376,7 +376,7 @@ PR作成後、返却されたPR URLを記録する。
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）/ `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number --jq '.number')
+PR_NUMBER=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch)
 GH_USER=$(gh api user --jq '.login')
 
 gh pr view "$PR_NUMBER" --json assignees,labels \
@@ -395,7 +395,7 @@ gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number --jq '.number')
+PR_NUMBER=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch)
 gh pr view "$PR_NUMBER" --json body --jq '.body' \
   | sed -E '/^Closes #[[:space:]]*$/d' \
   | gh pr edit "$PR_NUMBER" --body-file -

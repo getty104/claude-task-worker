@@ -262,7 +262,7 @@ push（またはリモート存在確認）に失敗した場合はエラー出�
 
 ```bash
 BASE_BRANCH=""
-if ! PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty'); then
+if ! PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0"); then
   echo "failed to resolve issue parent" >&2
   exit 1
 fi

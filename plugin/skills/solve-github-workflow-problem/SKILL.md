@@ -28,7 +28,7 @@ argument-hint: "[run-id | run-url]"
 ARG=$(printf '%s' "$ARGUMENTS" | tr -d '[:space:]')
 RUN_ID=$(printf '%s' "$ARG" | grep -oE '^[0-9]+$|/actions/runs/[0-9]+' | grep -oE '[0-9]+$')
 REPO=$(printf '%s' "$ARG" | grep -oE '^https?://github\.com/[^/]+/[^/]+' | sed -E 's#^https?://github\.com/##')
-CURRENT_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)  # 単独取得ツールがMCPに無いため gh のまま残す
+CURRENT_REPO=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh owner-repo)
 REPO="${REPO:-$CURRENT_REPO}"
 ```
 
@@ -118,7 +118,7 @@ gh run rerun "$RUN_ID" --repo "$REPO" --failed
 デフォルトブランチ上で作業しないこと。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 git fetch origin "$DEFAULT_BRANCH"
 git switch -c "fix-workflow-$(date +%Y%m%d%H%M%S)" "origin/$DEFAULT_BRANCH"
 ```
@@ -145,7 +145,7 @@ PR 作成後、Assignee とラベルが実際に付いていることを確認�
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number -q .number)
+PR_NUMBER=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch)
 gh pr view "$PR_NUMBER" --json assignees,labels
 gh pr edit "$PR_NUMBER" --add-assignee "@me" --add-label cc-triage-scope
 ```

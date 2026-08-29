@@ -79,7 +79,7 @@ EPIC_ISSUE_NUMBER=$(basename "$EPIC_ISSUE_URL")
 
 #### 依存関係の表現方法
 
-依存関係は本文の `## 依存関係` セクションには書かず、GitHub ネイティブの relationships（blocked-by）を使う。`post-scope-issue-body` の YAML 入力に `blocked_by:` を渡して `gh issue create --blocked-by` 経由で貼る（GitHub UI で関係性が表示され、本文との二重管理によるズレも避けられる）。
+依存関係は本文の `## 依存関係` セクションには書かず、GitHub ネイティブの relationships（blocked-by）を使う。`post-scope-issue-body` の YAML 入力に `blocked_by:` を渡して貼る（GitHub UI で関係性が表示され、本文との二重管理によるズレも避けられる）。
 
 #### 作成順序
 

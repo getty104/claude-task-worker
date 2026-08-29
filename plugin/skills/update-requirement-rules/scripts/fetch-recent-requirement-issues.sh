@@ -29,7 +29,7 @@ if ! [[ "$DAYS" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+OWNER_REPO="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" owner-repo)"
 OWNER="$(echo "$OWNER_REPO" | cut -d'/' -f1)"
 REPO="$(echo "$OWNER_REPO" | cut -d'/' -f2)"
 

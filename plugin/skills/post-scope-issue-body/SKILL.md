@@ -154,7 +154,9 @@ EOF
 
 成功時、コマンドが標準出力に返す Issue URL を保持する。
 
-`--parent` / `--blocked-by` / `--blocking` の検証エラー（存在しない Issue 番号、権限不足、`gh` バージョン未達 等）は `gh issue create` 自体を失敗させ、その場合 Issue も作成されない（「relationship が貼れないなら作るな」という fail-fast の意図的な挙動）。失敗を呼び出し元に伝えて中断する（後追いの best-effort リンクが必要な場合は、呼び出し元側で `parent` を渡さず作成し、別途 `gh issue edit --add-sub-issue` 等でリンクするフローを使うこと）。
+`--parent` / `--blocked-by` / `--blocking` の検証エラー（存在しない Issue 番号、権限不足、`gh` バージョン未達 等）は `gh issue create` 自体を失敗させ、その場合 Issue も作成されない（「relationship が貼れないなら作るな」という fail-fast の意図的な挙動）。失敗を呼び出し元に伝えて中断する（後追いの best-effort リンクが必要な場合は、呼び出し元側で `parent` を渡さず作成し、別途 `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-sub-issue <親> <子>` でリンクするフローを使うこと）。
+
+**本スキルはクラウドセッションでは成立しない**。クラウド VM の gh 2.45.0 は `--parent` / `--blocked-by` / `--blocking` を知らないため、作成そのものが引数エラーで落ちる。ただし唯一の呼び出し元である `breakdown-issues` は `AskUserQuestion` を使う対話専用スキルで、ワーカーから自動起動されることが無い（＝クラウド実行の対象外）ため、fail-fast の保証を捨ててまで2フェーズ化しない。呼び出し元が増えてクラウドで走るようになったら、`post-issue-body` と同じ「作成 → `gh-compat.sh` でリンク」の2フェーズへ寄せること。
 
 ### 4. 呼び出し元への返却
 

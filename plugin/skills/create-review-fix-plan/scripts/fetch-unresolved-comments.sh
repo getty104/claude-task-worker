@@ -11,12 +11,12 @@
 # 未対応の指摘を残したまま PR をマージする。
 set -euo pipefail
 
-OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+OWNER_REPO="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" owner-repo)"
 OWNER="$(echo $OWNER_REPO | cut -d'/' -f1)"
 REPO="$(echo $OWNER_REPO | cut -d'/' -f2)"
 # `set -e` があるため gh 自体の失敗はここで即終了する。値が取れても空/null なら
 # 番号を確定できていないので、同じく失敗として扱う（空の結果を返さない）。
-if ! PR_NUMBER="$(gh pr view --json number --jq '.number')" || [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+if ! PR_NUMBER="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" pr-for-branch)" || [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
   echo "Error: Could not determine PR number. Make sure the current branch has an open PR." >&2
   exit 1
 fi

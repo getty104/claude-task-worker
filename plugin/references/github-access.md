@@ -62,7 +62,7 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 | `gh pr checks` | `pull_request_read`（method: `get_status` / `get_check_runs`） |
 | `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`）。スレッドの node ID（`PRRT_...`）と `isResolved` を返す。カーソル方式（`perPage` 最大100 / `after` に前ページの `endCursor`）でページングを取得しきる |
 | `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等） |
-| `gh pr list --head` / `--base` / `--state` | `list_pull_requests` |
+| `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる） |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | `create_pull_request` |
 | `gh pr edit` | `pull_request_write`（method: `update`） |
@@ -84,17 +84,37 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 | --- | --- |
 | `gh api user --jq .login` | `get_me` |
 
-## `gh` のまま残す操作
+## `gh-compat.sh`（MCP に無く、`gh` ではクラウドで落ちる操作）
 
-MCP へ移さない。理由が「クラウドでも `gh` で足りる」ではなく「**MCP では代替できない**」ものだけを挙げる。
+MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 403 になる操作は、`${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh` に寄せてある。**REST / git のローカル導出を第一手段にし、失敗時のみ従来の `gh` へフォールバックする**ので、ローカル実行の挙動は変わらない。スキル本文からは `gh` を直接呼ばず、必ずこのヘルパーを経由する。
+
+| サブコマンド | 置き換えた `gh` | 第一手段 |
+| --- | --- | --- |
+| `default-branch` | `gh repo view --json defaultBranchRef` | `git symbolic-ref refs/remotes/origin/HEAD` |
+| `owner-repo` | `gh repo view --json nameWithOwner` | `git remote get-url origin` |
+| `issue-parent <n>` | `gh issue view --json parent` | `GET repos/{o}/{r}/issues/{n}/parent` |
+| `issue-deps <n>` | `gh issue view --json blockedBy,blocking` | `GET repos/{o}/{r}/issues/{n}/dependencies/{blocked_by,blocking}` |
+| `add-blocked-by <n> <num>...` | `gh issue edit --add-blocked-by` | `POST .../dependencies/blocked_by`（body は番号ではなく `issue_id`） |
+| `add-blocking <n> <num>...` | `gh issue edit --add-blocking` | 同上を**相手側から**貼る（REST に `blocking` の POST が無いため） |
+| `add-sub-issue <parent> <child>...` | `gh issue edit --add-sub-issue` | `POST .../sub_issues`（body は `sub_issue_id`） |
+| `pr-mergeable <n>` | `gh pr view --json mergeable` / `gh pr status` | `GET repos/{o}/{r}/pulls/{n}` の `mergeable`（`null` は `UNKNOWN` へ写す） |
+| `pr-for-branch [branch]` | `gh pr view --json number`（カレントブランチのPR導出） | `GET repos/{o}/{r}/pulls?state=open&head={owner}:{branch}` |
+
+`gh issue view --json parent` / `blockedBy` は GraphQL ゲートに加え、クラウド VM の gh 2.45.0 が**フィールド自体を知らない**（`Unknown JSON field`）。`gh issue edit --add-blocked-by` / `--add-sub-issue` も同 gh はフラグを知らない。ゲートが解けても `gh` 経路は直らないため、REST が唯一の道になる。
+
+## `gh` のまま残す操作
 
 | 操作 | 残す理由 |
 | --- | --- |
-| `gh pr checkout <n>` | ローカル作業ツリーへの checkout。リモート API では代替できない |
-| `gh-asset download <id>` | 添付アセットをローカルへ落とす操作。MCP にファイル取得の同等ツールがない |
-| `gh pr status` | カレントブランチという**ローカルの文脈**に依存する（MCP は PR 番号を要求する） |
-| `gh repo view --json nameWithOwner,defaultBranchRef` | リポジトリ情報の単独取得ツールが MCP に無い。`git remote get-url origin` / `git symbolic-ref refs/remotes/origin/HEAD` でローカル導出できるため、そちらを優先してよい |
-| `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-sub-issue` | Issue Dependencies / sub-issue の操作。MCP 側の対応が不定のため `gh` に据え置く |
+| `gh pr checkout <n>` | ローカル作業ツリーへの checkout。リモート API では代替できない。**クラウドでは実行しない** — PR 系ワーカーがセッション作成時に `--on-branch <PR の head ブランチ>` を渡しており、クラウド VM は最初から PR のブランチ上で始まる（`src/claude-args.ts` の `buildCloudCheckoutInstruction()` が起動プロンプトでその旨を伝える） |
+| `gh run view` / `gh run list` / `gh run rerun` | REST 経由なので GraphQL ゲートを受けない（MCP の `actions_*` を優先し、これはフォールバック） |
+
+## 画像・添付ファイル
+
+**画像は Issue へ直接添付せず、Google Drive 等へ上げたうえでリンクを貼る運用を前提とする。** GitHub の添付ファイル（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は認証付きの実体取得が必要で、クラウドセッションからは取得手段が無い（かつて使っていた `gh-asset` はサードパーティ拡張で、クラウド VM に導入されていない）。
+
+- description・コメントに貼られた**リンクは読む**。一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP、GitHub の URL は上記対応表の MCP ツール
+- 直接添付されていて読めない場合は、推測で補わず「添付 `<URL>` は取得不可（Issue への直接添付のため）」と報告・根拠に明記し、確認できた範囲で処理を続行する
 
 ## 本ドキュメントで扱わないもの
 

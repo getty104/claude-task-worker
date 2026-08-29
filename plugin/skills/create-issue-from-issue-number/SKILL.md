@@ -75,7 +75,7 @@ description は人間がレビューし、後続の `exec-issue` が実装スコ
 git fetch --prune || true
 
 BASE_BRANCH=""
-PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty') || PARENT="__unresolved__"
+PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0") || PARENT="__unresolved__"
 if [ "${PARENT}" != "__unresolved__" ] && [ -n "${PARENT}" ] \
   && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
   BASE_BRANCH="cc-epic-${PARENT}"
@@ -103,7 +103,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - 現在の作業ディレクトリのコード状態（＝`BASE_BRANCH` 由来）が分析対象。「この変更はデフォルトブランチにまだ入っていない」ことを問題として扱わない
 - `BASE_BRANCH` が `cc-epic-<N>` の場合、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであることは Epic フローの正常状態**。これを根拠とした確認事項・リスク・検討事項（「先に Epic PR をマージすべきか」「マージされていないがどうするか」等）を一切生成しない
 - epic ブランチへマージ済みの兄弟サブIssueの変更は「既に存在するコード」として扱い、実装プランで再実装しない
-- `gh issue view --json parent` に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした確認事項は生成しない**（epic フローの正常状態を誤って確認事項化しないための安全側の倒し方）。その旨は最終報告に1行残す
+- parent の取得に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした確認事項は生成しない**（epic フローの正常状態を誤って確認事項化しないための安全側の倒し方）。その旨は最終報告に1行残す
 
 **完了条件**: Issue番号が確定し、作業ディレクトリと `BASE_BRANCH` が特定されていること。
 
@@ -121,13 +121,9 @@ gh issue view $0 --json number,title,state,labels,body,url
 
 `state` が `CLOSED` の場合は更新せず、その旨を報告して終了する。
 
-本文に画像URLがある場合、`gh-asset` でダウンロードし Read で実際に確認する（UIの見た目・エラー画面などテキストで伝わらない仕様が判断に必要なことがあるため、URLを見て終わりにしない）。`gh-asset` はローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` に据え置く。
+本文・コメントに画像や資料への**リンク**がある場合は、リンク先を開いて内容を確認する（テキストだけでは伝わらない仕様 — UIの見た目・エラー画面・図など — が判断に必要なことがあるため、URLを見て終わりにしない）。手段は後述の「外部リンクの参照」に従う（一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP）。
 
-```bash
-gh-asset download <asset_id> ~/Downloads/
-```
-
-参考: https://github.com/YuitoSato/gh-asset
+**画像は Issue へ直接添付せず、Drive 等へ上げたうえでリンクを貼る運用を前提とする。** GitHub の添付ファイル（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は認証付きの実体取得が必要で、クラウドセッションからは取得手段が無い。添付が直接貼られていて内容を読めない場合は、推測で補わず「添付 `<URL>` は取得不可（Issue への直接添付のため）。Drive 等へ上げ直してリンクを貼ってほしい」と報告に明記し、確認できた範囲で処理を続行する。
 
 なお、変更ログの verbatim 再掲用の既存本文取得は `post-issue-body` が `mode=edit` で再度行うため、本ステップの body は分析用途で使い、`post-issue-body` へは Issue 番号だけを伝えればよい。
 
@@ -181,7 +177,7 @@ gh-asset download <asset_id> ~/Downloads/
    - GitHub上のIssue・PR → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
    - GitHub上のファイル参照リンク（blob URL 等、別リポジトリ含む） → `issue_read` / `pull_request_read` はファイル内容を取得できないため使わない。GitHub MCP が使える場合は `get_file_contents` を使う。利用不可なら `gh api repos/<owner>/<repo>/contents/<path>` または `WebFetch`（raw URL）へフォールバック
    - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
-   - Issue本文に貼られた画像URL → ステップ1のとおり `gh-asset` でダウンロードして Read する
+   - Issue本文に貼られた画像・資料へのリンク → ステップ1のとおりリンク先を開いて内容を確認する
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら確認事項に回す
 5. **記録**: 判断に使ったリンクは「参照情報」に `<URL> — <参照した要点>` の形で残す（後続の `exec-issue` / `answer-issue-questions` が同じ根拠を辿れるようにするため）

@@ -53,22 +53,21 @@ hooks:
 ```bash
 gh pr checkout $ARGUMENTS
 ```
+**クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
 
 このコマンドが**失敗した場合**（典型例: `fatal: '<branch>' is already used by worktree at ...` — PRブランチが別のworktreeでcheckout中）は、**後続のステップに進まず**、エラー出力をそのまま含めて「判定: エラー」で結果報告を行い終了する。ラベル操作・自前のリトライは行わない（ブロッカー解消後のポーリングで自動的に再実行される）。
 
 ### ステップ1: コンフリクト検知とラベル付与
 
-`gh pr status` でPRのstatus（mergeable / コンフリクト有無）を取得する。カレントブランチというローカルの文脈に依存する操作（MCPはPR番号を要求する）のため`gh`のまま残す。
+対象PRの `mergeable` を取得してコンフリクトの有無を判定する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
 
 ```bash
-gh pr status
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-mergeable $ARGUMENTS
 ```
 
-出力から `#$ARGUMENTS` の行を特定し、コンフリクト表示（"Conflict" / 衝突マーク等）の有無を判定する。`gh pr status` は現在のユーザーに関連するPR（作成者・レビュアー・assignee）のみ表示するため、対象PRが含まれない場合はフォールバックとして`mergeable`を取得する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
+返る値は `CONFLICTING` / `MERGEABLE` / `UNKNOWN` の3値。`gh-compat.sh` は REST（`repos/{o}/{r}/pulls/{n}` の `mergeable`）を第一手段にし、失敗時のみ `gh pr view --json mergeable` へフォールバックする。
 
-```bash
-gh pr view $ARGUMENTS --json mergeable -q .mergeable
-```
+`gh pr status` は使わない。カレントブランチというローカル文脈に依存するうえ、現在のユーザーに関連するPR（作成者・レビュアー・assignee）しか表示しないため対象PRが載るとは限らず、さらに GraphQL 経由なのでクラウドセッションでは 403 になる。
 
 返却値 `MERGEABLE` / `CONFLICTING` / `UNKNOWN` のうち `CONFLICTING` のときコンフリクトありと判定する。`UNKNOWN` の場合はGitHub側で判定中のため、数秒のスリープ後に1回だけリトライする。
 
@@ -274,7 +273,7 @@ EOF
 
 ```bash
 BASE_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 ```
 
 2. **必ずマージを実行する。** GitHub MCP の `pull_request_write`（method: `merge`）を優先し、利用不可なら以下の `gh` コマンドへフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。

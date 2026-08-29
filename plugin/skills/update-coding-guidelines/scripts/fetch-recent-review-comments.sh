@@ -8,7 +8,7 @@ set -euo pipefail
 DAYS="${1:-1}"
 JOB_LIMIT="${JOB_LIMIT:-10}"
 
-OWNER_REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+OWNER_REPO="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" owner-repo)"
 OWNER="$(echo "$OWNER_REPO" | cut -d'/' -f1)"
 REPO="$(echo "$OWNER_REPO" | cut -d'/' -f2)"
 

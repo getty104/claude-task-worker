@@ -73,16 +73,18 @@ gh pr checkout $ARGUMENTS
 
 （`gh pr checkout` はローカル作業ツリーへの checkout であり、リモート API では代替できないため `gh` のまま残す）
 
+**クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
+
 `gh pr checkout`が失敗した場合（作業ツリーが汚れている、ローカルに同名のブランチがある等）は、原因をそのまま出力して中断する。`git stash`や`git reset --hard`を独断で行ってユーザーの未コミット変更を失わせないこと。
 
 チェックアウト成功後、fail-safeとしてブランチがデフォルトブランチでないことを確認する。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
-`CURRENT_BRANCH`が`DEFAULT_BRANCH`と一致する場合は中断する（想定外の状態でrebase/force-pushがデフォルトブランチに走るのを防ぐため）。`gh repo view`が失敗してデフォルトブランチ名が取得できない場合も、判定不能として中断する。
+`CURRENT_BRANCH`が`DEFAULT_BRANCH`と一致する場合は中断する（想定外の状態でrebase/force-pushがデフォルトブランチに走るのを防ぐため）。`gh-compat.sh default-branch`が失敗してデフォルトブランチ名が取得できない場合も、判定不能として中断する。
 
 ## ステップ2: ターゲットブランチとのコンフリクト判定
 

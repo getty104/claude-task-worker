@@ -40,11 +40,7 @@ gh issue view <issue番号> --json number,title,state,labels,assignees,milestone
 
 以下も併せて確認：
 
-- **画像/添付**: 本文に画像URLがある場合、`gh-asset` でダウンロードして内容を読む（ローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` のまま残す）
-  ```
-  gh-asset download <asset_id> ~/Downloads/
-  ```
-  参考: https://github.com/YuitoSato/gh-asset
+- **画像/資料へのリンク**: 本文にリンクがある場合はリンク先を開いて内容を読む（一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP）。**画像は Issue へ直接添付せず Drive 等へ上げてリンクする運用を前提とする** — GitHub の添付ファイルは認証付きの実体取得が必要でクラウドセッションからは読めない。直接添付されていて読めない場合は、その旨を明記して確認できた範囲で続行する
 - **リンクされたIssue/PR**: `#123` 形式や URL での参照は依存関係の手がかり。必要に応じて GitHub MCP の `issue_read`（method: `get`）/ `pull_request_read`（method: `get`）を優先し、利用不可なら `gh issue view <num>` / `gh pr view <num>` へフォールバックして内容を確認
 - **コード参照**: 本文に登場するファイルパス・関数名は対象範囲特定の起点。実際の所在・周辺実装の確認は手順2で `explore-agent` に委譲する
 
