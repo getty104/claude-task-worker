@@ -413,6 +413,35 @@ test(
   },
 );
 
+test("E3: 未サインイン（claude auth status）だと起動せず終了コード1", { timeout: 30_000 }, async (t) => {
+  const stubs = installCliStubs({
+    claude: { authStatus: { loggedIn: false, authMethod: "claude.ai", apiProvider: "firstParty" } },
+    gh: ISSUE_GH_SCENARIO,
+  });
+  const handle = await startWorker({
+    worker: "exec-issue",
+    workerConfig: { workers: { "exec-issue": { cloud: true } } },
+    userConfig: { mode: "herdr" },
+    records: stubs.records,
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
+
+  const code = await handle.waitForExit(15_000);
+  assert.equal(code, 1);
+
+  const records = stubs.records();
+  assert.equal(findRecord(records, "herdr", "tab", "create"), undefined);
+  assert.equal(findRecord(records, "herdr", "agent", "start"), undefined);
+  assert.equal(
+    records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length,
+    0,
+    "クラウドフラグ付きの claude 起動が記録されている",
+  );
+});
+
 // ============================================================
 // F. ローカル実行の不変性（cloud 未指定、mode herdr）
 // ============================================================
