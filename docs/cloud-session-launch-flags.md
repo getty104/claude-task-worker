@@ -5,6 +5,7 @@
 - 実測日: 2026-08-27
 - 実測バージョン: `claude --version` → `2.1.247 (Claude Code)`
 - 後続Issueが失効判定できるよう、`claude --version` がここより新しい場合はフラグの受理可否を再実測すること
+- **追記（Issue #302 / claude 2.1.250）**: `--cloud <description>` の `description` は表示名ではなく**初期プロンプトとして即実行される**ことが後続の smoke test で判明した。本ファイルの測定時点ではこの前提を認識しておらず「作成 → 既存セッションへの投函」という2コマンド運用を想定していたが、description が即実行されるためその運用は同じ作業を2回実行させてしまう（1タスクで PR が2件作られる不具合の原因）。現行実装は作成コマンド1本で description にプロンプトを直接渡す方式に切り替えた（`docs/prd-cloud-worker-execution.md` 4.2）。以下の T1〜T11 の測定結果自体は改変していない
 
 ## 実測環境
 
@@ -44,9 +45,9 @@
 
 | 引数 | ローカル | クラウド | 受理可否 | エラー文言 | 根拠 |
 |------|---------|---------|---------|-----------|------|
-| `-p <prompt>` | default モードのみ付与 | 付けない（新規作成は print モード非対応） | 新規作成は拒否／既存セッションへの投函は受理 | `Error: --cloud cannot be combined with --print.`（新規作成時） | T2, T3 |
-| `--cloud`（値なし・新規作成、非TTY） | なし | 付与 | 拒否（TTY必須） | `Error: --cloud requires an interactive terminal.` | T1 |
-| `--cloud <session_id>`（既存セッションへの投函、`-p` 併用） | なし | 付与 | **受理**（TTY不要） | — | T3 |
+| `-p <prompt>` | default モードのみ付与 | 付けない（新規作成は print モード非対応） | 新規作成は拒否／既存セッションへの追記投函は受理 | `Error: --cloud cannot be combined with --print.`（新規作成時） | T2, T3 |
+| `--cloud <description>`（値あり・新規作成、非TTY） | なし | 付与 | 拒否（TTY必須） | `Error: --cloud requires an interactive terminal.` | T1 |
+| `--cloud <session_id>`（既存セッションへの追記投函、`-p` 併用） | なし | 付与 | **受理**（TTY不要）。**ただし現行実装（Issue #302 以降）ではこの経路は使わない** — `--cloud <description>` の `description` は表示名ではなく初期プロンプトとして即実行される（claude 2.1.250 実測）ため、作成コマンドの description にプロンプトを直接渡す1コマンド方式へ切り替え、この投函コマンドは廃止した | — | T3 |
 | `--cloud <session_id>`（対話アタッチ） | なし | 付与 | 拒否（アカウント単位で無効） | `Error: Attaching to an existing cloud session is not enabled for your account.` | T4 |
 | `--ref <branch>` | なし | Issue系: ベースブランチ想定 | **未実測**（GitHub App未設定のため到達不可） | `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9 |
 | `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | **未実測**（同上） | `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10 |
