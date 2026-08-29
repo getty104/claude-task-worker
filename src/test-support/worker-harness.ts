@@ -115,6 +115,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
         // src/slack.ts の send() はこれが truthy だと実際に fetch する（完了/失敗通知の
         // たびに呼ばれる）ため、テストが実チャンネルへ通知を飛ばさないよう必ず空にする。
         CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: "",
+        // ホストの ANTHROPIC_BASE_URL がワーカー子プロセスへ引き継がれると、
+        // assertCloudAvailable() の checkCloudAuth() 判定がホスト環境依存になる
+        // （クラウド起動拒否テストが実行環境によって結果を変えてしまう）ため空にする。
+        ANTHROPIC_BASE_URL: "",
         ...options.env,
       },
       stdio: ["ignore", "pipe", "pipe"],
