@@ -384,7 +384,10 @@ async function runViaCloud(
         }
         let content = "";
         try {
-          content = await paneRead(created.paneId, { source: "recent" });
+          // `recent` は「末尾N行」を空行パディング込みで数えるため、作成直後のペイン
+          // （出力がビューポート下端に届いていない）では必ず空文字になる。既定の
+          // `visible`（ビューポート全体）で読む。詳細は CLAUDE.md の herdr 節を参照。
+          content = await paneRead(created.paneId);
         } catch (err) {
           console.error(`[worker] failed to read pane ${created.paneId} while waiting for the cloud session: ${err}`);
         }

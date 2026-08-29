@@ -403,6 +403,23 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 起動判定（`isWorkerProcess()`）は `pollOnce()` の生存判定と共有し、「起動したとみなす条件」と「生存しているとみなす条件」を一致させる。なお `herdr pane read` は他コマンドと違い JSON エンベロープではなく端末内容の生テキストを返す（失敗時のみ `{"code","message"}` を返し `error` キーで包まない）ため、`paneRead()` は `execHerdr()` のJSONパース経路を通さない専用実装になっている。
 
+#### `herdr pane read` の `--source` 差（`recent` は作成直後のペインで空を返す）
+
+`--source recent` は**ペインバッファの末尾N行**を返すが、この N 行は「ビューポートを埋めていない空行パディング」を**含めて**数えられる。そのため出力がまだビューポート下端に届いていないペインでは、返る行がすべて空行になり herdr は**空文字**を返す。`--source visible`（`paneRead()` の既定）はビューポート全体を返すため、この状況でも内容が取れる。
+
+実測（herdr 0.8.2、`viewport_rows: 106` の新規タブのルートペイン）:
+
+| ペインの状態 | `visible` | `recent`（`--lines` なし） | `recent --lines 100` | `recent --lines 106` | `recent --lines 300` |
+|---|---|---|---|---|---|
+| 作成直後（プロンプトのみ） | 324B | **0B** | **0B** | 324B | 324B |
+| 1行だけ出力したコマンドの実行後 | 679B（内容を含む） | **0B** | — | — | — |
+| 200行の出力後（スクロール済み） | 1265B | 1035B | — | — | 2009B |
+| claude(TUI) が動作中 | 3828B | 3261B | 3742B | — | 3828B |
+
+境界は `viewport_rows` と一致する（`--lines 100` は空、`--lines 106` から内容が返る）。`--lines` が `viewport_rows` を超えていればパディングを飛び越えて先頭行まで届くため、空にはならない。
+
+この挙動により、**`--lines` を付けずに `recent` で読む経路は作成直後のペインで必ず空振りする**。`runViaCloud()`（`src/process-manager.ts`）のクラウドセッションID抽出がこれに該当し、セッションが正常に作成されても ID を一度も読めず `timed out waiting for the cloud session id (pane tail: )` で必ず失敗していた（既定の `visible` で読むよう修正済み）。一方 `readPaneOutput()`（`src/herdr-runner.ts`）は `lines: PANE_OUTPUT_LINES`（300）を渡しており `viewport_rows` を超えるため空振りしない（上表の claude(TUI) 行で確認済み）。`waitForPaneReady()` は元から `visible` を使っている。
+
 ### ラベルフロー
 
 | Worker | トリガーラベル | 完了時 |
