@@ -190,6 +190,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               execution.prompt,
               isCloud,
               isCloud ? "pr" : undefined,
+              model,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for PR #${pr.number}: ${err}`);

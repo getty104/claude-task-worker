@@ -118,6 +118,8 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           buildClaudeEnv(mode, cloud),
           execution.prompt,
           cloud,
+          undefined,
+          model,
         );
       } catch (err) {
         console.error(`[${config.name}] setup error: ${err}`);
