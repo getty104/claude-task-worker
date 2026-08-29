@@ -364,6 +364,9 @@ async function runViaCloud(
   let cloudSessionId: string | undefined;
 
   try {
+    // env は tabCreate（herdr の --env）で渡す。1コマンド方式では `claude` はこの
+    // ペインのシェルへ直接送信されるため（下記 paneSendText）、env はここ1箇所に
+    // 渡せば CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 等が確実に効く。
     const created = await tabCreate({ label, cwd: cwd ?? process.cwd(), workspaceId: getCurrentWorkspaceId(), env });
     herdrTasks.set(id, created);
 
