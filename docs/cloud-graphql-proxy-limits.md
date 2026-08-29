@@ -158,7 +158,7 @@ Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP �
 ## PRD からの差分
 
 1. **5章「GraphQL の 403 制限」の影響範囲が過小**。PRD は `--json parent,blockedBy` とレビュースレッド解決を挙げていたが、実際は `gh issue view --json` / `gh pr view --json` / `gh pr list` / `gh pr checks` が**フィールドを問わず**全滅する。ワーカー起動スキル15個すべてが影響を受ける
-2. **「REST へのフォールバックが必要」は正しいが、レビュースレッド解決だけは REST 代替が原理的に存在しない**。`fix-review-point` / `resolve-pr-comments.sh` はスキル・スクリプトを書き換えても回復しない
+2. **「REST へのフォールバックが必要」は正しいが、レビュースレッド解決だけは REST 代替が原理的に存在しない**。ただし**GitHub MCP には代替がある**: `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` が返す `PRRT_...` node ID）。MCP はプロキシを経由しないため、`resolve-pr-comments` スキルを MCP 優先へ書き換えればクラウドでも Resolve は成立する（`gh api graphql` を使う `resolve-pr-comments.sh` は引き続きクラウドでは403で、ローカル向けフォールバックとして残る）。**未実測**（本メモの smoke test で動作確認した4ツールに含まれない）
 3. **適合性表を全面的に格下げする必要がある**。`exec-issue` の ◎ を含め、Issue/PR の内容を `gh` で読む全ワーカーが GraphQL ゲートの影響下にある（上表参照）
 4. **制約表に「リポジトリゲート」と「パスゲート」を追加すべき**。GitHub App 連携が未設定のセッションでは `repos/*` が全リポジトリで403になり、GraphQL 以前に何も読めない
 5. **クラウド VM の `gh` が 2.45.0 で古い**。プロキシ制限とは独立に、sub-issue / issue-dependencies 系の `--json` フィールドが使えない。PRD にはこの前提が無い

@@ -56,7 +56,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | `plugin/skills/` | ワーカーが呼ぶスキル群と、対話セッション用の補助スキル（`commit-push` / `create-pr` / `breakdown-issues` / `edit-pencil-design` など） |
 | `plugin/agents/` | サブエージェント定義（`explore-agent` / `frontend-implementer` / `general-purpose-assistant` / `lightweight-assistant` / `pencil-design-updater` / `requirement-todo-organizer`） |
 | `plugin/hooks/` | `SessionStart`（worktree セットアップ / `git fetch --prune`）と `UserPromptSubmit`（`codegraph prompt-hook`）のフック定義 |
-| `plugin/scripts/` | フックから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs` / `resolve-pr-comments.sh` — `fix-review-point` の `Stop` フックでレビュースレッドを一括 Resolve） |
+| `plugin/scripts/` | フック・スキルから呼ばれるスクリプト（`setup-worktree.sh` / `stop-servers.mjs` / `resolve-pr-comments.sh` — `resolve-pr-comments` スキルが GitHub MCP を使えない場合の `gh` フォールバック） |
 | `plugin/references/` | 複数スキルが共有する参照ドキュメント（GitHub アクセス方針など） |
 | `plugin/.mcp.json` | MCP サーバー定義（`codegraph` / `context7` / `next-devtools` / `shadcn` / `playwright`） |
 

@@ -39,11 +39,13 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 
 > `scripts/fetch-unresolved-comments.sh` は `triage-pr` スキルからも `${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh` として参照される共有スクリプト。パス・ファイル名を変更する場合は `triage-pr` 側の参照も合わせて直すこと。
 
+**取得失敗を「指摘0件」と読み替えないこと。** MCP・スクリプトのどちらの経路でも、取得に失敗した場合（スクリプトが非0で終了した／MCP がエラーを返した）は**空の結果として扱わず**、失敗として扱う。スクリプトは失敗時に非0で終了し stderr に原因を出す（正常に0件だった場合は exit 0 と空配列）。両経路とも失敗した場合は修正プランを組み立てず、「レビューコメントを取得できなかった」ことと原因を呼び出し元へ返して終了する。空の結果を返すと、呼び出し元（`triage-pr`）が指摘なしと判断してPRをマージしてしまう。
+
 **ページング**: `unresolved_threads[]` はレビュースレッドが100件を超える場合、`get_review_comments` の返却にページ情報（カーソル/次ページの有無）があれば全ページを取得し終えるまで呼び続ける。`get_comments`（会話コメント）も同様に、1回の呼び出しで全件を返すとは限らないため、返却が尽きるまでページングする。共有スクリプトの `fetch_all_review_threads()` がレビュースレッド側で行っているのと同じ「次ページが無くなるまでループする」動作を、MCP経路でも徹底すること（片方だけ取得して打ち切ると、後続フェーズが古い/一部の指摘だけを対象にしてしまう）。
 
 MCP経路で取得する場合も、スクリプトが返すJSONと同じ意味の情報を同じ観点で抽出すること（`unresolved_threads[]` の `thread_id` / `path` / `line` / `is_outdated` / `comments[]`、`conversation_comments[]` の `author` / `body` / `url` / `created_at` / `is_minimized`）。後続フェーズと `fix-review-point` がこれらのキーに依存するため、キー名・粒度をどちらの経路でも揃える。
 
-**重要**: `thread_id`（GraphQLのスレッドID）はレビュースレッドのResolve（`resolve-pr-comments`スキル）で必要になる。MCP経路でスレッドIDが取得できない場合は、Resolveのために既存スクリプト経路が必要になりうる。
+**重要**: `thread_id`（スレッドの node ID。`PRRT_...` 形式）はレビュースレッドのResolve（`resolve-pr-comments`スキル）で必要になる。MCP経路では `get_review_comments` が同じ node ID を返すため、そのまま `pull_request_review_write`（method: `resolve_thread`）へ渡せる。
 
 返却されるJSONから2系統のフィードバックを抽出する。
 

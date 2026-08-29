@@ -154,7 +154,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 効かない宣言を残すと「このスキルは sonnet で動いている」という誤った前提でコスト試算やモデル調整をしてしまうため、`src/skill-frontmatter.test.ts` の「a skill declaring model/effort also declares context: fork」で機械的に固定してある。あわせて**ワーカー起動スキル（15個）には `model:` も `context:` も書かない**ことも同ファイルで固定している（ワーカーのモデルは `claude-task-worker.json` の `workers.<name>.model` が決めるため、スキル側に書くとその設定を上書きしてしまう）。
 
-fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `commit-push` / `resolve-pencil-conflict`。
+fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
 
 **`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。
 
@@ -219,7 +219,11 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 
 判定ロジック（`selectPidsToKill` / `parseLsofCwds` / `isUnder` / `resolveTargetDir`）は純粋関数として export し、`plugin/scripts/stop-servers.test.mjs` でユニットテストする。対象スキルは同期実行ガードと同じ15スキル（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）。
 
-`fix-review-point` だけは同じ `Stop` の下に2本目のフック（`plugin/scripts/resolve-pr-comments.sh`）を持ち、レビュースレッドの一括 Resolve を行う。**このフックは実行形態を問わず常に走る**。クラウド実行では VM 上で `gh api graphql` が 403 になるため、フック側の Resolve は空振りするだけで済む。そのため `src/workers/fix-review-point.ts` の `onCompleted` がワーカープロセス（ローカル）から同じスクリプトを PR 番号付きで実行する。`resolveReviewThread` mutation はクラウドの GraphQL ゲートで 403 になり REST 代替が原理的に存在しない（`docs/cloud-graphql-proxy-limits.md`）ため、この二経路が必要になる。
+### レビュースレッドの Resolve は `Stop` フックに置かない
+
+レビュースレッドの一括 Resolve は `fix-review-point` のフェーズ6が `resolve-pr-comments` スキルを呼んで行う（`plugin/skills/resolve-pr-comments/SKILL.md`）。**`Stop` フックへ移してはいけない**。同フックはセッションの終わり方に関わらず必ず走るため、フェーズ0の安全ガード（worktree 外・デフォルトブランチ）や実装フェーズの失敗で中断した場合でも、**1件も修正していないのに未解決スレッドが全件 Resolve される**。`triage-pr` は Resolve 済みを「対応済み」とみなすため、指摘が消えたまま PR がマージされる。Resolve は「修正を push し終えた」ことを前提にした操作であり、その前提を判定できるのはスキル本文だけである。
+
+Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` から取得）で、**クラウド実行でも成立する**。`resolveReviewThread` は REST 代替が無く `gh` 経路では GraphQL 直叩きになるため、クラウドセッションのプロキシで 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、MCP はそのゲートを迂回する。したがってワーカープロセス側から Resolve スクリプトを実行する必要はない（`src/workers/fix-review-point.ts` の `onCompleted` はコールバックコメント投稿のみで、レビュースレッドには触らない）。`gh` フォールバック（`plugin/scripts/resolve-pr-comments.sh`）はローカル実行向けに残してあり、失敗時は非0で終了して「0件」と区別できるようにしてある。
 
 ### `advisor`（アドバイザーモデル）
 
@@ -553,7 +557,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 `src/gh.ts` などワーカープロセス（ローカル）側の `gh` 呼び出しは対象外。ワーカーはローカルで走り続けるためプロキシのゲートを受けない。クラウドで走るのはタスクセッション（スキル）だけである。
 
-レビュースレッドの Resolve（GraphQL `resolveReviewThread`、`resolve-pr-comments` スキル）は本移行のスコープ外。REST に該当エンドポイントが無く、フック／タスクハンドラ実行へ移す方針で別Issueの担当。
+レビュースレッドの Resolve（`resolve-pr-comments` スキル）も MCP 経路へ移した。`resolveReviewThread` は REST 代替が無いため `gh` 経路では GraphQL 直叩きになり、クラウドでは 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）がゲートを迂回する。`threadId` は `pull_request_read`（method: `get_review_comments`）が返す node ID（`PRRT_...`）を使い、カーソル方式（`perPage` / `after`）でページングを取得しきる。`resolve_thread` は既に解決済みのスレッドに対して no-op なので冪等で、フォールバックによる二重実行の害が無い。
 
 **クラウドセッションでの GitHub MCP の起動・認証**は、2026-08-29 の smoke test で実測した（`docs/cloud-graphql-proxy-limits.md` 参照）。クラウド VM 上で `mcp__github__*` が55ツール利用可能で、うち `issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4つの動作を確認した。ただし `gh … --json`（GraphQL 経由）は依然403のままで、GraphQL ゲート自体は健在（MCP はゲートを迂回する別経路であり、解消したわけではない）。下記「クラウド実行」の「ワーカー別の適合性」表は、動作確認できたこの4ツールで代替できる範囲に限って見直した（未実測の操作に依存するワーカーの判定は据え置いてある）。
 

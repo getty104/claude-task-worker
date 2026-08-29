@@ -33,6 +33,7 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 
 - **未実行が確定している場合**（認証拒否・権限エラー・ツール未検出など、リクエストがサーバーに到達していないと分かるエラー）は、即座に `gh` の同等コマンドへフォールバックしてよい
 - **実行有無が不明な場合**（タイムアウト・接続断・応答喪失など）は、`gh` で直接再実行せず、まず対象（Issue/PRのコメント一覧・ラベル・マージ状態など）を読み直して**既に反映されていないかを確認**する。反映済みなら再実行しない。未反映と確認できた場合にのみ `gh` へフォールバックする
+- **例外**: `pull_request_review_write`（method: `resolve_thread` / `unresolve_thread`）は冪等な no-op なので二重実行の害が無い。失敗の種類を問わず即フォールバックしてよい
 
 ## 対応表
 
@@ -59,7 +60,8 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 | `gh pr view --json files` / `gh pr diff --name-only` | `pull_request_read`（method: `get_files`） |
 | `gh pr diff` | `pull_request_read`（method: `get_diff`） |
 | `gh pr checks` | `pull_request_read`（method: `get_status` / `get_check_runs`） |
-| `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`） |
+| `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`）。スレッドの node ID（`PRRT_...`）と `isResolved` を返す。カーソル方式（`perPage` 最大100 / `after` に前ページの `endCursor`）でページングを取得しきる |
+| `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等） |
 | `gh pr list --head` / `--base` / `--state` | `list_pull_requests` |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | `create_pull_request` |
@@ -96,7 +98,6 @@ MCP へ移さない。理由が「クラウドでも `gh` で足りる」では�
 
 ## 本ドキュメントで扱わないもの
 
-- **レビュースレッドの Resolve**（GraphQL `resolveReviewThread`、`resolve-pr-comments` スキル）。REST に該当エンドポイントが無く、フック／タスクハンドラ実行へ移す方針で別Issueの担当
 - `src/gh.ts` などワーカープロセス側の `gh` 呼び出し。ワーカーはローカルで走り続けるためプロキシのゲートを受けない
 
 ## GitHub MCP の有効化
