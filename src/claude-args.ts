@@ -285,6 +285,38 @@ export function appendCloudDoneInstruction(prompt: string, target: { type: "issu
   return `${prompt}\n\n${reportInstruction}\n\n${labelInstruction}`;
 }
 
+// `--disallowedTools` の文面（cloud プロンプト用）。DISALLOWED_TOOLS と二重管理しないよう
+// 配列から都度組み立てる。
+export function buildCloudToolRestriction(): string {
+  return `クラウド実行では \`--disallowedTools\` フラグによるツール制限が反映されないため、以下のツールを使わないこと: ${DISALLOWED_TOOLS.join(", ")}`;
+}
+
+// クラウドセッションの初期プロンプト本文を組み立てる。
+//
+// クラウド実行（Claude Code on the web）は `--append-system-prompt-file` /
+// `--disallowedTools` を起動引数として受理はするが VM 側で反映されないことが smoke test
+// （claude 2.1.250、#307）で確定したため、システムプロンプト相当の内容とツール制限を
+// プロンプト本文（`--cloud` の description）へ載せる。ローカル実行（default / herdr）は
+// 従来どおり CLI フラグ経由のままで、この関数は使わない。
+//
+// target を省略した場合（定期ワーカー）は cc-cloud-done 完了検知の指示を付けない。
+// CLOUD_DENIED_WORKERS により定期ワーカーは実際には cloud で起動されないが、
+// buildClaudeArgs 同様に呼び出し可能な形にしておく。
+//
+// タスクプロンプト（prompt）を先頭に置くのは、Claude Code がメッセージ先頭の
+// スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
+// 連結すると本来先頭にあるべきスラッシュコマンドが本文中ほどへずれ、リテラル
+// 文字列として扱われて SKILL.md がロードされなくなる。
+export function buildCloudPrompt(
+  prompt: string,
+  model: string,
+  target?: { type: "issue" | "pr"; number: number },
+): string {
+  const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}`;
+  const withPrinciples = `${prompt}\n\n${principles}`;
+  return target ? appendCloudDoneInstruction(withPrinciples, target) : withPrinciples;
+}
+
 // POSIX シェル向けのシングルクォート引用。herdr の `pane send-text` はシェルへ
 // そのまま文字列を送るため、スペース・`#`・`:` 等を含む引数（description・prompt）を
 // 安全に1トークンとして渡すにはクォートが要る。内部の `'` は `'\''` へエスケープする

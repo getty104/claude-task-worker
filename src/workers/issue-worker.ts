@@ -253,6 +253,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               execution.prompt,
               cloud,
               cloud ? "issue" : undefined,
+              model,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);

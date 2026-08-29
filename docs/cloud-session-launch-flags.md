@@ -61,9 +61,9 @@
 | `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | 同上（回避策適用でセッション作成は成功する。それ以降は未実測） | `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10 |
 | `--ref` と `--on-branch` の併用 | — | — | 拒否（排他） | `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other` | T8 |
 | `--permission-mode bypassPermissions` | 付与 | 付けない（PRD想定） | **受理される**（PRD想定と異なる） | エラーなし。セッション作成成功 | T5 |
-| `--disallowedTools` | 付与 | 付けない（PRD想定） | **受理される**（PRD想定と異なる） | エラーなし。セッション作成成功 | T6 |
-| `--append-system-prompt-file` | 付与 | 要検証（PRD 9-2） | **受理される**（起動引数としては拒否されない。VM側での反映は未確認） | エラーなし | T7 |
-| `--model` / `--effort` / `--advisor` / `--chrome` | 付与 | 要検証（PRD 9-3） | **受理される**（起動引数としては拒否されない。VM側での反映は未確認） | エラーなし | T7 |
+| `--disallowedTools` | 付与 | 付けない（PRD想定） | **受理されるが VM 側ではツール制限として効かない**（smoke test、claude 2.1.250、2026-08-29 で確定。Issue #307） | エラーなし。セッション作成成功 | T6 |
+| `--append-system-prompt-file` | 付与 | 要検証（PRD 9-2） | **受理されるが VM 側には反映されない**（smoke test、claude 2.1.250、2026-08-29 で確定。Issue #307） | エラーなし | T7 |
+| `--model` / `--effort` / `--advisor` / `--chrome` | 付与 | 要検証（PRD 9-3） | **受理される**（起動引数としては拒否されない。VM側での反映は引き続き未確認） | エラーなし | T7 |
 
 ## 測定ログ（要旨）
 
@@ -75,7 +75,9 @@
 - **T4** `claude --cloud <session_id>`（pty、対話アタッチ）→ exit=1: `Error: Attaching to an existing cloud session is not enabled for your account.`（T3の投函は成功するので、投函とアタッチは別権限）
 - **T5** `claude --cloud "<desc>" --permission-mode bypassPermissions`（pty）→ exit=0・受理。PRD 旧版の想定エラー（`Error: a cloud session cannot bypass permissions`）は2.1.247で再現せず
 - **T6** `claude --cloud "<desc>" --disallowedTools Monitor`（pty）→ exit=0・受理。PRD 旧版の想定エラー（`Error: a cloud session does not enforce tool restrictions yet`）も再現せず
+  - **追試**（smoke test、claude 2.1.250、2026-08-29）: `--disallowedTools AskUserQuestion` 付きで作成したセッションが同ツールを「利用可能」と報告。**受理されるだけで VM 側ではツール制限として効かない**ことを確定（Issue #307）
 - **T7** 複合受理プローブ（pty）: `claude --cloud "ctw probe" --append-system-prompt-file /tmp/ctw-sp.txt --model opus --effort high --advisor opus --chrome` → exit=0、5フラグすべて受理。1回にまとめたのはセッション作成という外部副作用の最小化のため（バリデーションは最初に拒否されたフラグで即エラー終了する＝まとめて通った時点で個別受理も保証される、T8/T9で確認済みの挙動）
+  - **追試**（smoke test、claude 2.1.250、2026-08-29）: システムプロンプトファイルに仕込んだ合言葉を `--append-system-prompt-file` で渡してもセッションが答えられなかった。**受理されるが VM 側には反映されない**ことを確定（Issue #307）
 - **T8** `claude --cloud "<desc>" --ref main --on-branch main`（pty）→ exit=1: `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`。両フラグが**どちらもベースブランチ指定**であることを示す（PRD旧版の役割分担想定とは異なる）
 - **T9** `claude --cloud "<desc>" --ref ctw-no-such-branch-xyz123`（pty）→ exit=1: `Error: --ref ctw-no-such-branch-xyz123 cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.`
 - **T10** `claude --cloud "<desc>" --on-branch ctw-no-such-branch-xyz123`（pty）→ exit=1、T9と同文言（`--ref`→`--on-branch`に置換のみ）
@@ -85,21 +87,19 @@
 ## PRD 4.2 からの差分
 
 1. **`--permission-mode bypassPermissions` は拒否されない**（T5）。PRD が記載する `Error: a cloud session cannot bypass permissions` は 2.1.247 で再現しなかった
-2. **`--disallowedTools` は拒否されない**（T6）。PRD が記載する `Error: a cloud session does not enforce tool restrictions yet` は 2.1.247 で再現しなかった
+2. **`--disallowedTools` は拒否されない**（T6）。PRD が記載する `Error: a cloud session does not enforce tool restrictions yet` は 2.1.247 で再現しなかった。ただし受理されるだけで VM 側の制限としては効かない（smoke test、claude 2.1.250、2026-08-29）
 3. **`--ref` / `--on-branch` はどちらもベースブランチ指定であり排他**（T8）。PRD が想定していた「`--ref` = ベースブランチ / `--on-branch` = 既存PRブランチ上で作業再開」という役割分担ではない
 
 ## 9-2（`--append-system-prompt-file` の代替 system-level control）の扱い
 
-`--append-system-prompt-file` は T7 で受理されたため、PRD 9-2 が想定していた「拒否された場合に代替手段を探す」分岐には該当しない。代替 system-level control の調査は不要になった。ただし「受理された＝クラウド VM 側で実際にシステムプロンプトとして反映される」ことまでは確認していない（起動引数として拒否されないことのみを確認）。
+`--append-system-prompt-file` は T7 で受理されたため、PRD 9-2 が想定していた「拒否された場合に代替手段を探す」分岐には該当しない。代替 system-level control の調査は不要になった。「受理された＝クラウド VM 側で実際にシステムプロンプトとして反映される」わけではないことを smoke test（claude 2.1.250、2026-08-29）で確定した（Issue #307）。自律実行原則とツール制限指示は cloud 実行時のみ初期プロンプト本文（`--cloud <prompt>` の値）へ付加する実装へ切り替えた。
 
 ## 未実測項目
 
 1. **`--ref` / `--on-branch` のブランチ名検証以降の意味論**
    - 理由: 実測当時は #81776 のバグにより `--ref`/`--on-branch` 自体がブランチ名検証の前段で拒否されていた。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` の回避策適用でセッション作成には成功することを smoke test で確認済みだが、(a) 既存リモートブランチ、(b) リモート未存在ブランチでの意味論の違い、(c) 作業ブランチとベースブランチの実際の対応関係は未確認
    - 再現手順: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与したうえで、(a) 既存リモートブランチ、(b) リモート未存在ブランチ、の2ケースで `claude --cloud "<desc>" --ref <branch>` / `--on-branch <branch>` を pty から実行し、成功時は claude.ai 側でベースブランチと作業ブランチを確認する
-2. **`--append-system-prompt-file` の内容がクラウド VM 側で実際にシステムプロンプトへ反映されるか**
-   - 理由: 起動引数として拒否されないことのみを確認した。反映の確認にはセッションへプロンプトを投入して挙動を観察する必要がある
-   - 再現手順: 判別可能な指示（例: 特定の固定文字列を必ず出力させる）を書いたファイルを `--append-system-prompt-file` で渡してクラウドセッションを作成し、`claude -p --cloud <session_id> "..."` で質問して指示が効いているかを確認する
+2. ~~**`--append-system-prompt-file` の内容がクラウド VM 側で実際にシステムプロンプトへ反映されるか**~~: **実測済み**（smoke test、claude 2.1.250、2026-08-29。Issue #307）。**反映されない**（システムプロンプトに仕込んだ合言葉をセッションが「無し」と回答）。あわせて `--disallowedTools` も受理されるだけで VM 側のツール制限としては効かないことを確定（`AskUserQuestion` を「利用可能」と報告）
 3. **`--model` / `--effort` / `--advisor` / `--chrome` がクラウド VM 側で実際に効くか**
    - 理由: 上と同じく、起動引数として拒否されないことのみを確認
    - 再現手順: セッション作成後に claude.ai 側のセッション設定、または `/model` 等のスラッシュコマンドで実際の値を確認する
