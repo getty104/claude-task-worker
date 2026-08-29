@@ -357,7 +357,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md` M-5）。ただし M-5 の実測環境が本当に未連携だったかは #81776（`--ref` の誤判定バグ）により確定していないため、**連携済み環境でも同じになるかは未確認**（同 M-5 の訂正注記を参照）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
 
-あわせて、クラウド VM の `gh` が古い（実測 2.45.0）ため `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` でクライアント側から失敗する、という**プロキシ制限とは独立した交絡**もある。
+かつてはクラウド VM の `gh` が古く（2.45.0）`--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` で失敗するという**プロキシ制限とは独立した交絡**もあったが、2026-08-29 時点で 2.98.0 へ上がりこの交絡は解消した。ただし同バージョンでも `GH_DEBUG=api` 実測のとおりこれらは GraphQL 経由のままで、**403 になる事実は変わらない**（フィールドの有無ではなく転送経路の問題なので、gh を新しくしても解決しない）。
 
 | ワーカー | 判定 | 主な劣化要因 |
 |---|---|---|
@@ -553,7 +553,15 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 `gh` コマンドは削除せずフォールバックとして本文に残してある。GitHub MCP は前提条件ではなく最適化であり、未設定・未認証のローカル環境でスキルを壊さないため。フォールバックは1操作につき1回に限る（MCP で失敗した同じ操作を MCP で再試行しない。認証・設定の問題は再試行では直らない）。
 
-`gh` のまま残す操作もある（`gh pr checkout` / `gh pr status` / `gh-asset` / `gh repo view --json` など）。いずれもローカルの作業ツリー・カレントブランチという文脈に依存するか、MCP に同等の取得手段が無いことが理由で、クラウド対応とは無関係にこのまま残る。
+MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 403 になる操作（`gh repo view --json`、`gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-sub-issue`、`gh pr view --json mergeable` / `gh pr status`）は **`plugin/scripts/gh-compat.sh`** に集約した。同スクリプトは REST（`gh api repos/{o}/{r}/...`）と git のローカル導出を第一手段にし、失敗時のみ従来の `gh` へフォールバックするため、ローカル実行の挙動は変わらない。サブコマンド一覧は `plugin/references/github-access.md` にある。
+
+Issue Dependencies / sub-issue の POST（`add-blocked-by` / `add-blocking` / `add-sub-issue`）は**番号ではなくデータベースID**（`issue_id` / `sub_issue_id`）を要求するため、内部で `gh api repos/{o}/{r}/issues/{n} --jq .id` を挟む。`blocking` は REST に POST が無いので**相手側の `blocked_by` として貼る**（GitHub 上の見え方は同じ）。これに伴い `post-issue-body` は `gh issue create --blocked-by` を使わず「作成 → `gh-compat.sh` でリンク」の2フェーズになった。作成と依存登録の間はブロック済みIssueが非ブロックに見えるが、`issue-worker.ts` の `hasOpenBlockers()`（検索インデックスを経由しない実体判定）が起動直前に止めるため、この窓で新規に事故は起きない。`post-scope-issue-body` だけは `gh issue create --parent` / `--blocked-by` の fail-fast（relationship が貼れないなら Issue も作らない）を残してある — 唯一の呼び出し元 `breakdown-issues` は `AskUserQuestion` を使う対話専用スキルで、ワーカーから自動起動されない（＝クラウド実行の対象外）ため。
+
+`gh pr checkout` は**ワーカー側で解決している**。PR 系ワーカーはクラウドセッション作成時に `--on-branch <PR の head ブランチ>` を渡しており（`pr-worker.ts`）、クラウド VM は最初から PR のブランチ上で作業を始めるので checkout 自体が不要。`buildCloudCheckoutInstruction()`（`src/claude-args.ts`）が PR 系タスクの起動プロンプトへ「`gh pr checkout` を実行しない」ことを明記する（Issue 系は `--ref` でベースブランチだけを指定し、クラウド側が新規作業ブランチを切るため付けない）。スキル本文の `gh pr checkout` はローカル実行用にそのまま残る。
+
+**画像は Issue へ直接添付せず Drive 等へ上げてリンクを貼る運用を前提とする**。GitHub の添付ファイルは認証付きの実体取得が必要でクラウドセッションからは読めず、従来使っていた `gh-asset`（サードパーティ拡張）はクラウド VM に導入されていない。分析系スキル（`read-github-issue` / `create-issue-from-issue-number` / `update-issue` / `answer-issue-questions`）は添付ダウンロードをやめ、**description・コメントに貼られたリンクを読む**（一般URLは `WebFetch`、Drive はドライブ用 MCP、Figma は Figma MCP）。直接添付されていて読めない場合は推測で補わず、取得不可である旨を報告に明記して確認できた範囲で続行する。
+
+なお `gh pr checkout`（ローカル作業ツリーへの checkout）と `gh run` 系（REST 経由でゲートを受けない）は `gh` のまま残る。
 
 `src/gh.ts` などワーカープロセス（ローカル）側の `gh` 呼び出しは対象外。ワーカーはローカルで走り続けるためプロキシのゲートを受けない。クラウドで走るのはタスクセッション（スキル）だけである。
 

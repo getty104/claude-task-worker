@@ -99,7 +99,7 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 並列で以下を確認し、判断は自動で行う。ユーザーに質問しないこと。
 
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断** し、理由を出力して終了する（デフォルトブランチで作業してはならない）
-- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）。リポジトリ情報の単独取得ツールが MCP に無いため `gh` に据え置く（`git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@'` によるローカル導出も可）
+- `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）
 - `gh issue view $0 --json number,title,state,labels` でIssueが存在し `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更を確認する。存在する場合は `git stash push -u -m "exec-issue auto-stash $0"` で自動退避し、その旨を最終報告に明記する
 
@@ -303,11 +303,11 @@ UI変更を含むタスクは、`read-github-issue` の返却で「デザイン�
 
 まず差分の基準ブランチ（`BASE_BRANCH`）を決定する。Issue `$0` が parent（Epic Issue）を持つ場合、worktree は `cc-epic-<parent番号>` ブランチ派生のため epic ブランチを基準にする。デフォルトブランチを基準にすると、epic ブランチへマージ済みの**他サブIssueの差分が混ざり**、コード変更の有無を誤判定する（create-pr スキルのベースブランチ決定と同じ確定的導出を用いる）。
 
-`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
+`parent` は Issue Dependencies（sub-issue）系のフィールドで、`gh issue view --json parent` は GraphQL 経由のためクラウドセッションでは 403 になり、クラウド VM の gh 2.45.0 はそもそもこのフィールドを知らない。`gh-compat.sh issue-parent` は REST（`repos/{o}/{r}/issues/{n}/parent`）を第一手段にし、失敗時のみ `gh` へフォールバックする。
 
 ```bash
 BASE_BRANCH=""
-if ! PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty'); then
+if ! PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0"); then
   echo "failed to resolve issue parent" >&2
   exit 1
 fi
@@ -359,8 +359,10 @@ git diff "origin/${BASE_BRANCH}..HEAD" --stat
 
    ```bash
    HEAD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-   gh pr list --head "${HEAD_BRANCH}" --state open --json number,url
+   OWNER_REPO=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh owner-repo)
+   gh api "repos/${OWNER_REPO}/pulls" -f state=open -f head="${OWNER_REPO%%/*}:${HEAD_BRANCH}" --jq '.[] | {number, url}'
    ```
+   （`gh pr list --head` は GraphQL 経由でクラウドセッションでは 403 になるため、REST で引く）
    - **PRが実在する場合**: そのURLを最終報告として出力し正常終了する
    - **PRが実在しない場合**: `commit-push` / `create-pr` の失敗、返却にPR URLが含まれない、想定外エラー等、**理由を問わず最終的にPRが存在しないとき**は以下を必ず実施する：
      1. `cc-need-human-check` ラベルを付与する（外側ワーカーはこのラベルがある場合、PR不在のまま `cc-pr-created` を付けて完了扱いにするのを抑止する）：

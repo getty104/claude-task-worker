@@ -182,7 +182,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 `commit-push`はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチに直コミットが入る。必ずfeature branchへ切り替える。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
@@ -206,7 +206,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 - フェーズ0でIssue番号が指定されていた場合: そのIssue番号を引数として渡す（`$0`に展開され、PR本文に`Closes #<Issue番号>`が記載される）
 - 指定されていない場合: 引数なしで呼び出す。`create-pr`のテンプレートは無条件で`Closes #$0`を本文に入れるため、空展開の`Closes #`行が本文に残る（5-4で後処理する）
 
-PR作成後、create-prが返却するPR URLを記録しておく。
+PR作成後、create-prが返却するPR URLを記録しておく。以降のフェーズでPR番号が必要な箇所は、この記録済みURLの末尾から抽出する（`PR_NUMBER="${PR_URL##*/}"`）。URLを取得できなかった場合はフェーズ5-3・5-4を実行せず、フェーズ6の出力に「PR URL未取得」と明記して終了する。
 
 ### 5-3. Assignee・ラベルの付与確認（**毎回必ず実行**）
 
@@ -215,7 +215,9 @@ PR作成後、create-prが返却するPR URLを記録しておく。
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）/ `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number --jq '.number')
+PR_URL="<create-prが返却したPR URL>"
+PR_NUMBER="${PR_URL##*/}"
+[ -n "$PR_NUMBER" ] || exit 1  # PR_URL未取得時は実行せず中断（前掲の方針どおり）
 GH_USER=$(gh api user --jq '.login')
 
 # 現状を確認
@@ -237,7 +239,9 @@ gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number --jq '.number')
+PR_URL="<create-prが返却したPR URL>"
+PR_NUMBER="${PR_URL##*/}"
+[ -n "$PR_NUMBER" ] || exit 1  # PR_URL未取得時は実行せず中断（前掲の方針どおり）
 gh pr view "$PR_NUMBER" --json body --jq '.body' \
   | sed -E '/^Closes #[[:space:]]*$/d' \
   | gh pr edit "$PR_NUMBER" --body-file -

@@ -84,7 +84,7 @@ gh issue view $0 --json comments --jq '.comments[] | select(.body | test("## 確
 git fetch --prune || true
 
 BASE_BRANCH=""
-PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty') || PARENT="__unresolved__"
+PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0") || PARENT="__unresolved__"
 if [ "${PARENT}" != "__unresolved__" ] && [ -n "${PARENT}" ] \
   && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
   BASE_BRANCH="cc-epic-${PARENT}"
@@ -115,7 +115,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - `BASE_BRANCH` が `cc-epic-<N>` の場合、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであることは Epic フローの正常状態**。これを根拠としたリスク・注意点・推奨アクション（「先に Epic PR をマージすべき」等）を回答に含めない
 - epic ブランチへマージ済みの兄弟サブIssueの実装は「既に存在するコード」として扱い、根拠として引用してよい
 - 未マージPRに言及する場合は **base が `BASE_BRANCH` のPRだけ**を対象にする（GitHub MCP が使える場合は `list_pull_requests` / `search_pull_requests` を使う。利用不可時のフォールバックは `gh pr list --state open --json number,title,baseRefName --jq ".[] | select(.baseRefName == \"${BASE_BRANCH}\")"`）。base が異なるPR（Epic PR 自身など）は回答対象外
-- `gh issue view --json parent` に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした回答・注意点は書かない**（安全側の倒し方）。その旨は最終報告に1行残す
+- parent の取得に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした回答・注意点は書かない**（安全側の倒し方）。その旨は最終報告に1行残す
 
 ### ステップ2: タスクの分析
 
@@ -139,7 +139,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
    - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
    - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
-   - 画像URL → `gh-asset download <asset_id> ~/Downloads/` でダウンロードして Read で内容を確認する（URLを見て終わりにしない。`gh-asset` はローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` に据え置く）
+   - 画像・資料へのリンク → リンク先を開いて内容を確認する（Google Drive はドライブ用の MCP、それ以外は `WebFetch`。URLを見て終わりにしない）。**画像は Issue へ直接添付せず Drive 等へ上げてリンクする運用を前提とする** — GitHub の添付ファイル（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は認証付きの実体取得が必要でクラウドセッションからは読めないため、直接添付されていて読めない場合は推測で埋めず「取得不可（Issue への直接添付のため）」と根拠に明記する
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら「確信度と追加調査の必要性」として回答に明示する
 5. **記録**: 判断に使ったリンクは回答の「根拠」に `<URL> — <参照した要点>` の形で残す（`path:line` の引用と同格の根拠として扱う）

@@ -20,9 +20,9 @@ Dependabot PRに対して、依存ライブラリのバージョンアップに�
 
 本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
 
-!`git fetch origin "$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)" >/dev/null 2>&1 || true`
+!`git fetch origin "$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)" >/dev/null 2>&1 || true`
 
-（`gh repo view --json defaultBranchRef` は単独取得ツールがMCPに無いため `gh` のまま残す）
+（`gh-compat.sh default-branch` は git のローカル導出を第一手段にし、失敗時のみ `gh repo view` へフォールバックする。クラウドセッションでは `gh repo view --json` が GraphQL ゲートで 403 になるため直接呼ばない）
 
 > **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。プリアンブルには `|| true` で非致命化したコマンドだけを置き、`gh pr checkout` のような失敗しうるコマンドは本文のステップ0で実行する。
 
@@ -46,6 +46,8 @@ gh pr checkout $ARGUMENTS
 ```
 
 （`gh pr checkout` はローカル作業ツリーへの checkout であり、リモート API では代替できないため `gh` のまま残す）
+
+**クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
 
 このコマンドが**失敗した場合**（典型例: `fatal: '<branch>' is already used by worktree at ...` — PRブランチが別のworktreeでcheckout中）は、**後続のステップに進まず**、エラー出力をそのまま含めて「判定: エラー」で結果報告を行い終了する。コード修正・push・ラベル操作は行わない（ブロッカー解消後のポーリングで自動的に再実行される）。
 

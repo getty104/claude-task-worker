@@ -22,7 +22,7 @@ Sentry の Issue 一覧 URL `$ARGUMENTS` を起点に、未解決 Issue を「�
 
 1. **Sentry MCP ツールが使えること**。ツール名のプレフィックスは接続方法で変わる（`mcp__plugin_sentry_sentry__*` / `mcp__claude_ai_Sentry__*` など）ため、**末尾の名前**で判定する。必要なのは `search_issues` / `get_sentry_resource` / `update_issue` の3つ。無ければ「Sentry MCP が未接続のため実行できません」と出力して終了する。
 2. `$ARGUMENTS` が Sentry の Issue 一覧 URL でなければ、期待する形式を示して終了する。
-3. `gh repo view --json nameWithOwner -q .nameWithOwner` で対象リポジトリを確定する（単独取得ツールがMCPに無いため gh のまま残す）。
+3. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh owner-repo` で対象リポジトリを確定する（git のローカル導出を第一手段にし、失敗時のみ `gh repo view` へフォールバックする）。
 4. `pwd` を確認する。worktree を**新たに作成しない**（`.claude/worktrees/` 配下ならそこで、それ以外ならその場で作業する）。
 
 **完了条件**: Sentry MCP が使え、URL が妥当で、対象リポジトリが確定していること。

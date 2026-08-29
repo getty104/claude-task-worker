@@ -99,8 +99,8 @@ jq -r '.issues[] | select(.issue_number | IN(101,102,103)) |
   ([.comments[] | "[\(.author)] \(.body)"] | join("\n\n"))' <output_file>
 
 # 親Issue（Epic）を確認する。採用基準の「同一Epicは1件と数える」判定に使う
-# Issue Dependencies（parent）はMCP側の対応が不定のため gh のまま残す
-gh issue view <番号> --json parent --jq '.parent.number // "none"'
+# Issue Dependencies（parent）はMCP側の対応が不定のため gh-compat.sh 経由（REST優先・失敗時のみ gh フォールバック）で取得する
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent <番号>
 ```
 
 ### 分割して読む場合の制約
@@ -274,7 +274,7 @@ Issue の description と確認事項への回答コメントから、**「こ�
 `commit-push` はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチへ直コミットが入る。必ずfeature branchへ切り替える。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
@@ -298,7 +298,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 - フェーズ0でIssue番号が指定されていた場合: そのIssue番号を引数として渡す（PR本文に `Closes #<番号>` が入る）
 - 指定されていない場合: 引数なしで呼び出す（空展開の `Closes #` 行が残るため 5-4 で後処理する）
 
-PR作成後、返却されたPR URLを記録する。
+PR作成後、返却されたPR URLを記録する。以降のフェーズでPR番号が必要な箇所は、この記録済みURLの末尾から抽出する（`PR_NUMBER="${PR_URL##*/}"`）。URLを取得できなかった場合はフェーズ5-3・5-4を実行せず、フェーズ6の出力に「PR URL未取得」と明記して終了する。
 
 ### 5-3. Assignee・ラベルの付与確認（**毎回必ず実行**）
 
@@ -307,7 +307,9 @@ PR作成後、返却されたPR URLを記録する。
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）/ `get_me` を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number --jq '.number')
+PR_URL="<create-prが返却したPR URL>"
+PR_NUMBER="${PR_URL##*/}"
+[ -n "$PR_NUMBER" ] || exit 1  # PR_URL未取得時は実行せず中断（前掲の方針どおり）
 GH_USER=$(gh api user --jq '.login')
 
 gh pr view "$PR_NUMBER" --json assignees,labels \
@@ -325,7 +327,9 @@ gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-PR_NUMBER=$(gh pr view --json number --jq '.number')
+PR_URL="<create-prが返却したPR URL>"
+PR_NUMBER="${PR_URL##*/}"
+[ -n "$PR_NUMBER" ] || exit 1  # PR_URL未取得時は実行せず中断（前掲の方針どおり）
 gh pr view "$PR_NUMBER" --json body --jq '.body' \
   | sed -E '/^Closes #[[:space:]]*$/d' \
   | gh pr edit "$PR_NUMBER" --body-file -

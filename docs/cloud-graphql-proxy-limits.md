@@ -31,9 +31,22 @@ GitHub アクセスは **3つの独立したゲート**で塞がれており、`
 
 なお403の応答ヘッダは3行（`Content-Length` / `Content-Type` のみ、`Server` も `X-GitHub-Request-Id` も無い）で、200を返した `gh api user` は完全な GitHub ヘッダ群を伴っていた。**拒否はコンテナ内で合成されており、GitHub には到達していない**。
 
-### 交絡: クラウド VM の `gh` が古い
+### 交絡: クラウド VM の `gh` が古い（2026-08-29 に解消。ただし結論は変わらない）
 
-クラウド VM の `gh` は **2.45.0（2025-07-18 の Ubuntu パッケージ）**で、`parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` の各 `--json` フィールドを**そもそも知らない**（`Unknown JSON field` でネットワークに出る前に失敗する）。この4つはプロキシ制限とは無関係に失敗するため、403の集計から切り離して読むこと。ワーカー本体（`src/gh.ts`）が使う `hasOpenBlockers` / `getIssueSubIssuesSummary` / `listIssuesByLabel`(`--json parent`) は、クラウド実行時にこの CLI バージョン差にも当たる。
+実測当時のクラウド VM の `gh` は **2.45.0（2025-07-18 の Ubuntu パッケージ）**で、`parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` の各 `--json` フィールドを**そもそも知らなかった**（`Unknown JSON field` でネットワークに出る前に失敗する）。この4つはプロキシ制限とは無関係に失敗するため、403の集計から切り離して読むこと。
+
+**2026-08-29 時点でクラウド VM の `gh` は 2.98.0 へ上がり、この交絡は解消した**（C1 / C2 / C3 / C6 の「失敗（CLI）」はもう起きない）。ただし**403 になる事実は変わらない**。同日 gh 2.98.0（ローカル）で `GH_DEBUG=api` を取り、以下がいずれも `https://api.github.com/graphql` を叩くことを確認した:
+
+| コマンド | 転送経路（gh 2.98.0 実測） |
+|---|---|
+| `gh issue view <n> --json parent` / `blockedBy` | GraphQL |
+| `gh issue edit <n> --add-blocked-by` / `--add-blocking` / `--add-sub-issue` | GraphQL |
+| `gh issue create`（`--blocked-by` 等の有無に関わらず） | GraphQL（`createIssue` mutation） |
+| `gh pr view <n> --json mergeable` | GraphQL（`PullRequestByNumber`） |
+
+つまりフィールド・フラグの有無ではなく**転送経路**の問題であり、**gh を新しくしても GraphQL ゲートは越えられない**。REST（`gh api repos/{o}/{r}/...`）へ寄せる以外に手が無く、その実装が `plugin/scripts/gh-compat.sh` である。
+
+あわせて `gh issue create --blocked-by` の順序も確認した。**Issue の作成（`createIssue`）が先に完了し、relationship の解決はその後**に走るため、`--blocked-by` に不正な番号を渡すとコマンドは非0で終わるが Issue は作成済みで残る。`post-scope-issue-body` に書かれていた「relationship が貼れないなら Issue も作られない」という fail-fast の記述は、現行 gh では成立しない（同スキルの記述を訂正済み）。
 
 ## `gh` コマンド表（PRD 5章 制約表の差し替え用）
 

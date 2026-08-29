@@ -172,7 +172,7 @@ E2Eテストが存在し、かつタスクがユーザー操作フロー（画�
 
 ### 依存関係の特定（blockedBy / blocking）
 
-作成する Issue が他の Open な Issue と依存関係を持つ場合、GitHub ネイティブ relationships（blocked-by / blocking）で明示する。依存関係は本文の `## 依存関係` セクションには書かず、`post-issue-body` の `blocked_by` / `blocking` 経由で `gh issue create --blocked-by` / `--blocking` として貼る（GitHub UI で関係性が表示され、本文との二重管理によるズレも避けられる）。
+作成する Issue が他の Open な Issue と依存関係を持つ場合、GitHub ネイティブ relationships（blocked-by / blocking）で明示する。依存関係は本文の `## 依存関係` セクションには書かず、`post-issue-body` の `blocked_by` / `blocking` 経由で GitHub ネイティブ relationships として貼る（GitHub UI で関係性が表示され、本文との二重管理によるズレも避けられる）。
 
 推測で無関係な Issue を紐付けないよう、**根拠が明確なものだけ**を対象にする。
 

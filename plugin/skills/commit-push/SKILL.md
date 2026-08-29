@@ -41,7 +41,7 @@ pwd
 
 ```bash
 git status
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # 分岐元（BASE_BRANCH）を確定する。upstream を最優先し、無ければデフォルトブランチへ倒す。

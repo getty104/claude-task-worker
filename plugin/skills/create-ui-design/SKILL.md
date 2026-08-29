@@ -258,11 +258,11 @@ push（またはリモート存在確認）に失敗した場合はエラー出�
 
 ベースブランチは実装PRと揃える（Epic配下のIssueでは、デザインが実装ブランチに存在しない事態を防ぐため）。
 
-`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。ログインユーザー取得（`gh api user`）は GitHub MCP が使える場合は `get_me` を使う。
+`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh-compat.sh issue-parent`（REST優先・失敗時のみ `gh` へフォールバック）を使う。ログインユーザー取得（`gh api user`）は GitHub MCP が使える場合は `get_me` を使う。
 
 ```bash
 BASE_BRANCH=""
-if ! PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty'); then
+if ! PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0"); then
   echo "failed to resolve issue parent" >&2
   exit 1
 fi

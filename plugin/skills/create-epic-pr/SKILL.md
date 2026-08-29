@@ -49,10 +49,10 @@ Issueが存在しない、または `state` が `CLOSED` の場合は中断す�
 
 ### 0-4. デフォルトブランチ名の取得
 
-リポジトリ情報の単独取得ツールが MCP に無いため `gh` に据え置く（`git symbolic-ref refs/remotes/origin/HEAD` 等のローカル導出も可）。
+リポジトリ情報の単独取得ツールが MCP に無いため `gh-compat.sh default-branch`（REST優先・失敗時のみ `gh` へフォールバック）を使う。
 
 ```bash
-gh repo view --json defaultBranchRef -q .defaultBranchRef.name
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch
 ```
 
 失敗した場合は中断する。取得した値を `<BASE>` と呼ぶ。

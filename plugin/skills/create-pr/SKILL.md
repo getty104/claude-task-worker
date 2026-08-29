@@ -65,9 +65,9 @@ BASE_BRANCH=""
 
 # Issue 番号を取り出せた場合のみ実行
 if [ -n "${ISSUE_NUMBER}" ]; then
-  # gh issue view が失敗した場合はエラーを報告して中断
-  # Issue Dependencies（parent）はMCP側の対応が不定のため gh のまま残す
-  PARENT=$(gh issue view "${ISSUE_NUMBER}" --json parent --jq '.parent.number // empty') || {
+  # parent の取得が失敗した場合はエラーを報告して中断
+  # `gh issue view --json parent` は GraphQL 経由でクラウドでは 403 になるため、REST を第一手段にする
+  PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "${ISSUE_NUMBER}") || {
     echo "Error: Failed to retrieve Issue #${ISSUE_NUMBER}" >&2
     exit 1
   }
@@ -77,7 +77,7 @@ if [ -n "${ISSUE_NUMBER}" ]; then
 fi
 ```
 
-Issue番号を取り出せなかった場合（`ISSUE_NUMBER` が空）は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。Issue番号が指定されているが `gh issue view` の実行に失敗した場合（ネットワークエラー・権限不足等）はエラーメッセージを出力して処理を中断する。
+Issue番号を取り出せなかった場合（`ISSUE_NUMBER` が空）は本ステップをスキップし、`BASE_BRANCH` を空のままステップ2へ進む。Issue番号が指定されているが parent の取得に失敗した場合（ネットワークエラー・権限不足等）はエラーメッセージを出力して処理を中断する。
 
 ### 2. upstream（追跡ブランチ）からの確定的導出
 
@@ -104,7 +104,7 @@ fi
 
 ```bash
 if [ -z "${BASE_BRANCH}" ]; then
-  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
+  DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
   CURRENT=$(git rev-parse --abbrev-ref HEAD)
 
   BASE_BRANCH=$(
