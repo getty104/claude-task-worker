@@ -215,6 +215,22 @@ test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server
   assert.ok(!("HERDR_DISABLE_SOUND" in buildClaudeEnv("herdr")));
 });
 
+test("buildClaudeEnv adds CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC only when cloud is true", () => {
+  assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("default", false), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("herdr", false), {
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+  });
+  assert.deepEqual(buildClaudeEnv("default", true), {
+    ...CLAUDE_SPAWN_ENV,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  });
+  assert.deepEqual(buildClaudeEnv("herdr", true), {
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  });
+});
+
 test("buildClaudeExecution always runs claude directly with the built args", () => {
   for (const mode of ["default", "herdr"] as const) {
     const invocation = { mode, prompt: "/skill 123", model: "sonnet", effort: "high" } as const;

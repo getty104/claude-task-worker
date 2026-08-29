@@ -13,7 +13,15 @@
 - OS: macOS (darwin 25.6.0)
 - 実行ディレクトリ: git の **linked worktree**（`.claude/worktrees/<name>`）
 - TTY のある実行は `script -q /dev/null <cmd>` で pty を割り当てて実施
-- **このリポジトリでは claude.ai 側の GitHub App 連携が未設定**（`--ref` / `--on-branch` の結果に直結する前提）
+- 実測当時は claude.ai 側の GitHub App 連携が未設定と判断していたが、下記「訂正（2026-08-29）」のとおりこれは Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)）による誤判定だったと判明している
+
+## 訂正（2026-08-29）: `--ref` / `--on-branch` 拒否は GitHub App 未設定が原因ではない
+
+本ファイルの T9 / T10 / T11 が観測した `Error: ... the GitHub App is not set up for this repository, ...` は、**GitHub App 連携が実際に未設定だったからではなく、Claude Code 側のバグによる誤判定**だった（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)、2026-08-29 時点で `area:core` ラベル付き **OPEN**）。上流の `--debug` ログでは `Checking GitHub app installation for <owner>/<repo>` → `GitHub app is not installed … (status is null)` という判定になっており、GitHub App 連携済みのリポジトリ（public / private とも）でも同じ理由で拒否される。コメント欄では macOS / Windows 双方での再現も報告されている。
+
+回避策は環境変数 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与すること。smoke test（claude 2.1.250、2026-08-29、public / private 双方のリポジトリ）で `--ref main` / `--on-branch <PR head>` のいずれもセッション**作成に成功する**ことを確認済み。確認できたのは「セッション作成が成功すること」のみで、その先（force-push の可否等）は未確認。
+
+観測されたエラー文言・終了コード・コマンド自体は事実として以下にそのまま残す。「GitHub App が未設定である」「ブランチ名検証に到達しない」という**結論**の部分だけを上記のとおり訂正する。
 
 ## `--help` 掲載状況（2.1.247）
 
@@ -36,7 +44,7 @@
 根拠:
 - 1: 非TTY環境で `claude --cloud "ctw probe" --definitely-not-a-flag` は `error: unknown option` を返し、後続のいずれのチェックにも到達しない
 - 2 → 3: T2（非TTY・`-p` 併用・新規作成）は `Error: --cloud cannot be combined with --print.` を返し、T1 が示す TTY エラー（`Error: --cloud requires an interactive terminal.`）には到達しない。非TTYなのに TTY エラーではなく `--print` 排他エラーが返っている＝この経路では TTY チェックに到達していない。したがって `-p` 併用時は print 排他チェックが TTY チェックより先に評価される
-- 4: T8（`--ref`/`--on-branch` 併用の排他）・T9/T10（GitHub App 未設定エラー）はいずれも pty（TTYチェック通過後）でのみ検証しており、この段の内部順序（2・3との相対順を含む）は未確認
+- 4: T8（`--ref`/`--on-branch` 併用の排他）・T9/T10（GitHub App 誤判定エラー。上記「訂正」参照）はいずれも pty（TTYチェック通過後）でのみ検証しており、この段の内部順序（2・3との相対順を含む）は未確認
 - 5: 未実測。ネットワーク呼び出し自体の失敗ケース（認証切れ等）は本調査で確認していない
 
 **この順序は `-p` を併用した新規作成（T1・T2）でのみ裏付けが取れている。** `-p` を伴わない `--cloud` 新規作成時に TTY チェックと他のバリデーションがどの順で評価されるかは実測していない。
@@ -49,8 +57,8 @@
 | `--cloud <description>`（値あり・新規作成、非TTY） | なし | 付与 | 拒否（TTY必須） | `Error: --cloud requires an interactive terminal.` | T1 |
 | `--cloud <session_id>`（既存セッションへの追記投函、`-p` 併用） | なし | 付与 | **受理**（TTY不要）。**ただし現行実装（Issue #302 以降）ではこの経路は使わない** — `--cloud <description>` の `description` は表示名ではなく初期プロンプトとして即実行される（claude 2.1.250 実測）ため、作成コマンドの description にプロンプトを直接渡す1コマンド方式へ切り替え、この投函コマンドは廃止した | — | T3 |
 | `--cloud <session_id>`（対話アタッチ） | なし | 付与 | 拒否（アカウント単位で無効） | `Error: Attaching to an existing cloud session is not enabled for your account.` | T4 |
-| `--ref <branch>` | なし | Issue系: ベースブランチ想定 | **未実測**（GitHub App未設定のため到達不可） | `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9 |
-| `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | **未実測**（同上） | `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10 |
+| `--ref <branch>` | なし | Issue系: ベースブランチ想定 | 実測環境ではバグ（#81776）により拒否されていた。回避策適用でセッション作成は成功する（smoke test 済み）。ブランチ名検証以降の意味論は**引き続き未実測** | `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9 |
+| `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | 同上（回避策適用でセッション作成は成功する。それ以降は未実測） | `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10 |
 | `--ref` と `--on-branch` の併用 | — | — | 拒否（排他） | `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other` | T8 |
 | `--permission-mode bypassPermissions` | 付与 | 付けない（PRD想定） | **受理される**（PRD想定と異なる） | エラーなし。セッション作成成功 | T5 |
 | `--disallowedTools` | 付与 | 付けない（PRD想定） | **受理される**（PRD想定と異なる） | エラーなし。セッション作成成功 | T6 |
@@ -71,8 +79,8 @@
 - **T8** `claude --cloud "<desc>" --ref main --on-branch main`（pty）→ exit=1: `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`。両フラグが**どちらもベースブランチ指定**であることを示す（PRD旧版の役割分担想定とは異なる）
 - **T9** `claude --cloud "<desc>" --ref ctw-no-such-branch-xyz123`（pty）→ exit=1: `Error: --ref ctw-no-such-branch-xyz123 cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.`
 - **T10** `claude --cloud "<desc>" --on-branch ctw-no-such-branch-xyz123`（pty）→ exit=1、T9と同文言（`--ref`→`--on-branch`に置換のみ）
-  - T9/T10 の解釈: 拒否理由は「ブランチ不在」ではなく「GitHub App 連携未設定」。ブランチ名検証に到達していないため、`--ref`/`--on-branch` の**受理可否そのものが未判定**
-- **T11** GitHub App 未設定時のシード元（T5/T6/T7で毎回観測）: `This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.` → クラウドセッションは**ローカル作業ツリーをアップロードしてシードされる**（remote を clone するのではない）。PRD 4.4-1 の「VM は自前で clone するので worktree 不要」という前提は GitHub App 連携済みの場合にのみ成立しうる（本Issueのスコープ外の判断材料）
+  - T9/T10 の解釈（訂正済み）: 拒否理由は「ブランチ不在」でも「GitHub App 連携未設定」の実態でもなく、Claude Code 側のバグ（#81776）による誤判定。ブランチ名検証に到達していないため、`--ref`/`--on-branch` の**受理可否そのものが未判定**（回避策適用後はセッション作成まで到達する。上記「訂正」参照）
+- **T11** シード元（T5/T6/T7で毎回観測。当時は GitHub App 未設定時の挙動と解釈していたが、上記の誤判定バグと同一のチェックに起因する可能性があり、実際の連携状態を裏付ける根拠としては扱わない）: `This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.` → クラウドセッションは**ローカル作業ツリーをアップロードしてシードされる**（remote を clone するのではない）。PRD 4.4-1 の「VM は自前で clone するので worktree 不要」という前提が成立するかは**未確認**（連携済み判定のもとでの再実測が必要）
 
 ## PRD 4.2 からの差分
 
@@ -86,9 +94,9 @@
 
 ## 未実測項目
 
-1. **`--ref` / `--on-branch` の受理可否と意味論**
-   - 理由: 実測リポジトリで claude.ai 側の GitHub App 連携が未設定のため、ブランチ名の検証に到達する前に拒否される
-   - 再現手順: https://claude.ai/code で対象リポジトリの GitHub 連携をセットアップしたうえで、(a) 既存リモートブランチ、(b) リモート未存在ブランチ、の2ケースで `claude --cloud "<desc>" --ref <branch>` / `--on-branch <branch>` を pty から実行し、成功時は claude.ai 側でベースブランチと作業ブランチを確認する
+1. **`--ref` / `--on-branch` のブランチ名検証以降の意味論**
+   - 理由: 実測当時は #81776 のバグにより `--ref`/`--on-branch` 自体がブランチ名検証の前段で拒否されていた。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` の回避策適用でセッション作成には成功することを smoke test で確認済みだが、(a) 既存リモートブランチ、(b) リモート未存在ブランチでの意味論の違い、(c) 作業ブランチとベースブランチの実際の対応関係は未確認
+   - 再現手順: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与したうえで、(a) 既存リモートブランチ、(b) リモート未存在ブランチ、の2ケースで `claude --cloud "<desc>" --ref <branch>` / `--on-branch <branch>` を pty から実行し、成功時は claude.ai 側でベースブランチと作業ブランチを確認する
 2. **`--append-system-prompt-file` の内容がクラウド VM 側で実際にシステムプロンプトへ反映されるか**
    - 理由: 起動引数として拒否されないことのみを確認した。反映の確認にはセッションへプロンプトを投入して挙動を観察する必要がある
    - 再現手順: 判別可能な指示（例: 特定の固定文字列を必ず出力させる）を書いたファイルを `--append-system-prompt-file` で渡してクラウドセッションを作成し、`claude -p --cloud <session_id> "..."` で質問して指示が効いているかを確認する
@@ -116,7 +124,7 @@
 
 - 実行場所: herdr タブ（`tab create --cwd <worktree> --no-focus`）のルートペイン。`script` による疑似 pty ではなく**実TTY**
 - 実行ディレクトリ: git の linked worktree（`.claude/worktrees/<worktree>`）
-- S-1 と同じく、このリポジトリでは claude.ai 側の **GitHub App 連携が未設定**
+- S-1 と同じく、実測当時は claude.ai 側の **GitHub App 連携が未設定**と判断していたが、これは #81776 のバグによる誤判定だったと後日判明している（上記「訂正（2026-08-29）」参照）
 
 ## 結論
 
@@ -147,7 +155,7 @@
 - **M-2** `claude --teleport <session_id>` は同ペインで TUI を起動でき、`agent get` が agent を返す（`agent_session.value` はローカル claude のセッションUUID、`agent_status: idle`）。`herdr agent prompt` 投入後 3秒間隔ポーリングで `idle → working → done`（非フォーカスのまま `done` に到達し60sまで維持）を観測。**ローカル実行と完全に同じ遷移**で、`observeAgentStatus()` の `done` 即完了ルールがそのまま効く
 - **M-3** `--teleport` の実行場所は**ローカル**。`uname -a; whoami; hostname; pwd; git rev-parse --abbrev-ref HEAD` を投入した結果、ローカルマシン（Darwin・ローカルユーザー・ローカル worktree・ローカルブランチ）で実行されていた。`--teleport` はクラウド VM をリモート操作するのではなく、セッションを手元へ引き寄せてローカルで継続するフラグ。ctrl-c で抜けた際の案内も `claude --resume <uuid>` とローカル resume を示し、`claude agents --json --all` にも `"kind": "interactive"` かつローカル `pid` 付きで列挙される（M-8）
 - **M-4** 質問待ちは `blocked` を返す（`idle` 誤返却なし）。`AskUserQuestion` で選択肢待ちにしてポーリングすると `blocked` を36秒以上維持し `idle` へは落ちない。`observeAgentStatus()` は `blocked` を待機継続へ倒すため誤完了は起きない。受け入れ基準7を満たす
-- **M-5** `claude -p --cloud <id> "<msg>"`（非TTY投函）は**即座に return**し、CLI から観測できる完了シグナルが一切無い。claude.ai の Web UI で確認すると、VM 側は Linux/x86_64/`root`/cwd `/home/user/repo` で正しく実行されていた（`git remote -v produced no output` の地の文含む）。判明事実: (1) VM は Linux/x86_64/`root`、(2) ブランチ名は**ローカル worktree のブランチ名がそのまま持ち込まれる**（S-1 T11と整合）、(3) **`git remote` が1件も無い**ため push も PR 作成もできない。(3) は GitHub App 未連携のクラウドセッションが成果物を出せないことを示す判断材料（本Issueのスコープ外）
+- **M-5** `claude -p --cloud <id> "<msg>"`（非TTY投函）は**即座に return**し、CLI から観測できる完了シグナルが一切無い。claude.ai の Web UI で確認すると、VM 側は Linux/x86_64/`root`/cwd `/home/user/repo` で正しく実行されていた（`git remote -v produced no output` の地の文含む）。判明事実: (1) VM は Linux/x86_64/`root`、(2) ブランチ名は**ローカル worktree のブランチ名がそのまま持ち込まれる**（S-1 T11と整合）、(3) **`git remote` が1件も無い**ため push も PR 作成もできない。(3) は実測当時 GitHub App 未連携が原因と解釈していたが、S-1 T11 と同じく #81776 のバグの影響が疑われるため、連携済み環境での再実測（本Issueのスコープ外）まで確定的な原因とはしない
 - **M-6** クラウド側のターンはローカルへ降りてこない。M-5 の投函から100秒後に同セッションへ `--teleport` でアタッチすると会話履歴は空（`NO PRIOR HISTORY`）。ペイン内容にもローカル transcript にも一切現れないため、`buildHerdrTaskResult()` の transcript 経路・ペイン内容フォールバックのどちらでもクラウドの成果を回収できない。transcript は**クラウドセッションIDでは生成されない**が、teleport セッションのローカル UUID ではローカルターン実行後に生成され、`readFinalReport()` 相当（末尾の非 sidechain アシスタント発言）で `NO PRIOR HISTORY …` が正しく取り出せた。**実装自体は teleport セッションに対して無修正で機能する**（読めるのがローカルターンだけという制約が付くだけ）
 - **M-7** `agentGet()` の sessionId は claude.ai の URL として使えない。M-2 で得たローカル UUID を `https://claude.ai/code/<uuid>` で開くと「このセッションは見つかりませんでした」。クラウドセッションIDの stdout 値（`session_01…` 形式）で開くと正しく表示される（M-5）。**ID形式が別系統**（ローカルはUUID、クラウドはULID様式）で、`src/herdr.ts` の `toAgentInfo()` が拾う値をそのまま Slack URL に流用できない
 - **M-8** CLI にクラウドセッションを列挙・照会する手段は無い。`claude agents --json --all`（TTY不要）は**ローカルセッションのみ**を返しクラウドセッション（`session_01…`）は1件も含まれない（要素例: `pid`/`cwd`/`kind: "interactive"`/`sessionId`（ローカルUUID）/`status`）。`claude --help` の全サブコマンドにもクラウドセッション照会に相当するものは無い。副次的収穫として `claude agents --json` はローカルセッションの `status`（`idle`/`busy`）を herdr 非依存で返す（`mode: "default"` でも使える完了検知チャネル、本Issueのスコープ外）
@@ -159,13 +167,13 @@
 2. **4.4-3 のフォールバックが両方とも空振りする**。transcript もペイン内容も、クラウド VM で実行されたターンを含まない（M-6）。最終レポートの取得経路は現状ゼロ
 3. **9-9 の想定（`agentGet()` の sessionId ＝ クラウドセッションID）が誤り**（M-7）。取得元は起動コマンドの stdout になる
 4. **受け入れ基準7 の「質問待ちを `idle` と誤返却しない」は満たされている**（M-4）。ただし検証できたのはローカル TUI に対する herdr の挙動であり、クラウドセッションの質問待ちについては観測経路が無いため未検証
-5. **GitHub App 未設定のクラウドセッションには git remote が無い**（M-5）。PR を作るワーカーをこの構成のままクラウド化することはできない
+5. **クラウドセッションに git remote が無い**（M-5）。当時は GitHub App 未設定が原因と解釈していたが、#81776（上記「訂正」参照）により実際の連携状態を反映した観測かどうかが不確かになっている。連携済み環境での再実測ができるまで、PR を作るワーカーのクラウド化はこの制約を前提に判断を保留する
 
 ## 未実測項目
 
-1. **GitHub App 連携済みリポジトリでの挙動全般**
-   - 理由: 実測リポジトリで claude.ai 側の GitHub App 連携が未設定。クラウド VM がリモートを clone する経路（remote あり・独自ブランチ）に入れないため、ブランチ名の決まり方・push 可否・`gh pr list` からの追跡可否がいずれも判定できない
-   - 再現手順: https://claude.ai/code で対象リポジトリの GitHub 連携をセットアップしたうえで M-5 を再実行し、`git remote -v` / `git rev-parse --abbrev-ref HEAD` の出力を比較する
+1. **クラウド VM がリモートを clone する経路（remote あり・独自ブランチ）での挙動全般**
+   - 理由: 実測当時は claude.ai 側の GitHub App 連携が未設定と判断していたが、#81776（上記「訂正」参照）によりこの判定自体の信頼性が確定していない。回避策 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を適用した場合にクラウド VM がリモート clone 経路へ入るかは未確認で、ブランチ名の決まり方・push 可否・`gh pr list` からの追跡可否がいずれも判定できていない
+   - 再現手順: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与したうえで M-5 を再実行し、`git remote -v` / `git rev-parse --abbrev-ref HEAD` の出力を比較する
 2. **クラウドセッションの質問待ち（`blocked` 相当）の観測**
    - 理由: クラウドセッションを観測できる CLI 経路が無いため（M-8）、状態を取得する手段そのものが存在しない
    - 再現手順: 対話アタッチ（`claude --cloud <session_id>`）がアカウントで有効化された環境で M-4 を再実行する
@@ -179,3 +187,7 @@
 ## 実測の副作用
 
 本実測により2件のクラウドセッションが作成された（M-1〜M-4はteleport経由でローカルターンを3回実行、M-5/M-6はクラウドVM側で1ターン実行）。不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。herdr のプローブ用タブは実測後にクローズ済み。
+
+## 関連する別バグ（記録のみ・本Issueのスコープ外）
+
+[anthropics/claude-code#87235](https://github.com/anthropics/claude-code/issues/87235): **スラッシュを含むブランチ名**（`team/branch` 形式）はリモートに存在してもクラウドセッションの revision として解決されない。`--on-branch` に PR の head ブランチを渡す PR 系ワーカー（`dependabot/npm_and_yarn/...` 等）に影響しうる。#81776 とは別バグで、本Issueの修正対象外のため記録のみ。

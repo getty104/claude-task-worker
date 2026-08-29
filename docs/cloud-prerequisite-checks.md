@@ -107,9 +107,11 @@ instead. Set up the GitHub integration at https://claude.ai/code, or drop
 --ref to seed from local HEAD.
 ```
 
-ワーカーは Issue 系タスクで `--ref`、PR 系タスクで `--on-branch` を付ける想定（PRD 4.2）なので、GitHub 未連携はこのエラーとしてタスク実行時に必ず顕在化する。案内はこの文言を起点にすればよい。
+**訂正（2026-08-29）**: 上記の文言は「GitHub 連携が実際に未設定だから」ではなく、Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)、2026-08-29 時点 OPEN）による誤判定でも表示されることが判明している。GitHub App 連携済みのリポジトリ（public / private とも）でも同じ文言で拒否されうる。**回避策**は環境変数 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与すること。smoke test（claude 2.1.250、2026-08-29、public / private 双方）で `--ref` / `--on-branch` ともセッション作成に成功することを確認済み。
 
-なお `docs/cloud-session-launch-flags.md`（Issue #224 の追記）が実測したとおり、**GitHub App 未設定のクラウドセッションには git remote が無く、成果物を GitHub へ push できない**。連携未設定は「セッションは作れるが PR を出せない」状態であり、案内では単なる警告ではなく実質的なブロッカーとして扱う必要がある。
+したがって、このエラーに遭遇した場合の案内は「GitHub 連携をセットアップする」だけでなく、まず回避策 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` の付与で解消するかを確認する順にすべきである。ワーカーは Issue 系タスクで `--ref`、PR 系タスクで `--on-branch` を付ける想定（PRD 4.2）なので、この文言はタスク実行時に顕在化しうる。
+
+なお `docs/cloud-session-launch-flags.md`（Issue #224 の追記）が実測した「GitHub App 未設定のクラウドセッションには git remote が無く、成果物を GitHub へ push できない」という記述も、同じ誤判定チェックの影響を受けている可能性があり、連携済み環境（かつ回避策適用後）での再実測が必要である。再実測が済むまでは、案内では単なる警告ではなく実質的なブロッカーとして扱っておく。
 
 ## 前提条件4: `allow_remote_sessions` — 判定できない
 
@@ -169,7 +171,8 @@ Contact your organization admin to enable them.
 
 ### 2（タスク失敗時の案内）
 
-> クラウドセッションの作成が GitHub 連携の未設定で失敗した可能性があります（`--ref` / `--on-branch` が拒否された場合はこれが原因です）。https://claude.ai/code で対象リポジトリの GitHub 連携をセットアップしてください。GitHub App の認可、または `/web-setup` による `gh` トークンの同期のどちらでも構いません。
+> クラウドセッションの作成が `--ref` / `--on-branch` のエラー（`the GitHub App is not set up for this repository, ...`）で失敗した可能性があります。**まず環境変数 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与して再実行してください** — この文言は GitHub 連携済みのリポジトリでも Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)）により表示されることがあり、同変数で回避できることを確認しています。
+> それでも解消しない場合は、https://claude.ai/code で対象リポジトリの GitHub 連携をセットアップしてください。GitHub App の認可、または `/web-setup` による `gh` トークンの同期のどちらでも構いません。
 > ローカルからは連携状態を確認する手段がないため、事前チェックは行っていません。
 
 ### 4（タスク失敗時の案内）
@@ -202,5 +205,5 @@ Contact your organization admin to enable them.
 2. **組織ポリシーで `allow_remote_sessions` が拒否される環境での実文言と `policy-limits.json` の実体**
    - 理由: 実測アカウントの組織にポリシー制限がかかっておらず、自組織で無効化するのは破壊的なため実施しなかった
    - 再現手順: ポリシー制限のある組織アカウントで `claude --cloud "<desc>"` を実行し、エラー文言と `~/.claude/policy-limits.json` の有無・内容を確認する
-3. **GitHub 連携済みリポジトリでの `--ref` / `--on-branch` の挙動**
-   - `docs/cloud-session-launch-flags.md` の未実測項目1と同一。本Issueでも解消していない
+3. **`--ref` / `--on-branch` のブランチ名検証以降の挙動（回避策適用後）**
+   - `docs/cloud-session-launch-flags.md` の未実測項目1と同一。回避策 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` の適用でセッション作成には成功することは smoke test で確認済み（2026-08-29）だが、本Issueの範囲では解消していない
