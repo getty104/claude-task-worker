@@ -93,7 +93,7 @@ gh pr view $ARGUMENTS --json mergeable -q .mergeable
 
 以下を **同一メッセージ内で並列に実行** する。
 
-未解決のインラインレビューコメントとConversationタブの一般コメントは、GitHub MCP の `pull_request_read`（method: `get_review_comments`）を優先して取得する。利用不可なら以下の共有スクリプトへフォールバックする。
+未解決のインラインレビューコメントは GitHub MCP の `pull_request_read`（method: `get_review_comments`）を優先して取得する。**`get_review_comments` はレビュースレッド専用で、Conversationタブの会話コメントは返さない**ため、会話コメントは PR が Issue 番号空間を共有することを利用して `issue_read`（method: `get_comments`）を別途呼ぶ。どちらか一方でも利用不可なら以下の共有スクリプトへフォールバックする（同スクリプトは両方を1回で返す）。
 
 **ページングは取得しきる。** `get_review_comments` はカーソル方式（`after` に前ページの `endCursor` を渡す）で、応答の `pageInfo.hasNextPage` が `true` の間は `after` を更新して呼び直す。会話コメント（PRはIssue番号を共有するため `issue_read` の method: `get_comments`）はオフセット方式（`page` / `perPage`）で、返り件数が `perPage` 未満になるまで `page` を進めて呼び直す。1ページ目だけで打ち切ると、指摘・コメントが多いPRで後続ページの指摘を取りこぼす。
 
@@ -114,7 +114,8 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 上記のPR本文・ラベル取得は、GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら`gh pr view`にフォールバックする。
 
-- 1つ目（`fetch-unresolved-comments.sh` またはMCPの`get_review_comments`）は未解決のインラインレビューコメント（`unresolved_threads[]`）とConversationタブの一般コメント（`conversation_comments[]`）を返す。インラインだけでは行外の指摘を取りこぼすため両方を対象にする。MCP経路でも同じキー（`thread_id` / `path` / `line` / `is_outdated` / `comments[]` と `author` / `body` / `url` / `created_at` / `is_minimized`）で抽出すること。カレントブランチのPRを対象とするため、ステップ0の `gh pr checkout` 済みであることが前提
+- 1つ目（`fetch-unresolved-comments.sh` またはMCPの`get_review_comments` ＋ `get_comments`）は未解決のインラインレビューコメント（`unresolved_threads[]`）とConversationタブの一般コメント（`conversation_comments[]`）を返す。インラインだけでは行外の指摘を取りこぼすため両方を対象にする。MCP経路でも同じキー（`thread_id` / `path` / `line` / `is_outdated` / `comments[]` と `author` / `body` / `url` / `created_at` / `is_minimized`）で抽出すること。カレントブランチのPRを対象とするため、ステップ0の `gh pr checkout` 済みであることが前提
+- **取得に失敗した場合は「未解決の指摘0件」に倒さない。** スクリプトが非0で終了した場合、または MCP がエラーを返した場合は、`gh pr checks` のパース失敗時と同じ扱いにする: **後続のステップに進まず**、ラベル操作は一切行わずに出力内容をそのまま含めて「判定: エラー」で結果報告を行い終了する。本スキルはマージゲートであり、403 や一過性の `gh` 障害を指摘なしと誤認すると未対応の指摘を残したままPRをマージする。正常に0件だった場合（スクリプトが exit 0 で空配列を返した場合）とは必ず区別すること
 - `gh pr checks` は失敗チェックがあると終了コードが非0になるが、これは「失敗チェックが存在する」という正常系の結果であり、認証失敗・通信障害・不正なPR番号等の実行時エラーと区別が必要。区別は終了コードではなく **出力がJSONとしてパース可能かどうか** で行う。
 
   ```bash

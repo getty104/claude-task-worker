@@ -37,7 +37,7 @@ interface PrWorkerConfig {
    * 含まれるラベルを必ず付けること。
    */
   keepTriggerLabel?: boolean;
-  onCompleted?: (pr: PullRequestWithChecks, output: string, cloud: boolean) => Promise<void>;
+  onCompleted?: (pr: PullRequestWithChecks, output: string) => Promise<void>;
   onFinally?: (pr: PullRequestWithChecks) => Promise<void>;
 }
 
@@ -129,7 +129,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 lastCompletionAt = Date.now();
                 try {
                   if (status === "completed") {
-                    await config.onCompleted?.(pr, output, isCloud);
+                    await config.onCompleted?.(pr, output);
                     await notifyTaskCompleted(
                       config.name,
                       name,
