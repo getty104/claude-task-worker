@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { appendCloudDoneInstruction, buildCloudCreateArgs, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
+import { buildCloudCreateArgs, buildCloudPrompt, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
 import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
@@ -377,6 +377,7 @@ async function runViaCloud(
   cwd?: string,
   env?: Record<string, string>,
   cloudTarget?: CloudTargetType,
+  model?: string,
 ): Promise<void> {
   const herdrRunnerMod = await import("./herdr-runner");
   const { taskTabLabel, waitForPaneReady, extractCloudSessionId } = herdrRunnerMod;
@@ -390,9 +391,14 @@ async function runViaCloud(
 
   const label = taskTabLabel(resolveProjectName(), id);
   // 作成コマンドの description は herdr のタスクタブラベルではなく、クラウドセッションの
-  // 初期プロンプトそのもの。cc-cloud-done の投稿指示もここへ含めておく（渡した瞬間に
-  // 実行されるため、後から追加投函する余地は無い）。
-  const initialPrompt = cloudTarget ? appendCloudDoneInstruction(prompt, { type: cloudTarget, number: id }) : prompt;
+  // 初期プロンプトそのもの。cc-cloud-done の投稿指示に加え、クラウドでは反映されない
+  // システムプロンプト・ツール制限もここへ本文として含めておく（渡した瞬間に実行される
+  // ため、後から追加投函する余地は無い）。
+  const initialPrompt = buildCloudPrompt(
+    prompt,
+    model ?? "",
+    cloudTarget ? { type: cloudTarget, number: id } : undefined,
+  );
   let result: TaskResult;
   let cloudSessionId: string | undefined;
 
@@ -543,6 +549,9 @@ export function run(
   cloud?: boolean,
   // クラウド実行時に cc-cloud-done を探す対象の種別。番号は id を使う。
   cloudTarget?: "issue" | "pr",
+  // クラウド実行時のプロンプト本文組み立て（buildCloudPrompt）に使う `--model` の値。
+  // default/herdr（非cloud）では未使用。
+  model?: string,
 ): void {
   // 同じ Issue/PR を再実行したときは古いエントリを削除してから入れ直し、
   // Map の挿入順で「最新に繰り上げる」（selectRecentTasks の直近順表示と揃える）。
@@ -561,7 +570,7 @@ export function run(
 
   if (getRunMode() === "herdr") {
     if (cloud) {
-      void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env, cloudTarget);
+      void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env, cloudTarget, model);
       return;
     }
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、

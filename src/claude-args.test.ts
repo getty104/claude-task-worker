@@ -15,6 +15,8 @@ const {
   buildClaudeEnv,
   buildClaudeExecution,
   buildCloudCreateArgs,
+  buildCloudPrompt,
+  buildCloudToolRestriction,
   appendCloudDoneInstruction,
   CLOUD_REPORT_HEADING,
   shellQuote,
@@ -405,4 +407,48 @@ test("appendCloudDoneInstruction switches wording between issue and pr targets",
   assert.ok(issueResult.includes("gh issue edit 1 --add-label cc-cloud-done"));
   assert.ok(prResult.includes("PR #1"));
   assert.ok(prResult.includes("gh pr edit 1 --add-label cc-cloud-done"));
+});
+
+test("buildCloudToolRestriction lists every DISALLOWED_TOOLS entry", () => {
+  const restriction = buildCloudToolRestriction();
+  for (const tool of DISALLOWED_TOOLS) {
+    assert.ok(restriction.includes(tool), `expected restriction text to mention ${tool}`);
+  }
+});
+
+test("buildCloudPrompt includes the base system prompt body", () => {
+  const result = buildCloudPrompt("/skill 1", "sonnet");
+  assert.ok(result.includes(SYSTEM_PROMPT_BASE));
+});
+
+test("buildCloudPrompt appends the opus addendum only for opus models", () => {
+  const opusResult = buildCloudPrompt("/skill 1", "opus");
+  const sonnetResult = buildCloudPrompt("/skill 1", "sonnet");
+  assert.ok(opusResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
+  assert.ok(!sonnetResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
+});
+
+test("buildCloudPrompt includes the tool restriction text", () => {
+  const result = buildCloudPrompt("/skill 1", "sonnet");
+  for (const tool of DISALLOWED_TOOLS) {
+    assert.ok(result.includes(tool));
+  }
+});
+
+test("buildCloudPrompt keeps the cc-cloud-done instruction and task prompt when a target is given", () => {
+  const prompt = "/claude-task-worker:exec-issue 123";
+  const result = buildCloudPrompt(prompt, "sonnet", { type: "issue", number: 123 });
+  assert.ok(result.startsWith(prompt));
+  assert.ok(result.includes(prompt));
+  assert.ok(result.includes(CLOUD_REPORT_HEADING));
+  assert.ok(result.includes("cc-cloud-done"));
+  assert.ok(result.includes("Issue #123"));
+});
+
+test("buildCloudPrompt omits the cc-cloud-done instruction when no target is given", () => {
+  const result = buildCloudPrompt("/claude-task-worker:update-coding-guidelines 1", "sonnet");
+  assert.ok(!result.includes("cc-cloud-done"));
+  assert.ok(!result.includes(CLOUD_REPORT_HEADING));
+  assert.ok(result.includes(SYSTEM_PROMPT_BASE));
+  assert.ok(result.includes(DISALLOWED_TOOLS[0]));
 });
