@@ -105,6 +105,7 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 - GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
   `gh pr view $0 --json number,state,headRefName,isDraft,labels` でPRが存在し `OPEN` であることを確認する。CLOSED/MERGEDなら処理を中断。取得したラベル一覧は「修正点がない場合」の Epic PR 判定で使う（再取得しない）
 - `gh pr checkout $0 >/dev/null 2>&1` でPRブランチをチェックアウト（ローカル作業ツリーへの checkout はリモート API では代替できないため `gh` のまま残す）。**クラウド実行時は実行しない** — セッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、`gh pr checkout` はクラウドでは GraphQL ゲートにより 403 で失敗する。`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチなら省略してよい
+- **チェックアウトを省略した場合のfail-safe**: `git rev-parse --abbrev-ref HEAD` の値が、直前で取得済みの `headRefName` と一致することを確認する。一致しない場合は `--on-branch` が反映されていない想定外の状態のため、以降のフェーズ（修正コミット・force-push・Resolve）に進まずその場で中断する
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら安全のため処理を中断する（デフォルトブランチで作業してはならない）
 - `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと一致する場合は中断する。デフォルトブランチ名の取得失敗も中断する（fail-safe）
 - `git status --short` で未コミット変更があれば `git stash push -u -m "fix-review-point auto-stash $0"` で自動退避してから先に進む（ユーザーへの確認は行わない）

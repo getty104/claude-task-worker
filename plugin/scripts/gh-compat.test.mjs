@@ -63,15 +63,27 @@ test("issue-parent は REST を第一手段にし、gh issue view --json parent 
   assert.doesNotMatch(calls, /--json parent/);
 });
 
-test("issue-parent は parent 不在（REST 404 かつ Issue は読める）を空文字・exit 0 で返す", () => {
+test("issue-parent は /parent が404（parent無し）なら空文字・exit 0 で返す", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
   const log = path.join(dir, "log");
-  // /parent は非0（404相当）、Issue 本体だけ読める
-  makeGhStub(dir, { "issues/12 --jq .number": "12\n" });
+  // /parent 本体は非0（404相当）、-i 付きの再問い合わせで 404 ステータス行を返す
+  makeGhStub(dir, { "issues/12/parent -i": "HTTP/2.0 404 Not Found\n\n{}\n" });
   const out = run(["issue-parent", "12"], {
     env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
   });
   assert.equal(out, "");
+});
+
+test("issue-parent は /parent が404以外（403/5xx等）で失敗し gh issue view でも取得不能なら非0で終了する", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  // /parent 本体は非0、-i 付きの再問い合わせは 403 を返す（404 ではない）。gh issue view も失敗させる。
+  makeGhStub(dir, { "issues/12/parent -i": "HTTP/2.0 403 Forbidden\n\n{}\n" });
+  assert.throws(() => {
+    run(["issue-parent", "12"], {
+      env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+    });
+  });
 });
 
 test("issue-parent は REST も Issue 取得も失敗したら gh issue view へフォールバックする", () => {
@@ -100,7 +112,11 @@ test("add-blocking は相手側の blocked_by として登録する（REST に b
 test("pr-mergeable は REST の true/false/null を GraphQL 語彙へ写す", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
   const log = path.join(dir, "log");
-  for (const [rest, expected] of [["false", "CONFLICTING"], ["true", "MERGEABLE"], ["null", "UNKNOWN"]]) {
+  for (const [rest, expected] of [
+    ["false", "CONFLICTING"],
+    ["true", "MERGEABLE"],
+    ["null", "UNKNOWN"],
+  ]) {
     makeGhStub(dir, { "pulls/3": `${rest}\n` });
     assert.equal(
       run(["pr-mergeable", "3"], {
@@ -123,16 +139,69 @@ test("default-branch は git のローカル導出を優先し gh を呼ばな�
     run(["default-branch"], { cwd: repo, env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log } }),
     "trunk",
   );
-  assert.equal(run(["owner-repo"], { cwd: repo, env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log } }), "acme/widget");
+  assert.equal(
+    run(["owner-repo"], { cwd: repo, env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log } }),
+    "acme/widget",
+  );
 });
 
-test("pr-for-branch は REST でカレントブランチの Open PR を引く", () => {
+test("pr-for-branch は REST でカレントブランチの Open PR を引く（-f でクエリをフィールド渡しする）", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
   const log = path.join(dir, "log");
-  makeGhStub(dir, { "pulls?state=open&head=acme:feature/x": "31\n" });
+  makeGhStub(dir, { "pulls -f state=open -f head=acme:feature/x": "[31]\n" });
   const out = run(["pr-for-branch", "feature/x"], {
     env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
   });
   assert.equal(out, "31");
   assert.doesNotMatch(execFileSync("cat", [log], { encoding: "utf8" }), /pr view/);
+});
+
+test("pr-for-branch は特殊文字を含むブランチ名も -f 経由でそのまま1フィールドとして渡す", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "head=acme:feature/x&y": "[31]\n" });
+  const out = run(["pr-for-branch", "feature/x&y"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  assert.equal(out, "31");
+});
+
+test("pr-for-branch は同一ブランチに複数のOpen PRがあれば失敗し、gh pr view へはフォールバックしない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "pulls -f state=open -f head=acme:feature/x": "[31,32]\n" });
+  assert.throws(() => {
+    run(["pr-for-branch", "feature/x"], {
+      env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+    });
+  });
+  assert.doesNotMatch(execFileSync("cat", [log], { encoding: "utf8" }), /pr view/);
+});
+
+test("pr-for-branch はRESTが失敗した場合のみ指定ブランチを添えて gh pr view へフォールバックする", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "pr view feature/x --json number": "9\n" });
+  const out = run(["pr-for-branch", "feature/x"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  assert.equal(out, "9");
+});
+
+test("issue-deps は30件超のページングを取りこぼさないよう --paginate --slurp を付ける", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  // gh をスタブしているため実際のページ結合は gh 自身が行う（--paginate --slurp の指定を検証する）。
+  // 31件超のケースを模して、jq側フィルタが通しても壊れないことをあわせて確認する。
+  makeGhStub(dir, {
+    "dependencies/blocked_by": "[1,2,3]",
+    "dependencies/blocking": "[]",
+  });
+  const out = run(["issue-deps", "12"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  assert.equal(out, '{"blockedBy":[1,2,3],"blocking":[]}');
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /--paginate --slurp repos\/acme\/widget\/issues\/12\/dependencies\/blocked_by/);
+  assert.match(calls, /--paginate --slurp repos\/acme\/widget\/issues\/12\/dependencies\/blocking/);
 });

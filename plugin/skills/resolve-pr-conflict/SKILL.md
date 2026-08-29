@@ -75,6 +75,8 @@ gh pr checkout $ARGUMENTS
 
 **クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
 
+**チェックアウトを省略した場合のfail-safe**: `git rev-parse --abbrev-ref HEAD` の値が、ステップ1冒頭で取得済みの `headRefName` と一致することを確認する。一致しない場合は `--on-branch` が反映されていない想定外の状態のため、rebase・force-pushを行わずその場で中断する。
+
 `gh pr checkout`が失敗した場合（作業ツリーが汚れている、ローカルに同名のブランチがある等）は、原因をそのまま出力して中断する。`git stash`や`git reset --hard`を独断で行ってユーザーの未コミット変更を失わせないこと。
 
 チェックアウト成功後、fail-safeとしてブランチがデフォルトブランチでないことを確認する。

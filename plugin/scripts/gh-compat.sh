@@ -73,23 +73,26 @@ issue_id() {
 }
 
 cmd_issue_parent() {
-  local n="$1" out
-  if out=$(gh api "repos/${OWNER_REPO}/issues/${n}/parent" --jq '.number' 2>/dev/null); then
+  local n="$1" out rc status_line
+  out=$(gh api "repos/${OWNER_REPO}/issues/${n}/parent" --jq '.number' 2>/dev/null)
+  rc=$?
+  if [ $rc -eq 0 ]; then
     printf '%s\n' "$out"; return 0
   fi
-  # 404 は「parent が無い」の正常系。Issue 自体が読めるかで失敗と区別する。
-  if gh api "repos/${OWNER_REPO}/issues/${n}" --jq '.number' >/dev/null 2>&1; then
-    printf '\n'; return 0
-  fi
+  # 404 は「parent が無い」の正常系。403/5xx/network 等それ以外の失敗は「親なし」と誤認せず区別する。
+  status_line=$(gh api "repos/${OWNER_REPO}/issues/${n}/parent" -i 2>/dev/null | head -1)
+  case "$status_line" in
+    *" 404 "*) printf '\n'; return 0 ;;
+  esac
   gh issue view "$n" --json parent --jq '.parent.number // empty' 2>/dev/null
 }
 
 cmd_issue_deps() {
   local n="$1" blocked blocking
-  blocked=$(gh api "repos/${OWNER_REPO}/issues/${n}/dependencies/blocked_by" \
-    --jq '[.[] | select(.state=="open") | .number]' 2>/dev/null)
-  blocking=$(gh api "repos/${OWNER_REPO}/issues/${n}/dependencies/blocking" \
-    --jq '[.[] | select(.state=="open") | .number]' 2>/dev/null)
+  blocked=$(gh api --paginate --slurp "repos/${OWNER_REPO}/issues/${n}/dependencies/blocked_by" \
+    --jq '[.[][] | select(.state=="open") | .number]' 2>/dev/null)
+  blocking=$(gh api --paginate --slurp "repos/${OWNER_REPO}/issues/${n}/dependencies/blocking" \
+    --jq '[.[][] | select(.state=="open") | .number]' 2>/dev/null)
   if [ -n "$blocked" ] || [ -n "$blocking" ]; then
     printf '{"blockedBy":%s,"blocking":%s}\n' "${blocked:-[]}" "${blocking:-[]}"
     return 0
@@ -154,13 +157,19 @@ cmd_pr_mergeable() {
 
 # カレントブランチに対応する Open PR の番号。MCP は PR 番号を要求するので代替できず、
 # `gh pr view --json number` は GraphQL 経由でクラウドでは 403 になる。
+# 同一 head ブランチに複数の Open PR がある場合は、誤って別PRを指すのを避けるため失敗として返す
+# （呼び出し元は既存の空チェックで安全に停止する）。REST 呼び出し自体が失敗した場合のみ gh へフォールバックする。
 cmd_pr_for_branch() {
-  local branch="${1:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}" n
+  local branch="${1:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}" out count
   [ -n "$branch" ] || return 1
-  n=$(gh api "repos/${OWNER_REPO}/pulls?state=open&head=${OWNER_REPO%%/*}:${branch}" \
-    --jq '.[0].number // empty' 2>/dev/null)
-  if [ -n "$n" ]; then printf '%s\n' "$n"; return 0; fi
-  gh pr view --json number --jq '.number' 2>/dev/null
+  if out=$(gh api "repos/${OWNER_REPO}/pulls" -f state=open -f "head=${OWNER_REPO%%/*}:${branch}" \
+    --jq '[.[].number]' 2>/dev/null); then
+    count=$(printf '%s' "$out" | jq 'length' 2>/dev/null)
+    [ "$count" = "1" ] || return 1
+    printf '%s\n' "$(printf '%s' "$out" | jq '.[0]')"
+    return 0
+  fi
+  gh pr view "$branch" --json number --jq '.number' 2>/dev/null
 }
 
 [ $# -ge 1 ] || usage

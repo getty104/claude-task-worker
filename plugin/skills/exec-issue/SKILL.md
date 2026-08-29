@@ -360,7 +360,7 @@ git diff "origin/${BASE_BRANCH}..HEAD" --stat
    ```bash
    HEAD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
    OWNER_REPO=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh owner-repo)
-   gh api "repos/${OWNER_REPO}/pulls?state=open&head=${OWNER_REPO%%/*}:${HEAD_BRANCH}" --jq '.[] | {number, url}'
+   gh api "repos/${OWNER_REPO}/pulls" -f state=open -f head="${OWNER_REPO%%/*}:${HEAD_BRANCH}" --jq '.[] | {number, url}'
    ```
    （`gh pr list --head` は GraphQL 経由でクラウドセッションでは 403 になるため、REST で引く）
    - **PRが実在する場合**: そのURLを最終報告として出力し正常終了する

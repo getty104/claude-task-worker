@@ -283,9 +283,7 @@ export function appendCloudDoneInstruction(prompt: string, target: { type: "issu
   const checkoutInstruction = buildCloudCheckoutInstruction(target);
   const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
   const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
-  return [prompt, checkoutInstruction, reportInstruction, labelInstruction]
-    .filter((part) => part !== "")
-    .join("\n\n");
+  return [prompt, checkoutInstruction, reportInstruction, labelInstruction].filter((part) => part !== "").join("\n\n");
 }
 
 // PR 系タスク向けの `gh pr checkout` スキップ指示。
