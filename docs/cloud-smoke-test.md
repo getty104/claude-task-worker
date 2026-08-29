@@ -9,6 +9,8 @@
 
 `src/cloud-execution.integration.test.ts` が CLI スタブで検証済みの項目（起動引数の付与・排他、print 専用環境変数が渡らないこと、worktree を作らないこと、`onCompleted` の呼び出し条件、mode/対応ワーカーの起動拒否）は再実装しない。本手順書が担うのは、**スタブでは代替できない実環境の挙動**（claude.ai 上の実セッション、`cc-cloud-done` ラベルによる実際の完了検知、Slack 通知からの実URL到達性）だけ。
 
+同統合テストは `claude auth status --json` をスタブ化し、ワーカー子プロセスへ渡すホスト env（`ANTHROPIC_BASE_URL` 等）も固定するため、実行するホストの claude.ai サインイン状態に依存しない。未サインイン時の起動拒否（E3）もスタブ層で検証済みのため、本手順書でホストのサインイン状態を切り替えて確認する必要はない。
+
 ## 事前条件
 
 | # | 項目 | 確認方法 |
