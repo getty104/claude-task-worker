@@ -97,28 +97,12 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           config.name,
           config.name,
           cloud ? undefined : worktreeId,
-          async (status, output, cloudSessionId) => {
+          async (status, output) => {
             try {
               if (status === "completed") {
-                await notifyTaskCompleted(
-                  config.name,
-                  repoName,
-                  config.taskId,
-                  config.name,
-                  repoUrl,
-                  output,
-                  cloudSessionId,
-                );
+                await notifyTaskCompleted(config.name, repoName, config.taskId, config.name, repoUrl, output);
               } else {
-                await notifyTaskFailed(
-                  config.name,
-                  repoName,
-                  config.taskId,
-                  config.name,
-                  repoUrl,
-                  output,
-                  cloudSessionId,
-                );
+                await notifyTaskFailed(config.name, repoName, config.taskId, config.name, repoUrl, output);
               }
             } catch (err) {
               console.error(`[${config.name}] post-task error: ${err}`);

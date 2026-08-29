@@ -104,6 +104,32 @@ function argValue(argv: string[], flag: string): string | undefined {
   return idx >= 0 ? argv[idx + 1] : undefined;
 }
 
+// `gh issue comment <n> --body <text>` の記録を探し、本文（--body の値）を取り出す。
+function findCommentBody(records: StubRecord[], type: "issue" | "pr", number: number): string | undefined {
+  const record = records.find(
+    (r) => r.command === "gh" && r.argv[0] === type && r.argv[1] === "comment" && r.argv[2] === String(number),
+  );
+  return record ? argValue(record.argv, "--body") : undefined;
+}
+
+// 固定 sleep ではなく stdout の内容をポーリングして待つ。SIGINT の2段階ハンドラ
+// （src/index.ts）は1回目の受信で state を同期的に確定させてからログを出すため、
+// このログの出現を「1回目のシグナルの効果が確定した」ことの確実な合図として使う。
+async function waitForStdout(
+  handle: { stdout(): string },
+  predicate: (out: string) => boolean,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate(handle.stdout())) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for stdout condition.\n--- stdout ---\n${handle.stdout()}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 // クォート済みのシェルコマンド文字列から `--flag <value>` の値を取り出す。トークンはすべて
 // shellQuote() でシングルクォートされているため、フラグ自身も `'--flag'` の形で現れる。
 function commandFlagValue(command: string, flag: string): string | undefined {
@@ -304,6 +330,9 @@ test(
   "D: exec-issue のクラウド実行がセッションID抽出失敗でも cc-in-progress を除去し PR ラベルを付けない",
   { timeout: 45_000 },
   async (t) => {
+    const slack = await startSlackCapture();
+    t.after(() => slack.close());
+
     const stubs = installCliStubs({
       gh: ISSUE_GH_SCENARIO,
       // 1コマンド方式には投函コマンドが存在しないため、作成コマンドの出力から
@@ -317,7 +346,7 @@ test(
       workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
       userConfig: { mode: "herdr" },
       records: stubs.records,
-      env: { CTW_CLOUD_SESSION_TIMEOUT_MS: "500" },
+      env: { CTW_CLOUD_SESSION_TIMEOUT_MS: "500", CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
     });
     t.after(async () => {
       await handle.cleanup();
@@ -355,6 +384,32 @@ test(
       "1コマンド化後は claude バイナリが --cloud 付きで直接起動されてはいけない",
     );
     assert.ok(!existsSync(join(handle.repoDir, ".claude", "worktrees")), "worktree ディレクトリが作られている");
+
+    // セッションID抽出失敗（catch経路）は孤立クラウドセッションの可能性があるため、
+    // cc-need-human-check を付けて人手確認へ回す（flagOrphanedCloudSession の "session-id" 経路）。
+    assert.ok(
+      records.some(
+        (r) =>
+          r.command === "gh" &&
+          r.argv[0] === "issue" &&
+          r.argv[1] === "edit" &&
+          r.argv.includes("--add-label") &&
+          r.argv.includes("cc-need-human-check"),
+      ),
+      "cc-need-human-check が付与されていない",
+    );
+    const commentBody = findCommentBody(records, "issue", 501);
+    assert.ok(commentBody, "孤立クラウドセッションのコメントが記録されていない");
+    assert.ok(commentBody!.includes("孤立クラウドセッションの可能性"));
+    assert.ok(
+      commentBody!.includes("セッションURL不明（ID抽出に失敗）"),
+      "セッションIDが取れない場合のプレースホルダがコメントに含まれていない",
+    );
+
+    await handle.waitFor(
+      () => slack.texts().some((text) => text.includes("セッションURL不明（ID抽出に失敗）")),
+      20_000,
+    );
   },
 );
 
@@ -655,3 +710,70 @@ test("I: クラウド完了待機中はトリガーラベルが再装填され�
   const cloudClaudeInvocations = records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length;
   assert.equal(cloudClaudeInvocations, 0, `claude --cloud の直接起動が記録されている: ${cloudClaudeInvocations}件`);
 });
+
+// ============================================================
+// J. クラウド完了待機中のシャットダウン（aborted）で cc-need-human-check を付ける
+// ============================================================
+test(
+  "J: クラウド完了待機中のシャットダウンで cc-need-human-check を付けコメントを残す",
+  { timeout: 60_000 },
+  async (t) => {
+    const slack = await startSlackCapture();
+    t.after(() => slack.close());
+
+    const stubs = installCliStubs({
+      gh: ISSUE_GH_SCENARIO,
+      // cloudComplete を設定しないため cc-cloud-done は自発的に付かず、
+      // ワーカーは waitForCloudTask() の待機に入ったままになる（aborted 経路を確実に踏むため）。
+      herdr: {
+        paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubJ?from=cli&m=0",
+      },
+    });
+    const handle = await startWorker({
+      worker: "exec-issue",
+      workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    // クラウドセッションの作成（pane send-text）を確認してから完了待機フェーズへ進ませる。
+    await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined);
+
+    // src/index.ts の SIGINT ハンドラは2段階: 1回目は graceful shutdown へ入るだけで
+    // herdrAbortSignal は立たない（waitForCloudTask は timeout まで解決しない）。2回目で
+    // 初めて shutdown("SIGKILL") が呼ばれ aborted が確定する。1回目のログ（"Stopping new tasks"）
+    // の出現を待ってから2回目を送ることで、1回目のハンドラの状態確定前に2回目が素通りする
+    // レースを避ける。
+    handle.child.kill("SIGINT");
+    await waitForStdout(handle, (out) => out.includes("Stopping new tasks"));
+    handle.child.kill("SIGINT");
+
+    await handle.waitFor(
+      (records) =>
+        records.some(
+          (r) =>
+            r.command === "gh" &&
+            r.argv[0] === "issue" &&
+            r.argv[1] === "edit" &&
+            r.argv.includes("--add-label") &&
+            r.argv.includes("cc-need-human-check"),
+        ),
+      30_000,
+    );
+
+    const records = stubs.records();
+    const commentBody = findCommentBody(records, "issue", 501);
+    assert.ok(commentBody, "孤立クラウドセッションのコメントが記録されていない");
+    assert.ok(commentBody!.includes("孤立クラウドセッションの可能性"));
+    assert.ok(commentBody!.includes("https://claude.ai/code/session_stubJ"), "セッションURLがコメントに含まれていない");
+
+    // finishTask() 経由の失敗通知（notifyTaskFailed）はシャットダウン中でも抑止されないため、
+    // Slack 側でも aborted 経路の文言を確認できる。
+    await handle.waitFor(() => slack.texts().some((text) => text.includes("The session may still be running")), 20_000);
+  },
+);

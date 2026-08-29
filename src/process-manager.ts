@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { appendCloudDoneInstruction, buildCloudCreateArgs, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
-import { addLabel, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
+import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
 import {
@@ -332,6 +332,39 @@ export function waitForCloudTask(id: number, type: CloudTargetType): Promise<"co
   });
 }
 
+// クラウドセッションはローカル側の失敗確定後も独立して稼働し続けうる（孤立セッション）。
+// ワーカーの onComplete の失敗経路は cc-need-human-check を付けないため、ここで確実に
+// 付けてポーリング対象から外す（同ラベルは issue-worker/pr-worker 共通の除外ラベル）。
+// cc-in-progress を残す案は採らない: finally で無条件に外されるため残すには分岐追加が要り、
+// かつ「実行中に見えるが実行していない」状態を作ってしまう。
+async function flagOrphanedCloudSession(
+  target: CloudTargetType,
+  id: number,
+  reason: "session-id" | "shutdown",
+  cloudSessionId?: string,
+): Promise<void> {
+  await addLabel(target, id, "cc-need-human-check").catch((err: unknown) => {
+    console.error(`[worker] failed to add cc-need-human-check to ${target} #${id}: ${err}`);
+  });
+
+  const causeLine =
+    reason === "session-id"
+      ? "セッションIDの抽出に失敗して待機を打ち切りました。プロンプトは投入済みで、" +
+        "クラウドセッションは独立して稼働している可能性があります。"
+      : "ワーカーのシャットダウンで待機を打ち切りました。クラウドセッションは継続している可能性が高いです。";
+  const sessionLine = cloudSessionId ? `https://claude.ai/code/${cloudSessionId}` : "セッションURL不明（ID抽出に失敗）";
+  const body =
+    `## 孤立クラウドセッションの可能性\n\n` +
+    `**原因**: ${causeLine}\n\n` +
+    `**セッションURL**: ${sessionLine}\n\n` +
+    `**再開方法**: 孤立セッションの成果物が届いていないか確認したうえで、\`cc-need-human-check\` ラベルを外すとポーリング対象に戻ります。`;
+
+  const commentFn = target === "issue" ? commentOnIssue : commentOnPR;
+  await commentFn(id, body).catch((err: unknown) => {
+    console.error(`[worker] failed to comment on ${target} #${id} about the orphaned cloud session: ${err}`);
+  });
+}
+
 // クラウド実行（workers.<name>.cloud）のタスク実行。`claude --cloud <prompt> ...`
 // 1コマンドでセッション作成と初期プロンプトの実行を同時に行う（description が
 // そのまま初期プロンプトとして即実行されるため）。作成後は cc-cloud-done ラベルの
@@ -455,22 +488,31 @@ async function runViaCloud(
             `AskUserQuestion, the cloud VM crashed, the plugin was not installed, or label assignment itself failed.`,
         };
       } else {
-        // aborted: ワーカー側の停止であり、タスクの失敗ではないので cc-need-human-check は付けない。
+        // aborted: ワーカー側の停止でありタスクの失敗ではないが、クラウドセッションは
+        // 継続稼働しうる（孤立セッション）ため timeout と同じく cc-need-human-check を付ける。
+        // タスクの失敗か否かの区別はラベルではなく output/コメントの文面で行う。
+        await flagOrphanedCloudSession(cloudTarget, id, "shutdown", cloudSessionId);
         result = {
           status: "failed",
-          output: `${createOutput}\n[worker] shutdown aborted the wait for the ${CLOUD_DONE_LABEL} label`,
+          output:
+            `${createOutput}\n[worker] shutdown aborted the wait for the ${CLOUD_DONE_LABEL} label. ` +
+            "The session may still be running; added cc-need-human-check.",
         };
       }
     }
     result.cloudSessionId = cloudSessionId;
   } catch (err) {
     console.error(`[worker] failed to run #${id} via cloud: ${err}`);
+    let orphanNote =
+      "[worker] note: with the 1-command launch, the cloud session may already have started " +
+      "working independently even though this task is being reported as failed locally (orphaned session).";
+    if (cloudTarget) {
+      await flagOrphanedCloudSession(cloudTarget, id, "session-id", cloudSessionId);
+      orphanNote += " added cc-need-human-check so a human can verify whether it completed on its own.";
+    }
     result = {
       status: "failed",
-      output:
-        `[worker] failed to run the task via cloud: ${err}\n` +
-        "[worker] note: with the 1-command launch, the cloud session may already have started " +
-        "working independently even though this task is being reported as failed locally (orphaned session).",
+      output: `[worker] failed to run the task via cloud: ${err}\n${orphanNote}`,
       ...(cloudSessionId ? { cloudSessionId } : {}),
     };
   }

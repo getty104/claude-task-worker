@@ -200,7 +200,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                         issue.title,
                         issueUrl,
                         output,
-                        cloudSessionId,
+                        cloud ? { sessionId: cloudSessionId } : undefined,
                       );
                     } else {
                       await notifyTaskCompleted(
@@ -210,7 +210,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                         issue.title,
                         issueUrl,
                         output,
-                        cloudSessionId,
+                        cloud ? { sessionId: cloudSessionId } : undefined,
                       );
                     }
                   } else {
@@ -221,7 +221,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                       issue.title,
                       issueUrl,
                       output,
-                      cloudSessionId,
+                      cloud ? { sessionId: cloudSessionId } : undefined,
                     );
                   }
                 } catch (err) {
@@ -233,7 +233,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                     issue.title,
                     issueUrl,
                     output,
-                    cloudSessionId,
+                    cloud ? { sessionId: cloudSessionId } : undefined,
                   ).catch((notifyErr) =>
                     console.error(`[${config.name}] notifyTaskFailed failed for #${issue.number}: ${notifyErr}`),
                   );
