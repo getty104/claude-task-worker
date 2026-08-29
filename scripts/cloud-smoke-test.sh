@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# クラウド実行（workers.<name>.cloud: true）の実クラウドセッションによる
+# クラウド実行（--cloud フラグ）の実クラウドセッションによる
 # smoke test を補助するスクリプト。docs/cloud-smoke-test.md から参照される。
 #
 # 自動判定できる範囲（事前条件・実行前後のスナップショット差分・ラベル遷移・
@@ -21,9 +21,12 @@ set -euo pipefail
 SNAPSHOT_DIR="${CLOUD_SMOKE_TEST_SNAPSHOT_DIR:-/tmp/cloud-smoke-test}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-task-worker"
 USER_CONFIG_PATH="$CONFIG_DIR/config.json"
-REPO_CONFIG_PATH="claude-task-worker.json"
 EXPECTED_CLAUDE_VERSION="2.1.247"
 EXPECTED_HERDR_VERSION="0.8.2"
+
+# src/config.ts の CLOUD_DENIED_WORKERS と揃える。--cloud を付けてもこれらの
+# ワーカーはローカル実行のまま残る（起動時エラーにはならない）。
+CLOUD_DENIED_WORKERS="resolve-conflict create-ui-design apply-ui-design update-coding-guidelines update-requirement-rules update-design-md"
 
 ok_count=0
 ng_count=0
@@ -71,21 +74,24 @@ cmd_preflight() {
     report NG "config.json not found: $USER_CONFIG_PATH"
   fi
 
-  # 2. workers.<name>.cloud: true
+  # 2. worker が CLOUD_DENIED_WORKERS に含まれず --cloud でクラウド実行される
+  #    （--cloud はコマンド実行時のフラグなので設定ファイルからは静的判定できない。
+  #    ここでは denied リストに該当しないことだけを確認する）
   if [ -n "$worker_name" ]; then
-    if [ -f "$REPO_CONFIG_PATH" ]; then
-      local cloud
-      cloud="$(jq -r --arg w "$worker_name" '.workers[$w].cloud // false' "$REPO_CONFIG_PATH" 2>/dev/null || echo "false")"
-      if [ "$cloud" = "true" ]; then
-        report OK "workers.$worker_name.cloud: true ($REPO_CONFIG_PATH)"
-      else
-        report NG "workers.$worker_name.cloud is not true ($REPO_CONFIG_PATH)"
+    local denied=false
+    for w in $CLOUD_DENIED_WORKERS; do
+      if [ "$w" = "$worker_name" ]; then
+        denied=true
+        break
       fi
+    done
+    if [ "$denied" = "true" ]; then
+      report NG "$worker_name is in CLOUD_DENIED_WORKERS; --cloud will not send it to the cloud"
     else
-      report NG "$REPO_CONFIG_PATH not found"
+      report OK "$worker_name is not in CLOUD_DENIED_WORKERS; run with --cloud (e.g. claude-task-worker $worker_name --cloud)"
     fi
   else
-    report NG "worker-name not given; skipped workers.<name>.cloud check"
+    report NG "worker-name not given; skipped CLOUD_DENIED_WORKERS check"
   fi
 
   # 3. claude auth status --json

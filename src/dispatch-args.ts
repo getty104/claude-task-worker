@@ -1,4 +1,6 @@
-const PROJECT_INCOMPATIBLE_COMMANDS = ["init", "install", "update", "usage", "version"];
+// --project と --cloud のどちらも「ワーカー起動」を前提とするフラグのため、
+// 非互換コマンド集合は共有する。
+const FLAG_INCOMPATIBLE_COMMANDS = ["init", "install", "update", "usage", "version"];
 
 function collectFlagValues(argv: string[], flag: string): string[] {
   const values: string[] = [];
@@ -23,8 +25,31 @@ export function hasProjectFilter(): boolean {
 }
 
 export function assertProjectCompatibleCommand(command: string): void {
-  if (PROJECT_INCOMPATIBLE_COMMANDS.includes(command)) {
+  if (FLAG_INCOMPATIBLE_COMMANDS.includes(command)) {
     console.error(`[dispatcher] --project cannot be used with the "${command}" command`);
+    process.exit(1);
+  }
+}
+
+// --cloud はプロセス起動時に確定させる。実行中に argv が変わることは無いが、
+// getRunMode() / isAdvisorEnabled() と同じくキャッシュして解決経路を一本化する。
+let cachedCloudFlag: boolean | undefined;
+
+export function hasCloudFlag(): boolean {
+  if (cachedCloudFlag === undefined) {
+    cachedCloudFlag = process.argv.includes("--cloud");
+  }
+  return cachedCloudFlag;
+}
+
+// テスト用。キャッシュを未解決へ戻す。
+export function resetCloudFlagCache(): void {
+  cachedCloudFlag = undefined;
+}
+
+export function assertCloudCompatibleCommand(command: string): void {
+  if (FLAG_INCOMPATIBLE_COMMANDS.includes(command)) {
+    console.error(`[worker] --cloud cannot be used with the "${command}" command`);
     process.exit(1);
   }
 }

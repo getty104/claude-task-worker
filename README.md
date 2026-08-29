@@ -98,11 +98,11 @@ claude plugin install claude-task-worker@claude-task-worker
 
 herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
 
-クラウド実行（`workers.<名前>.cloud: true`）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境設定（Environment setup script / セットアップスクリプト欄）に `npx claude-task-worker install` を直接記載しておく。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。
+クラウド実行（`--cloud` フラグ）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境設定（Environment setup script / セットアップスクリプト欄）に `npx claude-task-worker install` を直接記載しておく。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。
 
 UIデザイン先行ワークフローを使う場合は、同じ claude.ai の環境設定の環境変数欄に `PEN_CLI_KEY` も設定する。`.pen` を扱うスキル（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict`）の Pen CLI 認証に使うもので、クラウド VM では対話ログインができないため。キーの発行元と値の形式は後述の「[Pen CLI のログイン](#pen-cli-のログイン)」を参照。
 
-詳細は後述の「[`cloud`（クラウド実行）](#cloudクラウド実行)」を参照。
+詳細は後述の「[`--cloud`](#--cloud)」を参照。
 
 ### GitHub コネクタの有効化
 
@@ -179,7 +179,7 @@ CodeGraph のセットアップとして、グローバル gitignore（`~/.confi
 ## コマンド
 
 ```bash
-claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--project <name>]...
+claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--project <name>]... [--cloud]
 ```
 
 | コマンド | 内容 |
@@ -244,6 +244,35 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 - **一括停止**: SIGTERM/SIGINT で全セッションへ ctrl-c を送り、終了を待ってワークスペースを閉じる。もう一度送ると強制終了
 
 `--project` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
+
+### `--cloud`
+
+指定したワーカーのタスクを Claude Code on the web（クラウド VM）で実行する。プロセス単位のフラグで既定は無効。`all` / `yolo` に付けると、クラウド実行を拒否するワーカー（`CLOUD_DENIED_WORKERS`: `resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3つ `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）だけがローカル実行のまま残り、それ以外は全てクラウド実行になる。どのワーカーがローカルに残るかは起動時に1行ログで示される。
+
+```bash
+claude-task-worker exec-issue --cloud
+claude-task-worker all --cloud
+```
+
+前提条件:
+
+- `config.json` の `mode` が `"herdr"` であること。新しいクラウドセッションの作成には TTY が必要で、`"default"` の子プロセス実行では作れない。`mode` が `"herdr"` でないのに `--cloud` を付けた場合は**タスクを1件も起動せずエラー終了する**（`"default"` へフォールバックしない）
+- claude.ai アカウントでのサインインが必須。API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成では利用できない。この検査（`claude auth status --json` の実行）は `--cloud` を指定したときだけ行う
+- 対象リポジトリの GitHub App 連携（クラウド VM から push / PR 作成を行うため）
+- claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載してプラグイン・CLI を導入しておくこと（手順は「[インストール](#インストール)」参照）
+- UIデザイン先行ワークフローを使う場合のみ、claude.ai の環境設定の環境変数欄に `PEN_CLI_KEY`（pen.dev の組織設定 > Developer Keys で発行）を設定しておくこと。`.pen` を扱う3スキルの Pen CLI 認証に使う（「[Pen CLI のログイン](#pen-cli-のログイン)」参照）
+
+上記のうち静的検査されるのは1〜2番目だけで、GitHub App 連携・クラウド VM 側の導入状況・環境変数の設定はローカルから確認できないため検査されない。
+
+運用上は次の3ワーカーには `--cloud` を使わないことを推奨する: `fix-review-point` / `triage-pr` / `check-dependabot`。起動自体は許可されるが、クラウドセッションの GitHub プロキシ制限でレビューコメント・CI ステータスなど判断材料を取得できず、タスクが空振りする。ローカルのみで実行したい場合は個別のワーカー名コマンドで `--cloud` を付けずに起動する。
+
+クラウド実行のタスクは worktree を作らない（クラウド VM が自前でリポジトリを持つため）。
+
+`--project` と併用した場合、`--cloud` は各プロジェクトへそのまま転送される。`--cloud` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
+
+`claude-task-worker.json` の `workers.<名前>.cloud` 設定は廃止された。設定ファイルに残っている場合は警告ログを出したうえで無視される。
+
+詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
 
 ## 設定ファイル
 
@@ -315,9 +344,8 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。`
 | `pollingIntervalSeconds` | number | ポーリング間隔（秒） |
 | `cooldownSeconds` | number | タスク完了後にポーリングを止める時間（秒）。`0` でなし |
 | `maxConcurrentTasks` | number | 同時実行できるタスクの最大数 |
-| `cloud` | boolean | タスクをクラウド（Claude Code on the web）で実行するか。既定 `false`（下記「[`cloud`（クラウド実行）](#cloudクラウド実行)」） |
 
-既定値（`skill` は「[Worker とスキルの対応](#worker-とスキルの対応)」を参照。`cooldownSeconds` は `0`、`maxConcurrentTasks` は `1`、`cloud` は `false`）:
+既定値（`skill` は「[Worker とスキルの対応](#worker-とスキルの対応)」を参照。`cooldownSeconds` は `0`、`maxConcurrentTasks` は `1`）:
 
 | ワーカー | `model` | `effort` | `advisorModel` | `pollingIntervalSeconds` |
 |---|---|---|---|---|
@@ -340,40 +368,6 @@ advisor は main モデル以上の能力が必要（Claude CLI の制約）。`
   }
 }
 ```
-
-#### `cloud`（クラウド実行）
-
-`workers.<名前>.cloud: true` で、そのワーカーのタスクを Claude Code on the web（クラウド VM）で実行する。ワーカー単位のオプトインで既定は `false`（`mode` / `advisor` / `permission` と違い、ワーカーごとに切り替えられる）。
-
-前提条件:
-
-- `config.json` の `mode` が `"herdr"` であること。新しいクラウドセッションの作成には TTY が必要で、`"default"` の子プロセス実行では作れない。`cloud: true` のワーカーがあるのに `mode` が `"herdr"` でない場合は**ワーカー起動時にエラー終了する**（`"default"` へフォールバックしない）
-- claude.ai アカウントでのサインインが必須。API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成では利用できない。`cloud: true` のワーカーがある場合、これはワーカー起動時に静的検査される
-- 対象リポジトリの GitHub App 連携（クラウド VM から push / PR 作成を行うため）
-- claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載してプラグイン・CLI を導入しておくこと（手順は「[インストール](#インストール)」参照）
-- UIデザイン先行ワークフローを使う場合のみ、claude.ai の環境設定の環境変数欄に `PEN_CLI_KEY`（pen.dev の組織設定 > Developer Keys で発行）を設定しておくこと。`.pen` を扱う3スキルの Pen CLI 認証に使う（「[Pen CLI のログイン](#pen-cli-のログイン)」参照）
-
-上記のうち静的検査されるのは1〜2番目だけで、GitHub App 連携・クラウド VM 側の導入状況・環境変数の設定はローカルから確認できないため検査されない。
-
-クラウド実行を拒否するワーカーが3つある: `resolve-conflict` / `create-ui-design` / `apply-ui-design`。これらに `cloud: true` を指定すると起動時にエラー終了する。
-
-運用上は次の3ワーカーへの `cloud: true` を推奨しない: `fix-review-point` / `triage-pr` / `check-dependabot`。起動自体は許可されるが、クラウドセッションの GitHub プロキシ制限でレビューコメント・CI ステータスなど判断材料を取得できず、タスクが空振りする。
-
-クラウド実行のタスクは worktree を作らない（クラウド VM が自前でリポジトリを持つため）。
-
-設定例:
-
-```json
-// config.json
-{ "mode": "herdr" }
-```
-
-```json
-// claude-task-worker.json
-{ "workers": { "exec-issue": { "cloud": true } } }
-```
-
-詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
 
 ## ワークフロー
 
@@ -427,7 +421,7 @@ claude-task-worker all
 
 通知には Claude API の使用状況（5時間/7日間の利用率とリセット時刻）も含まれる。使用状況の取得は macOS では `security`（Keychain）、それ以外では `~/.claude/.credentials.json` を使う。あわせて [RunCat Neo](https://kyome.io/runcat/) 用のスナップショットを `~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で変更可）へ原子的に書き出す（Webhook 未設定でも更新される）。取得結果は360秒キャッシュされるため、値は最大6分古くなりうる。
 
-クラウド実行（`cloud: true`）のタスクは、通知の先頭行にクラウドセッションのURL（`https://claude.ai/code/<id>`）が入る。Slack で本文が折りたたまれても先頭行は見えるため。
+クラウド実行（`--cloud`）のタスクは、通知の先頭行にクラウドセッションのURL（`https://claude.ai/code/<id>`）が入る。Slack で本文が折りたたまれても先頭行は見えるため。
 
 ## プロセス管理
 

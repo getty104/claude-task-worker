@@ -161,7 +161,7 @@ const ISSUE_GH_SCENARIO = {
 };
 
 // ============================================================
-// A. Issue系ワーカーのクラウド起動引数・env・cwd（exec-issue, herdr, cloud: true）
+// A. Issue系ワーカーのクラウド起動引数・env・cwd（exec-issue, herdr, --cloud）
 // ============================================================
 test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree を作らない", { timeout: 75_000 }, async (t) => {
   const stubs = installCliStubs({
@@ -178,9 +178,10 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
   });
   const handle = await startWorker({
     worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+    workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -260,7 +261,7 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
 });
 
 // ============================================================
-// B. PR系ワーカーのクラウド起動引数（triage-pr, herdr, cloud: true）
+// B. PR系ワーカーのクラウド起動引数（triage-pr, herdr, --cloud）
 // ============================================================
 test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付けない", { timeout: 60_000 }, async (t) => {
   const stubs = installCliStubs({
@@ -277,9 +278,10 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
   });
   const handle = await startWorker({
     worker: "triage-pr",
-    workerConfig: { workers: { "triage-pr": { cloud: true, pollingIntervalSeconds: 3600 } } },
+    workerConfig: { workers: { "triage-pr": { pollingIntervalSeconds: 3600 } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -296,35 +298,49 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
 });
 
 // ============================================================
-// C. 定期ワーカーの起動拒否（update-coding-guidelines, herdr, cloud: true）
+// C. 定期ワーカーは --cloud 下でもローカル実行に落ちる（update-coding-guidelines, herdr, --cloud）
 // ============================================================
-// 定期ワーカーは CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため cloud: true を拒否する。
-// 対象 Issue/PR を持たず cc-cloud-done を置く先が無く、完了検知できないため（Phase 1 の制約）。
-test("C: 定期ワーカーに cloud: true があると起動せず終了コード1", { timeout: 30_000 }, async (t) => {
-  const stubs = installCliStubs({
-    gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
-  });
-  const handle = await startWorker({
-    worker: "update-coding-guidelines",
-    workerConfig: { workers: { "update-coding-guidelines": { cloud: true } } },
-    userConfig: { mode: "herdr" },
-    records: stubs.records,
-  });
-  t.after(async () => {
-    await handle.cleanup();
-    stubs.cleanup();
-  });
+// 定期ワーカーは CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため、isCloudWorker() が false を
+// 返しローカル実行になる（対象 Issue/PR を持たず cc-cloud-done を置く先が無く完了検知できないため。
+// Phase 1 の制約）。新仕様では --cloud はプロセス単位のフラグなので起動時エラーにはならない。
+test(
+  "C: 定期ワーカーは --cloud 下でも起動時エラーにならずローカル実行になる（worktree 生成・--cloud 未付与）",
+  { timeout: 30_000 },
+  async (t) => {
+    const stubs = installCliStubs({
+      gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
+      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] update-coding-guidelines local report" },
+    });
+    const handle = await startWorker({
+      worker: "update-coding-guidelines",
+      workerConfig: { workers: {} },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      extraArgs: ["--cloud"],
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
 
-  const code = await handle.waitForExit(15_000);
-  assert.equal(code, 1);
+    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 20_000);
 
-  const records = stubs.records();
-  assert.equal(findRecord(records, "herdr", "tab", "create"), undefined);
-  assert.equal(findRecord(records, "herdr", "pane", "send-text"), undefined);
-});
+    const records = stubs.records();
+    const tabCreate = findRecord(records, "herdr", "tab", "create")!;
+    const cwdArg = argValue(tabCreate.argv, "--cwd")!;
+    assert.ok(
+      cwdArg.startsWith(`${join(realpathSync(handle.repoDir), ".claude", "worktrees")}${sep}`),
+      `worktree 配下の cwd になっていない: ${cwdArg}`,
+    );
+
+    const agentStart = findRecord(records, "herdr", "agent", "start")!;
+    const claudeArgs = extractAgentStartArgs(agentStart);
+    assert.ok(!claudeArgs.includes("--cloud"), "定期ワーカーが --cloud 付きで起動している");
+  },
+);
 
 // ============================================================
-// D. 失敗時の cleanup（exec-issue, cloud: true, タスク失敗）
+// D. 失敗時の cleanup（exec-issue, --cloud, タスク失敗）
 // ============================================================
 test(
   "D: exec-issue のクラウド実行がセッションID抽出失敗でも cc-in-progress を除去し PR ラベルを付けない",
@@ -343,10 +359,11 @@ test(
     });
     const handle = await startWorker({
       worker: "exec-issue",
-      workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+      workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
       userConfig: { mode: "herdr" },
       records: stubs.records,
       env: { CTW_CLOUD_SESSION_TIMEOUT_MS: "500", CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+      extraArgs: ["--cloud"],
     });
     t.after(async () => {
       await handle.cleanup();
@@ -416,13 +433,14 @@ test(
 // ============================================================
 // E. 起動拒否
 // ============================================================
-test("E1: mode default で cloud: true のワーカーがあると起動せず終了コード1", { timeout: 30_000 }, async (t) => {
+test("E1: mode default で --cloud を渡すと起動せず終了コード1", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
   const handle = await startWorker({
     worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { cloud: true } } },
+    workerConfig: { workers: {} },
     userConfig: { mode: "default" },
     records: stubs.records,
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -440,31 +458,55 @@ test("E1: mode default で cloud: true のワーカーがあると起動せず�
     0,
     "クラウドフラグ付きの claude 起動が記録されている",
   );
+  // console.error はステータステーブル描画用にキャプチャされ stdout 側のログテーブルへ
+  // 流れる（src/table.ts の captureConsole()）ため、stderr ではなく stdout を見る。
+  assert.ok(handle.stdout().includes("--cloud"), "エラーメッセージが --cloud を指していない");
+  assert.ok(handle.stdout().includes("herdr"), "エラーメッセージが herdr モードへの切り替えを案内していない");
 });
 
+// resolve-conflict は CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため、--cloud 下でも
+// 起動時エラーにならずローカル実行（worktree あり・--cloud なしの claude 起動）に落ちる。
 test(
-  "E2: mode herdr で CLOUD_DENIED_WORKERS に cloud: true があると起動せず終了コード1",
-  { timeout: 30_000 },
+  "E2: CLOUD_DENIED_WORKERS のワーカー（resolve-conflict）は --cloud 下でもローカル実行に落ちる",
+  { timeout: 45_000 },
   async (t) => {
-    const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
+    const stubs = installCliStubs({
+      gh: {
+        login: "octocat",
+        repo: { owner: "acme", name: "demo", defaultBranch: "main" },
+        prList: [
+          { number: 801, headRefName: "conflict-branch", labels: [{ name: "cc-resolve-conflict" }], title: "Fix" },
+        ],
+        view: { "801": { checks: [] } },
+      },
+      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] resolve-conflict local report" },
+    });
     const handle = await startWorker({
-      worker: "exec-issue",
-      // resolve-conflict は CLOUD_DENIED_WORKERS（src/config.ts）に含まれる。
-      workerConfig: { workers: { "resolve-conflict": { cloud: true } } },
+      worker: "resolve-conflict",
+      workerConfig: { workers: {} },
       userConfig: { mode: "herdr" },
       records: stubs.records,
+      extraArgs: ["--cloud"],
     });
     t.after(async () => {
       await handle.cleanup();
       stubs.cleanup();
     });
 
-    const code = await handle.waitForExit(15_000);
-    assert.equal(code, 1);
+    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 30_000);
 
     const records = stubs.records();
-    assert.equal(findRecord(records, "herdr", "tab", "create"), undefined);
-    assert.equal(findRecord(records, "herdr", "agent", "start"), undefined);
+    const tabCreate = findRecord(records, "herdr", "tab", "create")!;
+    const cwdArg = argValue(tabCreate.argv, "--cwd")!;
+    assert.ok(
+      cwdArg.startsWith(`${join(realpathSync(handle.repoDir), ".claude", "worktrees")}${sep}`),
+      `worktree 配下の cwd になっていない: ${cwdArg}`,
+    );
+
+    const agentStart = findRecord(records, "herdr", "agent", "start")!;
+    const claudeArgs = extractAgentStartArgs(agentStart);
+    assert.ok(!claudeArgs.includes("--cloud"), "denied ワーカーが --cloud 付きで起動している");
+    assert.ok(!claudeArgs.includes("--on-branch"));
   },
 );
 
@@ -475,9 +517,10 @@ test("E3: 未サインイン（claude auth status）だと起動せず終了コ�
   });
   const handle = await startWorker({
     worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { cloud: true } } },
+    workerConfig: { workers: {} },
     userConfig: { mode: "herdr" },
     records: stubs.records,
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -532,6 +575,14 @@ test("F: exec-issue のローカル実行は --cloud/--ref/-p を付けず workt
   assert.ok(!claudeArgs.includes("--ref"));
   assert.ok(!claudeArgs.includes("--on-branch"));
   assert.ok(!claudeArgs.includes("-p"), "-p が付いてはいけない（herdr モード）");
+
+  // --cloud 未指定時は buildClaudeEnv(mode, cloud) の cloud 引数が false のままなので、
+  // クラウド専用の CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC が注入されてはいけない
+  // （--cloud 未指定時に env がまったく変わらないことの固定）。
+  assert.ok(
+    !tabCreate.argv.some((a) => a.startsWith("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=")),
+    "--cloud 未指定なのに CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC が --env に含まれている",
+  );
 });
 
 // ============================================================
@@ -557,10 +608,11 @@ test("G: クラウド完了検知後にレポートコメントを取得し Slac
   });
   const handle = await startWorker({
     worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+    workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
     env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -620,10 +672,11 @@ test(
     });
     const handle = await startWorker({
       worker: "exec-issue",
-      workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+      workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
       userConfig: { mode: "herdr" },
       records: stubs.records,
       env: { CTW_CLOUD_TASK_TIMEOUT_MS: "1", CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+      extraArgs: ["--cloud"],
     });
     t.after(async () => {
       await handle.cleanup();
@@ -683,9 +736,10 @@ test("I: クラウド完了待機中はトリガーラベルが再装填され�
   });
   const handle = await startWorker({
     worker: "triage-pr",
-    workerConfig: { workers: { "triage-pr": { cloud: true, pollingIntervalSeconds: 1 } } },
+    workerConfig: { workers: { "triage-pr": { pollingIntervalSeconds: 1 } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -731,10 +785,11 @@ test(
     });
     const handle = await startWorker({
       worker: "exec-issue",
-      workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
+      workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
       userConfig: { mode: "herdr" },
       records: stubs.records,
       env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+      extraArgs: ["--cloud"],
     });
     t.after(async () => {
       await handle.cleanup();
@@ -753,20 +808,23 @@ test(
     await waitForStdout(handle, (out) => out.includes("Stopping new tasks"));
     handle.child.kill("SIGINT");
 
-    await handle.waitFor(
-      (records) =>
-        records.some(
-          (r) =>
-            r.command === "gh" &&
-            r.argv[0] === "issue" &&
-            r.argv[1] === "edit" &&
-            r.argv.includes("--add-label") &&
-            r.argv.includes("cc-need-human-check"),
-        ),
-      30_000,
-    );
+    // flagOrphanedCloudSession() はラベル付与 → コメント投稿の順に実行するため、
+    // ラベルの記録だけを待つと後続のコメント assert がまだ届いていない状態で走りうる。
+    // 後発のコメントを待てばラベル付与の完了も含意される。
+    await handle.waitFor((records) => findCommentBody(records, "issue", 501) !== undefined, 30_000);
 
     const records = stubs.records();
+    assert.ok(
+      records.some(
+        (r) =>
+          r.command === "gh" &&
+          r.argv[0] === "issue" &&
+          r.argv[1] === "edit" &&
+          r.argv.includes("--add-label") &&
+          r.argv.includes("cc-need-human-check"),
+      ),
+      "cc-need-human-check が付与されていない",
+    );
     const commentBody = findCommentBody(records, "issue", 501);
     assert.ok(commentBody, "孤立クラウドセッションのコメントが記録されていない");
     assert.ok(commentBody!.includes("孤立クラウドセッションの可能性"));
@@ -781,16 +839,17 @@ test(
 // ============================================================
 // K. init 未再実行の既存リポジトリでも cc-cloud-done ラベルを保証する
 // ============================================================
-test("K: cloud: true のワーカーがあると起動時に cc-cloud-done ラベルを作成する", { timeout: 30_000 }, async (t) => {
+test("K: --cloud 指定時は起動時に cc-cloud-done ラベルを作成する", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
   const handle = await startWorker({
     worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { cloud: true } } },
-    // mode: "default" は cloud 設定として無効（E1 参照）だが、assertCloudAvailable の
+    workerConfig: {},
+    // mode: "default" は --cloud 指定として無効（E1 参照）だが、assertCloudAvailable の
     // ラベル作成は checkCloudConfig の妥当性判定より前に行われるため、この組み合わせでも
     // 素早く（起動失敗を待つだけで）ラベル作成の記録を確認できる。
     userConfig: { mode: "default" },
     records: stubs.records,
+    extraArgs: ["--cloud"],
   });
   t.after(async () => {
     await handle.cleanup();
@@ -807,7 +866,7 @@ test("K: cloud: true のワーカーがあると起動時に cc-cloud-done ラ�
   assert.ok(labelCreate!.argv.includes("--force"), "--force が付いていない（未作成リポジトリで冪等に作成できない）");
 });
 
-test("L: cloud: true のワーカーが無ければ cc-cloud-done ラベルを作成しない", { timeout: 30_000 }, async (t) => {
+test("L: --cloud を指定しなければ cc-cloud-done ラベルを作成しない", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
   const handle = await startWorker({
     worker: "exec-issue",

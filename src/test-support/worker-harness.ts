@@ -58,6 +58,8 @@ export interface StartWorkerOptions {
   defaultTimeoutMs?: number;
   /** 既定の env（XDG_CONFIG_HOME 等）の後ろへマージして上書きできる追加 env。 */
   env?: Record<string, string>;
+  /** ワーカー名の後ろへ渡す追加 argv（例: `["--cloud"]`）。 */
+  extraArgs?: string[];
 }
 
 export interface WorkerHandle {
@@ -104,7 +106,14 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
 
   const child = spawn(
     process.execPath,
-    ["--experimental-strip-types", "--import", TEST_RESOLVER_URL, INDEX_TS_PATH, options.worker],
+    [
+      "--experimental-strip-types",
+      "--import",
+      TEST_RESOLVER_URL,
+      INDEX_TS_PATH,
+      options.worker,
+      ...(options.extraArgs ?? []),
+    ],
     {
       cwd: repoDir,
       env: {

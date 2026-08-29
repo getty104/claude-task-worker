@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { CLOUD_DONE_LABEL, getWorkerConfig } from "../config";
+import { CLOUD_DONE_LABEL, getWorkerConfig, isCloudWorker } from "../config";
 import {
   type PullRequestWithChecks,
   getCurrentUser,
@@ -69,8 +69,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
           const hadTriageScope = pr.labels.some((l) => l.name === LABEL_TRIAGE_SCOPE);
 
           await addLabel("pr", pr.number, LABEL_IN_PROGRESS);
-          const { cloud } = getWorkerConfig(config.name);
-          const isCloud = cloud === true;
+          const isCloud = isCloudWorker(config.name);
           const worktreeId = isCloud ? undefined : generateWorktreeName();
           try {
             // クラウド実行（worktreeId なし）ではローカルに checkout しないため、

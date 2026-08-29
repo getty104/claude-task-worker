@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep as SEP } from "node:path";
+import { hasCloudFlag } from "./dispatch-args";
 
 export type WorkerName =
   | "exec-issue"
@@ -32,9 +33,6 @@ export interface WorkerRuntimeConfig {
   pollingIntervalSeconds: number;
   cooldownSeconds: number;
   maxConcurrentTasks: number;
-  // ワーカー単位のクラウド実行オプトイン。既定は必ず false（クラウド実行はワーカーの
-  // 明示的なオプトインが無い限り有効化しない）。
-  cloud: boolean;
 }
 
 // Pencil デザイン先行ワークフロー（create-ui-design / apply-ui-design）の設定。
@@ -74,7 +72,6 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   pollingIntervalSeconds: 60,
   cooldownSeconds: 0,
   maxConcurrentTasks: 1,
-  cloud: false,
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
@@ -86,7 +83,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "create-issue": {
     skill: "/claude-task-worker:create-issue-from-issue-number",
@@ -96,7 +92,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "update-issue": {
     skill: "/claude-task-worker:update-issue",
@@ -106,7 +101,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "exec-issue": {
     skill: "/claude-task-worker:exec-issue",
@@ -116,7 +110,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "fix-review-point": {
     skill: "/claude-task-worker:fix-review-point",
@@ -126,7 +119,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "triage-created-issue": {
     skill: "/claude-task-worker:triage-created-issue",
@@ -136,7 +128,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "triage-pr": {
     skill: "/claude-task-worker:triage-pr",
@@ -146,7 +137,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "resolve-conflict": {
     skill: "/claude-task-worker:resolve-pr-conflict",
@@ -156,7 +146,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "check-dependabot": {
     skill: "/claude-task-worker:check-dependabot",
@@ -166,7 +155,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "epic-issue": {
     skill: "/claude-task-worker:create-epic-pr",
@@ -176,7 +164,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "create-ui-design": {
     skill: "/claude-task-worker:create-ui-design",
@@ -186,7 +173,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "apply-ui-design": {
     skill: "/claude-task-worker:apply-ui-design",
@@ -196,7 +182,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   // 以下3つは定期ワーカー（createScheduledWorker）。実行間隔そのものは
   // SCHEDULE_INTERVAL_HOURS（24時間）と実行ログで決まり、pollingIntervalSeconds は
@@ -211,7 +196,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "update-requirement-rules": {
     skill: "/claude-task-worker:update-requirement-rules",
@@ -221,7 +205,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
   "update-design-md": {
     skill: "/claude-task-worker:update-design-md",
@@ -231,7 +214,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
-    cloud: false,
   },
 };
 
@@ -246,9 +228,9 @@ export const SCHEDULED_WORKER_NAMES = [
 // （cc-cloud-done ラベルのポーリングでクラウドタスクの完了を判定する。#284）。
 export const CLOUD_DONE_LABEL = "cc-cloud-done";
 
-// cloud: true を許可しないワーカー。resolve-conflict は .pen コンフリクト解消に pencil CLI と
-// そのログイン認証がクラウド環境で使える保証が無いため、create-ui-design / apply-ui-design は
-// クラウド環境からの force-push の可否が未検証のため、いずれも拒否する。定期ワーカー
+// --cloud 指定時もクラウド実行にしないワーカー。resolve-conflict は rebase 後の force-push が
+// クラウド環境で可能か未測定のため、create-ui-design / apply-ui-design は .pen の編集に必要な
+// pencil CLI がクラウド環境に未導入（さらに認証が要る）ため、いずれも拒否する。定期ワーカー
 // （SCHEDULED_WORKER_NAMES）は対象 Issue/PR を持たず cc-cloud-done を置く先が無いため
 // 完了検知できず拒否する（Phase 1 の制約）。
 export const CLOUD_DENIED_WORKERS = [
@@ -257,6 +239,12 @@ export const CLOUD_DENIED_WORKERS = [
   "apply-ui-design",
   ...SCHEDULED_WORKER_NAMES,
 ] as const;
+
+// --cloud 指定時に、そのワーカーをクラウド実行するか。CLOUD_DENIED_WORKERS の
+// ワーカーは起動時エラーにせずローカル実行のまま残す。
+export function isCloudWorker(name: string): boolean {
+  return hasCloudFlag() && !(CLOUD_DENIED_WORKERS as readonly string[]).includes(name);
+}
 
 // `claude auth status --json` が読めた場合は判定対象のフィールドを、
 // 実行・パースに失敗した場合は「判定不能」を表す `unknown` を渡す。
@@ -275,10 +263,10 @@ export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: strin
   if (loggedIn && apiProvider === "firstParty" && authMethod === "claude.ai" && !apiKeySource && !baseUrlSet) {
     return [];
   }
-  const prefix = `クラウド実行（workers.<name>.cloud: true）には claude.ai アカウントでのサインインが必要です。現在の認証構成: ${authMethod} / ${apiProvider}。`;
+  const prefix = `クラウド実行（--cloud フラグ）には claude.ai アカウントでのサインインが必要です。現在の認証構成: ${authMethod} / ${apiProvider}。`;
   if (apiProvider === "bedrock" || apiProvider === "vertex") {
     return [
-      `${prefix} 第三者プロバイダ（Bedrock / Vertex）を使っている場合: クラウドセッションは Anthropic のインフラ上で動くため利用できません。CLAUDE_CODE_USE_BEDROCK / CLAUDE_CODE_USE_VERTEX を解除するか、対象ワーカーの cloud を false にしてください。`,
+      `${prefix} 第三者プロバイダ（Bedrock / Vertex）を使っている場合: クラウドセッションは Anthropic のインフラ上で動くため利用できません。CLAUDE_CODE_USE_BEDROCK / CLAUDE_CODE_USE_VERTEX を解除するか、--cloud フラグを外してください。`,
     ];
   }
   if (apiKeySource || authMethod === "oauth_token") {
@@ -297,34 +285,22 @@ export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: strin
   return [`${prefix} claude auth status --json の出力からクラウド実行の前提条件を判定できませんでした。`];
 }
 
-// cloud: true のワーカー構成に非対応の組み合わせが無いかを検査する。
-// 引数をオブジェクト1つにしてあるのは、検査項目を追加してもシグネチャを壊さずフィールドを
-// 足せるようにするため。`auth` は cloud: true のワーカーが1件も無ければ
-// 一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
+// --cloud フラグ指定時に非対応の組み合わせが無いかを検査する。引数をオブジェクト1つに
+// してあるのは、検査項目を追加してもシグネチャを壊さずフィールドを足せるようにするため。
+// `auth` は cloud が false なら一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
 export function checkCloudConfig(input: {
-  workers: Record<string, WorkerRuntimeConfig>;
+  cloud: boolean;
   mode: string;
   auth?: { status: CloudAuthStatus; baseUrl?: string };
 }): string[] {
+  if (!input.cloud) return [];
   const errors: string[] = [];
-  let hasCloudWorker = false;
-  for (const [name, worker] of Object.entries(input.workers)) {
-    if (!worker.cloud) continue;
-    hasCloudWorker = true;
-    if (input.mode !== "herdr") {
-      errors.push(
-        `worker "${name}" has cloud: true but mode is "${input.mode}" (creating a new cloud session requires a TTY, which "default" mode's spawn does not have). Set mode to "herdr" in config.json, or remove cloud from worker "${name}".`,
-      );
-    }
-    if ((CLOUD_DENIED_WORKERS as readonly string[]).includes(name)) {
-      errors.push(
-        `worker "${name}" has cloud: true but this worker does not support cloud execution. Remove cloud from worker "${name}" in config.json.`,
-      );
-    }
+  if (input.mode !== "herdr") {
+    errors.push(
+      `--cloud requires mode "herdr" but mode is "${input.mode}" (creating a new cloud session requires a TTY, which "default" mode's spawn does not have). Set mode to "herdr" in config.json, or drop the --cloud flag.`,
+    );
   }
-  if (hasCloudWorker) {
-    if (input.auth !== undefined) errors.push(...checkCloudAuth(input.auth));
-  }
+  if (input.auth !== undefined) errors.push(...checkCloudAuth(input.auth));
   return errors;
 }
 
@@ -412,11 +388,9 @@ export function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfi
     }
   }
   if ("cloud" in entry) {
-    if (typeof entry.cloud === "boolean") {
-      result.cloud = entry.cloud;
-    } else {
-      console.warn(`[config] invalid workers.${name}.cloud: ${String(entry.cloud)}, using default ${base.cloud}`);
-    }
+    console.warn(
+      `[config] workers.${name}.cloud is removed; cloud execution now opts in via the --cloud flag at runtime. This setting is ignored.`,
+    );
   }
   return result;
 }

@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { CLOUD_DONE_LABEL, getWorkerConfig } from "../config";
+import { CLOUD_DONE_LABEL, getWorkerConfig, isCloudWorker } from "../config";
 import {
   getCurrentUser,
   getRepoInfo,
@@ -118,7 +118,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           await addLabel("issue", issue.number, "cc-in-progress");
 
           const worktreeId = generateWorktreeName();
-          const { cloud } = getWorkerConfig(config.name);
+          const cloud = isCloudWorker(config.name);
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             syncDefaultBranch(defaultBranch);

@@ -1,6 +1,6 @@
 # クラウド実行の smoke test 手順書
 
-`workers.<name>.cloud: true` によるクラウド実行（Claude on the Web）を、実クラウドセッションで確認するための手順書。`docs/prd-cloud-worker-execution.md` 7.2 が定めるテスト3層（ユニットテスト／CLIスタブ統合テスト／**実クラウドセッションを使う限定的な smoke test**）のうち3層目に対応する（Issue #242）。
+`--cloud` フラグによるクラウド実行（Claude on the Web）を、実クラウドセッションで確認するための手順書。`docs/prd-cloud-worker-execution.md` 7.2 が定めるテスト3層（ユニットテスト／CLIスタブ統合テスト／**実クラウドセッションを使う限定的な smoke test**）のうち3層目に対応する（Issue #242）。
 
 - **CI の通常ジョブでは実行しない**。実際に claude.ai 上にクラウドセッションを作成する副作用を伴うため、手動または定期実行に留める
 - 2026-08-29 に実測を実施済み（claude 2.1.250 / herdr 0.8.2、使い捨ての private リポジトリ）。詳細は末尾の「実測記録」の該当エントリを参照。以降も実測のたびに「結果記録テンプレート」を埋めて「実測記録」へ追記していく運用を想定している
@@ -16,7 +16,7 @@
 | # | 項目 | 確認方法 |
 |---|------|---------|
 | 1 | `mode: "herdr"` | `~/.config/claude-task-worker/config.json` の `mode` |
-| 2 | 対象ワーカーの `cloud: true` | リポジトリ直下 `claude-task-worker.json` の `workers.<name>.cloud` |
+| 2 | 対象ワーカーが `CLOUD_DENIED_WORKERS` に含まれず `--cloud` でクラウド実行される | 起動コマンドに `--cloud` を付ける（`claude-task-worker exec-issue --cloud` 等）。`claude-task-worker.json` の `workers.<name>.cloud` 設定は廃止済み |
 | 3 | claude.ai サインイン | `claude auth status --json`（判定式は `docs/cloud-prerequisite-checks.md` 参照） |
 | 4 | herdr の疎通 | `herdr --version` が応答すること |
 
@@ -117,7 +117,7 @@ scripts/cloud-smoke-test.sh snapshot after
 | セッションID取得・タブクローズの状態遷移 | 目視 |
 | クラウドセッションが最終報告コメント（`## claude-task-worker 実行結果`）を投稿し `cc-cloud-done` を付与・ワーカーが検知して除去する | 目視 |
 | Slack 通知本文とセッションURLの到達性 | 目視 |
-| 事前条件1〜4（mode / cloud設定 / サインイン / herdr疎通） | `scripts/cloud-smoke-test.sh preflight` |
+| 事前条件1〜4（mode / `--cloud`指定 / サインイン / herdr疎通） | `scripts/cloud-smoke-test.sh preflight` |
 | Issueラベルの遷移（`cc-cloud-done` の除去含む） | `scripts/cloud-smoke-test.sh check-labels` |
 | closing参照PRの候補列挙 | `scripts/cloud-smoke-test.sh check-pr` |
 | worktree・ローカルブランチの残骸有無 | `scripts/cloud-smoke-test.sh snapshot` |

@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type * as ConfigModule from "./config";
+import type * as DispatchArgsModule from "./dispatch-args";
 
 const {
   parseLastRunEntry,
@@ -17,7 +18,9 @@ const {
   CLOUD_DENIED_WORKERS,
   checkCloudConfig,
   checkCloudAuth,
+  isCloudWorker,
 } = (await import("./config")) as typeof ConfigModule;
+const { resetCloudFlagCache } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
 function silenceWarn(t: TestContext): void {
@@ -174,69 +177,78 @@ test("scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-
   }
 });
 
-test("parseWorkerEntry reads a boolean cloud", (t) => {
-  silenceWarn(t);
-  assert.equal(parseWorkerEntry("exec-issue", { cloud: true })?.cloud, true);
-  assert.equal(parseWorkerEntry("exec-issue", { cloud: false })?.cloud, false);
+test("parseWorkerEntry warns and ignores a legacy cloud key (moved to the --cloud runtime flag)", (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const result = parseWorkerEntry("exec-issue", { cloud: true });
+  assert.ok(result);
+  assert.ok(!("cloud" in result), "cloud はもう WorkerRuntimeConfig に含まれてはいけない");
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(String(warn.mock.calls[0]?.arguments[0]), /workers\.exec-issue\.cloud is removed/);
 });
 
-test("parseWorkerEntry defaults cloud to false when unspecified", (t) => {
-  silenceWarn(t);
-  assert.equal(parseWorkerEntry("exec-issue", {})?.cloud, false);
+test("checkCloudConfig returns nothing when cloud is false, regardless of mode", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: false, mode: "default" }), []);
 });
 
-test("parseWorkerEntry falls back to false for a non-boolean cloud", (t) => {
-  silenceWarn(t);
-  // クラウド実行は既定で無効なオプトインなので、不正値は必ず既定（無効）へ倒す。
-  assert.equal(parseWorkerEntry("exec-issue", { cloud: "true" })?.cloud, false);
-  assert.equal(parseWorkerEntry("exec-issue", { cloud: 1 })?.cloud, false);
-  assert.equal(parseWorkerEntry("exec-issue", { cloud: null })?.cloud, false);
-});
-
-test("every worker defaults to cloud disabled", () => {
-  // オプトインが既定で有効化されないことの保証。
-  assert.equal(DEFAULT_WORKER_CONFIG.cloud, false);
-  for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
-    assert.equal(config.cloud, false, `WORKER_DEFAULTS.${name}.cloud`);
-  }
-});
-
-test("checkCloudConfig allows cloud: true workers when mode is herdr", () => {
-  const workers = {
-    "exec-issue": { ...DEFAULT_WORKER_CONFIG, cloud: true },
-  };
-  assert.deepEqual(checkCloudConfig({ workers, mode: "herdr" }), []);
+test("checkCloudConfig allows cloud: true when mode is herdr", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: true, mode: "herdr" }), []);
 });
 
 test("checkCloudConfig rejects cloud: true when mode is not herdr", () => {
-  const workers = {
-    "exec-issue": { ...DEFAULT_WORKER_CONFIG, cloud: true },
-  };
-  const errors = checkCloudConfig({ workers, mode: "default" });
+  const errors = checkCloudConfig({ cloud: true, mode: "default" });
   assert.equal(errors.length, 1);
-  assert.match(errors[0], /exec-issue/);
-  assert.match(errors[0], /mode/);
+  assert.match(errors[0], /--cloud/);
+  assert.match(errors[0], /herdr/);
 });
 
-test("checkCloudConfig rejects cloud: true on a denied worker even under mode herdr", () => {
-  const workers = {
-    "resolve-conflict": { ...DEFAULT_WORKER_CONFIG, cloud: true },
-  };
-  const errors = checkCloudConfig({ workers, mode: "herdr" });
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /resolve-conflict/);
+test("checkCloudConfig does not inspect auth when cloud is false", () => {
+  const errors = checkCloudConfig({
+    cloud: false,
+    mode: "herdr",
+    auth: { status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" } },
+  });
+  assert.deepEqual(errors, []);
 });
 
-test("checkCloudConfig reports both reasons when a denied worker also has mode !== herdr", () => {
-  const workers = {
-    "create-ui-design": { ...DEFAULT_WORKER_CONFIG, cloud: true },
-  };
-  const errors = checkCloudConfig({ workers, mode: "default" });
-  assert.equal(errors.length, 2);
+test("isCloudWorker returns false for every worker when --cloud is not passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv.filter((a) => a !== "--cloud")];
+  resetCloudFlagCache();
+
+  for (const name of Object.keys(WORKER_DEFAULTS)) {
+    assert.equal(isCloudWorker(name), false, `isCloudWorker(${name}) without --cloud`);
+  }
 });
 
-test("checkCloudConfig reports nothing for the existing default configuration (cloud unset/false everywhere)", () => {
-  assert.deepEqual(checkCloudConfig({ workers: WORKER_DEFAULTS, mode: "default" }), []);
+test("isCloudWorker returns true for non-denied workers when --cloud is passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv, "--cloud"];
+  resetCloudFlagCache();
+
+  assert.equal(isCloudWorker("exec-issue"), true);
+  assert.equal(isCloudWorker("triage-pr"), true);
+});
+
+test("isCloudWorker returns false for every CLOUD_DENIED_WORKERS entry even when --cloud is passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv, "--cloud"];
+  resetCloudFlagCache();
+
+  for (const name of CLOUD_DENIED_WORKERS) {
+    assert.equal(isCloudWorker(name), false, `isCloudWorker(${name}) must stay local under --cloud`);
+  }
 });
 
 // M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
@@ -308,13 +320,4 @@ test("checkCloudAuth rejects a custom ANTHROPIC_BASE_URL even with an otherwise 
 
 test("checkCloudAuth treats an indeterminate status as not an error", () => {
   assert.deepEqual(checkCloudAuth({ status: { kind: "unknown" } }), []);
-});
-
-test("checkCloudConfig does not inspect auth when no worker has cloud: true", () => {
-  const errors = checkCloudConfig({
-    workers: WORKER_DEFAULTS,
-    mode: "default",
-    auth: { status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" } },
-  });
-  assert.deepEqual(errors, []);
 });

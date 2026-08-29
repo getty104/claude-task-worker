@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
-import { getLastRunAt, getWorkerConfig } from "../config";
+import { getLastRunAt, getWorkerConfig, isCloudWorker } from "../config";
 import { getRepoInfo } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { publishLastRunPr } from "../last-run-pr";
@@ -59,8 +59,8 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
       let cloud = false;
       try {
         syncDefaultBranch(defaultBranch);
-        const { model, effort, skill, advisorModel, cloud: workerCloud } = getWorkerConfig(config.name);
-        cloud = workerCloud;
+        const { model, effort, skill, advisorModel } = getWorkerConfig(config.name);
+        cloud = isCloudWorker(config.name);
         const command = skill || config.command;
         const mode = getRunMode();
         const execution = buildClaudeExecution({
