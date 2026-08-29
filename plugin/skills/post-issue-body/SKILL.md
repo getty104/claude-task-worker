@@ -304,7 +304,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocked-by <作成したIssu
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocking <作成したIssue番号> <番号> <番号> ...
 ```
 
-`gh issue create --blocked-by` / `--blocking` を使わないのは、クラウド VM の gh 2.45.0 がこのフラグを知らず、Issue 作成そのものが引数エラーで落ちるため。作成と依存登録が2フェーズに分かれるので、**その間はブロック済みの Issue が非ブロック状態に見える**が、`issue-worker.ts` が候補ループ内で `hasOpenBlockers()`（検索インデックスを経由しない実体判定）を実行するため、この窓で拾われたIssueは起動直前にスキップされる。
+`gh issue create --blocked-by` / `--blocking` を使わないのは、依存登録が GraphQL 経由でクラウドセッションでは 403 になるため（gh 2.98.0 で `GH_DEBUG=api` により確認）。**`gh issue create` はそもそもフラグの有無に関わらず GraphQL の `createIssue` mutation を使う**ので、クラウドでは MCP の `issue_write`（method: `create`）が実質唯一の作成経路になる。なお `--blocked-by` に不正な番号を渡した場合でも **Issue の作成自体は先に完了する**（同実測。以前「relationship が貼れないなら Issue も作らない」と記述していたが、現行 gh ではそうならない）ため、フラグに依存しても2フェーズであることは変わらない。作成と依存登録が2フェーズに分かれるので、**その間はブロック済みの Issue が非ブロック状態に見える**が、`issue-worker.ts` が候補ループ内で `hasOpenBlockers()`（検索インデックスを経由しない実体判定）を実行するため、この窓で拾われたIssueは起動直前にスキップされる。
 
 付与に失敗しても Issue の作成自体は完了しているのでロールバックせず、失敗した番号と理由を呼び出し元への報告に1行残す。
 

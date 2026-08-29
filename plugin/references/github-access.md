@@ -100,7 +100,7 @@ MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 
 | `pr-mergeable <n>` | `gh pr view --json mergeable` / `gh pr status` | `GET repos/{o}/{r}/pulls/{n}` の `mergeable`（`null` は `UNKNOWN` へ写す） |
 | `pr-for-branch [branch]` | `gh pr view --json number`（カレントブランチのPR導出） | `GET repos/{o}/{r}/pulls?state=open&head={owner}:{branch}` |
 
-`gh issue view --json parent` / `blockedBy` は GraphQL ゲートに加え、クラウド VM の gh 2.45.0 が**フィールド自体を知らない**（`Unknown JSON field`）。`gh issue edit --add-blocked-by` / `--add-sub-issue` も同 gh はフラグを知らない。ゲートが解けても `gh` 経路は直らないため、REST が唯一の道になる。
+2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。
 
 ## `gh` のまま残す操作
 

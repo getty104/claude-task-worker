@@ -357,7 +357,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md` M-5）。ただし M-5 の実測環境が本当に未連携だったかは #81776（`--ref` の誤判定バグ）により確定していないため、**連携済み環境でも同じになるかは未確認**（同 M-5 の訂正注記を参照）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
 
-あわせて、クラウド VM の `gh` が古い（実測 2.45.0）ため `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` でクライアント側から失敗する、という**プロキシ制限とは独立した交絡**もある。
+かつてはクラウド VM の `gh` が古く（2.45.0）`--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` で失敗するという**プロキシ制限とは独立した交絡**もあったが、2026-08-29 時点で 2.98.0 へ上がりこの交絡は解消した。ただし同バージョンでも `GH_DEBUG=api` 実測のとおりこれらは GraphQL 経由のままで、**403 になる事実は変わらない**（フィールドの有無ではなく転送経路の問題なので、gh を新しくしても解決しない）。
 
 | ワーカー | 判定 | 主な劣化要因 |
 |---|---|---|

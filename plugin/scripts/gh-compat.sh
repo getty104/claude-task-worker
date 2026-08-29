@@ -5,8 +5,12 @@
 # なぜ必要か: クラウドセッション（`claude --cloud`）の GitHub プロキシは操作名単位の
 # アローリストで、`gh (issue|pr) view --json` はフィールドを問わず GraphQL 経由になり
 # 403 で落ちる（実測は docs/cloud-graphql-proxy-limits.md）。加えてクラウド VM の gh は
-# 2.45.0 で `--json parent` / `blockedBy` を「Unknown JSON field」として知らない。
 # 一方 REST（`gh api repos/{o}/{r}/...`）と git のローカル導出はゲートを通らない。
+#
+# gh のバージョンを上げても解決しない: 2026-08-29 に gh 2.98.0 で `GH_DEBUG=api` を取ったところ、
+# `--json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-sub-issue`、`gh issue create`、
+# `gh pr view --json mergeable` はいずれも GraphQL エンドポイントを叩いていた。フラグやフィールドの
+# 有無ではなく転送経路の問題なので、REST へ寄せる以外に手が無い。
 #
 # 各サブコマンドは「REST / git を第一手段、失敗したら従来の gh へフォールバック」で、
 # ローカル実行の挙動を変えない。REST 側のエンドポイント仕様が将来変わってもフォール

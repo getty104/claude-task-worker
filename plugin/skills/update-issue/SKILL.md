@@ -262,7 +262,7 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 
    付与が失敗しても（権限不足・存在しない番号等）、description 更新はすでに完了しているため、エラーを最終報告に残したうえで処理を続行する（ロールバックしない）。付与・スキップの結果は最終報告に1行で記録する。
 
-   `gh issue view --json blockedBy,blocking` / `gh issue edit --add-blocked-by` を直接使わないのは、どちらも GraphQL 経由でクラウドセッションでは 403 になり、クラウド VM の gh 2.45.0 はこのフィールド・フラグ自体を知らないため。`gh-compat.sh` は REST（`repos/{o}/{r}/issues/{n}/dependencies/...`）を第一手段にし、失敗時のみ `gh` へフォールバックする。**`blocking` の追加は相手側の `blocked_by` として登録される**（REST に `blocking` の POST が無いため）が、GitHub 上の見え方は同じである。
+   `gh issue view --json blockedBy,blocking` / `gh issue edit --add-blocked-by` を直接使わないのは、どちらも GraphQL 経由でクラウドセッションでは 403 になるため（gh 2.98.0 で `GH_DEBUG=api` により確認。gh を新しくしても転送経路は変わらない）。`gh-compat.sh` は REST（`repos/{o}/{r}/issues/{n}/dependencies/...`）を第一手段にし、失敗時のみ `gh` へフォールバックする。**`blocking` の追加は相手側の `blocked_by` として登録される**（REST に `blocking` の POST が無いため）が、GitHub 上の見え方は同じである。
 
 ## 中断条件
 
