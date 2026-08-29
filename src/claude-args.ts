@@ -327,10 +327,15 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
 // エージェントの状態遷移音は herdr 側の設定（`~/.config/herdr/config.toml` の
 // `[ui.sound]`）か、ワーカー用 herdr セッションを `HERDR_DISABLE_SOUND=1` 付きで
 // 起動することでしか止められない。
-export function buildClaudeEnv(mode: RunMode): Record<string, string> {
+export function buildClaudeEnv(mode: RunMode, cloud?: boolean): Record<string, string> {
   const base =
     mode === "herdr"
       ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
       : { ...CLAUDE_SPAWN_ENV };
-  return base;
+  if (!cloud) return base;
+  // anthropics/claude-code#81776（2026-08-29時点でOPEN）の回避。GitHub App 連携済みでも
+  // `claude --cloud --ref` / `--on-branch` が「the GitHub App is not set up for this
+  // repository」で拒否されるバグがあり、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を
+  // 付けると成功することを smoke test（claude 2.1.250）で確認済み。上流修正後は撤去する。
+  return { ...base, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" };
 }
