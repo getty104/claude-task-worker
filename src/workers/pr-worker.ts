@@ -131,9 +131,25 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
                 try {
                   if (status === "completed") {
                     await config.onCompleted?.(pr, output, isCloud);
-                    await notifyTaskCompleted(config.name, name, pr.number, pr.title, prUrl, output, cloudSessionId);
+                    await notifyTaskCompleted(
+                      config.name,
+                      name,
+                      pr.number,
+                      pr.title,
+                      prUrl,
+                      output,
+                      isCloud ? { sessionId: cloudSessionId } : undefined,
+                    );
                   } else {
-                    await notifyTaskFailed(config.name, name, pr.number, pr.title, prUrl, output, cloudSessionId);
+                    await notifyTaskFailed(
+                      config.name,
+                      name,
+                      pr.number,
+                      pr.title,
+                      prUrl,
+                      output,
+                      isCloud ? { sessionId: cloudSessionId } : undefined,
+                    );
                   }
                 } catch (err) {
                   console.error(`[${config.name}] post-task error for PR #${pr.number}: ${err}`);

@@ -338,6 +338,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - **起動前に対象から `cc-cloud-done` を除去する**（`issue-worker.ts` / `pr-worker.ts`）。前回実行の残骸で即座に完了と誤判定するのを防ぐ。同一番号の同時実行は `isRunning()` が止めるため nonce は不要
 - **`CLOUD_TASK_TIMEOUT_MS`（4時間）で打ち切る**。`AskUserQuestion` で停止したセッション・VM 側クラッシュ・プラグイン未導入による空振り・ラベル付与自体の失敗はすべてここへ落ちる。打ち切り時は `cc-need-human-check` を付けて failed とし、セッション URL 付きの Slack 失敗通知を送る。**`cc-need-human-check` の付与を `runViaCloud()` 側で行っている**のは、ワーカーの `onComplete` の失敗経路が同ラベルを付けないため（付けないと打ち切られたタスクが誰にも拾われない）
 - 人が手動で `cc-cloud-done` を付けても同じ経路で完了扱いになる（張り付いたタスクの救済手段）。シャットダウン時は `herdrAbortSignal` で待機ループを抜ける（1秒刻みで確認するため30秒の間隔待ちに引きずられない）
+- **セッションID抽出失敗（catch 経路）と `aborted`（シャットダウン）も `runViaCloud()` 側で `cc-need-human-check` を付け、対象 Issue/PR へ孤立セッション（クラウド側は生き残っている可能性がある）である旨とセッションURL（不明なら「セッションURL不明（ID抽出に失敗）」）をコメントする**（`cloudTarget` を持たない定期ワーカーは対象外）。`cc-in-progress` を残す案は採らない — 無条件に外す `finally` へ分岐が要るうえ「実行中に見えるが実行していない」状態を作るため
 
 #### ワーカー別の適合性
 

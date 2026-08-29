@@ -146,8 +146,9 @@ export async function buildTokenLimitText(): Promise<string> {
 
 /**
  * 完了/失敗通知の本文を組み立てる純粋関数。
- * cloudSessionId が非空なら、クラウドセッションURLを先頭行として付与する
- * （Slack側で通知の最初の一行だけが折りたたみ表示でも見えるため、先頭に置く）。
+ * cloud が渡された（＝クラウド実行）場合のみ先頭行を出す: sessionId が非空ならセッションURL、
+ * 空ならID抽出失敗を明記する（Slack側で通知の最初の一行だけが折りたたみ表示でも見えるため、先頭に置く）。
+ * ローカル実行（cloud 省略）では先頭行を出さない。
  */
 export function buildTaskNotificationText(params: {
   status: "completed" | "failed";
@@ -158,15 +159,20 @@ export function buildTaskNotificationText(params: {
   url: string;
   tokenText: string;
   output?: string;
-  cloudSessionId?: string;
+  cloud?: { sessionId?: string };
 }): string {
-  const { status, workerName, repoName, id, title, url, tokenText, output, cloudSessionId } = params;
+  const { status, workerName, repoName, id, title, url, tokenText, output, cloud } = params;
   const emoji = status === "completed" ? "✅" : "❌";
   const label = status === "completed" ? "completed" : "failed";
   const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
   const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
   const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${tokenText}${outputBlock}`;
-  const sessionUrlPrefix = cloudSessionId?.trim() ? `https://claude.ai/code/${cloudSessionId.trim()}\n` : "";
+  let sessionUrlPrefix = "";
+  if (cloud) {
+    sessionUrlPrefix = cloud.sessionId?.trim()
+      ? `https://claude.ai/code/${cloud.sessionId.trim()}\n`
+      : "セッションURL不明（ID抽出に失敗）\n";
+  }
   return `${sessionUrlPrefix}${body}`;
 }
 
@@ -177,7 +183,7 @@ export async function notifyTaskCompleted(
   title: string,
   url: string,
   output?: string,
-  cloudSessionId?: string,
+  cloud?: { sessionId?: string },
 ): Promise<void> {
   const tokenText = await buildTokenLimitText();
   await send({
@@ -190,7 +196,7 @@ export async function notifyTaskCompleted(
       url,
       tokenText,
       output,
-      cloudSessionId,
+      cloud,
     }),
   });
 }
@@ -202,7 +208,7 @@ export async function notifyTaskFailed(
   title: string,
   url: string,
   output?: string,
-  cloudSessionId?: string,
+  cloud?: { sessionId?: string },
 ): Promise<void> {
   const tokenText = await buildTokenLimitText();
   await send({
@@ -215,7 +221,7 @@ export async function notifyTaskFailed(
       url,
       tokenText,
       output,
-      cloudSessionId,
+      cloud,
     }),
   });
 }
