@@ -114,15 +114,17 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 
 判定は「Phase 1 でクラウド実行を推奨してよいか」。**本実測の結果は、GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しないことを示している**（そもそも `git remote` が無く push も PR 作成もできない。`docs/cloud-session-launch-flags.md` M-5 で既測）。以下は「連携を設定してリポジトリゲートを解いた場合に、**GraphQL ゲートだけが残る**」という前提での判定である。この前提の根拠である「GraphQL ゲートはリポジトリ連携と独立している」という結論（B1）は、**GitHub App 連携が未設定のセッションでの実測**（リポジトリを含まないクエリと含むクエリが同一の403を返した）にとどまり、連携済みセッションでの挙動は未検証である。
 
+2026-08-29 の smoke test（claude 2.1.250 / herdr 0.8.2、後述「GitHub MCP 移行との関係」参照）で、クラウド VM の GitHub MCP のうち `issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4ツールが動作することを確認した。以下の表はこの4ツールで直接代替できる操作に限って判定を見直したもので、それ以外（`gh pr checks` によるCI状態取得、`gh pr list` によるPR一覧、レビュースレッドの `reviewThreads`/`resolveReviewThread` など）は今回動作確認していないため判定を据え置いてある。
+
 | ワーカー | 判定 | GraphQL 403 で劣化する操作 | ラベル遷移・成果物検証への影響 |
 |---|---|---|---|
-| `exec-issue` | △（PRD の ◎ から格下げ） | `gh issue view --json body`（Issue本文の読み取り）、フェーズ7の `gh pr list --head` によるPR実在検証 | Issue本文が読めなければ実装に着手できない。REST（`gh api repos/{o}/{r}/issues/{n} --jq .body`）への書き換えが前提条件。ラベル遷移はワーカー側（ローカル）が行うため影響なし |
+| `exec-issue` | ○（2026-08-29 smoke test で `issue_read`/`create_pull_request` の動作を確認、△ から格上げ。ただし PR一覧検証は未実測のため ◎ ではない） | ~~`gh issue view --json body`（Issue本文の読み取り）~~ → `issue_read` で代替確認済み。~~PR作成~~ → `create_pull_request` で代替確認済み（同 smoke test の `exec-issue` エンドツーエンド実行で実際に成立、所要9分03秒）。フェーズ7の `gh pr list --head` によるPR実在検証は今回未確認のまま残る | Issue本文の読み取りとPR作成はMCP経由で成立することを確認した。PR一覧を使う検証ステップの成否は未確認。ラベル遷移はワーカー側（ローカル）が行うため影響なし |
 | `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（PRD の ◎ から格下げ） | 収集スクリプトの `gh api graphql` と `gh (issue\|pr) view --json` | 収集が0件になり、空振りのまま成果物なしで終了する。実行記録PRはローカルのワーカーが出すため記録自体は残るが、内容が伴わない |
 | `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（PRD の ○ から格下げ） | `gh issue view --json body,comments,labels`（フィールドを問わず403） | Issue本文・コメントが読めず、分析系スキルの入力がゼロになる。`--json parent` は加えて gh 2.45.0 でも失敗する |
 | `epic-issue`（`create-epic-pr`） | △（PRD の ○ から格下げ） | `gh issue view --json` | 同上。PR本文の生成材料（コミットログ）は `git log` で取れるが、Issue情報が欠ける |
-| `fix-review-point` | ✕（PRD の △ から格下げ） | `reviewThreads` クエリ（未解決コメント取得）、`resolveReviewThread`（スレッド解決）、`gh pr view --json` | **レビュー指摘を1件も取得できない**。加えてスレッド解決は REST 代替が原理的に存在しないため、書き換えでも回復しない。Phase 1 では許可方針が確定済みだが、実質的に何もできないまま完了扱いになる点を明記する |
-| `triage-pr` | ✕（PRD の △ から格下げ） | `gh pr view --json`、`gh pr checks`、`reviewThreads`、`gh pr list` | CI状態もレビュー指摘も取れないため、**マージ判断の材料がゼロ**。マージゲートを担うワーカーが根拠なく判断する状態になる。`gh pr merge` 自体の可否は未判定 |
-| `check-dependabot` | ✕（PRD の △ から格下げ） | `gh pr view --json`、`gh pr checks` | 依存更新の内容もCI結果も読めない |
+| `fix-review-point` | ✕（PRD の △ から格下げ。据え置き） | `reviewThreads` クエリ（未解決コメント取得）、`resolveReviewThread`（スレッド解決）、`gh pr view --json` | **レビュー指摘を1件も取得できない**。加えてスレッド解決は REST 代替が原理的に存在せず、2026-08-29 の smoke test でも `resolveReviewThread` 代替は確認していない（確認済みの4ツールに該当なし）ため、書き換えでも回復しない。Phase 1 では許可方針が確定済みだが、実質的に何もできないまま完了扱いになる点を明記する |
+| `triage-pr` | ✕（PRD の △ から格下げ。据え置き） | `gh pr view --json`、`gh pr checks`、`reviewThreads`、`gh pr list` | CI状態（`gh pr checks`）もレビュー指摘（`reviewThreads`）も PR一覧（`gh pr list`）も今回動作確認していないため、**マージ判断の材料がゼロ**のまま。マージゲートを担うワーカーが根拠なく判断する状態になる。`gh pr merge` 自体の可否は未判定 |
+| `check-dependabot` | ✕（PRD の △ から格下げ。据え置き） | `gh pr view --json`、`gh pr checks` | 依存更新の内容もCI結果も読めない。`gh pr checks` 相当の代替は今回動作確認していない |
 | `resolve-conflict` | ✕（PRD どおり） | `gh pr view --json` | PRD の理由（force-push 未検証・`pencil` CLI 不在）に加え、コンフリクト判定の入力も取れない |
 | `create-ui-design` / `apply-ui-design` | ✕（PRD どおり） | `gh issue view --json` | PRD の理由（`pencil` CLI と認証）は変わらず |
 
@@ -130,11 +132,18 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 
 ## GitHub MCP 移行との関係
 
-Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP 優先（利用不可なら `gh` へフォールバック）へ切り替えた。GitHub MCP は本ドキュメントが実測した `gh` 経由のプロキシ（GraphQL ゲート／リポジトリゲート／パスゲート）を経由しないため、上記の適合性表が挙げる劣化要因（GraphQL 403）は原理的に回避されうる。対応表は `plugin/references/github-access.md` に集約してある。
+Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP 優先（利用不可なら `gh` へフォールバック）へ切り替えた。GitHub MCP は本ドキュメントが実測した `gh` 経由のプロキシ（GraphQL ゲート／リポジトリゲート／パスゲート）を経由しない。対応表は `plugin/references/github-access.md` に集約してある。
 
-**この移行はクラウドセッションでの GitHub MCP の起動・認証を実測したものではない**。ローカルからクラウド VM の MCP 接続状態を照会する手段が無いため、GitHub MCP がクラウド VM 上で実際に使えるかは未確認である。そのため本ドキュメントの実測表（`gh` コマンド表・スキル別出現数表・ワーカー別適合性表）は本移行を反映せず、値は変更していない。クラウドでの MCP 疎通が実測でき次第、本ドキュメントを更新する。
+**2026-08-29 に smoke test でクラウド VM 上の GitHub MCP の起動・動作を実測した**（実測バージョン: claude 2.1.250 / herdr 0.8.2、使い捨ての private リポジトリ、手動プローブ2セッション＋`exec-issue` ワーカーのエンドツーエンド実行1件）。結果は以下のとおり。
 
-レビュースレッドの Resolve（`resolveReviewThread`）は本移行のスコープ外（別Issue担当）で、`fix-review-point` の判定に変更はない。
+- クラウド VM 上で `mcp__github__*` ツールが **55個**存在することを確認した。そのうち実際に動作を確認できたのは **`issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4つ**。残り51ツールは今回実行していないため動作は未確認。
+- 一方、`gh … --json`（GraphQL 経由）は今回も**403のまま**だった。**GraphQL ゲートはこの移行によって解消されたわけではなく、GitHub MCP はそれとは別経路でゲートを迂回するにすぎない**（ゲート自体は健在）。
+- `gh api repos/…`（REST）は成功した。
+- 上記4ツールを使う完了検知の連鎖（プロンプト投函 → 最終報告コメント投稿 → `cc-cloud-done` ラベル付与 → ワーカー側での検知・除去 → `cc-pr-created` 付与）が成立し、`exec-issue` の1タスク（2行のファイル追加）がエンドツーエンドで完了した。所要時間は9分03秒。
+
+この実測をもとに、上表「ワーカー別適合性」は確認済みの4ツールで直接代替できる操作に限って判定を見直した（`exec-issue` の格上げ、詳細は同表の直前の注記を参照）。CI状態取得（`gh pr checks`）・PR一覧（`gh pr list`）・レビュースレッドの解決（`resolveReviewThread`）など、確認済み4ツールに含まれない操作に依存する判定は据え置いてある。`mcp__github__*` の残り51ツールについても、今回動作を確認していない以上、それらに依存する判定を動かす根拠にはしていない。
+
+レビュースレッドの Resolve（`resolveReviewThread`）は本移行のスコープ外（別Issue担当）で、今回も動作確認しておらず、`fix-review-point` の判定に変更はない。
 
 ## 測定ログ（要旨）
 

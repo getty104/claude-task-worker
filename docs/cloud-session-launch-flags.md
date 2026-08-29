@@ -57,8 +57,8 @@
 | `--cloud <description>`（値あり・新規作成、非TTY） | なし | 付与 | 拒否（TTY必須） | `Error: --cloud requires an interactive terminal.` | T1 |
 | `--cloud <session_id>`（既存セッションへの追記投函、`-p` 併用） | なし | 付与 | **受理**（TTY不要）。**ただし現行実装（Issue #302 以降）ではこの経路は使わない** — `--cloud <description>` の `description` は表示名ではなく初期プロンプトとして即実行される（claude 2.1.250 実測）ため、作成コマンドの description にプロンプトを直接渡す1コマンド方式へ切り替え、この投函コマンドは廃止した | — | T3 |
 | `--cloud <session_id>`（対話アタッチ） | なし | 付与 | 拒否（アカウント単位で無効） | `Error: Attaching to an existing cloud session is not enabled for your account.` | T4 |
-| `--ref <branch>` | なし | Issue系: ベースブランチ想定 | 実測環境ではバグ（#81776）により拒否されていた。回避策適用でセッション作成は成功する（smoke test 済み）。ブランチ名検証以降の意味論は**引き続き未実測** | `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9 |
-| `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | 同上（回避策適用でセッション作成は成功する。それ以降は未実測） | `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10 |
+| `--ref <branch>` | なし | Issue系: ベースブランチ想定 | **確定**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）: 指定ブランチを起点に `claude/<description由来>-<6文字>` 形式の**作業ブランチが新規に作られる**。作業ブランチ名は `--cloud` に渡した description に依存し、ローカル側から事前に名前を決めることはできない | 実測当時のバグ（#81776）による拒否文言: `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9、smoke test（2026-08-29） |
+| `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | **確定**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）: クラウドセッションは指定した PR の head ブランチ上で**直接作業**し、push すると**その PR が更新される**（新しいブランチは切られない） | 実測当時のバグ（#81776）による拒否文言: `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10、smoke test（2026-08-29） |
 | `--ref` と `--on-branch` の併用 | — | — | 拒否（排他） | `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other` | T8 |
 | `--permission-mode bypassPermissions` | 付与 | 付けない（PRD想定） | **受理される**（PRD想定と異なる） | エラーなし。セッション作成成功 | T5 |
 | `--disallowedTools` | 付与 | 付けない（PRD想定） | **受理されるが VM 側ではツール制限として効かない**（smoke test、claude 2.1.250、2026-08-29 で確定。Issue #307） | エラーなし。セッション作成成功 | T6 |
@@ -96,9 +96,9 @@
 
 ## 未実測項目
 
-1. **`--ref` / `--on-branch` のブランチ名検証以降の意味論**
-   - 理由: 実測当時は #81776 のバグにより `--ref`/`--on-branch` 自体がブランチ名検証の前段で拒否されていた。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` の回避策適用でセッション作成には成功することを smoke test で確認済みだが、(a) 既存リモートブランチ、(b) リモート未存在ブランチでの意味論の違い、(c) 作業ブランチとベースブランチの実際の対応関係は未確認
-   - 再現手順: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を付与したうえで、(a) 既存リモートブランチ、(b) リモート未存在ブランチ、の2ケースで `claude --cloud "<desc>" --ref <branch>` / `--on-branch <branch>` を pty から実行し、成功時は claude.ai 側でベースブランチと作業ブランチを確認する
+`--ref` / `--on-branch` の基本的な意味論（作業ブランチの作られ方、PR head 上での直接作業）は smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）で確定済み（上記「引数表」参照）。以下は依然として未実測。
+
+1. ~~**`--ref` / `--on-branch` のブランチ名検証以降の意味論**~~: **実測済み**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）。上記「引数表」参照。リモート未存在ブランチでの挙動差など細部は引き続き未確認
 2. ~~**`--append-system-prompt-file` の内容がクラウド VM 側で実際にシステムプロンプトへ反映されるか**~~: **実測済み**（smoke test、claude 2.1.250、2026-08-29。Issue #307）。**反映されない**（システムプロンプトに仕込んだ合言葉をセッションが「無し」と回答）。あわせて `--disallowedTools` も受理されるだけで VM 側のツール制限としては効かないことを確定（`AskUserQuestion` を「利用可能」と報告）
 3. **`--model` / `--effort` / `--advisor` / `--chrome` がクラウド VM 側で実際に効くか**
    - 理由: 上と同じく、起動引数として拒否されないことのみを確認
@@ -147,7 +147,7 @@
 | 受け入れ基準7 | 質問待ちを `idle` として誤返却しないか | **誤返却しない**。`AskUserQuestion` で停止した状態は `blocked` を返し続けた（M-4）。`blocked` は `observeAgentStatus()` で待機継続に倒れるため誤完了は起きない |
 | 9-9 | `agentGet()` の `sessionId` がクラウドセッションIDと一致し `https://claude.ai/code/<id>` として使えるか | **一致しない**。`agent_session` は `kind: "id"` で返るが `value` は**ローカル claude のセッションUUID**（例 `f9342ab2-…`）。クラウドセッションIDは `session_01…` 形式で別物。UUID を URL に入れると claude.ai は「このセッションは見つかりませんでした」を返す（M-3 / M-7） |
 | 9-4 | `~/.claude/projects/*/<sessionId>.jsonl` が生成されるか | **クラウドセッションでは生成されない**。teleport セッションではローカルターンの分だけ生成され、`readFinalReport()` 相当（末尾の非 sidechain アシスタント発言）が正しく読める（M-6）。クラウド側で実行されたターンは transcript にもペインにも一切現れない |
-| 4.4-5 | クラウドセッションの作業ブランチ名をローカルから取得できるか | **取得手段は無い**。CLI にクラウドセッションを列挙・照会する経路が無く（M-8）、ローカルの `~/.claude/sessions/<pid>.json` にもクラウドセッションとの紐付けは記録されない（M-9）。ブランチ名自体は claude.ai の Web UI でのみ確認できた（M-5） |
+| 4.4-5 | クラウドセッションの作業ブランチ名をローカルから取得できるか | **取得手段は無い**。CLI にクラウドセッションを列挙・照会する経路が無く（M-8）、ローカルの `~/.claude/sessions/<pid>.json` にもクラウドセッションとの紐付けは記録されない（M-9）。ブランチ名自体は claude.ai の Web UI でのみ確認できた（M-5）。**追記（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）**: `--ref <branch>` 使用時の作業ブランチ名は `claude/<description由来>-<6文字>` 形式で、`--cloud` に渡した description に依存する（＝ローカル側から事前に名前を決めることはできない点は従来の結論のまま）。`--on-branch <PR head>` 使用時は新規ブランチを切らず PR head 上で直接作業する |
 
 ## 測定ログ（要旨）
 
