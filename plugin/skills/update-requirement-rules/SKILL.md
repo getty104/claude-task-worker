@@ -42,6 +42,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `update-requirement-rules` ワーカーから24時間おきに自動起動され、ワーカーは起動時刻を `claude-task-worker.json` の `lastRun` へ記録する別PRを作ったうえで、次の24時間の実行を抑止する。処理が未完のままターンを終えると、その日の分の収集・ルール化が行われないまま実行済みとして扱われ、取りこぼしたIssueは二度と対象期間に入らない（対象期間は常に直近N日で、遡らない）。
@@ -65,6 +69,8 @@ Issue番号はフェーズ5で `create-pr` に渡す。指定なしの場合はP
 **完了条件**: リポジトリルートにいることが確認でき、既存の `.claude/requirements/` の内容を把握済みで、日数と任意Issue番号が確定していること。
 
 ## フェーズ1: Issueの収集
+
+GitHub MCP が使える場合は対応表のツール（`list_issues` / `search_issues` / `issue_read` 等）で同等の収集を行う。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-requirement-issues.sh <フェーズ0で確定した日数>
@@ -93,6 +99,7 @@ jq -r '.issues[] | select(.issue_number | IN(101,102,103)) |
   ([.comments[] | "[\(.author)] \(.body)"] | join("\n\n"))' <output_file>
 
 # 親Issue（Epic）を確認する。採用基準の「同一Epicは1件と数える」判定に使う
+# Issue Dependencies（parent）はMCP側の対応が不定のため gh のまま残す
 gh issue view <番号> --json parent --jq '.parent.number // "none"'
 ```
 
@@ -267,7 +274,7 @@ Issue の description と確認事項への回答コメントから、**「こ�
 `commit-push` はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチへ直コミットが入る。必ずfeature branchへ切り替える。
 
 ```bash
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
@@ -297,6 +304,8 @@ PR作成後、返却されたPR URLを記録する。
 
 `create-pr` 側でも付与手順はあるが、`context: fork` で結果を検証できないため本スキル側で確認・補完する。
 
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）/ `get_me` を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')
 GH_USER=$(gh api user --jq '.login')
@@ -312,6 +321,8 @@ gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
 - Assignee付与が権限等で失敗してもPR作成自体は成功しているため、フェーズ6の出力に「Assignee付与失敗」と理由を明記して続行する
 
 ### 5-4. Issue番号なしのケースの後処理（**Issue番号未指定の場合のみ**）
+
+> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 PR_NUMBER=$(gh pr view --json number --jq '.number')

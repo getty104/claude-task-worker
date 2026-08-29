@@ -16,6 +16,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 前提
 
 - **依存Issueの着手判定**（このIssue自体が着手可能か）は解決済みであり、再確認は不要
@@ -38,6 +42,8 @@ hooks:
 
 ### 1. Issueのdescriptionとコメント履歴の確認
 
+> GitHub MCP が使える場合は `issue_read`（method: `get`。コメント取得は `get_comments`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view $0 --json body,labels,comments
 ```
@@ -51,6 +57,8 @@ gh issue view $0 --json body,labels,comments
 ### 2. 確認事項内で参照されるIssue/PRの現在状態の検証
 
 確認事項本文（最後のコメント・descriptionの両方が対象）で他のIssue/PRが参照されている場合（番号・URLでの言及、「依存Issue」「関連PR」等の表現を含む）、記述はスナップショット時点のものでその後クローズ・マージされている可能性があるため、鵜呑みにせず参照先の**現在の状態**を必ず`gh`で取得する。
+
+> GitHub MCP が使える場合は Issue に `issue_read`（method: `get`）、PR に `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh issue view <参照先のIssue番号> --json state,title
@@ -153,6 +161,9 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
    - 分離元Issue側は既存descriptionを保持したまま末尾に参照を追記する。`exec-issue`など後続処理はdescriptionのみを読むため、コメントだけでは本文に参照が残らない
 
    固定パス（例: `/tmp/issue-$0-body.md`）は同一Issueへの並行実行で衝突しうるため`mktemp`で一意な一時ファイルを確保する。`view`と`edit`の間の外部更新に備え、`edit`直前に本文を再取得し、(a) 追記予定の参照文言がすでに含まれていないか、(b) このステップ開始時点の内容と一致しているかを検証してから書き戻す：
+
+   > GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
    ```bash
    BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"
    trap 'rm -f "$BODY_FILE"' EXIT

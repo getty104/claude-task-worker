@@ -32,7 +32,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/gh.ts`** - GitHub CLI (`gh`) ラッパー。全GitHub操作を集約
 - **`src/process-manager.ts`** - 子プロセス管理。リアルタイムステータステーブル表示、プロセスライフサイクル管理
 - **`src/table.ts`** - 端末テーブル描画のヘルパー。`getDisplayWidth()`/`truncateToWidth()`/`padToWidth()`（全角を幅2として扱う桁揃え）、`buildTaskTableLines()`（ステータステーブルの行組み立て）。`buildTaskTableLines()` は副作用を持たない純粋関数で、`process-manager.ts` の `renderTable()` が画面差し替え + 出力のみを担う。あわせてログのローリングバッファ（`logLines` / `pushLogLine()`）、画面差し替え（`writeScreen()`）、**console 出力のキャプチャ（`captureConsole()`）** を持つ。ワーカー/ディスパッチャーは毎秒テーブルを再描画（画面クリア）するため、`console.error` 等をそのまま端末へ出すと一瞬しか見えない。`captureConsole()` は `console.log/info/warn/error` を差し替えて `logLines` へ流し込み、Logs テーブルの一部として残す（`id` を持たない行として `-` 列で表示）。テーブル描画側はパッチ前の console を握った `writeScreen()` を使う（パッチ済み console を使うと描画結果がバッファへ流れ込んで自己増殖する）。描画前にプロセスが終了しても消えないよう、`process.on("exit")` で残ログを端末へ書き出す。呼び出しは `index.ts`（ワーカー系は `assertRunPrerequisites()`、`--project` はディスパッチャー分岐）で、`init`/`install`/`update`/`usage` のようなテーブルを描かない一発コマンドでは呼ばない（キャプチャすると出力が出なくなるため）。**実行中/完了のセクション振り分けは `TaskTableEntry.status` で行い、表示用の status 文字列では判定しない**。herdr モードの実行中行は `running:working` のように agentStatus を併記した装飾済み文字列になるため、表示値で `=== "running"` を見ると実行中タスクが完了セクション（区切り罫線の下）へ紛れ込む
-- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて Issue テンプレート・GitHub Actions ワークフロー・設定ファイル（`claude-task-worker.json`）の生成と、CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）を行う
+- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて Issue テンプレート・GitHub Actions ワークフロー・設定ファイル（`claude-task-worker.json`）の生成、CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）を行う
 - **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI / DESIGN.md CLI / Pen CLI のインストール・Playwright ブラウザの取得を一括で行うコマンド
 - **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI / DESIGN.md CLI / Pen CLI・Playwright ブラウザの更新コマンド
 - **`src/commands/codegraph.ts`** - CodeGraph（`@colbymchenry/codegraph`）連携。`installCodegraphCli()`（`npm install -g` によるインストール）、`upgradeCodegraphCli()`（`codegraph upgrade` による更新。CodeGraph 自身の更新機構を使うことで配布方法の変更に追随できる。未インストール環境では `codegraph` コマンドが無く失敗するため `installCodegraphCli()` へフォールバックする）、`runCodegraphInit()`（`codegraph init`）、`ensureCodegraphGitIgnore()`（グローバル gitignore への `.codegraph/` 追記）、`globalGitIgnorePath()`/`appendIgnoreEntry()`（テスト可能な純粋関数）
@@ -186,7 +186,7 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
+`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
@@ -218,6 +218,12 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 2. **worktree配下を作業ディレクトリに持つ残留プロセスへ `SIGTERM`**: 実行cwd（worktree、`.claude/worktrees/<adj-noun-NNNN>` で一意）を cwd に持つプロセスだけを対象にする。切り離されたプロセスも起動時の cwd を保持し、worktree名はこの実行に固有なため、「この実行が起動したプロセス」だけを、ユーザー自身や別実行のプロセスに触れずに特定できる。ただし本フック自身の祖先チェーン（node フック・そのシェル・`claude` プロセスはいずれもworktreeをcwdに持つ）は除外し、自プロセスの巻き添え停止を防ぐ。プロセス列挙は Linux では `/proc/<pid>/cwd`、macOS 等では `lsof` を用いる。
 
 判定ロジック（`selectPidsToKill` / `parseLsofCwds` / `isUnder` / `resolveTargetDir`）は純粋関数として export し、`plugin/scripts/stop-servers.test.mjs` でユニットテストする。対象スキルは同期実行ガードと同じ15スキル（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）。
+
+### レビュースレッドの Resolve は `Stop` フックに置かない
+
+レビュースレッドの一括 Resolve は `fix-review-point` のフェーズ6が `resolve-pr-comments` スキルを呼んで行う（`plugin/skills/resolve-pr-comments/SKILL.md`）。**`Stop` フックへ移してはいけない**。同フックはセッションの終わり方に関わらず必ず走るため、フェーズ0の安全ガード（worktree 外・デフォルトブランチ）や実装フェーズの失敗で中断した場合でも、**1件も修正していないのに未解決スレッドが全件 Resolve される**。`triage-pr` は Resolve 済みを「対応済み」とみなすため、指摘が消えたまま PR がマージされる。Resolve は「修正を push し終えた」ことを前提にした操作であり、その前提を判定できるのはスキル本文だけである。
+
+Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` から取得）で、**クラウド実行でも成立する**。`resolveReviewThread` は REST 代替が無く `gh` 経路では GraphQL 直叩きになるため、クラウドセッションのプロキシで 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、MCP はそのゲートを迂回する。したがってワーカープロセス側から Resolve スクリプトを実行する必要はない（`src/workers/fix-review-point.ts` の `onCompleted` はコールバックコメント投稿のみで、レビュースレッドには触らない）。`gh` フォールバック（`plugin/scripts/resolve-pr-comments.sh`）はローカル実行向けに残してあり、失敗時は非0で終了して「0件」と区別できるようにしてある。
 
 ### `advisor`（アドバイザーモデル）
 
@@ -294,6 +300,92 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - 同 `[ui.sound.agents] claude = "off"`（claudeエージェント全体。対話セッションも無音になる）
 - ワーカー用に別 herdr セッションを `HERDR_DISABLE_SOUND=1 herdr --session <name>` で起動し、その中でディスパッチャーを動かす（サーバーへのenv継承は未検証）
 
+### クラウド実行（`--cloud`）
+
+`claude-task-worker <command> --cloud`（boolean フラグ、既定は無効）で、対象コマンドの全タスクを claude CLI の `--cloud`（Claude Code on the web）へ振る。`--project` と同様 `process.argv` から解決し、プロセス内で一度だけ解決してキャッシュする。ワーカー単位の設定ではなくプロセス単位の指定であり、実行時にどのワーカーをクラウドへ振るかは選べない（後述の `CLOUD_DENIED_WORKERS` だけが例外的にローカルへ残る）。
+
+`claude-task-worker.json` の `workers.<name>.cloud` 設定は廃止した。ワーカーごとにクラウド適合性が大きく違う（後述の適合性表）ため、静的な設定より実行のたびに `--cloud` を付け外しする運用の方が事故が起きにくい（推奨されないワーカーへ `cloud: true` を書いたまま放置される、といった設定の陳腐化を防げる）。設定ファイルに `cloud` キーが残っている場合は「`--cloud` へ移行した」旨を警告ログに出したうえで無視する（`parseWorkerEntry()`、`src/config.ts`）。
+
+ワーカー名からクラウド実行可否を返す単一ヘルパー `isCloudWorker(name)`（`src/config.ts`）に denied 判定を集約し、`issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts` の3ワーカーがこれを読む。
+
+#### Phase 1 が `mode: "herdr"` 限定である理由
+
+- **新規クラウドセッションの作成には TTY が必要**。claude CLI は stdout が TTY でない場合 print モード扱いになり、非TTY での `--cloud` は `Error: --cloud requires an interactive terminal.` で拒否される（実測 `docs/cloud-session-launch-flags.md` T1、claude 2.1.247）
+- `mode: "default"` は `spawn(..., { stdio: ["ignore", "pipe", "pipe"] })` で TTY を持たないため、この経路ではクラウドセッションを作成できない。`mode: "herdr"` では既存のタスクタブ（TUI・実TTY）がそのまま起動場所になる
+- `--cloud` を指定したのに `mode` が `"herdr"` でない場合は、`assertCloudAvailable()`（`src/index.ts`）が**タスクを1件も起動せずエラー終了**する。**サイレントにローカル実行へフォールバックしない**（実行形態が設定と食い違ったまま走る方が事故が大きいため）。エラーメッセージはワーカー名ではなく `--cloud` フラグを指す文言にする（プロセス単位の指定であり、特定ワーカーの設定ミスではないため）
+- `--cloud` は `CLOUD_DENIED_WORKERS` を**起動時エラーにはしない**。内訳は (a) `resolve-conflict` / `create-ui-design` / `apply-ui-design`（`.pen` の編集に `pencil` CLI とその認証が要る／クラウドからの force-push 可否が未検証）、(b) 定期ワーカー3件（`SCHEDULED_WORKER_NAMES`）。(b) は**完了検知の `cc-cloud-done` を置く先が無い**ため：同ワーカーは対象 Issue/PR を持たず、ラベルを付けるマーカーが存在しない（実行記録PRをマーカー先にする案は Phase 2 で再検討）。`all` / `yolo` には denied ワーカーが必ず含まれるため、エラー終了させると `--cloud` をこれらのコマンドで使えなくなる。そのため denied ワーカーは `isCloudWorker()` が false を返し、その分だけローカル実行のまま残す。どのワーカーがローカルに残るかは起動時に1行ログで示す
+- タスクタブのラベルは `taskTabLabel()`（`src/herdr-runner.ts`）が `ctw:<project>:#<n>`（ローカル実行と同一書式）を返すため、タブラベルだけではクラウド実行かどうかを区別できない。タブはセッションID取得後すぐ閉じられ、クラウドセッション自体はローカルに常駐しないため、タブに `:cloud` のようなサフィックスを付ける意味も無い
+
+#### クラウド時に worktree を作らない理由
+
+- `issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts` は `cloud` のとき `createWorktreeFromBranch()` / `getWorktreePath()` / `removeWorktree()` をスキップし、cwd を `undefined`（＝ワーカーのリポジトリルート）にする。**クラウド VM が自前でリポジトリを持つため、ローカルの作業ツリーは使われない**
+- Issue 系の `ensureEpicBranch()` は**引き続き実行する**（`cc-epic-<N>` をリモートに用意する処理であり、その後 `--ref cc-epic-<N>` で参照するため）
+- PR 系のローカルブランチ掃除（`removeWorktreeByBranch()` / `deleteLocalBranch()` / `localBranchExists()` のプリフライト）は**スキップする**。ローカルの checkout 競合はクラウド実行では発生しない（`gh pr checkout` はクラウド VM 側で走る）
+- **副作用**: `exec-issue` の PR 実在検証で「worktreeId を head とする PR」の条件が成立しなくなる（クラウドセッションは作業ブランチ名を自分で決め、ローカルからはその名前を取得する手段が無い）。代わりに `selectOwnedClosingPr()`（`src/workers/exec-issue.ts`）が closing 参照PRの **base ブランチ一致 ＋ 作成時刻がタスク起動時刻以降**で所有権を判定する。所有権を確認できなければ `cc-pr-created` を付けず `cc-need-human-check` へ倒す
+
+#### `--cloud` 付与時の起動引数の差分
+
+- `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` のみ**。`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
+- 実測（`docs/cloud-session-launch-flags.md` の T5 / T6 / T7、claude 2.1.247）でこれらのフラグはいずれも**受理された**。ただし「受理された＝クラウド VM 側で実際に反映される」ことまでは未確認（起動引数として拒否されないことのみを確認）
+- **「クラウドセッションが受理しないフラグを渡すと起動そのものが失敗する（黙って無視されない）」という原則は維持する**。実際にそれへ該当するのは2つだけ: (a) `-p` との併用（`Error: --cloud cannot be combined with --print.`）、(b) `--ref` と `--on-branch` の同時指定（`Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）
+- `--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**。実装は起動前に `buildClaudeArgs()` が例外で弾く（外部プロセスのエラーで気づく形にしないため）。Issue 系ワーカーはベースブランチを `--ref` へ、PR 系は PR の head ブランチを `--on-branch` へ渡す
+- 2026-08-29 の smoke test で両者の実際の挙動を確認した。**`--on-branch <PR の head ブランチ>`** はそのブランチ上で**直接**作業し、push すると**その PR がそのまま更新される**（新しいブランチは切られない）。**`--ref <branch>`** は指定ブランチを起点に `claude/<description 由来>-<6文字>` 形式の**新規**作業ブランチを作る。作業ブランチ名は `--cloud` に渡す description に依存するため、ローカルからは事前に取得・予測できない。この確認により、`--ref` 系ワーカー（Issue 系）で「作業ブランチ名を取得する手段が無い」という前節の結論、および `selectOwnedClosingPr()` による所有権判定が必要という結論は変わらない
+- **プロンプトは作成コマンドの `--cloud` の値として渡す**（`buildCloudCreateArgs(commonArgs, description)` の `description`）。実測（claude 2.1.250）により `--cloud <description>` の `description` は表示名ではなく**初期プロンプトとして即実行される**ことが判明したため、これがクラウドセッションの新規作成に `-p` を付けられない制約下でプロンプトを渡す唯一の経路になる。herdr の `agent prompt`（上記「mode（タスクの実行形態）」の「プロンプトを起動引数で渡してはいけない」）はローカル herdr 実行専用の投入経路であり、クラウド実行では使わない — クラウドの作成コマンドはherdrのタスクタブから送信されるが、投入されるプロンプトは`agent prompt`ではなく`--cloud`の値そのもの
+- `buildClaudeEnv(mode, cloud)` は `cloud` のときのみ `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を注入する。GitHub App 連携済みのリポジトリでも `--ref` / `--on-branch` が `the GitHub App is not set up for this repository` として誤って拒否される Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)、2026-08-29時点 OPEN）の回避策。tabCreate の `--env` 経由でペインのシェル環境へ渡るため、上記の作成コマンド（`paneSendText` で同ペインへ送信）にも自動的に効く
+- **最終レポートはドライバ経路には乗らないため、Issue/PR コメント経由で回収する**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8、Issue #285）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。そこで `appendCloudDoneInstruction()`（`src/claude-args.ts`）は `cc-cloud-done` を付ける直前に、固定見出し `CLOUD_REPORT_HEADING`（生成側・取得側で共有する定数）を持つコメントへ最終報告を投稿させ、ワーカーは完了検知（次節）後に1回だけ `findCommentSince()`（`src/gh.ts`）でその本文を取得して `TaskResult.output` にする。取得できない・例外の場合は従来どおりの定型文へフォールバックし、通知自体は落とさない。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
+
+#### 完了検知（`cc-cloud-done` ラベルのポーリング）
+
+クラウドをドライブし続けるローカル TUI が存在しない（M-1）ため、herdr の agent ステータスではクラウド側の完了を検知できない。代わりに**セッション自身が最後の操作として対象 Issue/PR へ `cc-cloud-done` ラベルを付け、ワーカーがそれをポーリングする**（`src/process-manager.ts` の `waitForCloudTask()`）。
+
+2026-08-29 の smoke test で、`exec-issue` ワーカーによるこの完了検知の連鎖（プロンプト投函 → 最終報告コメント投稿 → `cc-cloud-done` 付与 → ワーカーが検知して除去 → `cc-pr-created` 付与）がエンドツーエンドで成立することを確認した。小規模タスク（2行のファイル追加）1件の所要時間は9分03秒。
+
+- **プロンプトへの指示はワーカー側で付ける**（`appendCloudDoneInstruction()`、`src/claude-args.ts`）。スキル本文（`plugin/skills/*`）は変更しない — クラウド実行はワーカー単位の設定であり、ローカル実行のスキルに同じ指示を持たせても意味が無いため。指示は GitHub MCP 優先・`gh` フォールバックの既存規約に沿わせてある
+- **ポーリングは実行中のクラウドタスク全体を1クエリずつで判定する**（`listNumbersWithLabel()`、`src/gh.ts`）。`gh issue list --label cc-cloud-done --json number` / 同 `pr list` を type ごとに1回だけ叩き、待機中のタスクを一括で照合する。個別番号の `gh issue view` ポーリングにするとタスク数に比例して API を叩くことになる。`--state all` にしているのは、`exec-issue` の「コード変更なし」経路が Issue をクローズしてからラベルを付けるため（既定の open 限定だと取りこぼす）
+- **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。セッション作成完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` / `cc-fix-repeat` で毎ポーリングごとにクラウドセッションが量産されていた
+- **検知したら `cc-cloud-done` を除去してから `finishTask()` へ渡す**。以降のラベル遷移（`onCompleted` の PR 実在検証 → `cc-pr-created` / `cc-need-human-check`）はローカル実行と完全に同一の経路を通る
+- **起動前に対象から `cc-cloud-done` を除去する**（`issue-worker.ts` / `pr-worker.ts`）。前回実行の残骸で即座に完了と誤判定するのを防ぐ。同一番号の同時実行は `isRunning()` が止めるため nonce は不要
+- **`CLOUD_TASK_TIMEOUT_MS`（4時間）で打ち切る**。`AskUserQuestion` で停止したセッション・VM 側クラッシュ・プラグイン未導入による空振り・ラベル付与自体の失敗はすべてここへ落ちる。打ち切り時は `cc-need-human-check` を付けて failed とし、セッション URL 付きの Slack 失敗通知を送る。**`cc-need-human-check` の付与を `runViaCloud()` 側で行っている**のは、ワーカーの `onComplete` の失敗経路が同ラベルを付けないため（付けないと打ち切られたタスクが誰にも拾われない）
+- 人が手動で `cc-cloud-done` を付けても同じ経路で完了扱いになる（張り付いたタスクの救済手段）。シャットダウン時は `herdrAbortSignal` で待機ループを抜ける（1秒刻みで確認するため30秒の間隔待ちに引きずられない）
+- **セッションID抽出失敗（catch 経路）と `aborted`（シャットダウン）も `runViaCloud()` 側で `cc-need-human-check` を付け、対象 Issue/PR へ孤立セッション（クラウド側は生き残っている可能性がある）である旨とセッションURL（不明なら「セッションURL不明（ID抽出に失敗）」）をコメントする**（`cloudTarget` を持たない定期ワーカーは対象外）。`cc-in-progress` を残す案は採らない — 無条件に外す `finally` へ分岐が要るうえ「実行中に見えるが実行していない」状態を作るため
+
+#### ワーカー別の適合性
+
+判定は「Phase 1 でクラウド実行を推奨してよいか」であり、**`--cloud` 指定時にローカルへ残る対象とは別**。`--cloud` を付けてもローカル実行のまま残るのは `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件）だけで、`fix-review-point` / `triage-pr` / `check-dependabot` は `--cloud` でクラウド実行されるが推奨しない。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
+
+前節「GitHub アクセス（GitHub MCP 優先 / `gh` フォールバック）」の移行により、下表の劣化要因（GraphQL 403）は MCP 経由で回避されうる見込みだった。2026-08-29 の smoke test で実際にクラウド VM 上の GitHub MCP（`mcp__github__*`、55ツール）を確認したところ、`issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4ツールが動作した。一方 `gh … --json`（GraphQL 経由）は引き続き403で、GraphQL ゲート自体は解消していない（MCP はゲートを迂回する別経路であり、ゲートを塞いだわけではない）。`gh api repos/...`（REST）は成功する。動作確認できたのはこの4ツールのみで、`gh pr view --json` / `gh pr checks` / `reviewThreads` / `resolveReviewThread` に相当する MCP 操作は未実測のため、**下表はこの4ツールで代替できる範囲の行のみ見直し、それ以外は従来の判定を据え置いている**。
+
+前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md` M-5）。ただし M-5 の実測環境が本当に未連携だったかは #81776（`--ref` の誤判定バグ）により確定していないため、**連携済み環境でも同じになるかは未確認**（同 M-5 の訂正注記を参照）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
+
+あわせて、クラウド VM の `gh` が古い（実測 2.45.0）ため `--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` でクライアント側から失敗する、という**プロキシ制限とは独立した交絡**もある。
+
+| ワーカー | 判定 | 主な劣化要因 |
+|---|---|---|
+| `exec-issue` | ○（2026-08-29 smoke test でE2E成立を実測。GitHub MCP の `issue_read` でIssue本文を読み、`create_pull_request` でPRを作成し、`cc-cloud-done` 経由の完了検知まで通した。小規模タスク1件・9分03秒の実測のみで、`gh pr list --head` に相当するMCP操作は未実測） | （実測により大半の劣化要因を解消。未実測操作のみ残存） |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | ✕（`--cloud` 指定時もローカル実行のまま（`CLOUD_DENIED_WORKERS`）。`cc-cloud-done` を置く対象 Issue/PR が無く完了検知できない。加えて収集も0件で空振り終了） | 収集スクリプトの `gh api graphql` / `gh (issue\|pr) view --json` |
+| `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（据え置き。`issue_read` / `add_issue_comment` / `issue_write` の動作をMCPプローブで確認し、Issue本文・コメントの読み取りと書き戻しの経路自体は成立するが、これら4ワーカー自身のE2E実行は今回未実施） | `gh issue view --json body,comments,labels`（MCP代替を確認、E2E未検証） |
+| `epic-issue`（`create-epic-pr`） | △（据え置き。`issue_read` でのIssue読み取り・`create_pull_request` でのPR作成が動作することをMCPプローブで確認したが、ワーカー自身のE2E実行は未実施） | `gh issue view --json`（MCP代替を確認、E2E未検証） |
+| `fix-review-point` | ✕（レビュー指摘を1件も取得できず、スレッド解決も回復不能） | `reviewThreads` / `resolveReviewThread` / `gh pr view --json` |
+| `triage-pr` | ✕（マージ判断の材料がゼロ） | `gh pr view --json` / `gh pr checks` / `reviewThreads` / `gh pr list` |
+| `check-dependabot` | ✕（依存更新の内容もCI結果も読めない） | `gh pr view --json` / `gh pr checks` |
+| `resolve-conflict` | ✕（`--cloud` 指定時もローカル実行のまま（`CLOUD_DENIED_WORKERS`）。加えてコンフリクト判定の入力も取れない） | `gh pr view --json` |
+| `create-ui-design` / `apply-ui-design` | ✕（`--cloud` 指定時もローカル実行のまま（`CLOUD_DENIED_WORKERS`）。`pencil` CLI と認証が理由） | `gh issue view --json` |
+
+`fix-review-point` / `triage-pr` / `check-dependabot` / `resolve-conflict` の判定を据え置いたのは、必要な操作（`gh pr view --json` 相当のPR詳細取得、`gh pr checks`、`reviewThreads`、`resolveReviewThread`）がいずれも今回動作確認した4ツールの範囲外だからである（特に `resolveReviewThread` は REST 代替が原理的に存在せず、今回も実測対象外）。このうち `fix-review-point` / `triage-pr` / `check-dependabot` の3ワーカーは `--cloud` でも拒否されない（ローカルへは残らない）方針だが、成果物を出せずタスクが空振りするため、運用上はこれらのワーカーへ `--cloud` を使わないことを推奨する。
+
+**`src/gh.ts` の GraphQL 依存関数（`findPrNumberClosingIssue` / `hasOpenBlockers` / `getIssueSubIssuesSummary` / `getPrMergeable` / `listIssuesByLabel` / `listIssuesByNumbers`）はワーカープロセス（ローカル）が呼ぶため `--cloud` を指定しても影響を受けない**。クラウドで走るのはタスクセッション（スキル）だけであり、上表の劣化はすべてスキル本文の `gh` 呼び出しに起因する。ここを取り違えると影響範囲を誤って見積もる。
+
+#### 前提条件
+
+4つあり、**起動時に静的検査でき、満たさなければエラー終了する**（タスクを1件も起動しない）のは 1（claude.ai アカウントでのサインイン）のみ。2（GitHub 連携）・3（プラグイン導入）・4（`allow_remote_sessions` 組織ポリシー）は**ローカルから照会する手段が無い**ため静的検査せず、案内に留める（`docs/cloud-prerequisite-checks.md`、Issue #225 の実測）。
+
+- **1（サインイン）**: `checkCloudAuth()` が `claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で判定する。API キー認証・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成ではクラウドセッションを作成できない。**`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返す**ため `apiKeySource` の不在を併せて見る必要がある。コマンドの実行・パースに失敗した「判定不能」は**エラーにしない**（サインイン状態が読めないことを拒否根拠にしない安全側の倒し方）
+- **2（GitHub 連携）**: 非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない
+- **3（プラグイン導入）**: claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載してプラグイン・CLI を導入する。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式（`checkPluginDeclaration()` による静的検査）は、クラウドセッションがその宣言を読んで自動的にプラグインを有効化するという前提が事実でなかったため撤去した（Issue #268）。VM 側で `install` を実行済みかどうかはローカルから確認できないため静的検査は行わない
+- **4（`allow_remote_sessions` 組織ポリシー）**: CLI がポリシーを `policy-limits.json` にキャッシュする実装を持つが実測環境では生成されず、「未取得」と「拒否」を区別できないため静的検査しない
+
+上記1の検査は `--cloud` が指定されていなければ **I/O ごと行わない**（`--cloud` を使わない既存の実行の挙動を完全に不変に保つため）。
+
 ### `--project` ディスパッチ
 
 `src/index.ts` は起動時に `hasProjectFilter()` で `--project` フラグの有無を判定し、指定されている場合はワーカー起動の代わりにディスパッチャーを起動する（複数プロジェクトへ同一コマンドを一括転送する仕組み）。
@@ -322,6 +414,23 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 起動判定（`isWorkerProcess()`）は `pollOnce()` の生存判定と共有し、「起動したとみなす条件」と「生存しているとみなす条件」を一致させる。なお `herdr pane read` は他コマンドと違い JSON エンベロープではなく端末内容の生テキストを返す（失敗時のみ `{"code","message"}` を返し `error` キーで包まない）ため、`paneRead()` は `execHerdr()` のJSONパース経路を通さない専用実装になっている。
 
+#### `herdr pane read` の `--source` 差（`recent` は作成直後のペインで空を返す）
+
+`--source recent` は**ペインバッファの末尾N行**を返すが、この N 行は「ビューポートを埋めていない空行パディング」を**含めて**数えられる。そのため出力がまだビューポート下端に届いていないペインでは、返る行がすべて空行になり herdr は**空文字**を返す。`--source visible`（`paneRead()` の既定）はビューポート全体を返すため、この状況でも内容が取れる。
+
+実測（herdr 0.8.2、`viewport_rows: 106` の新規タブのルートペイン）:
+
+| ペインの状態 | `visible` | `recent`（`--lines` なし） | `recent --lines 100` | `recent --lines 106` | `recent --lines 300` |
+|---|---|---|---|---|---|
+| 作成直後（プロンプトのみ） | 324B | **0B** | **0B** | 324B | 324B |
+| 1行だけ出力したコマンドの実行後 | 679B（内容を含む） | **0B** | — | — | — |
+| 200行の出力後（スクロール済み） | 1265B | 1035B | — | — | 2009B |
+| claude(TUI) が動作中 | 3828B | 3261B | 3742B | — | 3828B |
+
+境界は `viewport_rows` と一致する（`--lines 100` は空、`--lines 106` から内容が返る）。`--lines` が `viewport_rows` を超えていればパディングを飛び越えて先頭行まで届くため、空にはならない。
+
+この挙動により、**`--lines` を付けずに `recent` で読む経路は作成直後のペインで必ず空振りする**。`runViaCloud()`（`src/process-manager.ts`）のクラウドセッションID抽出がこれに該当し、セッションが正常に作成されても ID を一度も読めず `timed out waiting for the cloud session id (pane tail: )` で必ず失敗していた（既定の `visible` で読むよう修正済み）。一方 `readPaneOutput()`（`src/herdr-runner.ts`）は `lines: PANE_OUTPUT_LINES`（300）を渡しており `viewport_rows` を超えるため空振りしない（上表の claude(TUI) 行で確認済み）。`waitForPaneReady()` は元から `visible` を使っている。
+
 ### ラベルフロー
 
 | Worker | トリガーラベル | 完了時 |
@@ -332,6 +441,8 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 | update-issue | `cc-update-issue` | `@author Updated` コメント投稿 |
 | create-ui-design | `cc-create-ui-design` | PR に `cc-ui-design` + `cc-triage-scope`、Issue に `cc-ui-design-pr-created` を付与 |
 | apply-ui-design | `cc-ui-design-pr-created` | Issue に `cc-ui-design-ready` + `cc-exec-issue` を付与 |
+
+`cc-cloud-done` は上表のどのワーカーのトリガーでもなく、クラウド実行（`--cloud`）のタスクがセッション自身の最後の操作として対象 Issue/PR へ付けるマーカー。ワーカーが検知して除去し、以降のラベル遷移はローカル実行と同一経路を通る。
 
 #### マーカーラベルは消費しない（`STICKY_LABELS`）
 
@@ -434,6 +545,22 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 `explore-agent` 側にも同じ方針をステップ4.5として置いている。同エージェントの「一切の変更を行わない」原則が読み取り専用の外部参照まで禁じていると読めたため、`WebFetch` / `WebSearch` / context7 は禁止に含まないことを明記した（禁止されるのは投稿・書き込み）。委譲元の3スキルもプロンプトで同方針を伝える。
 
+### GitHub アクセス（GitHub MCP 優先 / `gh` フォールバック）
+
+クラウドセッションの GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` がフィールドを問わず 403 になる（`docs/cloud-graphql-proxy-limits.md`）。この状態ではタスクセッションが Issue/PR 本文を1文字も読めないため、`plugin/` 配下スキルの GitHub アクセスを GitHub MCP 優先へ切り替えた。GitHub MCP はこのプロキシを経由しない。
+
+`gh` → MCP ツールの対応表は `plugin/references/github-access.md` の1ファイルに集約し、各スキルはそこを参照する形にしてある。GitHub MCP のツール名は上流（github/github-mcp-server）で統廃合が進んでおり（`list_workflow_runs` → `actions_list` など）、30本弱のスキルへツール名を直書きすると個々のリネームで一斉に腐る。1ファイルに寄せればリネームは1箇所の修正で済む。
+
+`gh` コマンドは削除せずフォールバックとして本文に残してある。GitHub MCP は前提条件ではなく最適化であり、未設定・未認証のローカル環境でスキルを壊さないため。フォールバックは1操作につき1回に限る（MCP で失敗した同じ操作を MCP で再試行しない。認証・設定の問題は再試行では直らない）。
+
+`gh` のまま残す操作もある（`gh pr checkout` / `gh pr status` / `gh-asset` / `gh repo view --json` など）。いずれもローカルの作業ツリー・カレントブランチという文脈に依存するか、MCP に同等の取得手段が無いことが理由で、クラウド対応とは無関係にこのまま残る。
+
+`src/gh.ts` などワーカープロセス（ローカル）側の `gh` 呼び出しは対象外。ワーカーはローカルで走り続けるためプロキシのゲートを受けない。クラウドで走るのはタスクセッション（スキル）だけである。
+
+レビュースレッドの Resolve（`resolve-pr-comments` スキル）も MCP 経路へ移した。`resolveReviewThread` は REST 代替が無いため `gh` 経路では GraphQL 直叩きになり、クラウドでは 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）がゲートを迂回する。`threadId` は `pull_request_read`（method: `get_review_comments`）が返す node ID（`PRRT_...`）を使い、カーソル方式（`perPage` / `after`）でページングを取得しきる。`resolve_thread` は既に解決済みのスレッドに対して no-op なので冪等で、フォールバックによる二重実行の害が無い。
+
+**クラウドセッションでの GitHub MCP の起動・認証**は、2026-08-29 の smoke test で実測した（`docs/cloud-graphql-proxy-limits.md` 参照）。クラウド VM 上で `mcp__github__*` が55ツール利用可能で、うち `issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4つの動作を確認した。ただし `gh … --json`（GraphQL 経由）は依然403のままで、GraphQL ゲート自体は健在（MCP はゲートを迂回する別経路であり、解消したわけではない）。下記「クラウド実行」の「ワーカー別の適合性」表は、動作確認できたこの4ツールで代替できる範囲に限って見直した（未実測の操作に依存するワーカーの判定は据え置いてある）。
+
 ## Conventions
 
 - ESM（tsconfig は `module: ESNext` / `moduleResolution: Bundler`）— **相対 import は拡張子を付けない**（`import { x } from "./foo"`）。`.js` も `.ts` も付けない。esbuild バンドルと `tsc`（Bundler 解決）は拡張子なしをそのまま解決するが、`node --experimental-strip-types --test` の ESM リゾルバは拡張子なし・`.js`→`.ts` のどちらも解決できないため、テスト実行時のみ `scripts/test-resolver.mjs`（`register()` で `scripts/test-resolver.hooks.mjs` の resolve フックを登録）が実ファイル（`.ts` 等）へ橋渡しする。`package.json` の `test` スクリプトが `--import ./scripts/test-resolver.mjs` で読み込む。テストでソースを値として読む場合は `import type * as M from "./foo"`（型は拡張子なしで erase される）＋ `const m = (await import("./foo")) as typeof M` の既存パターンに従う
@@ -449,6 +576,8 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - `claude-task-worker` プラグイン（本リポジトリの `plugin/`）がインストール済み
   - `npx claude-task-worker install` で一括セットアップ可能
   - 手動の場合: `claude plugin marketplace add getty104/claude-task-worker` → `claude plugin install claude-task-worker@claude-task-worker`
+  - Claude Code on the web からも実行する場合、およびクラウド実行（`--cloud`）を使う場合は、claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載し、VM 側にプラグイン・CLI を導入しておく（リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した。Issue #268）
+  - あわせて claude.ai アカウントでのサインインもクラウド実行の必須前提。未サインイン・API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）構成では、`--cloud` 指定時の静的検査（`checkCloudAuth()`）でエラー終了する（詳細は Architecture の「クラウド実行（`--cloud`）」参照）
 - CodeGraph (`codegraph`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`codegraph serve --mcp`）。`explore-agent` およびワーカー起動セッションは**この MCP ツール経由で** CodeGraph を使う。ツールが無い場合、および未インデックスでエラー・空結果が返る場合は `Glob`/`Grep` にフォールバックする
   - プロジェクトごとのインデックス構築は `claude-task-worker init`（内部で `codegraph init`）。未インストール・未初期化でもワーカーは動作する（探索がテキスト検索に落ちるだけ）
@@ -461,3 +590,6 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`npx -y @playwright/mcp@latest`）。サーバー本体は npx がその都度解決するため事前導入は不要だが、ブラウザバイナリが未取得だと MCP ツールの初回呼び出しが実行時に失敗する
   - 取得は `npx -y playwright-core@latest install chromium`（`src/commands/playwright.ts`）。chromium のみで、`--browser chrome` のブランドChannel は対象外
   - Linux ではシステムライブラリも必要なため、続けて `install-deps` を実行する（非 root では `sudo npx playwright-core@latest install-deps chromium`。root では `sudo` なし）。sudo のパスワードを求められることがある
+- GitHub MCP がセットアップ済み（任意）
+  - Claude 側（claude.ai / Claude Code）で有効化したコネクタを使う。プラグイン側では宣言しない。有効化手順は README を参照
+  - **未設定・未認証でもスキルは `gh` へフォールバックするため動作する**（前提条件ではなく最適化）。対応表は `plugin/references/github-access.md` を参照

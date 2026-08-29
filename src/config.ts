@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep as SEP } from "node:path";
+import { hasCloudFlag } from "./dispatch-args";
 
 export type WorkerName =
   | "exec-issue"
@@ -223,6 +224,86 @@ export const SCHEDULED_WORKER_NAMES = [
   "update-design-md",
 ] as const;
 
+// クラウドセッションが最後の操作として付与し、ワーカーが完了検知に使うラベル
+// （cc-cloud-done ラベルのポーリングでクラウドタスクの完了を判定する。#284）。
+export const CLOUD_DONE_LABEL = "cc-cloud-done";
+
+// --cloud 指定時もクラウド実行にしないワーカー。resolve-conflict は rebase 後の force-push が
+// クラウド環境で可能か未測定のため、create-ui-design / apply-ui-design は .pen の編集に必要な
+// pencil CLI がクラウド環境に未導入（さらに認証が要る）ため、いずれも拒否する。定期ワーカー
+// （SCHEDULED_WORKER_NAMES）は対象 Issue/PR を持たず cc-cloud-done を置く先が無いため
+// 完了検知できず拒否する（Phase 1 の制約）。
+export const CLOUD_DENIED_WORKERS = [
+  "resolve-conflict",
+  "create-ui-design",
+  "apply-ui-design",
+  ...SCHEDULED_WORKER_NAMES,
+] as const;
+
+// --cloud 指定時に、そのワーカーをクラウド実行するか。CLOUD_DENIED_WORKERS の
+// ワーカーは起動時エラーにせずローカル実行のまま残す。
+export function isCloudWorker(name: string): boolean {
+  return hasCloudFlag() && !(CLOUD_DENIED_WORKERS as readonly string[]).includes(name);
+}
+
+// `claude auth status --json` が読めた場合は判定対象のフィールドを、
+// 実行・パースに失敗した場合は「判定不能」を表す `unknown` を渡す。
+export type CloudAuthStatus =
+  | { kind: "ok"; loggedIn: boolean; authMethod: string; apiProvider: string; apiKeySource?: string }
+  | { kind: "unknown" };
+
+// claude.ai サインイン以外の構成（第三者プロバイダ・APIキー認証・未サインイン・カスタム
+// エンドポイント）でのクラウドセッション作成失敗を、起動前に検出する。
+// `docs/cloud-prerequisite-checks.md` の判定式・文面案が正。判定不能（コマンド実行/パース
+// 失敗）はエラーにしない — サインイン状態が読めないことを拒否根拠にしない安全側の倒し方。
+export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: string }): string[] {
+  if (input.status.kind === "unknown") return [];
+  const { loggedIn, authMethod, apiProvider, apiKeySource } = input.status;
+  const baseUrlSet = !!input.baseUrl;
+  if (loggedIn && apiProvider === "firstParty" && authMethod === "claude.ai" && !apiKeySource && !baseUrlSet) {
+    return [];
+  }
+  const prefix = `クラウド実行（--cloud フラグ）には claude.ai アカウントでのサインインが必要です。現在の認証構成: ${authMethod} / ${apiProvider}。`;
+  if (apiProvider === "bedrock" || apiProvider === "vertex") {
+    return [
+      `${prefix} 第三者プロバイダ（Bedrock / Vertex）を使っている場合: クラウドセッションは Anthropic のインフラ上で動くため利用できません。CLAUDE_CODE_USE_BEDROCK / CLAUDE_CODE_USE_VERTEX を解除するか、--cloud フラグを外してください。`,
+    ];
+  }
+  if (apiKeySource || authMethod === "oauth_token") {
+    return [
+      `${prefix} API キー認証（ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN）の場合: API キーではクラウドセッションを作成できません。環境変数を解除して claude auth login でサインインしてください。`,
+    ];
+  }
+  if (!loggedIn) {
+    return [`${prefix} 未サインインの場合: claude auth login を実行してください。`];
+  }
+  if (baseUrlSet) {
+    return [
+      `${prefix} ANTHROPIC_BASE_URL を設定している場合: カスタムエンドポイント構成ではクラウドセッションを利用できません。解除してください。`,
+    ];
+  }
+  return [`${prefix} claude auth status --json の出力からクラウド実行の前提条件を判定できませんでした。`];
+}
+
+// --cloud フラグ指定時に非対応の組み合わせが無いかを検査する。引数をオブジェクト1つに
+// してあるのは、検査項目を追加してもシグネチャを壊さずフィールドを足せるようにするため。
+// `auth` は cloud が false なら一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
+export function checkCloudConfig(input: {
+  cloud: boolean;
+  mode: string;
+  auth?: { status: CloudAuthStatus; baseUrl?: string };
+}): string[] {
+  if (!input.cloud) return [];
+  const errors: string[] = [];
+  if (input.mode !== "herdr") {
+    errors.push(
+      `--cloud requires mode "herdr" but mode is "${input.mode}" (creating a new cloud session requires a TTY, which "default" mode's spawn does not have). Set mode to "herdr" in config.json, or drop the --cloud flag.`,
+    );
+  }
+  if (input.auth !== undefined) errors.push(...checkCloudAuth(input.auth));
+  return errors;
+}
+
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
@@ -305,6 +386,11 @@ export function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfi
         `[config] invalid workers.${name}.maxConcurrentTasks: ${String(val)}, using default ${base.maxConcurrentTasks}`,
       );
     }
+  }
+  if ("cloud" in entry) {
+    console.warn(
+      `[config] workers.${name}.cloud is removed; cloud execution now opts in via the --cloud flag at runtime. This setting is ignored.`,
+    );
   }
   return result;
 }

@@ -14,6 +14,12 @@ const {
   buildClaudeArgs,
   buildClaudeEnv,
   buildClaudeExecution,
+  buildCloudCreateArgs,
+  buildCloudPrompt,
+  buildCloudToolRestriction,
+  appendCloudDoneInstruction,
+  CLOUD_REPORT_HEADING,
+  shellQuote,
   isOpusModel,
   systemPromptFilePath,
   systemPromptFor,
@@ -211,6 +217,22 @@ test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server
   assert.ok(!("HERDR_DISABLE_SOUND" in buildClaudeEnv("herdr")));
 });
 
+test("buildClaudeEnv adds CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC only when cloud is true", () => {
+  assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("default", false), { ...CLAUDE_SPAWN_ENV });
+  assert.deepEqual(buildClaudeEnv("herdr", false), {
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+  });
+  assert.deepEqual(buildClaudeEnv("default", true), {
+    ...CLAUDE_SPAWN_ENV,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  });
+  assert.deepEqual(buildClaudeEnv("herdr", true), {
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  });
+});
+
 test("buildClaudeExecution always runs claude directly with the built args", () => {
   for (const mode of ["default", "herdr"] as const) {
     const invocation = { mode, prompt: "/skill 123", model: "sonnet", effort: "high" } as const;
@@ -235,4 +257,198 @@ test("buildClaudeExecution exposes the prompt separately in herdr mode only", ()
   const common = { prompt: "/skill 1", model: "opus", effort: "high" } as const;
   assert.equal(buildClaudeExecution({ mode: "herdr", ...common }).prompt, "/skill 1");
   assert.equal(buildClaudeExecution({ mode: "default", ...common }).prompt, undefined);
+});
+
+test("buildClaudeArgs omits -p <prompt> and --cloud itself when cloud is true", () => {
+  // Cloud sessions do not support print mode (observed: `Error: --cloud cannot be
+  // combined with --print.`), so -p must drop out in both default and herdr mode.
+  // `--cloud <description>` itself is not added here: description（herdr のタスクタブ
+  // ラベル）は process-manager.ts 側でしか決まらないため、buildCloudCreateArgs() が
+  // このフラグ列の先頭へ足して作成コマンドを完成させる。
+  for (const mode of ["default", "herdr"] as const) {
+    const args = buildClaudeArgs({ mode, prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
+    assert.ok(!args.includes("-p"));
+    assert.ok(!args.includes("/skill 1"));
+    assert.ok(!args.includes("--cloud"));
+  }
+});
+
+test("buildClaudeArgs (cloud) contains only the create command's common flags", () => {
+  const args = buildClaudeArgs({ mode: "herdr", prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
+  assert.ok(args.includes("--permission-mode"));
+  assert.ok(args.includes("--disallowedTools"));
+  assert.ok(args.includes("--append-system-prompt-file"));
+  assert.ok(args.includes("--model"));
+  assert.ok(args.includes("--effort"));
+});
+
+test("buildCloudCreateArgs prepends --cloud <prompt> to the common flags", () => {
+  // 1コマンド方式では description はクラウドセッションの初期プロンプトそのもの
+  // （渡した瞬間に実行される）ため、複数行のタスクプロンプトを渡すケースで検証する。
+  const commonArgs = ["--permission-mode", "bypassPermissions", "--model", "opus"];
+  const prompt = "/claude-task-worker:exec-issue 123\n\n追加の指示1行目\n追加の指示2行目";
+  assert.deepEqual(buildCloudCreateArgs(commonArgs, prompt), [
+    "--cloud",
+    prompt,
+    "--permission-mode",
+    "bypassPermissions",
+    "--model",
+    "opus",
+  ]);
+});
+
+test("shellQuote wraps values in single quotes and escapes embedded single quotes", () => {
+  assert.equal(shellQuote("simple"), "'simple'");
+  assert.equal(shellQuote("with space"), "'with space'");
+  assert.equal(shellQuote("ctw:my-app:#123"), "'ctw:my-app:#123'");
+  assert.equal(shellQuote("it's here"), "'it'\\''s here'");
+});
+
+test("shellQuote keeps a multi-line value as a single quoted token", () => {
+  // herdr の `pane send-text` はシェルへそのまま送るため、改行を含む初期プロンプトも
+  // 単一のシングルクォートトークンに収まっている必要がある（複数トークンに割れると
+  // 後続のコマンド解釈が壊れる）。
+  const quoted = shellQuote("line1\nline2\nline3");
+  assert.equal(quoted, "'line1\nline2\nline3'");
+  assert.equal(quoted.match(/'/g)?.length, 2, "囲む2つのシングルクォート以外が含まれてはいけない");
+});
+
+test("buildClaudeArgs passes --ref when baseRef is given", () => {
+  const args = buildClaudeArgs({
+    mode: "herdr",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    cloud: true,
+    baseRef: "main",
+  });
+  assert.equal(args[args.indexOf("--ref") + 1], "main");
+  assert.ok(!args.includes("--on-branch"));
+});
+
+test("buildClaudeArgs passes --on-branch when onBranch is given", () => {
+  const args = buildClaudeArgs({
+    mode: "herdr",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    cloud: true,
+    onBranch: "cc-epic-1",
+  });
+  assert.equal(args[args.indexOf("--on-branch") + 1], "cc-epic-1");
+  assert.ok(!args.includes("--ref"));
+});
+
+test("buildClaudeArgs throws when both baseRef and onBranch are given for a cloud session", () => {
+  assert.throws(
+    () =>
+      buildClaudeArgs({
+        mode: "herdr",
+        prompt: "/skill 1",
+        model: "opus",
+        effort: "high",
+        cloud: true,
+        baseRef: "main",
+        onBranch: "cc-epic-1",
+      }),
+    /--on-branch and --ref/,
+  );
+});
+
+test("buildClaudeArgs omits both --ref and --on-branch when neither is given for a cloud session", () => {
+  const args = buildClaudeArgs({ mode: "herdr", prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
+  assert.ok(!args.includes("--ref"));
+  assert.ok(!args.includes("--on-branch"));
+});
+
+test("buildClaudeArgs keeps the other flags unchanged for a cloud session", () => {
+  const args = buildClaudeArgs({
+    mode: "herdr",
+    prompt: "/skill 1",
+    model: "opus",
+    effort: "high",
+    cloud: true,
+    baseRef: "main",
+  });
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
+  assert.equal(args[args.indexOf("--disallowedTools") + 1], DISALLOWED_TOOLS_ARG);
+  assert.equal(args[args.indexOf("--append-system-prompt-file") + 1], systemPromptFilePath("opus"));
+  assert.equal(args[args.indexOf("--model") + 1], "opus");
+  assert.equal(args[args.indexOf("--effort") + 1], "high");
+});
+
+test("buildClaudeArgs is unchanged when cloud is unspecified or false", () => {
+  const common = { prompt: "/skill 123", model: "sonnet", effort: "high" } as const;
+  for (const mode of ["default", "herdr"] as const) {
+    const withoutCloud = buildClaudeArgs({ mode, ...common });
+    const cloudFalse = buildClaudeArgs({ mode, ...common, cloud: false });
+    assert.deepEqual(cloudFalse, withoutCloud);
+    assert.ok(!withoutCloud.includes("--cloud"));
+  }
+});
+
+test("appendCloudDoneInstruction keeps the original prompt and appends the label instruction", () => {
+  const prompt = "/claude-task-worker:exec-issue 123";
+  const result = appendCloudDoneInstruction(prompt, { type: "issue", number: 123 });
+  assert.ok(result.startsWith(prompt));
+  assert.ok(result.includes("cc-cloud-done"));
+  assert.ok(result.includes("Issue #123"));
+});
+
+test("appendCloudDoneInstruction includes the cloud report heading", () => {
+  const result = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
+  assert.ok(result.includes(CLOUD_REPORT_HEADING));
+});
+
+test("appendCloudDoneInstruction switches wording between issue and pr targets", () => {
+  const issueResult = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
+  const prResult = appendCloudDoneInstruction("/skill 1", { type: "pr", number: 1 });
+  assert.ok(issueResult.includes("Issue #1"));
+  assert.ok(issueResult.includes("gh issue edit 1 --add-label cc-cloud-done"));
+  assert.ok(prResult.includes("PR #1"));
+  assert.ok(prResult.includes("gh pr edit 1 --add-label cc-cloud-done"));
+});
+
+test("buildCloudToolRestriction lists every DISALLOWED_TOOLS entry", () => {
+  const restriction = buildCloudToolRestriction();
+  for (const tool of DISALLOWED_TOOLS) {
+    assert.ok(restriction.includes(tool), `expected restriction text to mention ${tool}`);
+  }
+});
+
+test("buildCloudPrompt includes the base system prompt body", () => {
+  const result = buildCloudPrompt("/skill 1", "sonnet");
+  assert.ok(result.includes(SYSTEM_PROMPT_BASE));
+});
+
+test("buildCloudPrompt appends the opus addendum only for opus models", () => {
+  const opusResult = buildCloudPrompt("/skill 1", "opus");
+  const sonnetResult = buildCloudPrompt("/skill 1", "sonnet");
+  assert.ok(opusResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
+  assert.ok(!sonnetResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
+});
+
+test("buildCloudPrompt includes the tool restriction text", () => {
+  const result = buildCloudPrompt("/skill 1", "sonnet");
+  for (const tool of DISALLOWED_TOOLS) {
+    assert.ok(result.includes(tool));
+  }
+});
+
+test("buildCloudPrompt keeps the cc-cloud-done instruction and task prompt when a target is given", () => {
+  const prompt = "/claude-task-worker:exec-issue 123";
+  const result = buildCloudPrompt(prompt, "sonnet", { type: "issue", number: 123 });
+  assert.ok(result.startsWith(prompt));
+  assert.ok(result.includes(prompt));
+  assert.ok(result.includes(CLOUD_REPORT_HEADING));
+  assert.ok(result.includes("cc-cloud-done"));
+  assert.ok(result.includes("Issue #123"));
+});
+
+test("buildCloudPrompt omits the cc-cloud-done instruction when no target is given", () => {
+  const result = buildCloudPrompt("/claude-task-worker:update-coding-guidelines 1", "sonnet");
+  assert.ok(!result.includes("cc-cloud-done"));
+  assert.ok(!result.includes(CLOUD_REPORT_HEADING));
+  assert.ok(result.includes(SYSTEM_PROMPT_BASE));
+  assert.ok(result.includes(DISALLOWED_TOOLS[0]));
 });

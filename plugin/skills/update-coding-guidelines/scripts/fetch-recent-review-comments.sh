@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
+# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になり収集が0件になる。
+# 詳細は plugin/references/github-access.md を参照。
+
 DAYS="${1:-1}"
 JOB_LIMIT="${JOB_LIMIT:-10}"
 

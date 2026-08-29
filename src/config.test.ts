@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type * as ConfigModule from "./config";
+import type * as DispatchArgsModule from "./dispatch-args";
 
 const {
   parseLastRunEntry,
@@ -14,7 +15,12 @@ const {
   DEFAULT_WORKER_CONFIG,
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
+  CLOUD_DENIED_WORKERS,
+  checkCloudConfig,
+  checkCloudAuth,
+  isCloudWorker,
 } = (await import("./config")) as typeof ConfigModule;
+const { resetCloudFlagCache } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
 // 不正値は console.warn を出して既定値へ倒す仕様なので、テスト出力を汚さないよう黙らせる。
 function silenceWarn(t: TestContext): void {
@@ -163,4 +169,155 @@ test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
   for (const name of SCHEDULED_WORKER_NAMES) {
     assert.ok(WORKER_DEFAULTS[name], `missing defaults for ${name}`);
   }
+});
+
+test("scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-cloud-done)", () => {
+  for (const name of SCHEDULED_WORKER_NAMES) {
+    assert.ok((CLOUD_DENIED_WORKERS as readonly string[]).includes(name), `${name} must be in CLOUD_DENIED_WORKERS`);
+  }
+});
+
+test("parseWorkerEntry warns and ignores a legacy cloud key (moved to the --cloud runtime flag)", (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const result = parseWorkerEntry("exec-issue", { cloud: true });
+  assert.ok(result);
+  assert.ok(!("cloud" in result), "cloud はもう WorkerRuntimeConfig に含まれてはいけない");
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(String(warn.mock.calls[0]?.arguments[0]), /workers\.exec-issue\.cloud is removed/);
+});
+
+test("checkCloudConfig returns nothing when cloud is false, regardless of mode", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: false, mode: "default" }), []);
+});
+
+test("checkCloudConfig allows cloud: true when mode is herdr", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: true, mode: "herdr" }), []);
+});
+
+test("checkCloudConfig rejects cloud: true when mode is not herdr", () => {
+  const errors = checkCloudConfig({ cloud: true, mode: "default" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /--cloud/);
+  assert.match(errors[0], /herdr/);
+});
+
+test("checkCloudConfig does not inspect auth when cloud is false", () => {
+  const errors = checkCloudConfig({
+    cloud: false,
+    mode: "herdr",
+    auth: { status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" } },
+  });
+  assert.deepEqual(errors, []);
+});
+
+test("isCloudWorker returns false for every worker when --cloud is not passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv.filter((a) => a !== "--cloud")];
+  resetCloudFlagCache();
+
+  for (const name of Object.keys(WORKER_DEFAULTS)) {
+    assert.equal(isCloudWorker(name), false, `isCloudWorker(${name}) without --cloud`);
+  }
+});
+
+test("isCloudWorker returns true for non-denied workers when --cloud is passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv, "--cloud"];
+  resetCloudFlagCache();
+
+  assert.equal(isCloudWorker("exec-issue"), true);
+  assert.equal(isCloudWorker("triage-pr"), true);
+});
+
+test("isCloudWorker returns false for every CLOUD_DENIED_WORKERS entry even when --cloud is passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv, "--cloud"];
+  resetCloudFlagCache();
+
+  for (const name of CLOUD_DENIED_WORKERS) {
+    assert.equal(isCloudWorker(name), false, `isCloudWorker(${name}) must stay local under --cloud`);
+  }
+});
+
+// M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
+test("checkCloudAuth allows a normal claude.ai sign-in", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
+  });
+  assert.deepEqual(errors, []);
+});
+
+// M2: ANTHROPIC_API_KEY
+test("checkCloudAuth rejects ANTHROPIC_API_KEY even though authMethod reads claude.ai", () => {
+  const errors = checkCloudAuth({
+    status: {
+      kind: "ok",
+      loggedIn: true,
+      authMethod: "claude.ai",
+      apiProvider: "firstParty",
+      apiKeySource: "ANTHROPIC_API_KEY",
+    },
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /API キー/);
+});
+
+// M2: ANTHROPIC_AUTH_TOKEN
+test("checkCloudAuth rejects ANTHROPIC_AUTH_TOKEN (authMethod: oauth_token)", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "oauth_token", apiProvider: "firstParty" },
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /API キー/);
+});
+
+// M2: Bedrock / Vertex
+test("checkCloudAuth rejects third-party providers (Bedrock/Vertex)", () => {
+  const bedrock = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "third_party", apiProvider: "bedrock" },
+  });
+  assert.equal(bedrock.length, 1);
+  assert.match(bedrock[0], /第三者プロバイダ/);
+
+  const vertex = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "third_party", apiProvider: "vertex" },
+  });
+  assert.equal(vertex.length, 1);
+  assert.match(vertex[0], /第三者プロバイダ/);
+});
+
+// M3: 未ログイン
+test("checkCloudAuth rejects a logged-out state", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /未サインイン/);
+});
+
+// ANTHROPIC_BASE_URL: `claude auth status` の出力上は通常のサインインと区別できないため、
+// ワーカー側が別途 baseUrl を渡して判定する。
+test("checkCloudAuth rejects a custom ANTHROPIC_BASE_URL even with an otherwise normal sign-in", () => {
+  const errors = checkCloudAuth({
+    status: { kind: "ok", loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
+    baseUrl: "https://example.invalid",
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /ANTHROPIC_BASE_URL/);
+});
+
+test("checkCloudAuth treats an indeterminate status as not an error", () => {
+  assert.deepEqual(checkCloudAuth({ status: { kind: "unknown" } }), []);
 });

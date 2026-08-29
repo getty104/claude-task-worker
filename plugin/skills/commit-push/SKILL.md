@@ -14,6 +14,10 @@ context: fork
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行ステップ
 
 ### ステップ0: 作業ディレクトリの確認
@@ -37,7 +41,7 @@ pwd
 
 ```bash
 git status
-DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)  # 単独取得ツールがMCPに無いため gh のまま残す
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # 分岐元（BASE_BRANCH）を確定する。upstream を最優先し、無ければデフォルトブランチへ倒す。

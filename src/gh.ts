@@ -207,18 +207,21 @@ export async function getIssueState(issueNumber: number): Promise<string> {
   return parsed.state;
 }
 
-// Issue を closing keyword（Closes #N 等）で参照する PR を探す。マージ済み・オープン中のPRのみを対象とし、
-// 無関係な却下済み（未マージでクローズ）のPRを誤検出しないよう除外する。さらに、今回の実行の作業ブランチ
-// （expectedHeadRefName）と headRefName が一致するPRのみを有効とみなし、無関係な既存PRの誤検出を防ぐ。
-export async function findPrNumberClosingIssue(
-  issueNumber: number,
-  expectedHeadRefName: string,
-): Promise<number | null> {
+export interface ClosingPrRef {
+  number: number;
+  state: string;
+  headRefName: string;
+  baseRefName: string;
+  createdAt: string;
+}
+
+// Issue を closing keyword（Closes #N 等）で参照する PR の候補一覧を取得する（絞り込みは呼び出し側の責務）。
+export async function listPrsClosingIssue(issueNumber: number): Promise<ClosingPrRef[]> {
   const { owner, name } = await getRepoInfo();
   const query = `query($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) {
       issue(number: $number) {
-        closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number state headRefName } }
+        closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number state headRefName baseRefName createdAt } }
       }
     }
   }`;
@@ -235,8 +238,25 @@ export async function findPrNumberClosingIssue(
     `number=${issueNumber}`,
   ]);
   const parsed = JSON.parse(output);
-  const nodes: { number: number; state?: string; headRefName?: string }[] =
+  const nodes: { number: number; state?: string; headRefName?: string; baseRefName?: string; createdAt?: string }[] =
     parsed?.data?.repository?.issue?.closedByPullRequestsReferences?.nodes ?? [];
+  return nodes.map((node) => ({
+    number: node.number,
+    state: node.state ?? "",
+    headRefName: node.headRefName ?? "",
+    baseRefName: node.baseRefName ?? "",
+    createdAt: node.createdAt ?? "",
+  }));
+}
+
+// マージ済み・オープン中のPRのみを対象とし、無関係な却下済み（未マージでクローズ）のPRを誤検出しないよう除外する。
+// さらに、今回の実行の作業ブランチ（expectedHeadRefName）と headRefName が一致するPRのみを有効とみなし、
+// 無関係な既存PRの誤検出を防ぐ。
+export async function findPrNumberClosingIssue(
+  issueNumber: number,
+  expectedHeadRefName: string,
+): Promise<number | null> {
+  const nodes = await listPrsClosingIssue(issueNumber);
   const validPr = nodes.find(
     (node) => (node.state === "MERGED" || node.state === "OPEN") && node.headRefName === expectedHeadRefName,
   );
@@ -362,6 +382,46 @@ export async function hasLabel(type: "issue" | "pr", number: number, label: stri
     const labels: { name: string }[] = parsed?.labels ?? [];
     return labels.some((l) => l.name === label);
   });
+}
+
+/**
+ * 指定時刻以降に投稿されたコメントのうち、見出しが一致する最新（配列末尾）の1件の本文を返す。
+ * クラウドタスクの完了検知（cc-cloud-done ラベル）後に、最終報告コメントを1回だけ回収する
+ * ために使う想定で、ポーリングでは呼ばない。
+ * `{owner}/{repo}` は `gh api` が解決するため getRepoInfo() は使わない。PR も issue と
+ * 番号空間・エンドポイント（`issues/<number>/comments`）を共有するため type 分岐は不要。
+ */
+export async function findCommentSince(number: number, since: Date, heading: string): Promise<string | null> {
+  const output = await execGh(["api", `repos/{owner}/{repo}/issues/${number}/comments?since=${since.toISOString()}`]);
+  const comments: { body: string }[] = JSON.parse(output);
+  const matched = comments.filter((comment) => comment.body.split("\n").some((line) => line.trim() === heading));
+  if (matched.length === 0) {
+    return null;
+  }
+  return matched[matched.length - 1].body;
+}
+
+/**
+ * 指定ラベルが付いた issue/PR 番号を列挙する。実行中のクラウドタスク全体を1クエリで
+ * 判定するための列挙であり、個別番号の `gh issue view` ポーリングにはしない。
+ * `--state all` にするのは、exec-issue の「コード変更なし」経路が Issue をクローズして
+ * からラベルを付けるため、既定の open 限定だと検知できないため。
+ */
+export async function listNumbersWithLabel(type: "issue" | "pr", label: string, limit = 50): Promise<number[]> {
+  const output = await execGh([
+    type,
+    "list",
+    "--label",
+    label,
+    "--state",
+    "all",
+    "--json",
+    "number",
+    "--limit",
+    String(limit),
+  ]);
+  const parsed: { number: number }[] = JSON.parse(output);
+  return parsed.map((entry) => entry.number);
 }
 
 /**

@@ -20,6 +20,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `cc-update-issue` ラベルをトリガーに自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-update-issue` を外す。処理が未完のままターンを終えると、後続の `answer-issue-questions` / `triage-created-issue` / `exec-issue` などが古い description を前提に起動されてしまう。
@@ -42,6 +46,8 @@ description は人間がレビューし、後続の `exec-issue` が実装スコ
 リモート同期は以下を試行し、失敗しても中断せずスキップして続行する（本スキルはコードを変更しないため）。`git rebase` や `git pull` は実行しない（未コミット変更や conflict による中断を避けるため）。
 
 続いて分析の基準となるベースブランチ（`BASE_BRANCH`）を確定する。サブIssue（parent を持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生し、実装PRもそこへ向くため、**デフォルトブランチではなく epic ブランチが分析のターゲット**になる。デフォルトブランチをターゲットと見なすと、epic ブランチへマージ済みの兄弟サブIssueの変更が「未反映」に見え、「Epic PR が未マージだがどう扱うか」といった本来不要な検討事項・確認事項が混入する（`exec-issue` / `create-pr` のベースブランチ決定と同じ確定的導出を用いる）。
+
+`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
 
 ```bash
 git fetch --prune || true
@@ -81,6 +87,8 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 
 引数から先頭のIssue番号を取り出し、そのIssueを取得して現在の内容を確認する。
 
+> GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view <Issue番号> --json number,title,state,labels,body,url
 ```
@@ -91,11 +99,13 @@ gh issue view <Issue番号> --json number,title,state,labels,body,url
 
 コメント全件が更新の唯一の入力になるため、必ず併せて取得する。
 
+> GitHub MCP が使える場合は `issue_read`（method: `get_comments`）を使う。以下は MCP 利用不可時のフォールバック。
+
 ```bash
 gh issue view <Issue番号> --comments
 ```
 
-本文・コメントに画像URLがある場合、`gh-asset` でダウンロードし、実際に Read で内容を確認する（テキストだけでは伝わらない仕様 — UIの見た目・エラー画面・図など — が更新判断に必要なことがあるため、URLを見て終わりにしない）。
+本文・コメントに画像URLがある場合、`gh-asset` でダウンロードし、実際に Read で内容を確認する（テキストだけでは伝わらない仕様 — UIの見た目・エラー画面・図など — が更新判断に必要なことがあるため、URLを見て終わりにしない）。`gh-asset` はローカルへファイルを落とす操作で MCP に同等ツールが無いため `gh` に据え置く。
 
 ```bash
 gh-asset download <asset_id> ~/Downloads/
@@ -137,6 +147,8 @@ explore-agent サブエージェントで未反映事項に基づき、コード
 
 - 対象ファイルごとに `git log --oneline -10 <file>` を実行し、直近 commit のサマリを把握する
 - 未マージの関連 PR は **base が `BASE_BRANCH` のものだけ**を対象にする。base が異なる PR（`BASE_BRANCH` が epic ブランチのときの Epic PR 自身、他 epic 配下の PR など）は本Issueのマージ先に影響しないため除外する
+
+  > GitHub MCP が使える場合は `list_pull_requests` / `search_pull_requests` を使う。以下は MCP 利用不可時のフォールバック。
 
   ```bash
   gh pr list --search "<file>" --state open --json number,title,baseRefName,headRefName \
@@ -216,7 +228,7 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 - **ステップ2.5で「既存bodyに依頼内容が無い」と判定した場合** — 本ステップはスキップする（保護対象が無い）。
 - **未反映事項が0件で `post-issue-body` の起動をスキップした場合** — 本ステップもスキップする（description を更新していないため）。
 - **ステップ2.5で「既存bodyに依頼内容あり」と判定した場合** — 以下の手順で検証する:
-  1. `gh issue view <issue_number> --json body -q .body` で更新後の body を取得する。
+  1. `gh issue view <issue_number> --json body -q .body` で更新後の body を取得する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック）。
   2. 取得した body から `<details><summary>依頼内容</summary>` ブロックの中身をステップ2.5と同じ要領で抽出する。本文中に `<details>` は依頼内容と変更ログの2つ存在し得るので、必ず `<summary>依頼内容</summary>` で識別してから切り出す。
   3. ステップ2.5で保持した「期待値」と抽出した中身を比較する。**改行・空白まで含めて完全一致**すること。前後の空行1つ程度の差は許容してよいが、内容の欠落・改変は不可。
   4. **書き出しが折りたたみブロックになっていること** — 実行前が旧フォーマット（`## 依頼内容` 見出し）だった場合も、更新後は必ず `<details><summary>依頼内容</summary>` に詰め替わっていること。裸の見出しのままなら逸脱として扱う。
@@ -238,14 +250,14 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 2. **方向の確定**:
    - **blockedBy**（この Issue をブロックする＝先に片付けるべき Issue）: この Issue に着手する前に完了している必要がある Open Issue の番号。
    - **blocking**（この Issue がブロックする＝後続で待たせる Issue）: この Issue が完了しないと進められない Open Issue の番号。
-3. **現在状態の検証**: 対象 Issue 番号は `gh issue view <番号> --json number,state,title` で **Open であること**を確認する。CLOSED の Issue は含めない。
-4. **既存relationshipとの差分**: 現在の relationship を取得し、**まだ貼られていない依存だけ**を追加する（既存relationshipは剥がさない。`--remove-blocked-by` / `--remove-blocking` は使わない）。
+3. **現在状態の検証**: 対象 Issue 番号は `gh issue view <番号> --json number,state,title` で **Open であること**を確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック）。CLOSED の Issue は含めない。
+4. **既存relationshipとの差分**: 現在の relationship を取得し、**まだ貼られていない依存だけ**を追加する（既存relationshipは剥がさない。`--remove-blocked-by` / `--remove-blocking` は使わない）。`blockedBy`/`blocking` は Issue Dependencies のフィールドで MCP 側の対応が不定のため `gh` に据え置く。
 
    ```bash
    gh issue view <このIssue番号> --json blockedBy,blocking
    ```
 
-5. **付与（best-effort）**: 差分の番号だけを渡す。`--add-blocked-by` / `--add-blocking` はカンマ区切りで複数番号を1フラグにまとめてよい。追加が無い側のフラグは省略する。
+5. **付与（best-effort）**: 差分の番号だけを渡す。`--add-blocked-by` / `--add-blocking` はカンマ区切りで複数番号を1フラグにまとめてよい。追加が無い側のフラグは省略する。Issue Dependencies の操作のため `gh` に据え置く。
 
    ```bash
    gh issue edit <このIssue番号> --add-blocked-by <番号,番号,...>

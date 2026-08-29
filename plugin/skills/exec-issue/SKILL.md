@@ -18,6 +18,10 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## 実行モードの制約
 
 本スキル固有のリスク: 本スキルは `claude-task-worker` の `cc-exec-issue` ラベルをトリガーに自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-in-progress` 除去・`cc-pr-created` 付与のラベル遷移を進める（フェーズ7で `cc-need-human-check` を付与した場合は PR 不在とみなし `cc-pr-created` を付与しない）。処理未完のままターンを終えると、ワーカーの二重起動や、テスト・PR作成未完のままの `cc-pr-created` 付与で Issue/PR の状態が壊れる。
@@ -95,13 +99,13 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 並列で以下を確認し、判断は自動で行う。ユーザーに質問しないこと。
 
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断** し、理由を出力して終了する（デフォルトブランチで作業してはならない）
-- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）
-- `gh issue view $0 --json number,title,state,labels` でIssueが存在し `OPEN` であることを確認する。CLOSEDなら **中断**
+- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）。リポジトリ情報の単独取得ツールが MCP に無いため `gh` に据え置く（`git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@'` によるローカル導出も可）
+- `gh issue view $0 --json number,title,state,labels` でIssueが存在し `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更を確認する。存在する場合は `git stash push -u -m "exec-issue auto-stash $0"` で自動退避し、その旨を最終報告に明記する
 
 ### デザイン参照セクションの欠落検出
 
-`gh issue view $0 --json body,labels` の結果から、`cc-ui-design-ready` ラベルの有無と、description の `## UIデザイン` セクションが生きているかを確認する。**見出し行 `## UIデザイン`（行頭からの厳密一致。`### UIデザイン` のような部分一致は不可）の存在だけでは「生きている」とみなさない**。次の `## ` 見出し直前までのセクション本文に、`- デザインファイル:` 行があり、値が `<path>.pen` 形式（実パス）であることまで確認する（`<.pen の実パス>` のような未置換プレースホルダや、`<`/`>` を含む行、見出しのみで本文が空のセクションは「生きている」とみなさない）。この判定基準は `src/workers/ui-design.ts` の `hasDesignReference()` と同一にする。
+`gh issue view $0 --json body,labels`（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）の結果から、`cc-ui-design-ready` ラベルの有無と、description の `## UIデザイン` セクションが生きているかを確認する。**見出し行 `## UIデザイン`（行頭からの厳密一致。`### UIデザイン` のような部分一致は不可）の存在だけでは「生きている」とみなさない**。次の `## ` 見出し直前までのセクション本文に、`- デザインファイル:` 行があり、値が `<path>.pen` 形式（実パス）であることまで確認する（`<.pen の実パス>` のような未置換プレースホルダや、`<`/`>` を含む行、見出しのみで本文が空のセクションは「生きている」とみなさない）。この判定基準は `src/workers/ui-design.ts` の `hasDesignReference()` と同一にする。
 
 ただし `## UIデザイン` セクション内に `UIデザインは不要` で始まる行がある場合は、`create-ui-design` がデザイン不要と判定した正常な状態なので、以下の欠落検出には該当させない（そのまま実装へ進む）。
 
@@ -299,6 +303,8 @@ UI変更を含むタスクは、`read-github-issue` の返却で「デザイン�
 
 まず差分の基準ブランチ（`BASE_BRANCH`）を決定する。Issue `$0` が parent（Epic Issue）を持つ場合、worktree は `cc-epic-<parent番号>` ブランチ派生のため epic ブランチを基準にする。デフォルトブランチを基準にすると、epic ブランチへマージ済みの**他サブIssueの差分が混ざり**、コード変更の有無を誤判定する（create-pr スキルのベースブランチ決定と同じ確定的導出を用いる）。
 
+`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
+
 ```bash
 BASE_BRANCH=""
 if ! PARENT=$(gh issue view "$0" --json parent --jq '.parent.number // empty'); then
@@ -349,6 +355,8 @@ git diff "origin/${BASE_BRANCH}..HEAD" --stat
 1. `commit-push` skill を呼び出し、変更をコミット・push
 2. `create-pr` skill を呼び出し、PRを作成。**args には Issue 番号だけを渡す**（`Skill(skill='claude-task-worker:create-pr', args='$0')`）。ブランチ名や変更内容を添えた自然文を渡さないこと（`create-pr` は数字を抽出して動くが、番号以外を渡す必要はない）
 3. **PR作成の成否を必ず検証する**。現在ブランチに対応するOpen PRが実在するかを確認する：
+   > GitHub MCP が使える場合は `list_pull_requests` を使う。以下は MCP 利用不可時のフォールバック。
+
    ```bash
    HEAD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
    gh pr list --head "${HEAD_BRANCH}" --state open --json number,url

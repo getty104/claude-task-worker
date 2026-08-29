@@ -34,8 +34,16 @@ import {
   parseProjectFilters,
   assertProjectCompatibleCommand,
   buildForwardedCommand,
+  hasCloudFlag,
+  assertCloudCompatibleCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import { checkCloudConfig, CLOUD_DENIED_WORKERS, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import { createLabel } from "./gh";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 // dispatcher.ts / herdr.ts はワーカー起動には不要な --project 専用モジュールで、
 // dispatcher.ts のトップレベル await が即時実行されるのを避けるため、
 // 静的importではなく --project 使用時にのみ実行される動的importで遅延読込する。
@@ -66,7 +74,7 @@ function printUsage(): void {
   console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
 
 Commands:
-  init [--force]    Create required GitHub labels and config file (use --force to overwrite existing files)
+  init [--force]  Create required GitHub labels and config file (use --force to overwrite existing files)
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   usage             Notify current usage to Slack
@@ -144,6 +152,10 @@ if (hasProjectFilter()) {
   assertProjectCompatibleCommand(workerType);
 }
 
+if (hasCloudFlag()) {
+  assertCloudCompatibleCommand(workerType);
+}
+
 function collectFlagValues(flag: string): string[] {
   const values: string[] = [];
   for (let i = 0; i < process.argv.length; i++) {
@@ -196,6 +208,69 @@ async function assertRunModeAvailable(): Promise<void> {
   console.log("[worker] run mode: herdr (each task runs as a TUI session in its own herdr tab)");
 }
 
+// `claude auth status --json` を実行してパースする。未ログイン時は exit 1 だが stdout に
+// JSON が出る（`docs/cloud-prerequisite-checks.md` M3）ため、終了コードでは判定しない。
+// 実行・パースに失敗した場合は「判定不能」として扱い、起動を止める根拠にしない。
+async function readCloudAuthStatus(): Promise<CloudAuthStatus> {
+  let stdout: string;
+  try {
+    const result = await execFileAsync("claude", ["auth", "status", "--json"]);
+    stdout = result.stdout;
+  } catch (err) {
+    const maybeStdout = (err as { stdout?: string }).stdout;
+    if (!maybeStdout) return { kind: "unknown" };
+    stdout = maybeStdout;
+  }
+  try {
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    return {
+      kind: "ok",
+      loggedIn: parsed.loggedIn === true,
+      authMethod: String(parsed.authMethod ?? ""),
+      apiProvider: String(parsed.apiProvider ?? ""),
+      apiKeySource: typeof parsed.apiKeySource === "string" ? parsed.apiKeySource : undefined,
+    };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
+
+// --cloud フラグ指定時の構成が非対応（mode !== "herdr"、claude.ai 未サインイン）だと
+// タスク起動が壊れた形で失敗し続けるため、サイレントにローカル実行へフォールバックせず起動時に落とす。
+// サインイン状態の I/O は --cloud が指定されていなければ行わない
+// （--cloud を書かない既存の使い方での挙動を完全に不変に保つため）。
+async function assertCloudAvailable(): Promise<void> {
+  const cloud = hasCloudFlag();
+  // init を再実行していない既存リポジトリでも cc-cloud-done ラベルを保証する
+  // （無いとポーラー・クラウド双方が失敗し続け、タスクが4時間タイムアウトを繰り返す）。
+  // createLabel は失敗を握りつぶすため、作成できなかった場合は起動時エラーにする
+  // （素通りさせると、ラベル不在のまま全クラウドタスクがタイムアウトを繰り返す）。
+  // color は init.ts の LABELS の CLOUD_DONE_LABEL エントリと同じ値。
+  const labelReady = cloud ? await createLabel(CLOUD_DONE_LABEL, "33cfff", true) : true;
+  const status = cloud ? await readCloudAuthStatus() : undefined;
+  const errors = checkCloudConfig({
+    cloud,
+    mode: getRunMode(),
+    auth: status ? { status, baseUrl: process.env.ANTHROPIC_BASE_URL } : undefined,
+  });
+  if (!labelReady) {
+    errors.push(
+      `${CLOUD_DONE_LABEL} ラベルを作成できませんでした。gh の認証・権限を確認するか、claude-task-worker init を実行してください。`,
+    );
+  }
+  if (errors.length > 0) {
+    for (const message of errors) {
+      console.error(`[worker] ${message}`);
+    }
+    process.exit(1);
+  }
+  if (cloud) {
+    console.log(
+      `[worker] cloud execution enabled (--cloud); these workers stay local: ${CLOUD_DENIED_WORKERS.join(", ")}`,
+    );
+  }
+}
+
 // 起動前の前提チェックをまとめて実行する。
 async function assertRunPrerequisites(): Promise<void> {
   // 毎秒のテーブル再描画（画面クリア）でエラーログが一瞬しか見えないため、
@@ -203,6 +278,7 @@ async function assertRunPrerequisites(): Promise<void> {
   captureConsole();
   ensureRenderInterval();
   await assertRunModeAvailable();
+  await assertCloudAvailable();
 }
 
 if (!hasProjectFilter()) {
@@ -293,7 +369,8 @@ if (hasProjectFilter()) {
     }
   })();
 } else if (workerType === "init") {
-  const force = process.argv.slice(3).includes("--force");
+  const initArgs = process.argv.slice(3);
+  const force = initArgs.includes("--force");
   init({ force });
 } else if (workerType === "install") {
   (async () => {

@@ -32,6 +32,10 @@ hooks:
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 !`git fetch -p >/dev/null 2>&1 || true`
 
 > **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。プリアンブルには `|| true` で非致命化したコマンドだけを置き、`gh pr checkout` のような失敗しうるコマンドは本文のステップ0で実行する。
@@ -44,6 +48,8 @@ hooks:
 
 ### ステップ0: PRブランチのcheckout
 
+ローカル作業ツリーへのcheckoutはGitHub MCPで代替できないため`gh`のまま行う。
+
 ```bash
 gh pr checkout $ARGUMENTS
 ```
@@ -52,13 +58,13 @@ gh pr checkout $ARGUMENTS
 
 ### ステップ1: コンフリクト検知とラベル付与
 
-`gh pr status` でPRのstatus（mergeable / コンフリクト有無）を取得する。
+`gh pr status` でPRのstatus（mergeable / コンフリクト有無）を取得する。カレントブランチというローカルの文脈に依存する操作（MCPはPR番号を要求する）のため`gh`のまま残す。
 
 ```bash
 gh pr status
 ```
 
-出力から `#$ARGUMENTS` の行を特定し、コンフリクト表示（"Conflict" / 衝突マーク等）の有無を判定する。`gh pr status` は現在のユーザーに関連するPR（作成者・レビュアー・assignee）のみ表示するため、対象PRが含まれない場合はフォールバックとして以下で取得する。
+出力から `#$ARGUMENTS` の行を特定し、コンフリクト表示（"Conflict" / 衝突マーク等）の有無を判定する。`gh pr status` は現在のユーザーに関連するPR（作成者・レビュアー・assignee）のみ表示するため、対象PRが含まれない場合はフォールバックとして`mergeable`を取得する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
 
 ```bash
 gh pr view $ARGUMENTS --json mergeable -q .mergeable
@@ -87,6 +93,10 @@ gh pr view $ARGUMENTS --json mergeable -q .mergeable
 
 以下を **同一メッセージ内で並列に実行** する。
 
+未解決のインラインレビューコメントは GitHub MCP の `pull_request_read`（method: `get_review_comments`）を優先して取得する。**`get_review_comments` はレビュースレッド専用で、Conversationタブの会話コメントは返さない**ため、会話コメントは PR が Issue 番号空間を共有することを利用して `issue_read`（method: `get_comments`）を別途呼ぶ。どちらか一方でも利用不可なら以下の共有スクリプトへフォールバックする（同スクリプトは両方を1回で返す）。
+
+**ページングは取得しきる。** `get_review_comments` はカーソル方式（`after` に前ページの `endCursor` を渡す）で、応答の `pageInfo.hasNextPage` が `true` の間は `after` を更新して呼び直す。会話コメント（PRはIssue番号を共有するため `issue_read` の method: `get_comments`）はオフセット方式（`page` / `perPage`）で、返り件数が `perPage` 未満になるまで `page` を進めて呼び直す。1ページ目だけで打ち切ると、指摘・コメントが多いPRで後続ページの指摘を取りこぼす。
+
 ```bash
 bash "${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh"
 ```
@@ -96,11 +106,16 @@ CHECKS_JSON=$(gh pr checks $ARGUMENTS --json state,name,link,workflow 2>&1)
 CHECKS_EXIT=$?
 ```
 
+上記のCI状況取得は、GitHub MCP の `pull_request_read`（method: `get_status` / `get_check_runs`）を優先し、利用不可なら`gh pr checks`にフォールバックする。
+
 ```bash
 gh pr view $ARGUMENTS --json title,body,labels
 ```
 
-- 1つ目のスクリプトは未解決のインラインレビューコメント（`unresolved_threads[]`）とConversationタブの一般コメント（`conversation_comments[]`）を返す。インラインだけでは行外の指摘を取りこぼすため両方を対象にする。カレントブランチのPRを対象とするため、ステップ0の `gh pr checkout` 済みであることが前提
+上記のPR本文・ラベル取得は、GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら`gh pr view`にフォールバックする。
+
+- 1つ目（`fetch-unresolved-comments.sh` またはMCPの`get_review_comments` ＋ `get_comments`）は未解決のインラインレビューコメント（`unresolved_threads[]`）とConversationタブの一般コメント（`conversation_comments[]`）を返す。インラインだけでは行外の指摘を取りこぼすため両方を対象にする。MCP経路でも同じキー（`thread_id` / `path` / `line` / `is_outdated` / `comments[]` と `author` / `body` / `url` / `created_at` / `is_minimized`）で抽出すること。カレントブランチのPRを対象とするため、ステップ0の `gh pr checkout` 済みであることが前提
+- **取得に失敗した場合は「未解決の指摘0件」に倒さない。** スクリプトが非0で終了した場合、または MCP がエラーを返した場合は、`gh pr checks` のパース失敗時と同じ扱いにする: **後続のステップに進まず**、ラベル操作は一切行わずに出力内容をそのまま含めて「判定: エラー」で結果報告を行い終了する。本スキルはマージゲートであり、403 や一過性の `gh` 障害を指摘なしと誤認すると未対応の指摘を残したままPRをマージする。正常に0件だった場合（スクリプトが exit 0 で空配列を返した場合）とは必ず区別すること
 - `gh pr checks` は失敗チェックがあると終了コードが非0になるが、これは「失敗チェックが存在する」という正常系の結果であり、認証失敗・通信障害・不正なPR番号等の実行時エラーと区別が必要。区別は終了コードではなく **出力がJSONとしてパース可能かどうか** で行う。
 
   ```bash
@@ -108,7 +123,7 @@ gh pr view $ARGUMENTS --json title,body,labels
   ```
 
   パースに成功した場合のみ、その内容を「失敗チェックの有無」の判定材料として使う（`CHECKS_EXIT` が非0でもJSONとしてパースできていれば正常系として扱う）。パースに失敗した場合（＝実行時エラーで意味のある出力を返せなかった場合）は、**後続のステップに進まず**、ラベル操作は一切行わずに出力内容をそのまま含めて「判定: エラー」で結果報告を行い終了する（「CI失敗なし」には倒さない。ステップ0の失敗時と同様の扱い）
-  - `state` が `FAILURE` / `STARTUP_FAILURE` のチェックについてのみ、`link` から `run-id` を抽出して `gh run view <run-id> --log-failed` で失敗内容を確認する。**全Passなら追加のログ取得は行わない**
+  - `state` が `FAILURE` / `STARTUP_FAILURE` のチェックについてのみ、`link` から `run-id` を抽出して失敗内容を確認する。GitHub MCP の `get_job_logs`（`failed_only: true`）を優先し、利用不可なら `gh run view <run-id> --log-failed` にフォールバックする。**全Passなら追加のログ取得は行わない**
 - `gh pr view` の結果は「デザインPRか（`cc-ui-design`）」「Epic PRか（`cc-epic-issue`）」「`Refs #<N>` の有無」の確認に使う。ステップ3で同じ情報を再取得せず、ここで取得したラベル一覧を使い回す
 - デザインPR（`cc-ui-design`）と判定した場合のみ、差分ファイル一覧を追加で取得する（実装コードの混入・スナップショットの有無の確認用）
 
@@ -206,13 +221,13 @@ CI失敗の原因が、**このPRの差分をどう変更しても解消しな�
 
 上記の該当例のうち、**一過性の可能性がある失敗**（ネットワーク到達不能・レート制限・イメージ取得失敗・キュー詰まり・CIキャッシュ破損・同一run内の他ジョブが同じコードで成功しているのに特定ジョブだけ落ちている、など）は、再実行で解消することがある。恒久的な失敗（クレジット枯渇・課金停止・シークレット欠落/失効・権限不足）は再実行しても変わらないので、この切り分けは不要でそのまま C-2 へ進む。
 
-一過性の可能性がある場合は、その失敗runの実行回数を確認する。
+一過性の可能性がある場合は、その失敗runの実行回数を確認する。GitHub MCP の `actions_get` を優先し、利用不可なら以下にフォールバックする。**この`attempt`判定は再実行ループを防ぐための必須ロジックであり、経路に関わらず必ず行うこと。**
 
 ```bash
 gh run view <run-id> --json attempt -q .attempt
 ```
 
-- **`attempt` が 1（初回実行）**: 失敗ジョブだけを1回再実行し、**ラベルは一切付けずに**「判定: 保留（CI再実行）」として結果報告のみ行い終了する。再実行の完了は待たない（次回ポーリングで結果を再評価する）
+- **`attempt` が 1（初回実行）**: 失敗ジョブだけを1回再実行し、**ラベルは一切付けずに**「判定: 保留（CI再実行）」として結果報告のみ行い終了する。再実行の完了は待たない（次回ポーリングで結果を再評価する）。GitHub MCP の `actions_run_trigger` を優先し、利用不可なら以下にフォールバックする。
 
   ```bash
   gh run rerun <run-id> --failed
@@ -255,24 +270,24 @@ EOF
 
 - **通常のPRの場合（`cc-epic-issue` を含まない）**: 以下の手順でマージし、**必要に応じて関連Issueを明示的にクローズする。判定だけで終了しないこと。**
 
-1. マージ前に、PRのbaseブランチとデフォルトブランチ名を取得する。
+1. マージ前に、PRのbaseブランチとデフォルトブランチ名を取得する。`baseRefName` はGitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
 
 ```bash
 BASE_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)
 DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
 ```
 
-2. **必ず以下のコマンドを実行してマージする。**
+2. **必ずマージを実行する。** GitHub MCP の `pull_request_write`（method: `merge`）を優先し、利用不可なら以下の `gh` コマンドへフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。
 
 ```bash
 gh pr merge $ARGUMENTS --merge --delete-branch
 ```
 
-マージコマンドが失敗した場合は、エラー内容を記録して報告し、以降の手順に進まない。
+マージが失敗した場合は、エラー内容を記録して報告し、以降の手順に進まない。
 
 3. マージ成功後、`BASE_BRANCH` が `DEFAULT_BRANCH` と **一致しない**（`cc-epic-<N>` のような非デフォルトブランチへのマージ）場合のみ、関連Issueを明示的にクローズする。GitHubの`Closes #<issue番号>`記法による自動クローズは**デフォルトブランチへのマージ時にのみ**発動するため、EpicフローでサブIssueが閉じられずEpic PR作成が止まるのを防ぐ必要がある。一致する場合はGitHubが自動でクローズするためスキップする。
 
-   3-1. PR本文から関連Issueの番号を抽出する（「PRクローズ時のIssue連動Close」と同じ抽出コマンドを流用）。
+   3-1. PR本文から関連Issueの番号を抽出する（「PRクローズ時のIssue連動Close」と同じ抽出コマンドを流用）。`body` はGitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
 
    ```bash
    gh pr view $ARGUMENTS --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'
@@ -300,7 +315,7 @@ gh pr merge $ARGUMENTS --merge --delete-branch
 
 手順:
 
-1. PRのdescriptionから関連Issueの番号を取得する。
+1. PRのdescriptionから関連Issueの番号を取得する。`body` はGitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
 
 ```
 gh pr view $ARGUMENTS --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'

@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { getWorkerConfig } from "../config";
+import { CLOUD_DONE_LABEL, getWorkerConfig, isCloudWorker } from "../config";
 import {
   getCurrentUser,
   getRepoInfo,
@@ -45,7 +45,12 @@ interface IssueWorkerConfig {
   preflight?: (issue: Issue) => Promise<PreflightResult>;
   // exit 0 でも期待成果物（PR等）を検証できなかった場合は false を返す。
   // その場合ワーカーは完了通知ではなく失敗通知を送る。void / true は完了扱い。
-  onCompleted?: (issueNumber: number, worktreeId: string, output: string) => Promise<boolean | void>;
+  onCompleted?: (
+    issueNumber: number,
+    worktreeId: string,
+    output: string,
+    ctx: { cloud: boolean; baseBranch: string; startedAt: number },
+  ) => Promise<boolean | void>;
 }
 
 export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promise<void> {
@@ -113,6 +118,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
           await addLabel("issue", issue.number, "cc-in-progress");
 
           const worktreeId = generateWorktreeName();
+          const cloud = isCloudWorker(config.name);
           try {
             const issueUrl = `https://github.com/${owner}/${name}/issues/${issue.number}`;
             syncDefaultBranch(defaultBranch);
@@ -121,6 +127,16 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
 
             const parentNumber = issue.parent?.number;
             const mode = getRunMode();
+
+            // ベースブランチは buildClaudeExecution() の baseRef に渡すため、worktree 生成より
+            // 先に確定させる。ensureEpicBranch() はクラウド実行でも必要（cc-epic-<N> をリモートへ
+            // 用意する処理で、クラウドセッションが --ref で参照する前提になる）。
+            let baseBranch = defaultBranch;
+            if (parentNumber !== undefined) {
+              baseBranch = `cc-epic-${parentNumber}`;
+              await ensureEpicBranch(baseBranch, defaultBranch);
+            }
+
             const execution = buildClaudeExecution({
               mode,
               prompt: `${command} ${issue.number}`,
@@ -129,28 +145,39 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
               advisorModel: isAdvisorEnabled() ? advisorModel : "",
               permissionMode: getPermissionMode(),
+              ...(cloud ? { cloud: true, baseRef: baseBranch } : {}),
             });
 
-            // claude CLI の --worktree は locked な worktree を作り、異常終了時に
-            // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
-            // epic の有無に関わらずワーカー自身が worktree を生成して cwd として渡す。
-            let baseBranch = defaultBranch;
-            if (parentNumber !== undefined) {
-              baseBranch = `cc-epic-${parentNumber}`;
-              await ensureEpicBranch(baseBranch, defaultBranch);
+            let cwd: string | undefined;
+            if (cloud) {
+              console.log(
+                `[${config.name}] #${issue.number}: cloud execution, running without worktree on ${baseBranch}`,
+              );
+            } else {
+              // claude CLI の --worktree は locked な worktree を作り、異常終了時に
+              // 削除不能な残骸（幽霊エントリ・checkout済み扱いのブランチ）を残すため使わない。
+              // epic の有無に関わらずワーカー自身が worktree を生成して cwd として渡す。
+              await createWorktreeFromBranch(worktreeId, baseBranch);
+              cwd = getWorktreePath(worktreeId);
+              console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
             }
-            await createWorktreeFromBranch(worktreeId, baseBranch);
-            const cwd = getWorktreePath(worktreeId);
-            console.log(`[${config.name}] #${issue.number}: created worktree ${worktreeId} from ${baseBranch}`);
 
+            if (cloud) {
+              // 前回実行の残骸掃除。同一番号の同時実行は isRunning() が止めるため nonce は不要。
+              await removeLabel("issue", issue.number, CLOUD_DONE_LABEL).catch((err) =>
+                console.error(`[${config.name}] removeLabel ${CLOUD_DONE_LABEL} failed for #${issue.number}: ${err}`),
+              );
+            }
+
+            const startedAt = Date.now();
             run(
               execution.command,
               execution.args,
               issue.number,
               issue.title,
               config.name,
-              worktreeId,
-              async (status, output) => {
+              cloud ? undefined : worktreeId,
+              async (status, output, cloudSessionId) => {
                 lastCompletionAt = Date.now();
                 for (const label of consumableTriggerLabels(config.triggerLabels)) {
                   await removeLabel("issue", issue.number, label).catch((err) =>
@@ -159,38 +186,81 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
                 }
                 try {
                   if (status === "completed") {
-                    const verified = (await config.onCompleted?.(issue.number, worktreeId, output)) ?? true;
+                    const verified =
+                      (await config.onCompleted?.(issue.number, worktreeId, output, {
+                        cloud,
+                        baseBranch,
+                        startedAt,
+                      })) ?? true;
                     if (verified === false) {
-                      await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+                      await notifyTaskFailed(
+                        config.name,
+                        name,
+                        issue.number,
+                        issue.title,
+                        issueUrl,
+                        output,
+                        cloud ? { sessionId: cloudSessionId } : undefined,
+                      );
                     } else {
-                      await notifyTaskCompleted(config.name, name, issue.number, issue.title, issueUrl, output);
+                      await notifyTaskCompleted(
+                        config.name,
+                        name,
+                        issue.number,
+                        issue.title,
+                        issueUrl,
+                        output,
+                        cloud ? { sessionId: cloudSessionId } : undefined,
+                      );
                     }
                   } else {
-                    await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output);
+                    await notifyTaskFailed(
+                      config.name,
+                      name,
+                      issue.number,
+                      issue.title,
+                      issueUrl,
+                      output,
+                      cloud ? { sessionId: cloudSessionId } : undefined,
+                    );
                   }
                 } catch (err) {
                   console.error(`[${config.name}] post-task error for #${issue.number}: ${err}`);
-                  await notifyTaskFailed(config.name, name, issue.number, issue.title, issueUrl, output).catch(
-                    (notifyErr) =>
-                      console.error(`[${config.name}] notifyTaskFailed failed for #${issue.number}: ${notifyErr}`),
+                  await notifyTaskFailed(
+                    config.name,
+                    name,
+                    issue.number,
+                    issue.title,
+                    issueUrl,
+                    output,
+                    cloud ? { sessionId: cloudSessionId } : undefined,
+                  ).catch((notifyErr) =>
+                    console.error(`[${config.name}] notifyTaskFailed failed for #${issue.number}: ${notifyErr}`),
                   );
                 } finally {
                   await removeLabel("issue", issue.number, "cc-in-progress").catch((err) =>
                     console.error(`[${config.name}] removeLabel cc-in-progress failed for #${issue.number}: ${err}`),
                   );
-                  await removeWorktree(worktreeId).catch((err) =>
-                    console.error(`[${config.name}] removeWorktree failed for #${issue.number}: ${err}`),
-                  );
+                  if (!cloud) {
+                    await removeWorktree(worktreeId).catch((err) =>
+                      console.error(`[${config.name}] removeWorktree failed for #${issue.number}: ${err}`),
+                    );
+                  }
                 }
               },
               cwd,
-              buildClaudeEnv(mode),
+              buildClaudeEnv(mode, cloud),
               execution.prompt,
+              cloud,
+              cloud ? "issue" : undefined,
+              model,
             );
           } catch (err) {
             console.error(`[${config.name}] setup error for #${issue.number}: ${err}`);
             await removeLabel("issue", issue.number, "cc-in-progress").catch(() => {});
-            await removeWorktree(worktreeId).catch(() => {});
+            if (!cloud) {
+              await removeWorktree(worktreeId).catch(() => {});
+            }
             await notifyError(config.name, name, err);
           }
         }

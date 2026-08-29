@@ -20,6 +20,10 @@ set -euo pipefail
 #                     （`.pen` と同階層の `snapshots/` に出る Pencil のエクスポート結果のみを対象にし、
 #                      README/docs 配下等の無関係な画像を混入させない）
 #   - other_files:    それ以外（pen_files にも snapshot_files にも該当しないもの）
+#
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
+# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になり収集が0件になる。
+# 詳細は plugin/references/github-access.md を参照。
 
 DAYS="${1:-1}"
 OUT_FILE="${2:-}"

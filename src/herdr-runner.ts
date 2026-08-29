@@ -88,6 +88,25 @@ export function observeAgentStatus(
   return { tracker, decision: "running" };
 }
 
+// クラウドセッションURLの抽出元となる、claude 起動出力の2形式。
+// `View: https://claude.ai/code/<id>?from=cli&m=0` は行中に罫線等が混ざりうるため URL 部分だけを
+// 緩く拾い、クエリ文字列（`?` 以降）は落とす。複数マッチした場合は最初の1件を採用する
+// （同一タスクの起動出力に複数のセッションURLが出ることは想定していないため、最後まで
+// スキャンして上書きし続けるより単純で、事故時の挙動も予測しやすい）。
+const CLOUD_SESSION_URL_RE = /https:\/\/claude\.ai\/code\/([A-Za-z0-9_-]+)/;
+// 実測（docs/cloud-session-launch-flags.md の T5/T7/M-1）で `Created cloud session:` の
+// 後ろに出るのは**セッションIDではなく description そのもの**（例:
+// `Created cloud session: CTW probe`）。本Issueの description は `ctw:<project>:#<n>` の形を
+// しており、セッションID形式（`[A-Za-z0-9_-]+`）にマッチしてしまうと、作成待ちのポーリング中に
+// `View:` 行が描画される前の中間状態を読んだ際に description を偽のIDとして掴む。
+// そこでセッションID形式（`session_` で始まる）にのみマッチするよう絞り、`View:` の URL
+// パターンを優先する順序は維持する。
+const CLOUD_SESSION_CREATED_RE = /Created cloud session:\s*(session_[A-Za-z0-9_-]+)/;
+
+export function extractCloudSessionId(text: string): string | undefined {
+  return CLOUD_SESSION_URL_RE.exec(text)?.[1] ?? CLOUD_SESSION_CREATED_RE.exec(text)?.[1];
+}
+
 /**
  * herdr モードのタスク結果を組み立てる。`claude -p` と違い exit code が無いため、
  * 「出力が空か」だけで成否を判定する。プリアンブル失敗などでモデルが
@@ -285,7 +304,8 @@ async function waitForPromptAccepted(paneId: string, mod: typeof HerdrModule, ti
 
 // ペインに最初の出力（シェルのプロンプト）が現れるまで待つ。プロンプト文字列はユーザーの
 // シェル設定依存のため内容は判定せず「何か描画されたか」だけを見る（dispatcher.ts と同じ方針）。
-async function waitForPaneReady(
+// `src/process-manager.ts` のクラウド作成フェーズ（`runViaCloud`）からも再利用するため export する。
+export async function waitForPaneReady(
   paneId: string,
   mod: typeof HerdrModule,
   options?: { timeoutMs?: number; pollIntervalMs?: number },

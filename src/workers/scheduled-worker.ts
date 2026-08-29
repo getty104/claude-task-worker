@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
-import { getLastRunAt, getWorkerConfig } from "../config";
+import { getLastRunAt, getWorkerConfig, isCloudWorker } from "../config";
 import { getRepoInfo } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { publishLastRunPr } from "../last-run-pr";
@@ -56,9 +56,11 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
 
       const worktreeId = generateWorktreeName();
       startedAt = now;
+      let cloud = false;
       try {
         syncDefaultBranch(defaultBranch);
         const { model, effort, skill, advisorModel } = getWorkerConfig(config.name);
+        cloud = isCloudWorker(config.name);
         const command = skill || config.command;
         const mode = getRunMode();
         const execution = buildClaudeExecution({
@@ -68,6 +70,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           effort,
           advisorModel: isAdvisorEnabled() ? advisorModel : "",
           permissionMode: getPermissionMode(),
+          ...(cloud ? { cloud: true, baseRef: defaultBranch } : {}),
         });
 
         // 実行記録は成果物とは別PRでワーカー自身が出す。材料が無くてスキルがPRを
@@ -77,9 +80,14 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           console.error(`[${config.name}] publishLastRunPr failed: ${err}`),
         );
 
-        await createWorktreeFromBranch(worktreeId, defaultBranch);
-        const cwd = getWorktreePath(worktreeId);
-        console.log(`[${config.name}] created worktree ${worktreeId} from ${defaultBranch}`);
+        let cwd: string | undefined;
+        if (cloud) {
+          console.log(`[${config.name}] cloud execution, running without worktree on ${defaultBranch}`);
+        } else {
+          await createWorktreeFromBranch(worktreeId, defaultBranch);
+          cwd = getWorktreePath(worktreeId);
+          console.log(`[${config.name}] created worktree ${worktreeId} from ${defaultBranch}`);
+        }
 
         const repoUrl = `https://github.com/${owner}/${repoName}`;
         run(
@@ -88,7 +96,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           config.taskId,
           config.name,
           config.name,
-          worktreeId,
+          cloud ? undefined : worktreeId,
           async (status, output) => {
             try {
               if (status === "completed") {
@@ -99,18 +107,25 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
             } catch (err) {
               console.error(`[${config.name}] post-task error: ${err}`);
             } finally {
-              await removeWorktree(worktreeId).catch((err) =>
-                console.error(`[${config.name}] removeWorktree failed: ${err}`),
-              );
+              if (!cloud) {
+                await removeWorktree(worktreeId).catch((err) =>
+                  console.error(`[${config.name}] removeWorktree failed: ${err}`),
+                );
+              }
             }
           },
           cwd,
-          buildClaudeEnv(mode),
+          buildClaudeEnv(mode, cloud),
           execution.prompt,
+          cloud,
+          undefined,
+          model,
         );
       } catch (err) {
         console.error(`[${config.name}] setup error: ${err}`);
-        await removeWorktree(worktreeId).catch(() => {});
+        if (!cloud) {
+          await removeWorktree(worktreeId).catch(() => {});
+        }
         await notifyError(config.name, repoName, err);
       }
     };

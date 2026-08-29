@@ -1,7 +1,12 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { CLOUD_DONE_LABEL } from "./config";
 import { DEFAULT_PERMISSION_MODE, type PermissionMode, type RunMode } from "./user-config";
+
+// クラウドタスクの最終報告コメントの固定見出し。生成側（本ファイル）と取得側（gh.ts）で
+// 文言を共有し、どちらかだけ変更して取得が黙って壊れる事故を防ぐ。
+export const CLOUD_REPORT_HEADING = "## claude-task-worker 実行結果";
 
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
 // herdr モードは herdr タブ内の TUI セッション。どちらも応答するユーザーは常駐しない）。
@@ -152,6 +157,14 @@ export interface ClaudeInvocation {
   advisorModel?: string;
   // claude CLI の権限モード。config.json の `permission`（既定 bypassPermissions）。
   permissionMode?: PermissionMode;
+  // true なら Claude Code on the web（クラウド実行）のセッションとして起動する。
+  // クラウドセッションは print モード非対応なので `-p <prompt>` を付けない
+  // （実測: `Error: --cloud cannot be combined with --print.`）。
+  cloud?: boolean;
+  // `--ref` に渡すクラウドセッションのベースブランチ。`onBranch` とは排他。
+  baseRef?: string;
+  // `--on-branch` に渡すクラウドセッションのベースブランチ。`baseRef` とは排他。
+  onBranch?: string;
 }
 
 export const CLAUDE_COMMAND = "claude";
@@ -203,7 +216,17 @@ export function buildClaudeArgs({
   effort,
   advisorModel,
   permissionMode,
+  cloud,
+  baseRef,
+  onBranch,
 }: ClaudeInvocation): string[] {
+  const ref = baseRef?.trim() ?? "";
+  const onBranchValue = onBranch?.trim() ?? "";
+  // CLI 側も `--ref` / `--on-branch` の同時指定を排他としてエラーにするが（実測 T8）、
+  // 起動して外部プロセスのエラーで気づく形にしないよう、引数を組み立てる前に弾く。
+  if (cloud === true && ref !== "" && onBranchValue !== "") {
+    throw new Error("--on-branch and --ref both set the cloud session's base branch; pass one or the other");
+  }
   const advisor = advisorModel?.trim() ?? "";
   const permission = permissionMode ?? DEFAULT_PERMISSION_MODE;
   return [
@@ -212,7 +235,9 @@ export function buildClaudeArgs({
     // 「入力待ちになるまで」ブロックする仕様と噛み合わない（タスクが終わるまで返らず、
     // 2分を超えると timeout で落ちる）。プロンプトは起動後に `herdr agent prompt` で
     // 投入し、herdr にターンを追跡させる（herdr-runner.ts の startHerdrTask 参照）。
-    ...(mode === "herdr" ? [] : ["-p", prompt]),
+    // クラウド実行（`cloud: true`）も print モード非対応のため同様に省く
+    // （実測 T2: `Error: --cloud cannot be combined with --print.`）。
+    ...(mode === "herdr" || cloud === true ? [] : ["-p", prompt]),
     "--permission-mode",
     permission,
     "--disallowedTools",
@@ -226,7 +251,78 @@ export function buildClaudeArgs({
     // advisor 未指定（空文字）ならフラグごと省く。値なしの `--advisor` を渡すと
     // 後続フラグを値として食われるため、必ずモデル名とセットでのみ付ける。
     ...(advisor === "" ? [] : ["--advisor", advisor]),
+    // クラウド実行時は「作成コマンドの共通フラグ」だけをここで返す。`--cloud` 自体は
+    // 付けない（値として渡す description（＝クラウドセッションの初期プロンプト。
+    // appendCloudDoneInstruction() 適用後のタスクプロンプトそのもの）は
+    // `src/process-manager.ts` 側でしか決まらないため。`buildCloudCreateArgs()` が
+    // このフラグ列の先頭へ `--cloud <description>` を足して作成コマンドを完成させる）。
+    // ベースブランチ指定は `--ref` / `--on-branch` のどちらか一方のみ（両方指定は上で例外）。
+    ...(cloud === true && ref !== "" ? ["--ref", ref] : []),
+    ...(cloud === true && onBranchValue !== "" ? ["--on-branch", onBranchValue] : []),
   ];
+}
+
+// クラウドセッション作成コマンド（TTY 必須の `claude --cloud <prompt> ...`）の引数。
+// `prompt` は表示名ではなく**クラウドセッションの初期プロンプト**で、渡すと同時に
+// そのまま実行される（smoke test で確認済み）。旧実装は description に herdr の
+// タスクタブラベルを渡し、別コマンド（`claude -p --cloud <sessionId> <prompt>`）で
+// 本来のタスクプロンプトを投函する2コマンド方式だったが、ラベルを渡すターンで
+// モデルがそれをタスク指示と解釈して作業を完走し、投函ターンで同じ作業を再実行して
+// PR が重複するバグがあった。そのため初期プロンプトをそのまま渡す1コマンド方式へ
+// 統合した。呼び出し側（`src/process-manager.ts`）が appendCloudDoneInstruction()
+// 適用後のタスクプロンプトを組み立てて渡す。
+export function buildCloudCreateArgs(commonArgs: string[], prompt: string): string[] {
+  return ["--cloud", prompt, ...commonArgs];
+}
+
+// クラウドタスクの完了検知（cc-cloud-done ラベル、#284）用の指示を、作成コマンドの
+// description（＝クラウドセッションの初期プロンプト）へ追加する。
+// スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で初期プロンプトへ付加する方針。
+export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
+  const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
+  const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
+  const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
+  return `${prompt}\n\n${reportInstruction}\n\n${labelInstruction}`;
+}
+
+// `--disallowedTools` の文面（cloud プロンプト用）。DISALLOWED_TOOLS と二重管理しないよう
+// 配列から都度組み立てる。
+export function buildCloudToolRestriction(): string {
+  return `クラウド実行では \`--disallowedTools\` フラグによるツール制限が反映されないため、以下のツールを使わないこと: ${DISALLOWED_TOOLS.join(", ")}`;
+}
+
+// クラウドセッションの初期プロンプト本文を組み立てる。
+//
+// クラウド実行（Claude Code on the web）は `--append-system-prompt-file` /
+// `--disallowedTools` を起動引数として受理はするが VM 側で反映されないことが smoke test
+// （claude 2.1.250、#307）で確定したため、システムプロンプト相当の内容とツール制限を
+// プロンプト本文（`--cloud` の description）へ載せる。ローカル実行（default / herdr）は
+// 従来どおり CLI フラグ経由のままで、この関数は使わない。
+//
+// target を省略した場合（定期ワーカー）は cc-cloud-done 完了検知の指示を付けない。
+// CLOUD_DENIED_WORKERS により定期ワーカーは実際には cloud で起動されないが、
+// buildClaudeArgs 同様に呼び出し可能な形にしておく。
+//
+// タスクプロンプト（prompt）を先頭に置くのは、Claude Code がメッセージ先頭の
+// スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
+// 連結すると本来先頭にあるべきスラッシュコマンドが本文中ほどへずれ、リテラル
+// 文字列として扱われて SKILL.md がロードされなくなる。
+export function buildCloudPrompt(
+  prompt: string,
+  model: string,
+  target?: { type: "issue" | "pr"; number: number },
+): string {
+  const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}`;
+  const withPrinciples = `${prompt}\n\n${principles}`;
+  return target ? appendCloudDoneInstruction(withPrinciples, target) : withPrinciples;
+}
+
+// POSIX シェル向けのシングルクォート引用。herdr の `pane send-text` はシェルへ
+// そのまま文字列を送るため、スペース・`#`・`:` 等を含む引数（description・prompt）を
+// 安全に1トークンとして渡すにはクォートが要る。内部の `'` は `'\''` へエスケープする
+// （シングルクォートを閉じる → エスケープ済み `'` を1文字出す → シングルクォートを開き直す）。
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export interface ClaudeExecution {
@@ -263,8 +359,15 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
 // エージェントの状態遷移音は herdr 側の設定（`~/.config/herdr/config.toml` の
 // `[ui.sound]`）か、ワーカー用 herdr セッションを `HERDR_DISABLE_SOUND=1` 付きで
 // 起動することでしか止められない。
-export function buildClaudeEnv(mode: RunMode): Record<string, string> {
-  return mode === "herdr"
-    ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
-    : { ...CLAUDE_SPAWN_ENV };
+export function buildClaudeEnv(mode: RunMode, cloud?: boolean): Record<string, string> {
+  const base =
+    mode === "herdr"
+      ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
+      : { ...CLAUDE_SPAWN_ENV };
+  if (!cloud) return base;
+  // anthropics/claude-code#81776（2026-08-29時点でOPEN）の回避。GitHub App 連携済みでも
+  // `claude --cloud --ref` / `--on-branch` が「the GitHub App is not set up for this
+  // repository」で拒否されるバグがあり、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を
+  // 付けると成功することを smoke test（claude 2.1.250）で確認済み。上流修正後は撤去する。
+  return { ...base, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" };
 }

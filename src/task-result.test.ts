@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as TaskResultModule from "./task-result";
 
-const { buildTaskResult } = (await import("./task-result")) as typeof TaskResultModule;
+const { buildTaskResult, appendCloudFailureGuidance } = (await import("./task-result")) as typeof TaskResultModule;
 
 test("exit 0 with output is completed and keeps stdout as-is", () => {
   const result = buildTaskResult(0, "判定: パターンB-通常（マージ済み）\n", "");
@@ -38,5 +38,35 @@ test("stderr tail is appended on failure", () => {
 test("stderr tail is not appended on success", () => {
   const result = buildTaskResult(0, "ok", "warning: noise");
   assert.equal(result.status, "completed");
+  assert.equal(result.output, "ok");
+});
+
+test("appendCloudFailureGuidance prepends short guidance for a failed cloud task", () => {
+  const result = appendCloudFailureGuidance({ status: "failed", output: "boom" }, true);
+  assert.match(result.output, /^\[worker\]/);
+  assert.match(result.output, /boom$/);
+  assert.match(result.output, /GitHub 連携/);
+  assert.match(result.output, /allow_remote_sessions/);
+});
+
+test("appendCloudFailureGuidance keeps the real error readable after Slack's last-1000-chars truncation", () => {
+  const longError = "E".repeat(2000);
+  const result = appendCloudFailureGuidance({ status: "failed", output: longError }, true);
+  const truncated = result.output.slice(-1000);
+  assert.equal(truncated, "E".repeat(1000));
+  assert.doesNotMatch(truncated, /GitHub 連携/);
+});
+
+test("appendCloudFailureGuidance leaves non-cloud failures untouched", () => {
+  const failed = { status: "failed" as const, output: "boom" };
+  const result = appendCloudFailureGuidance(failed, false);
+  assert.equal(result, failed);
+  assert.equal(result.output, "boom");
+});
+
+test("appendCloudFailureGuidance leaves completed cloud tasks untouched", () => {
+  const completed = { status: "completed" as const, output: "ok" };
+  const result = appendCloudFailureGuidance(completed, true);
+  assert.equal(result, completed);
   assert.equal(result.output, "ok");
 });

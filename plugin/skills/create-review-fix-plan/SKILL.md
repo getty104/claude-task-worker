@@ -12,11 +12,15 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## フェーズ0: 事前チェック
 
 並列で以下を確認する。1つでも失敗したら、その場で原因を解消してから先に進むこと。
 
-- `gh pr view --json number,state,title,headRefName` でカレントPRが取得できることを確認する。取得できない場合は呼び出し元にエラーを返す
+- カレントPRの `number` / `state` / `title` / `headRefName` を取得できることを確認する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら `gh pr view --json number,state,title,headRefName` にフォールバックする。取得できない場合は呼び出し元にエラーを返す
 - PRの `state` が `OPEN` であることを確認する。`MERGED`/`CLOSED` の場合は呼び出し元にその旨を返して終了
 
 **完了条件**: PRが特定でき、OPEN状態であることが確認できていること。
@@ -27,11 +31,21 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 
 ### 1-1. レビューコメント・会話コメントの取得
 
+GitHub MCP の `pull_request_read`（method: `get_review_comments`）で未解決レビュースレッド（`unresolved_threads[]`）を取得することを第一手段とする。**`get_review_comments` はレビュースレッド専用で、Conversationタブの会話コメント（`conversation_comments[]`）は返さない**。会話コメントは PR が Issue 番号空間を共有することを利用し、`issue_read`（method: `get_comments`）を別途呼んで取得する。どちらか一方でも利用不可なら以下の共有スクリプトへフォールバックする。
+
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 ```
 
 > `scripts/fetch-unresolved-comments.sh` は `triage-pr` スキルからも `${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh` として参照される共有スクリプト。パス・ファイル名を変更する場合は `triage-pr` 側の参照も合わせて直すこと。
+
+**取得失敗を「指摘0件」と読み替えないこと。** MCP・スクリプトのどちらの経路でも、取得に失敗した場合（スクリプトが非0で終了した／MCP がエラーを返した）は**空の結果として扱わず**、失敗として扱う。スクリプトは失敗時に非0で終了し stderr に原因を出す（正常に0件だった場合は exit 0 と空配列）。両経路とも失敗した場合は修正プランを組み立てず、「レビューコメントを取得できなかった」ことと原因を呼び出し元へ返して終了する。空の結果を返すと、呼び出し元（`triage-pr`）が指摘なしと判断してPRをマージしてしまう。
+
+**ページング**: `unresolved_threads[]` はレビュースレッドが100件を超える場合、`get_review_comments` の返却にページ情報（カーソル/次ページの有無）があれば全ページを取得し終えるまで呼び続ける。`get_comments`（会話コメント）も同様に、1回の呼び出しで全件を返すとは限らないため、返却が尽きるまでページングする。共有スクリプトの `fetch_all_review_threads()` がレビュースレッド側で行っているのと同じ「次ページが無くなるまでループする」動作を、MCP経路でも徹底すること（片方だけ取得して打ち切ると、後続フェーズが古い/一部の指摘だけを対象にしてしまう）。
+
+MCP経路で取得する場合も、スクリプトが返すJSONと同じ意味の情報を同じ観点で抽出すること（`unresolved_threads[]` の `thread_id` / `path` / `line` / `is_outdated` / `comments[]`、`conversation_comments[]` の `author` / `body` / `url` / `created_at` / `is_minimized`）。後続フェーズと `fix-review-point` がこれらのキーに依存するため、キー名・粒度をどちらの経路でも揃える。
+
+**重要**: `thread_id`（スレッドの node ID。`PRRT_...` 形式）はレビュースレッドのResolve（`resolve-pr-comments`スキル）で必要になる。MCP経路では `get_review_comments` が同じ node ID を返すため、そのまま `pull_request_review_write`（method: `resolve_thread`）へ渡せる。
 
 返却されるJSONから2系統のフィードバックを抽出する。
 
@@ -48,6 +62,8 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 
 ### 1-2. PR本文の取得
 
+GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
+
 ```bash
 gh pr view --json title,body,url
 ```
@@ -56,11 +72,13 @@ PRの目的・スコープ・関連Issueを把握し、レビューコメント�
 
 ### 1-3. CIステータスの取得
 
+GitHub MCP の `pull_request_read`（method: `get_status` / `get_check_runs`）を優先し、利用不可なら以下にフォールバックする。
+
 ```bash
 gh pr checks --json state,name,link,workflow
 ```
 
-`state` が `FAILURE` / `STARTUP_FAILURE` のチェックがあれば、各 `link` から `run-id` を抽出して詳細ログを取得：
+`state` が `FAILURE` / `STARTUP_FAILURE` のチェックがあれば、各 `link` から `run-id` を抽出して詳細ログを取得する。GitHub MCP の `get_job_logs`（`failed_only: true`）を優先し、利用不可なら以下にフォールバックする。
 
 ```bash
 gh run view <run-id> --log-failed

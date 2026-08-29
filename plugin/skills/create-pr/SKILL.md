@@ -13,6 +13,10 @@ GitHubでPull Request（PR）を作成するスキルです。Instructionsに従
 
 # Instructions
 
+## GitHub アクセス
+
+本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+
 ## ステップ0: Issue番号の確定
 
 引数（`$ARGUMENTS`）から Issue 番号を取り出し、以降のすべてのステップで `${ISSUE_NUMBER}` を使う。
@@ -37,7 +41,8 @@ ISSUE_NUMBER=$(printf '%s' "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
 - PRのdescriptionのテンプレートは`.github/PULL_REQUEST_TEMPLATE.md`を参照し、それに従うこと
 - テンプレート内でコメントアウトされている箇所は必ず削除すること
 - PRのdescriptionには`Closes #${ISSUE_NUMBER}`と記載すること（`ISSUE_NUMBER` が空の場合は `Closes` 行を書かない）
-- `gh api user --jq '.login'`で取得したユーザーをAssigneesに追加すること
+- GitHub MCP が使える場合は `get_me` を使う。以下は MCP 利用不可時のフォールバック。
+  `gh api user --jq '.login'`で取得したユーザーをAssigneesに追加すること
 - PRのベースブランチは「ベースブランチの決定」の手順で決定したブランチにすること
 - PRに`cc-triage-scope`ラベルを付与すること
 
@@ -61,6 +66,7 @@ BASE_BRANCH=""
 # Issue 番号を取り出せた場合のみ実行
 if [ -n "${ISSUE_NUMBER}" ]; then
   # gh issue view が失敗した場合はエラーを報告して中断
+  # Issue Dependencies（parent）はMCP側の対応が不定のため gh のまま残す
   PARENT=$(gh issue view "${ISSUE_NUMBER}" --json parent --jq '.parent.number // empty') || {
     echo "Error: Failed to retrieve Issue #${ISSUE_NUMBER}" >&2
     exit 1
@@ -98,7 +104,7 @@ fi
 
 ```bash
 if [ -z "${BASE_BRANCH}" ]; then
-  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')  # 単独取得ツールがMCPに無いため gh のまま残す
   CURRENT=$(git rev-parse --abbrev-ref HEAD)
 
   BASE_BRANCH=$(
@@ -124,6 +130,8 @@ fi
 同点時の優先度はデフォルトブランチ → refname のアルファベット順。期待しないブランチがベースに選ばれた場合は `--base` を明示的に指定して上書きする。
 
 ## Command Examples
+
+> `gh api user --jq '.login'` は GitHub MCP が使える場合 `get_me` に置き換える。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr create \

@@ -2,7 +2,9 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { getWorkerConfig } from "./config";
+import { buildCloudCreateArgs, buildCloudPrompt, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
+import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
+import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
 import {
@@ -14,7 +16,7 @@ import {
   selectRecentTasks,
   writeScreen,
 } from "./table";
-import { STDERR_TAIL_LIMIT, buildTaskResult } from "./task-result";
+import { STDERR_TAIL_LIMIT, appendCloudFailureGuidance, buildTaskResult } from "./task-result";
 import type { TaskResult } from "./task-result";
 import { findProjectNameByPath, getRunMode } from "./user-config";
 
@@ -141,14 +143,14 @@ export function ensureRenderInterval(): void {
   renderInterval.unref();
 }
 
-type OnComplete = (status: "completed" | "failed", output: string) => Promise<void>;
+type OnComplete = (status: "completed" | "failed", output: string, cloudSessionId?: string) => Promise<void>;
 
 // onComplete の実行と台帳・テーブルの更新。default モード（プロセス終了）と
 // herdr モード（agent ステータス）で完了検知の手段は違うが、その後の処理は共通にする。
 async function finishTask(id: number, result: TaskResult, onComplete?: OnComplete): Promise<void> {
   try {
     await Promise.race([
-      onComplete?.(result.status, result.output) ?? Promise.resolve(),
+      onComplete?.(result.status, result.output, result.cloudSessionId) ?? Promise.resolve(),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("onComplete timed out after 120s")), 120_000).unref(),
       ),
@@ -175,8 +177,8 @@ export function resolveProjectName(cwd: string = process.cwd()): string {
   return findProjectNameByPath(cwd) ?? basename(cwd);
 }
 
-// herdr モードのタスク実行。claude を herdr のタスク専用タブで TUI 起動し、
-// agent ステータスで完了を検知する。
+// herdr モードのタスク実行（ローカル専用経路）。claude を herdr のタスク専用タブで
+// TUI 起動し、agent ステータスで完了を検知する。
 async function runViaHerdr(
   args: string[],
   prompt: string,
@@ -233,6 +235,300 @@ async function runViaHerdr(
   herdrTasks.delete(id);
 }
 
+// クラウドセッション作成コマンドの起動出力からセッションIDが読めるようになるまでの上限。
+// 作業ツリーのアップロードを伴うため default モードより長めに取る。
+// テストから短縮できるよう CTW_CLOUD_SESSION_TIMEOUT_MS で上書き可能にしてある。
+export const CLOUD_SESSION_TIMEOUT_MS = Number(process.env.CTW_CLOUD_SESSION_TIMEOUT_MS) || 120 * 1000;
+export const CLOUD_SESSION_POLL_INTERVAL_MS = 1000;
+
+// クラウドタスクの完了（cc-cloud-done ラベル）を確認するポーリング間隔。
+export const CLOUD_POLL_INTERVAL_MS = 30 * 1000;
+// クラウドタスクの打ち切り上限。これを超えたら failed として人手確認へ回す。
+// タイムアウトに落ちる典型: AskUserQuestion で停止したセッション・VM 側クラッシュ・
+// プラグイン未導入による空振り・ラベル付与自体の失敗。
+// テストから短縮できるよう CTW_CLOUD_TASK_TIMEOUT_MS で上書き可能にしてある。
+export const CLOUD_TASK_TIMEOUT_MS = Number(process.env.CTW_CLOUD_TASK_TIMEOUT_MS) || 4 * 60 * 60 * 1000;
+
+type CloudTargetType = "issue" | "pr";
+
+interface CloudWaiter {
+  type: CloudTargetType;
+  deadline: number;
+  settle: (outcome: "completed" | "timeout" | "aborted") => void;
+}
+
+// キーは `${type}:${number}`（issue #N と PR #N の番号衝突を避ける）。
+const cloudWaiters = new Map<string, CloudWaiter>();
+let cloudPollLoopRunning = false;
+
+// 実行中のクラウドタスク全体を1回のポーリングで判定する共有ポーラー。個別タスクごとに
+// `gh issue view` を叩かず、type ごとに `listNumbersWithLabel` を1クエリだけ呼ぶ。
+function ensureCloudPollLoop(): void {
+  if (cloudPollLoopRunning) return;
+  cloudPollLoopRunning = true;
+  void (async () => {
+    // 例外でループを抜けた場合も cloudPollLoopRunning を戻す。立てっぱなしにすると
+    // 以降どのタスクもポーラーを起動できず、待機が永久に解決しなくなる。
+    try {
+      await pollCloudWaiters();
+    } finally {
+      cloudPollLoopRunning = false;
+    }
+  })();
+}
+
+async function pollCloudWaiters(): Promise<void> {
+  while (cloudWaiters.size > 0) {
+    if (herdrAbortSignal.aborted) {
+      for (const waiter of cloudWaiters.values()) waiter.settle("aborted");
+      cloudWaiters.clear();
+      break;
+    }
+
+    const pendingTypes = new Set<CloudTargetType>();
+    for (const waiter of cloudWaiters.values()) pendingTypes.add(waiter.type);
+
+    const doneKeys = new Map<CloudTargetType, Set<number>>();
+    for (const type of pendingTypes) {
+      try {
+        const numbers = await listNumbersWithLabel(type, CLOUD_DONE_LABEL);
+        doneKeys.set(type, new Set(numbers));
+      } catch (err) {
+        console.error(`[worker] failed to poll ${CLOUD_DONE_LABEL} for ${type}: ${err}`);
+      }
+    }
+
+    const now = Date.now();
+    for (const [key, waiter] of [...cloudWaiters.entries()]) {
+      const done = doneKeys.get(waiter.type);
+      const number = Number(key.split(":")[1]);
+      if (done?.has(number)) {
+        waiter.settle("completed");
+        cloudWaiters.delete(key);
+      } else if (now >= waiter.deadline) {
+        waiter.settle("timeout");
+        cloudWaiters.delete(key);
+      }
+    }
+
+    if (cloudWaiters.size === 0) break;
+
+    // シャットダウン応答性のため 30 秒丸ごと眠らず 1 秒刻みで abort を確認する。
+    for (let waited = 0; waited < CLOUD_POLL_INTERVAL_MS; waited += 1000) {
+      if (herdrAbortSignal.aborted) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
+export function waitForCloudTask(id: number, type: CloudTargetType): Promise<"completed" | "timeout" | "aborted"> {
+  return new Promise((resolve) => {
+    cloudWaiters.set(`${type}:${id}`, {
+      type,
+      deadline: Date.now() + CLOUD_TASK_TIMEOUT_MS,
+      settle: resolve,
+    });
+    ensureCloudPollLoop();
+  });
+}
+
+// クラウドセッションはローカル側の失敗確定後も独立して稼働し続けうる（孤立セッション）。
+// ワーカーの onComplete の失敗経路は cc-need-human-check を付けないため、ここで確実に
+// 付けてポーリング対象から外す（同ラベルは issue-worker/pr-worker 共通の除外ラベル）。
+// cc-in-progress を残す案は採らない: finally で無条件に外されるため残すには分岐追加が要り、
+// かつ「実行中に見えるが実行していない」状態を作ってしまう。
+async function flagOrphanedCloudSession(
+  target: CloudTargetType,
+  id: number,
+  reason: "session-id" | "shutdown",
+  cloudSessionId?: string,
+): Promise<void> {
+  await addLabel(target, id, "cc-need-human-check").catch((err: unknown) => {
+    console.error(`[worker] failed to add cc-need-human-check to ${target} #${id}: ${err}`);
+  });
+
+  const causeLine =
+    reason === "session-id"
+      ? "セッションIDの抽出に失敗して待機を打ち切りました。プロンプトは投入済みで、" +
+        "クラウドセッションは独立して稼働している可能性があります。"
+      : "ワーカーのシャットダウンで待機を打ち切りました。クラウドセッションは継続している可能性が高いです。";
+  const sessionLine = cloudSessionId ? `https://claude.ai/code/${cloudSessionId}` : "セッションURL不明（ID抽出に失敗）";
+  const body =
+    `## 孤立クラウドセッションの可能性\n\n` +
+    `**原因**: ${causeLine}\n\n` +
+    `**セッションURL**: ${sessionLine}\n\n` +
+    `**再開方法**: 孤立セッションの成果物が届いていないか確認したうえで、\`cc-need-human-check\` ラベルを外すとポーリング対象に戻ります。`;
+
+  const commentFn = target === "issue" ? commentOnIssue : commentOnPR;
+  await commentFn(id, body).catch((err: unknown) => {
+    console.error(`[worker] failed to comment on ${target} #${id} about the orphaned cloud session: ${err}`);
+  });
+}
+
+// クラウド実行（workers.<name>.cloud）のタスク実行。`claude --cloud <prompt> ...`
+// 1コマンドでセッション作成と初期プロンプトの実行を同時に行う（description が
+// そのまま初期プロンプトとして即実行されるため）。作成後は cc-cloud-done ラベルの
+// ポーリングでタスク完了を検知する（#284）。
+async function runViaCloud(
+  args: string[],
+  prompt: string,
+  id: number,
+  onComplete?: OnComplete,
+  cwd?: string,
+  env?: Record<string, string>,
+  cloudTarget?: CloudTargetType,
+  model?: string,
+): Promise<void> {
+  const herdrRunnerMod = await import("./herdr-runner");
+  const { taskTabLabel, waitForPaneReady, extractCloudSessionId } = herdrRunnerMod;
+  const herdrMod = await import("./herdr");
+  const { tabCreate, tabClose, paneSendText, paneSendKeys, paneRead, getCurrentWorkspaceId } = herdrMod;
+
+  // 起動が完了する前にシャットダウンが走っても waitForAllProcesses() が
+  // 「実行中タスクなし」と誤判定しないよう、タブ確定前から台帳に載せておく
+  // （runViaHerdr と同じ狙い）。
+  herdrTasks.set(id, { paneId: "", tabId: "" });
+
+  const label = taskTabLabel(resolveProjectName(), id);
+  // 作成コマンドの description は herdr のタスクタブラベルではなく、クラウドセッションの
+  // 初期プロンプトそのもの。cc-cloud-done の投稿指示に加え、クラウドでは反映されない
+  // システムプロンプト・ツール制限もここへ本文として含めておく（渡した瞬間に実行される
+  // ため、後から追加投函する余地は無い）。
+  const initialPrompt = buildCloudPrompt(
+    prompt,
+    model ?? "",
+    cloudTarget ? { type: cloudTarget, number: id } : undefined,
+  );
+  let result: TaskResult;
+  let cloudSessionId: string | undefined;
+
+  try {
+    // env は tabCreate（herdr の --env）で渡す。1コマンド方式では `claude` はこの
+    // ペインのシェルへ直接送信されるため（下記 paneSendText）、env はここ1箇所に
+    // 渡せば CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 等が確実に効く。
+    const created = await tabCreate({ label, cwd: cwd ?? process.cwd(), workspaceId: getCurrentWorkspaceId(), env });
+    herdrTasks.set(id, created);
+
+    try {
+      const ready = await waitForPaneReady(created.paneId, herdrMod);
+      if (!ready) {
+        console.warn(`[worker] pane ${created.paneId} produced no prompt before the timeout, launching anyway`);
+      }
+
+      const command = ["claude", ...buildCloudCreateArgs(args, initialPrompt)].map(shellQuote).join(" ");
+      await paneSendText(created.paneId, command);
+      await paneSendKeys(created.paneId, "enter");
+
+      const deadline = Date.now() + CLOUD_SESSION_TIMEOUT_MS;
+      for (;;) {
+        if (herdrAbortSignal.aborted) {
+          throw new Error("the worker is shutting down before the cloud session could be created");
+        }
+        let content = "";
+        try {
+          // `recent` は「末尾N行」を空行パディング込みで数えるため、作成直後のペイン
+          // （出力がビューポート下端に届いていない）では必ず空文字になる。既定の
+          // `visible`（ビューポート全体）で読む。詳細は CLAUDE.md の herdr 節を参照。
+          content = await paneRead(created.paneId);
+        } catch (err) {
+          console.error(`[worker] failed to read pane ${created.paneId} while waiting for the cloud session: ${err}`);
+        }
+        cloudSessionId = extractCloudSessionId(content);
+        if (cloudSessionId) break;
+        if (Date.now() >= deadline) {
+          throw new Error(`timed out waiting for the cloud session id (pane tail: ${content.slice(-1000)})`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, CLOUD_SESSION_POLL_INTERVAL_MS));
+      }
+    } finally {
+      // クラウドセッションはローカルに常駐しないため、取得可否に関わらずタブを残さない。
+      await tabClose(created.tabId).catch((err: unknown) => {
+        console.error(`[worker] failed to close cloud task tab ${created.tabId}: ${err}`);
+      });
+    }
+
+    // 1コマンド方式のため投函フェーズは無い。ここに到達した時点でセッションは作成済みで、
+    // 初期プロンプト（＝タスク本体）の実行が既に始まっている。
+    const createOutput = `[worker] created cloud session ${cloudSessionId} with the task's initial prompt`;
+
+    if (!cloudTarget) {
+      // 定期ワーカーは CLOUD_DENIED_WORKERS で起動時に拒否されるため実際には到達しない。
+      console.warn(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
+      result = { status: "completed", output: createOutput };
+    } else {
+      // 待機中も台帳エントリを running のまま維持する（finishTask はここより後で呼ぶ）。
+      // herdrTasks はセッション作成後も残るため waitForAllProcesses()/shutdown() の
+      // abort フラグは引き続き効く。
+      const outcome = await waitForCloudTask(id, cloudTarget);
+
+      if (outcome === "completed") {
+        await removeLabel(cloudTarget, id, CLOUD_DONE_LABEL).catch((err: unknown) => {
+          console.error(`[worker] failed to remove ${CLOUD_DONE_LABEL} from ${cloudTarget} #${id}: ${err}`);
+        });
+        // 完了検知後に1回だけ、セッションが投稿した最終報告コメントを回収する。
+        // 取得できなければ従来どおりの定型文のまま completed を維持する（通知を落とさない）。
+        let reportBody: string | null = null;
+        const startedAt = tasks.get(id)?.startedAt;
+        if (startedAt) {
+          try {
+            reportBody = await findCommentSince(id, startedAt, CLOUD_REPORT_HEADING);
+          } catch (err) {
+            console.error(`[worker] failed to fetch the cloud report comment for ${cloudTarget} #${id}: ${err}`);
+          }
+        }
+        result = {
+          status: "completed",
+          output: reportBody ?? `${createOutput}\n[worker] detected completion via the ${CLOUD_DONE_LABEL} label`,
+        };
+      } else if (outcome === "timeout") {
+        // タイムアウト打ち切りを人手確認へ確実に回すためここで cc-need-human-check を付ける。
+        // ワーカーの onComplete の失敗経路は同ラベルを付けないため。
+        await addLabel(cloudTarget, id, "cc-need-human-check").catch((err: unknown) => {
+          console.error(`[worker] failed to add cc-need-human-check to ${cloudTarget} #${id}: ${err}`);
+        });
+        result = {
+          status: "failed",
+          output:
+            `${createOutput}\n[worker] timed out waiting for the ${CLOUD_DONE_LABEL} label after ` +
+            `${CLOUD_TASK_TIMEOUT_MS / 1000 / 60} minutes. Possible causes: the session stopped on ` +
+            `AskUserQuestion, the cloud VM crashed, the plugin was not installed, or label assignment itself failed.`,
+        };
+      } else {
+        // aborted: ワーカー側の停止でありタスクの失敗ではないが、クラウドセッションは
+        // 継続稼働しうる（孤立セッション）ため timeout と同じく cc-need-human-check を付ける。
+        // タスクの失敗か否かの区別はラベルではなく output/コメントの文面で行う。
+        await flagOrphanedCloudSession(cloudTarget, id, "shutdown", cloudSessionId);
+        result = {
+          status: "failed",
+          output:
+            `${createOutput}\n[worker] shutdown aborted the wait for the ${CLOUD_DONE_LABEL} label. ` +
+            "The session may still be running; added cc-need-human-check.",
+        };
+      }
+    }
+    result.cloudSessionId = cloudSessionId;
+  } catch (err) {
+    console.error(`[worker] failed to run #${id} via cloud: ${err}`);
+    let orphanNote =
+      "[worker] note: with the 1-command launch, the cloud session may already have started " +
+      "working independently even though this task is being reported as failed locally (orphaned session).";
+    if (cloudTarget) {
+      await flagOrphanedCloudSession(cloudTarget, id, "session-id", cloudSessionId);
+      orphanNote += " added cc-need-human-check so a human can verify whether it completed on its own.";
+    }
+    result = {
+      status: "failed",
+      output: `[worker] failed to run the task via cloud: ${err}\n${orphanNote}`,
+      ...(cloudSessionId ? { cloudSessionId } : {}),
+    };
+  }
+
+  result = appendCloudFailureGuidance(result, true);
+
+  await finishTask(id, result, onComplete);
+  herdrTasks.delete(id);
+}
+
 export function run(
   command: string,
   args: string[],
@@ -246,6 +542,16 @@ export function run(
   // herdr モードで起動後に投入するプロンプト（`buildClaudeExecution` の `prompt`）。
   // default モードでは args に含まれるため不要。
   prompt?: string,
+  // クラウド実行フラグ（workers.<name>.cloud）。herdr モードのときだけ実行経路を
+  // runViaCloud（`claude --cloud <prompt> ...` の1コマンド方式）へ切り替える。
+  // `cloud: true` かつ `mode: "default"` は起動時ガード（assertCloudAvailable）で
+  // 弾かれるためここでは扱わない。
+  cloud?: boolean,
+  // クラウド実行時に cc-cloud-done を探す対象の種別。番号は id を使う。
+  cloudTarget?: "issue" | "pr",
+  // クラウド実行時のプロンプト本文組み立て（buildCloudPrompt）に使う `--model` の値。
+  // default/herdr（非cloud）では未使用。
+  model?: string,
 ): void {
   // 同じ Issue/PR を再実行したときは古いエントリを削除してから入れ直し、
   // Map の挿入順で「最新に繰り上げる」（selectRecentTasks の直近順表示と揃える）。
@@ -263,6 +569,10 @@ export function run(
   renderTable();
 
   if (getRunMode() === "herdr") {
+    if (cloud) {
+      void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env, cloudTarget, model);
+      return;
+    }
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、
     // command は渡さず claude のフラグ（args）とプロンプトを渡す。
     void runViaHerdr(args, prompt ?? "", id, onComplete, cwd, env);

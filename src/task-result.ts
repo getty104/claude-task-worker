@@ -5,6 +5,30 @@ export const STDERR_TAIL_LIMIT = 8 * 1024;
 export interface TaskResult {
   status: "completed" | "failed";
   output: string;
+  // クラウド実行（workers.<name>.cloud）のセッションURL用ID。herdr モードでペインから
+  // 抽出できた場合のみ設定する。default モード（claude -p の spawn）は常に undefined。
+  cloudSessionId?: string;
+}
+
+// クラウド実行（workers.<name>.cloud: true）の前提条件のうち、GitHub 連携と
+// allow_remote_sessions 組織ポリシーはローカルから静的判定できない
+// （docs/cloud-prerequisite-checks.md の「案内メッセージの文面案」2・4）。
+// そのため起動時エラーにはできず、タスクが実際に失敗したときの案内としてのみ付与する。
+// Slack 通知は output の末尾1000文字だけを切り出す（src/slack.ts）ため、案内文は
+// この定数を先頭一致で検出して切り出し領域の外に確保してもらう必要があり、export する。
+export const CLOUD_FAILURE_GUIDANCE =
+  "[worker] クラウド実行の前提条件（GitHub 連携 / allow_remote_sessions 組織ポリシー）が" +
+  "満たされていない可能性があります。詳細は docs/cloud-prerequisite-checks.md を参照してください。";
+
+/**
+ * クラウド実行の失敗結果にのみ、前提条件の案内を output へ追記する。
+ * ローカル実行（cloud が false）や完了結果には一切追記しない。
+ * 案内文は output の前に置く。Slack 通知は末尾1000文字を切り出すため、後ろに置くと
+ * 実際のエラー本文が案内文に押し出されて読めなくなる。
+ */
+export function appendCloudFailureGuidance(result: TaskResult, cloud: boolean | undefined): TaskResult {
+  if (!cloud || result.status === "completed") return result;
+  return { ...result, output: `${CLOUD_FAILURE_GUIDANCE}\n${result.output}` };
 }
 
 /**
