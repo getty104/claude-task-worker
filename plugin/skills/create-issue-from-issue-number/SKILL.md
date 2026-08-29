@@ -178,7 +178,8 @@ gh-asset download <asset_id> ~/Downloads/
 3. **取得**: 種類ごとに手段を使い分ける
    - 一般のWebページ・仕様書・記事 → `WebFetch`
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
+   - GitHub上のIssue・PR → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
+   - GitHub上のファイル参照リンク（blob URL 等、別リポジトリ含む） → `issue_read` / `pull_request_read` はファイル内容を取得できないため使わない。GitHub MCP が使える場合は `get_file_contents` を使う。利用不可なら `gh api repos/<owner>/<repo>/contents/<path>` または `WebFetch`（raw URL）へフォールバック
    - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
    - Issue本文に貼られた画像URL → ステップ1のとおり `gh-asset` でダウンロードして Read する
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）

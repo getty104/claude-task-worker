@@ -108,7 +108,7 @@ update_issue(issueUrl=<permalink>, status='resolved', reason='<根拠。修正�
 
 **未解消の場合**:
 
-1. **重複確認**: GitHub MCP が使える場合は `list_issues` / `search_issues` を使う。以下は MCP 利用不可時のフォールバック。
+1. **重複確認**: **Open/Closed の両方**を検索対象にする（Closed で放置された重複を見落とすと再作成してしまう）。GitHub MCP が使える場合は `list_issues`（`states` に `OPEN` と `CLOSED` の両方を指定）または `search_issues`（`query` に状態を絞る `is:open` / `is:closed` を付けず、両状態を対象にする）を使う。以下は MCP 利用不可時のフォールバック。
    `gh issue list --state all --search "<shortId>" --json number,title,url,state` を実行する。同じ Sentry Issue を指す GitHub Issue が既にあれば**作成せず**、そのURLを添えて `skipped-duplicate` として報告する
 2. 重複が無ければ `create-issue` スキル（`claude-task-worker:create-issue`）を呼ぶ。引数には自然言語のタスク説明として次を含める:
    - エラーのタイトルと種別（例外クラス・メッセージ）

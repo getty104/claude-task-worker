@@ -130,7 +130,7 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
   gh pr edit $0 --add-label "cc-release-ready"
   ```
 
-- **通常のPRの場合**: `gh pr merge $0 --merge --delete-branch` でPRをマージし、下記「マージ後の関連Issue連動Close」を実行して終了する。
+- **通常のPRの場合**: PRをマージする。GitHub MCP の `pull_request_write`（method: `merge`）を優先し、利用不可なら `gh pr merge $0 --merge --delete-branch` へフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。マージ後、下記「マージ後の関連Issue連動Close」を実行して終了する。
 
 ### マージ後の関連Issue連動Close
 

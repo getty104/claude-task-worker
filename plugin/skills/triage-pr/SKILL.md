@@ -95,6 +95,8 @@ gh pr view $ARGUMENTS --json mergeable -q .mergeable
 
 未解決のインラインレビューコメントとConversationタブの一般コメントは、GitHub MCP の `pull_request_read`（method: `get_review_comments`）を優先して取得する。利用不可なら以下の共有スクリプトへフォールバックする。
 
+**ページングは取得しきる。** `get_review_comments` はカーソル方式（`after` に前ページの `endCursor` を渡す）で、応答の `pageInfo.hasNextPage` が `true` の間は `after` を更新して呼び直す。会話コメント（PRはIssue番号を共有するため `issue_read` の method: `get_comments`）はオフセット方式（`page` / `perPage`）で、返り件数が `perPage` 未満になるまで `page` を進めて呼び直す。1ページ目だけで打ち切ると、指摘・コメントが多いPRで後続ページの指摘を取りこぼす。
+
 ```bash
 bash "${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh"
 ```
@@ -274,13 +276,13 @@ BASE_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)
 DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
 ```
 
-2. **必ず以下のコマンドを実行してマージする。**
+2. **必ずマージを実行する。** GitHub MCP の `pull_request_write`（method: `merge`）を優先し、利用不可なら以下の `gh` コマンドへフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。
 
 ```bash
 gh pr merge $ARGUMENTS --merge --delete-branch
 ```
 
-マージコマンドが失敗した場合は、エラー内容を記録して報告し、以降の手順に進まない。
+マージが失敗した場合は、エラー内容を記録して報告し、以降の手順に進まない。
 
 3. マージ成功後、`BASE_BRANCH` が `DEFAULT_BRANCH` と **一致しない**（`cc-epic-<N>` のような非デフォルトブランチへのマージ）場合のみ、関連Issueを明示的にクローズする。GitHubの`Closes #<issue番号>`記法による自動クローズは**デフォルトブランチへのマージ時にのみ**発動するため、EpicフローでサブIssueが閉じられずEpic PR作成が止まるのを防ぐ必要がある。一致する場合はGitHubが自動でクローズするためスキップする。
 

@@ -36,7 +36,8 @@ import {
   buildForwardedCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
-import { loadConfig, checkCloudConfig, type CloudAuthStatus } from "./config";
+import { loadConfig, checkCloudConfig, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -235,12 +236,23 @@ async function readCloudAuthStatus(): Promise<CloudAuthStatus> {
 async function assertCloudAvailable(): Promise<void> {
   const workers = loadConfig().workers;
   const hasCloudWorker = Object.values(workers).some((w) => w.cloud);
+  // init を再実行していない既存リポジトリでも cc-cloud-done ラベルを保証する
+  // （無いとポーラー・クラウド双方が失敗し続け、タスクが4時間タイムアウトを繰り返す）。
+  // createLabel は失敗を握りつぶすため、作成できなかった場合は起動時エラーにする
+  // （素通りさせると、ラベル不在のまま全クラウドタスクがタイムアウトを繰り返す）。
+  // color は init.ts の LABELS の CLOUD_DONE_LABEL エントリと同じ値。
+  const labelReady = hasCloudWorker ? await createLabel(CLOUD_DONE_LABEL, "33cfff", true) : true;
   const status = hasCloudWorker ? await readCloudAuthStatus() : undefined;
   const errors = checkCloudConfig({
     workers,
     mode: getRunMode(),
     auth: status ? { status, baseUrl: process.env.ANTHROPIC_BASE_URL } : undefined,
   });
+  if (!labelReady) {
+    errors.push(
+      `${CLOUD_DONE_LABEL} ラベルを作成できませんでした。gh の認証・権限を確認するか、claude-task-worker init を実行してください。`,
+    );
+  }
   if (errors.length === 0) return;
   for (const message of errors) {
     console.error(`[worker] ${message}`);

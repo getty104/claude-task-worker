@@ -14,9 +14,9 @@ export interface TaskResult {
 // allow_remote_sessions 組織ポリシーはローカルから静的判定できない
 // （docs/cloud-prerequisite-checks.md の「案内メッセージの文面案」2・4）。
 // そのため起動時エラーにはできず、タスクが実際に失敗したときの案内としてのみ付与する。
-// Slack 通知は output の末尾1000文字しか載せない（src/slack.ts）ため、案内文は
-// 実際のエラー本文を押し出さないよう短く保ち、かつエラー本文より前に置く。
-const CLOUD_FAILURE_GUIDANCE =
+// Slack 通知は output の末尾1000文字だけを切り出す（src/slack.ts）ため、案内文は
+// この定数を先頭一致で検出して切り出し領域の外に確保してもらう必要があり、export する。
+export const CLOUD_FAILURE_GUIDANCE =
   "[worker] クラウド実行の前提条件（GitHub 連携 / allow_remote_sessions 組織ポリシー）が" +
   "満たされていない可能性があります。詳細は docs/cloud-prerequisite-checks.md を参照してください。";
 

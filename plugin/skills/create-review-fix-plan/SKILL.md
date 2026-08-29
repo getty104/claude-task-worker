@@ -31,13 +31,15 @@ GitHub PRの未解決レビューコメントとCI失敗を分析し、後続ス
 
 ### 1-1. レビューコメント・会話コメントの取得
 
-GitHub MCP の `pull_request_read`（method: `get_review_comments`）で未解決レビュースレッドと会話コメントを取得することを第一手段とする。利用不可なら以下の共有スクリプトへフォールバックする。
+GitHub MCP の `pull_request_read`（method: `get_review_comments`）で未解決レビュースレッド（`unresolved_threads[]`）を取得することを第一手段とする。**`get_review_comments` はレビュースレッド専用で、Conversationタブの会話コメント（`conversation_comments[]`）は返さない**。会話コメントは PR が Issue 番号空間を共有することを利用し、`issue_read`（method: `get_comments`）を別途呼んで取得する。どちらか一方でも利用不可なら以下の共有スクリプトへフォールバックする。
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-unresolved-comments.sh
 ```
 
 > `scripts/fetch-unresolved-comments.sh` は `triage-pr` スキルからも `${CLAUDE_SKILL_DIR}/../create-review-fix-plan/scripts/fetch-unresolved-comments.sh` として参照される共有スクリプト。パス・ファイル名を変更する場合は `triage-pr` 側の参照も合わせて直すこと。
+
+**ページング**: `unresolved_threads[]` はレビュースレッドが100件を超える場合、`get_review_comments` の返却にページ情報（カーソル/次ページの有無）があれば全ページを取得し終えるまで呼び続ける。`get_comments`（会話コメント）も同様に、1回の呼び出しで全件を返すとは限らないため、返却が尽きるまでページングする。共有スクリプトの `fetch_all_review_threads()` がレビュースレッド側で行っているのと同じ「次ページが無くなるまでループする」動作を、MCP経路でも徹底すること（片方だけ取得して打ち切ると、後続フェーズが古い/一部の指摘だけを対象にしてしまう）。
 
 MCP経路で取得する場合も、スクリプトが返すJSONと同じ意味の情報を同じ観点で抽出すること（`unresolved_threads[]` の `thread_id` / `path` / `line` / `is_outdated` / `comments[]`、`conversation_comments[]` の `author` / `body` / `url` / `created_at` / `is_minimized`）。後続フェーズと `fix-review-point` がこれらのキーに依存するため、キー名・粒度をどちらの経路でも揃える。
 

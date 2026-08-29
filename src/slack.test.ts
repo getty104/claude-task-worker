@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as SlackModule from "./slack";
+import { appendCloudFailureGuidance } from "./task-result";
 
 const { buildTaskNotificationText } = (await import("./slack")) as typeof SlackModule;
 
@@ -93,6 +94,14 @@ test("long output is truncated to the last 1000 chars, unaffected by the session
   assert.ok(withoutSession.endsWith(expectedBlock));
   assert.ok(withSession.endsWith(expectedBlock));
   assert.equal(withSession, `https://claude.ai/code/abc-123\n${withoutSession}`);
+});
+
+test("cloud failure guidance survives truncation alongside the error tail when output exceeds 1000 chars", () => {
+  const longError = "e".repeat(1500);
+  const { output } = appendCloudFailureGuidance({ status: "failed", output: longError }, true);
+  const text = buildTaskNotificationText({ status: "failed", ...base, output });
+  assert.ok(text.includes("docs/cloud-prerequisite-checks.md"), "guidance text must survive truncation");
+  assert.ok(text.includes(longError.slice(-1000)), "tail of the actual error must survive truncation");
 });
 
 test("tokenText is included in the body", () => {

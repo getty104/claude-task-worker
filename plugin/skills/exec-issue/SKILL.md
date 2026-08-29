@@ -99,7 +99,7 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 並列で以下を確認し、判断は自動で行う。ユーザーに質問しないこと。
 
 - `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断** し、理由を出力して終了する（デフォルトブランチで作業してはならない）
-- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）。リポジトリ情報の単独取得ツールが MCP に無いため `gh` に据え置く（`git remote get-url origin` 等のローカル導出も可）
+- `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）。リポジトリ情報の単独取得ツールが MCP に無いため `gh` に据え置く（`git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@'` によるローカル導出も可）
 - `gh issue view $0 --json number,title,state,labels` でIssueが存在し `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更を確認する。存在する場合は `git stash push -u -m "exec-issue auto-stash $0"` で自動退避し、その旨を最終報告に明記する
 

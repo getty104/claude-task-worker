@@ -18,10 +18,12 @@ export function resolveInstallPath(installedPluginsJson: string): string | undef
   } catch {
     return undefined;
   }
-  const entries = (parsed as { plugins?: Record<string, InstalledPluginEntry[]> } | null)?.plugins?.[PLUGIN_KEY];
-  if (!entries || entries.length === 0) return undefined;
-  const entry = entries.find((e) => e.scope === "user") ?? entries[0];
-  return entry?.installPath || undefined;
+  const entries = (parsed as { plugins?: Record<string, unknown> } | null)?.plugins?.[PLUGIN_KEY];
+  if (!Array.isArray(entries) || entries.length === 0) return undefined;
+  const isEntry = (e: unknown): e is InstalledPluginEntry => typeof e === "object" && e !== null;
+  const entry = entries.find((e) => isEntry(e) && e.scope === "user") ?? entries[0];
+  if (!isEntry(entry) || typeof entry.installPath !== "string") return undefined;
+  return entry.installPath || undefined;
 }
 
 // npm パッケージ（`dist` のみ同梱、プラグインは同梱しない）から、インストール済み

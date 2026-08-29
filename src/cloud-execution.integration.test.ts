@@ -777,3 +777,57 @@ test(
     await handle.waitFor(() => slack.texts().some((text) => text.includes("The session may still be running")), 20_000);
   },
 );
+
+// ============================================================
+// K. init 未再実行の既存リポジトリでも cc-cloud-done ラベルを保証する
+// ============================================================
+test("K: cloud: true のワーカーがあると起動時に cc-cloud-done ラベルを作成する", { timeout: 30_000 }, async (t) => {
+  const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
+  const handle = await startWorker({
+    worker: "exec-issue",
+    workerConfig: { workers: { "exec-issue": { cloud: true } } },
+    // mode: "default" は cloud 設定として無効（E1 参照）だが、assertCloudAvailable の
+    // ラベル作成は checkCloudConfig の妥当性判定より前に行われるため、この組み合わせでも
+    // 素早く（起動失敗を待つだけで）ラベル作成の記録を確認できる。
+    userConfig: { mode: "default" },
+    records: stubs.records,
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
+
+  const code = await handle.waitForExit(15_000);
+  assert.equal(code, 1);
+
+  const records = stubs.records();
+  const labelCreate = findRecord(records, "gh", "label", "create");
+  assert.ok(labelCreate, "cc-cloud-done ラベル作成（gh label create）の記録が見つからない");
+  assert.equal(labelCreate!.argv[2], "cc-cloud-done");
+  assert.ok(labelCreate!.argv.includes("--force"), "--force が付いていない（未作成リポジトリで冪等に作成できない）");
+});
+
+test("L: cloud: true のワーカーが無ければ cc-cloud-done ラベルを作成しない", { timeout: 30_000 }, async (t) => {
+  const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
+  const handle = await startWorker({
+    worker: "exec-issue",
+    workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
+    userConfig: { mode: "default" },
+    records: stubs.records,
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
+
+  // 起動が通常どおり進んだこと（gh repo view の記録）を待ってから判定する。
+  // 起動直後の記録なしとラベル未作成を区別するため。
+  await handle.waitFor((records) => findRecord(records, "gh", "repo", "view") !== undefined);
+
+  const records = stubs.records();
+  assert.equal(
+    findRecord(records, "gh", "label", "create"),
+    undefined,
+    "cloud ワーカーが無いのにラベルが作成されている",
+  );
+});

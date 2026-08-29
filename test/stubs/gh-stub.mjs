@@ -135,6 +135,8 @@ if (sub === "api" && action === "user") {
   writeState({ ...state, labels: { ...state.labels, [key]: [...labels] } });
 } else if ((sub === "issue" || sub === "pr") && action === "comment") {
   // 記録のみ。
+} else if (sub === "label" && action === "create") {
+  // `gh label create <name> --force` は冪等。記録のみで成功扱いにする。
 } else {
   process.stderr.write(`unknown gh command: ${argv.join(" ")}\n`);
   process.exit(1);

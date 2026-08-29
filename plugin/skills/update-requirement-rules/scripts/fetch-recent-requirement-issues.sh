@@ -52,15 +52,20 @@ OUT_DIR="$(cd "$(dirname "$OUT_FILE")" && pwd)"
 OUT_FILE="${OUT_DIR}/$(basename "$OUT_FILE")"
 
 # ラベルごとに検索して番号を和集合にする（gh の --label は複数指定するとAND条件になるため）
+# 認証失敗（クラウドセッションでの403等）を「該当0件」として握りつぶさないよう、
+# gh issue list の失敗はここで即座にエラー終了させる（呼び出し元が issue_count:0 と誤認しないため）。
 : > "$TEMP_DIR/numbers.txt"
 for LABEL in $LABELS; do
-  gh issue list \
+  if ! gh issue list \
     --state all \
     --label "$LABEL" \
     --search "updated:>=${SINCE_DATE}" \
     --json number \
     --jq '.[].number' \
-    --limit 200 >> "$TEMP_DIR/numbers.txt" || true
+    --limit 200 >> "$TEMP_DIR/numbers.txt"; then
+    echo "error: gh issue list failed for label '${LABEL}' (auth/network failure, not zero results)" >&2
+    exit 1
+  fi
 done
 
 ISSUE_NUMBERS=$(sort -rn -u "$TEMP_DIR/numbers.txt" | head -n "$MAX_ISSUES")

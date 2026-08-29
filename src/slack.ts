@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 // runcat.ts 側の slack.ts への import は type-only なので、実行時の循環参照は発生しない
 import { writeRuncatUsage } from "./runcat";
+import { CLOUD_FAILURE_GUIDANCE } from "./task-result";
 
 const execAsync = promisify(exec);
 
@@ -145,6 +146,21 @@ export async function buildTokenLimitText(): Promise<string> {
 }
 
 /**
+ * 通知本文へ載せる output を末尾1000文字に切り詰める。
+ * 案内文（CLOUD_FAILURE_GUIDANCE）は appendCloudFailureGuidance が output の先頭に
+ * 付けるが、単純な末尾切り出しだと長いエラー本文で先頭の案内文ごと消えてしまう。
+ * 先頭一致で検出できた場合は案内文を切り出し領域の外に確保し、残りだけを末尾切り出しする。
+ */
+export function truncateOutputForNotification(output: string): string {
+  if (output.length <= 1000) return output;
+  if (output.startsWith(CLOUD_FAILURE_GUIDANCE)) {
+    const rest = output.slice(CLOUD_FAILURE_GUIDANCE.length);
+    return `${CLOUD_FAILURE_GUIDANCE}…${rest.slice(-1000)}`;
+  }
+  return `…${output.slice(-1000)}`;
+}
+
+/**
  * 完了/失敗通知の本文を組み立てる純粋関数。
  * cloud が渡された（＝クラウド実行）場合のみ先頭行を出す: sessionId が非空ならセッションURL、
  * 空ならID抽出失敗を明記する（Slack側で通知の最初の一行だけが折りたたみ表示でも見えるため、先頭に置く）。
@@ -164,7 +180,7 @@ export function buildTaskNotificationText(params: {
   const { status, workerName, repoName, id, title, url, tokenText, output, cloud } = params;
   const emoji = status === "completed" ? "✅" : "❌";
   const label = status === "completed" ? "completed" : "failed";
-  const truncatedOutput = output && output.length > 1000 ? `…${output.slice(-1000)}` : output;
+  const truncatedOutput = output ? truncateOutputForNotification(output) : output;
   const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
   const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${tokenText}${outputBlock}`;
   let sessionUrlPrefix = "";

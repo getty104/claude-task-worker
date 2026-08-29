@@ -51,3 +51,27 @@ test("resolveInstallPath returns undefined when installPath is missing", () => {
   });
   assert.equal(resolveInstallPath(json), undefined);
 });
+
+test("resolveInstallPath returns undefined when entries is not an array", () => {
+  const json = JSON.stringify({
+    version: 2,
+    plugins: { "claude-task-worker@claude-task-worker": { scope: "user", installPath: "/x" } },
+  });
+  assert.equal(resolveInstallPath(json), undefined);
+});
+
+test("resolveInstallPath returns undefined for a null entry", () => {
+  const json = JSON.stringify({
+    version: 2,
+    plugins: { "claude-task-worker@claude-task-worker": [null] },
+  });
+  assert.equal(resolveInstallPath(json), undefined);
+});
+
+test("resolveInstallPath returns undefined when installPath is not a string", () => {
+  const json = JSON.stringify({
+    version: 2,
+    plugins: { "claude-task-worker@claude-task-worker": [{ scope: "user", installPath: 123 }] },
+  });
+  assert.equal(resolveInstallPath(json), undefined);
+});
