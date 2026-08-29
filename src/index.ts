@@ -34,9 +34,11 @@ import {
   parseProjectFilters,
   assertProjectCompatibleCommand,
   buildForwardedCommand,
+  hasCloudFlag,
+  assertCloudCompatibleCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
-import { loadConfig, checkCloudConfig, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import { checkCloudConfig, CLOUD_DENIED_WORKERS, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -150,6 +152,10 @@ if (hasProjectFilter()) {
   assertProjectCompatibleCommand(workerType);
 }
 
+if (hasCloudFlag()) {
+  assertCloudCompatibleCommand(workerType);
+}
+
 function collectFlagValues(flag: string): string[] {
   const values: string[] = [];
   for (let i = 0; i < process.argv.length; i++) {
@@ -229,22 +235,21 @@ async function readCloudAuthStatus(): Promise<CloudAuthStatus> {
   }
 }
 
-// cloud: true のワーカー構成が非対応（mode !== "herdr" や、pencil CLI 認証・force-push の
-// 可否が未検証なワーカーへの cloud: true、claude.ai 未サインイン）だと
+// --cloud フラグ指定時の構成が非対応（mode !== "herdr"、claude.ai 未サインイン）だと
 // タスク起動が壊れた形で失敗し続けるため、サイレントにローカル実行へフォールバックせず起動時に落とす。
-// サインイン状態の I/O は cloud: true のワーカーが1件も無ければ行わない。
+// サインイン状態の I/O は --cloud が指定されていなければ行わない
+// （--cloud を書かない既存の使い方での挙動を完全に不変に保つため）。
 async function assertCloudAvailable(): Promise<void> {
-  const workers = loadConfig().workers;
-  const hasCloudWorker = Object.values(workers).some((w) => w.cloud);
+  const cloud = hasCloudFlag();
   // init を再実行していない既存リポジトリでも cc-cloud-done ラベルを保証する
   // （無いとポーラー・クラウド双方が失敗し続け、タスクが4時間タイムアウトを繰り返す）。
   // createLabel は失敗を握りつぶすため、作成できなかった場合は起動時エラーにする
   // （素通りさせると、ラベル不在のまま全クラウドタスクがタイムアウトを繰り返す）。
   // color は init.ts の LABELS の CLOUD_DONE_LABEL エントリと同じ値。
-  const labelReady = hasCloudWorker ? await createLabel(CLOUD_DONE_LABEL, "33cfff", true) : true;
-  const status = hasCloudWorker ? await readCloudAuthStatus() : undefined;
+  const labelReady = cloud ? await createLabel(CLOUD_DONE_LABEL, "33cfff", true) : true;
+  const status = cloud ? await readCloudAuthStatus() : undefined;
   const errors = checkCloudConfig({
-    workers,
+    cloud,
     mode: getRunMode(),
     auth: status ? { status, baseUrl: process.env.ANTHROPIC_BASE_URL } : undefined,
   });
@@ -253,11 +258,17 @@ async function assertCloudAvailable(): Promise<void> {
       `${CLOUD_DONE_LABEL} ラベルを作成できませんでした。gh の認証・権限を確認するか、claude-task-worker init を実行してください。`,
     );
   }
-  if (errors.length === 0) return;
-  for (const message of errors) {
-    console.error(`[worker] ${message}`);
+  if (errors.length > 0) {
+    for (const message of errors) {
+      console.error(`[worker] ${message}`);
+    }
+    process.exit(1);
   }
-  process.exit(1);
+  if (cloud) {
+    console.log(
+      `[worker] cloud execution enabled (--cloud); these workers stay local: ${CLOUD_DENIED_WORKERS.join(", ")}`,
+    );
+  }
 }
 
 // 起動前の前提チェックをまとめて実行する。

@@ -163,8 +163,8 @@ Contact your organization admin to enable them.
 
 ### 1（起動時エラー / 静的判定）
 
-> クラウド実行（`workers.<name>.cloud: true`）には claude.ai アカウントでのサインインが必要です。現在の認証構成: `<authMethod>` / `<apiProvider>`。
-> - 第三者プロバイダ（Bedrock / Vertex）を使っている場合: クラウドセッションは Anthropic のインフラ上で動くため利用できません。`CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` を解除するか、対象ワーカーの `cloud` を `false` にしてください。
+> クラウド実行（`--cloud` フラグ）には claude.ai アカウントでのサインインが必要です。現在の認証構成: `<authMethod>` / `<apiProvider>`。
+> - 第三者プロバイダ（Bedrock / Vertex）を使っている場合: クラウドセッションは Anthropic のインフラ上で動くため利用できません。`CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` を解除するか、`--cloud` フラグを外してください。
 > - API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）の場合: API キーではクラウドセッションを作成できません。環境変数を解除して `claude auth login` でサインインしてください。
 > - 未サインインの場合: `claude auth login` を実行してください。
 > - `ANTHROPIC_BASE_URL` を設定している場合: カスタムエンドポイント構成ではクラウドセッションを利用できません。解除してください。

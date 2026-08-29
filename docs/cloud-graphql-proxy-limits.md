@@ -86,7 +86,7 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 
 ## 影響範囲の切り分け（ワーカー本体 vs スキル）
 
-`src/gh.ts` の GraphQL 依存関数（`findPrNumberClosingIssue` / `hasOpenBlockers` / `getIssueSubIssuesSummary` / `getPrMergeable` / `listIssuesByLabel` / `listIssuesByNumbers`）は**ワーカープロセスが呼ぶ**。ワーカー自体はクラウドへ移らずローカルで走り続けるため、`cloud: true` にしてもこれらは影響を受けない。
+`src/gh.ts` の GraphQL 依存関数（`findPrNumberClosingIssue` / `hasOpenBlockers` / `getIssueSubIssuesSummary` / `getPrMergeable` / `listIssuesByLabel` / `listIssuesByNumbers`）は**ワーカープロセスが呼ぶ**。ワーカー自体はクラウドへ移らずローカルで走り続けるため、`--cloud` を付けてもこれらは影響を受けない。
 
 クラウドで走るのは**タスクセッション（スキル）だけ**であり、そこで問題になるのは各スキル本文の `gh` 呼び出しである。調査時点で `gh issue view --json` / `gh pr view --json` を使うワーカー起動スキルは以下のとおりで、**15個すべてが該当する**。C7 が示すとおりフィールドの内容に関わらず403になるため、GraphQL ゲートが有効な限り**どのワーカーもクラウドでは Issue/PR 本文を読めない**。
 
@@ -128,7 +128,7 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 | `resolve-conflict` | ✕（PRD どおり） | `gh pr view --json` | PRD の理由（force-push 未検証・`pencil` CLI 不在）に加え、コンフリクト判定の入力も取れない |
 | `create-ui-design` / `apply-ui-design` | ✕（PRD どおり） | `gh issue view --json` | PRD の理由（`pencil` CLI と認証）は変わらず |
 
-「△」の3ワーカー（`fix-review-point` / `triage-pr` / `check-dependabot`）を Phase 1 で起動時に拒否せず許可する方針は確定済みのため、**本実測は判定の運用（拒否するかどうか）を覆さない**。ただし上表のとおり、これらは GraphQL ゲート下では成果物を出せないため、許可したままクラウド実行するとタスクが空振りする。運用上は「許可はするが、GraphQL ゲートが解除されるかスキルが REST 化されるまで `cloud: true` にしない」ことを推奨する。
+「△」の3ワーカー（`fix-review-point` / `triage-pr` / `check-dependabot`）を Phase 1 で起動時に拒否せず許可する方針は確定済みのため、**本実測は判定の運用（拒否するかどうか）を覆さない**。ただし上表のとおり、これらは GraphQL ゲート下では成果物を出せないため、許可したままクラウド実行するとタスクが空振りする。運用上は「許可はするが、GraphQL ゲートが解除されるかスキルが REST 化されるまで、これらのワーカーを `--cloud` 付きで起動しない」ことを推奨する。
 
 ## GitHub MCP 移行との関係
 
