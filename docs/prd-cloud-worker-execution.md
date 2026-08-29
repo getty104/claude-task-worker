@@ -67,19 +67,18 @@ Claude Code on the Web（クラウドセッション）はタスクごとに使�
 
 ### 4.2 起動引数の差分
 
-クラウド実行の起動引数は**作成コマンドと投函コマンドの2つ**に分かれる。`buildClaudeArgs()`（`src/claude-args.ts`）はこの2コマンドに共通するフラグ列（以下「共通フラグ」）だけを組み立てる。**実装が落とすのは `-p` のみ**で、`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` はクラウドでもローカルと同一に付与される（当初想定していた「ツール制限系フラグはクラウドでは付けない」という差分は採用していない）。`--ref` / `--on-branch` は cloud のときのみ、どちらか一方が共通フラグへ足される（同時指定は `buildClaudeArgs()` が例外を投げる）。
+クラウド実行の起動引数は**作成コマンド1つ**で組み立てる。`buildClaudeArgs()`（`src/claude-args.ts`）が組み立てるフラグ列（以下「共通フラグ」）だけを使う。**実装が落とすのは `-p` のみ**で、`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` はクラウドでもローカルと同一に付与される（当初想定していた「ツール制限系フラグはクラウドでは付けない」という差分は採用していない）。`--ref` / `--on-branch` は cloud のときのみ、どちらか一方が共通フラグへ足される（同時指定は `buildClaudeArgs()` が例外を投げる）。
 
-共通フラグはそのまま実行に使われるわけではなく、以下の2関数がそれぞれの argv を組み立てる:
+共通フラグはそのまま実行に使われるわけではなく、以下の関数が argv を組み立てる:
 
-- `buildCloudCreateArgs(commonArgs, description)` → `["--cloud", description, ...commonArgs]`。**作成コマンド**（新規クラウドセッションの作成。TTY 必須）。`description` は herdr のタスクタブラベルにも使う文字列
-- `buildCloudDispatchArgs(sessionId, prompt)` → `["-p", "--cloud", sessionId, prompt]`。**投函コマンド**（作成済みセッションへのメッセージ投函。TTY 不要・即 return）。`--ref` / `--on-branch` はベースブランチ指定でありセッション作成時にしか意味を持たないため、投函コマンドには含めない
+- `buildCloudCreateArgs(commonArgs, description)` → `["--cloud", description, ...commonArgs]`。**作成コマンド**（新規クラウドセッションの作成。TTY 必須）。実測（claude 2.1.250）により `--cloud <description>` の `description` は表示名ではなく**初期プロンプトとして即実行される**ことが判明したため、`description` には herdr のタスクタブラベルではなく `appendCloudDoneInstruction()` 適用後のプロンプトそのものを渡す（herdr のタスクタブラベルは引き続き `taskTabLabel()` の値を `tabCreate` へ渡すが、これは `description` とは別の値）。旧版にあった `buildCloudDispatchArgs()`（投函コマンド）は撤去した — description が即実行されるため、作成 → 投函の2コマンド方式は同じ作業を2回実行させてしまう（Issue #302: 1タスクで PR が2件作られる不具合の原因）
 
 実測（`docs/cloud-session-launch-flags.md`、claude 2.1.247、S-1 / T番号）により、**起動そのものが `Error:` で失敗するのは限定的な2ケースのみ**であることを確認済み（それ以外のフラグは受理される、または「起動時に拒否されるフラグは受理されない」という原則が成り立つ）。
 
 | 引数 | ローカル | クラウド | 実装の扱い | 実測結果 |
 |------|---------|---------|-----------|---------|
-| `-p <prompt>` | default モードのみ付与 | 作成コマンドには**付けない**／投函コマンドには付く | 共通フラグからは落とす。投函コマンドは `buildCloudDispatchArgs()` が別途 `-p` を先頭に付ける | `-p` と `--cloud`（新規作成）の併用は `Error: --cloud cannot be combined with --print.` で拒否される（T2）。クラウドセッションの新規作成は print モード非対応。一方、既存セッションへの `-p --cloud <session_id>` の投函はTTY不要で受理される（T3）。これが2コマンド方式の根拠 |
-| `--cloud` | なし | 作成コマンド: `--cloud <description>` ／ 投函コマンド: `--cloud <sessionId>` | `buildCloudCreateArgs()` / `buildCloudDispatchArgs()` がそれぞれ付与（共通フラグには含まれない） | 新規作成・既存セッションへの投函のいずれも `--cloud` 直後の値で区別される |
+| `-p <prompt>` | default モードのみ付与 | **付けない** | 共通フラグからは落とす。クラウドセッションの新規作成に `-p` を付けられないため、プロンプトは代わりに `--cloud` の値として渡す | `-p` と `--cloud`（新規作成）の併用は `Error: --cloud cannot be combined with --print.` で拒否される（T2）。クラウドセッションの新規作成は print モード非対応。一方、既存セッションへの `-p --cloud <session_id>` の投函はTTY不要で受理される（T3。現行実装では使わない。次段落参照） |
+| `--cloud` | なし | 作成コマンド: `--cloud <description>`（= プロンプト） | `buildCloudCreateArgs()` が付与（共通フラグには含まれない） | `--cloud` 直後の値が初期プロンプトとして即実行される（claude 2.1.250 実測） |
 | `--ref <branch>` | なし | 共通フラグへ**付与**（Issue 系: ベースブランチ。作成コマンドにのみ実質的な意味を持つ） | 付与 | **意味論・受理可否ともに未実測**（→ 10章 Phase 2）。実測環境では GitHub App 連携が未設定のため、ブランチ名の検証に到達する前に `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, …` で拒否される（T9） |
 | `--on-branch <branch>` | なし | 共通フラグへ**付与**（PR 系） | 付与 | 同上、未実測（T10）。**PRD が想定していた「`--ref` = ベースブランチ / `--on-branch` = 既存 PR ブランチ上で作業再開」という役割分担ではない**。`--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**（T8: `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）。実装は起動前に `buildClaudeArgs()` が例外で両方の同時指定を弾く（外部プロセスのエラーで気づく形にしないため） |
 | `--permission-mode bypassPermissions` | 付与 | **付与**（ローカルと同一） | 付与 | 受理される（T5）。PRD が旧版で記載していた `Error: a cloud session cannot bypass permissions` は2.1.247では再現しない |
@@ -91,11 +90,11 @@ Claude Code on the Web（クラウドセッション）はタスクごとに使�
 
 非TTY での `--cloud` 新規作成は拒否（`Error: --cloud requires an interactive terminal.`、T1）、`--cloud <session_id>` の対話アタッチは**アカウント単位で無効**（T4、`Error: Attaching to an existing cloud session is not enabled for your account.`）。
 
-プロンプト（`/claude-task-worker:exec-issue 123`）は**投函コマンドの引数として渡す**（`buildCloudDispatchArgs(sessionId, prompt)` の第2引数）。herdr の `agent prompt` は使わない — 作成コマンドの出力からクラウドセッションIDを取得し、それを投函コマンドの引数へ直接埋め込んで実行する。投函プロンプトの末尾には `appendCloudDoneInstruction()` が完了報告用の指示を追記する（→ 4.4-3）。
+プロンプト（`/claude-task-worker:exec-issue 123`）は**作成コマンドの description として渡す**（`buildCloudCreateArgs(commonArgs, description)` の第2引数）。herdr の `agent prompt` は使わない（ローカル herdr 実行のプロンプト投入とは別経路。「4.3」以降参照）。プロンプトの末尾には `appendCloudDoneInstruction()` が完了報告用の指示を追記する（→ 4.4-3）。
 
 ### 4.3 実行形態の制約: クラウド実行は `mode: "herdr"` 限定（Phase 1）
 
-**TTY が必要なのは作成コマンドのみ**。claude CLI は stdout が TTY でない場合 print モード扱いになり、print モードの `--cloud` は「既存セッションへのメッセージ投函」（投函コマンド）しか受け付けない。ワーカーの `mode: "default"` は `spawn(..., { stdio: ["ignore", "pipe", "pipe"] })` で TTY を持たないため、**この経路では作成コマンドを実行できない**（投函コマンド自体は TTY 不要だが、そもそも作成できないセッションへは投函できない）。
+**作成コマンドには TTY が必要**。claude CLI は stdout が TTY でない場合 print モード扱いになり、print モードの `--cloud` は「既存セッションへのメッセージ追記」しか受け付けない（新規作成は不可）。ワーカーの `mode: "default"` は `spawn(..., { stdio: ["ignore", "pipe", "pipe"] })` で TTY を持たないため、**この経路では作成コマンドを実行できない**。
 
 したがって Phase 1 では:
 
@@ -112,8 +111,7 @@ Claude Code on the Web（クラウドセッション）はタスクごとに使�
    - Issue 系の epic 対応は `ensureEpicBranch()` を**引き続き実行する**（`cc-epic-<N>` をリモートに用意する処理であり、その後 `--ref cc-epic-<N>` で参照する）
    - PR 系の `removeWorktreeByBranch()` / `deleteLocalBranch()` / `localBranchExists()` によるプリフライトは**スキップする**。ローカルの checkout 競合はクラウド実行では発生しないため（`gh pr checkout` はクラウド VM 側で走る）
    - タスクタブ（herdr）は `tabCreate` → `waitForPaneReady` → 作成コマンド送信 → `paneRead` によるクラウドセッションID抽出（`extractCloudSessionId()`、上限 `CLOUD_SESSION_TIMEOUT_MS = 120秒`・間隔 `CLOUD_SESSION_POLL_INTERVAL_MS = 1秒`）を経て、**ID取得の成否に関わらず `finally` で即座に `tabClose` される**（→ 4.3）。クラウドセッションはローカルに常駐しないため、タスクタブを「セッションの起動場所」として維持し続ける必要が無い
-2. **完了検知は `cc-cloud-done` ラベルのポーリングで行う**。実測（`docs/cloud-session-launch-flags.md`、claude 2.1.247 / herdr 0.8.2、S-2 / M番号）により、**PRD が前提としていた「クラウドセッションにアタッチし続けるローカルドライバ」は2.1.247 / 実測アカウントでは存在しない**ことが確定している。`claude --cloud "<desc>"` は実TTYでも作成後に即 exit し（M-1）、対話アタッチはアカウント単位で無効（S-1 T4）、`--teleport` はセッションを引き寄せて**ローカル実行に化ける**（M-3。VM ではなくローカルマシン・ローカル worktree・ローカルブランチで実行される）ため、herdr の agent ステータスで*クラウドセッションの*完了を検知する経路は成立しない。この実測を根拠に、**セッション自身が最後の操作として対象 Issue/PR へ `cc-cloud-done` ラベルを付ける**方式へ切り替えた: 投函コマンド成功後、`waitForCloudTask(id, type)` が完了検知ポーラー（下記）の通知を待つ
-   - 投函コマンド自体は `execFile` で実行し、タイムアウト `CLOUD_DISPATCH_TIMEOUT_MS = 60秒`（ハング保険）。非0終了なら完了待ちに入らず `status: "failed"` で確定する
+2. **完了検知は `cc-cloud-done` ラベルのポーリングで行う**。実測（`docs/cloud-session-launch-flags.md`、claude 2.1.247 / herdr 0.8.2、S-2 / M番号）により、**PRD が前提としていた「クラウドセッションにアタッチし続けるローカルドライバ」は2.1.247 / 実測アカウントでは存在しない**ことが確定している。`claude --cloud "<desc>"` は実TTYでも作成後に即 exit し（M-1）、対話アタッチはアカウント単位で無効（S-1 T4）、`--teleport` はセッションを引き寄せて**ローカル実行に化ける**（M-3。VM ではなくローカルマシン・ローカル worktree・ローカルブランチで実行される）ため、herdr の agent ステータスで*クラウドセッションの*完了を検知する経路は成立しない。この実測を根拠に、**セッション自身が最後の操作として対象 Issue/PR へ `cc-cloud-done` ラベルを付ける**方式へ切り替えた: 作成コマンド（プロンプト込み）成功後、`waitForCloudTask(id, type)` が完了検知ポーラー（下記）の通知を待つ。作成コマンドの非0終了、またはセッションID抽出の失敗は `status: "failed"` で確定する — ただし後者は**セッション自体は既に作業を開始している可能性がある**（孤立セッション。ID を取得できないだけでプロンプトは投入済みのため）ことを失敗メッセージに明記する
    - **完了検知ポーラー**: `CLOUD_POLL_INTERVAL_MS = 30秒` / `CLOUD_TASK_TIMEOUT_MS = 4時間`。`cloudWaiters` Map（キーは `${type}:${number}`。Issue #N と PR #N の番号衝突を避ける）と `ensureCloudPollLoop()` / `pollCloudWaiters()` による**共有ポーラー**が、実行中のクラウドタスク全体を type ごとに1クエリで判定する（`listNumbersWithLabel(type, CLOUD_DONE_LABEL)`、`src/gh.ts`）。個別番号の `gh issue view` ポーリングにするとタスク数に比例して API を叩くことになるため。`--state all` にしているのは `exec-issue` の「コード変更なし」経路が Issue をクローズしてからラベルを付けるため
    - シャットダウン応答性のため 30 秒を丸ごと眠らず 1 秒刻みで `herdrAbortSignal` を確認する。シャットダウンで待機を抜けた場合は `status: "failed"`（アボート）として確定する
    - タイムアウトに落ちる典型は `AskUserQuestion` で停止したセッション・VM 側クラッシュ・プラグイン未導入による空振り・ラベル付与自体の失敗
@@ -123,7 +121,7 @@ Claude Code on the Web（クラウドセッション）はタスクごとに使�
    - `CLOUD_TASK_TIMEOUT_MS` 超過で打ち切る場合は `cc-need-human-check` を付けて `failed` にする。**この付与は `runViaCloud()` 側で行う**。ワーカーの `onComplete` の失敗経路は同ラベルを付けないため、そこに任せると打ち切られたタスクが誰にも拾われないまま残る
    - **driver 契約そのもの（`working` / `idle` / `done` / `blocked` の遷移）は teleport セッション（＝ローカル TUI）に対しては完全に成立する**ことも確認済み（M-2 / M-4）。壊れているのは「ドライブ対象がローカルになってしまう」という接続経路の側であり、`observeAgentStatus()` / `waitForHerdrTask()` のロジック自体は正しい。ただし Phase 1 のクラウド完了検知はこの driver 契約を使わず、上記のラベルポーリングに一本化している
 3. **最終レポートは Issue/PR コメント経由で回収する**（Issue #285）。既存の「transcript 優先・ペイン内容フォールバック」は**両方とも空振りする**。クラウド VM で実行されたターンは transcript にもペイン内容にも一切現れない（M-6）。クラウドセッションのローカル transcript（`~/.claude/projects/*/<sessionId>.jsonl`）は生成されない（M-6）。`findTranscriptPath()` / `readFinalReport()` の実装自体は teleport セッション（ローカルターン）に対しては無修正で機能するが、読めるのはローカルで実行した分だけである。そこで `appendCloudDoneInstruction()`（`src/claude-args.ts`）は `cc-cloud-done` ラベルを付ける**直前**に、対象へ固定見出し `CLOUD_REPORT_HEADING`（`## claude-task-worker 実行結果`）を持つコメントを1件投稿させる。ワーカーは `cc-cloud-done` 検知後に `removeLabel(cc-cloud-done)` してから1回だけ `findCommentSince()`（`src/gh.ts`、タスク起動時刻以降のコメントから見出し一致の最新1件を取得）でその本文を回収し `TaskResult.output` にする。取得できない/例外の場合は従来どおりの定型文（セッション URL のみ）で通知を落とさない
-4. **セッション終了は `tabClose` のみで、`stopHerdrTask()` は使わない**。`runViaCloud()` はセッションID取得直後（成否に関わらず）にタスクタブを閉じるため（上記1）、投函・完了待ち・レポート回収の時点でタスクタブは既に存在しない。ctrl-c ×2 送信・agent 消失待ちといった `stopHerdrTask()` の手順（ローカル実行の claude プロセスを止めるためのもの）はクラウド実行には対応物が無い。ドライバを閉じても**クラウドセッション自体は生き続ける**点がローカル実行と異なる（アーカイブ・削除は claude.ai 側の操作）。**ワーカーが再起動されると `cloudWaiters` の待機は失われる**（プロセス内 Map のため）。失われた待機は再起動後のポーリングで自然に再開する経路を Phase 1 では持たず、ラベルは GitHub 側に残り続けるため人手（または偶発的な再起動後の別ポーリング）で拾われる可能性はあるが、これを保証する仕組みはまだ無い（→8章リスク表、Phase 2 で検討）
+4. **セッション終了は `tabClose` のみで、`stopHerdrTask()` は使わない**。`runViaCloud()` はセッションID取得直後（成否に関わらず）にタスクタブを閉じるため（上記1）、完了待ち・レポート回収の時点でタスクタブは既に存在しない。ctrl-c ×2 送信・agent 消失待ちといった `stopHerdrTask()` の手順（ローカル実行の claude プロセスを止めるためのもの）はクラウド実行には対応物が無い。ドライバを閉じても**クラウドセッション自体は生き続ける**点がローカル実行と異なる（アーカイブ・削除は claude.ai 側の操作）。**ワーカーが再起動されると `cloudWaiters` の待機は失われる**（プロセス内 Map のため）。失われた待機は再起動後のポーリングで自然に再開する経路を Phase 1 では持たず、ラベルは GitHub 側に残り続けるため人手（または偶発的な再起動後の別ポーリング）で拾われる可能性はあるが、これを保証する仕組みはまだ無い（→8章リスク表、Phase 2 で検討）
    - **セッションIDを得られるのは起動コマンドの stdout（`Created cloud session: <id>` / `View: https://claude.ai/code/<id>`）だけ**である（M-9）。`agentGet()`（`src/herdr.ts`）が返す `sessionId` は**ローカル claude のセッションUUID**であってクラウドセッションID（`session_01…`）とは別物で、claude.ai の URL に入れても「このセッションは見つかりませんでした」になる（M-7）。実装は `extractCloudSessionId()`（`src/herdr-runner.ts`）が起動出力をパースしてクラウドセッションIDを取得する
 5. **`cc-in-progress` / `cc-need-human-check` / `cc-pr-created`** の扱いはローカル実行と完全に同一。`onCompleted` の検証（PR 実在確認）は GitHub API 経由なので実行場所に依存しない
    - ただし `exec-issue` の検証のうち「**worktreeId を head とする PR**」の条件は成立しない（クラウドセッションは自分でブランチ名を決めるため）。**クラウドセッションの実ブランチ名を取得する手段は無い**（M-8 / M-9。CLI にクラウドセッションを列挙・照会する経路が無く、claude.ai の Web UI でしか確認できない）ため、PRD 旧版が想定していた「実ブランチ名を取得できる場合はそれを使う」分岐は成立せず、実装は代替経路のみを使う: `selectOwnedClosingPr()`（`src/workers/exec-issue.ts`）が closing 参照 PR の **base ブランチ一致 ＋ 作成時刻がタスク起動時刻以降**であることで所有権を判定する。所有権を確認できない closing-reference PR は根拠として使わず、「Issue がクローズ済み」の条件のみで `cc-pr-created` を付与する
@@ -200,13 +198,13 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 | ファイル | 変更内容 |
 |---------|---------|
-| `src/claude-args.ts` | `ClaudeInvocation` に `cloud` / `baseRef` / `onBranch` を追加。`buildClaudeArgs()` にクラウド分岐（4.2 の表、共通フラグの組み立て）。`buildCloudCreateArgs()` / `buildCloudDispatchArgs()`（作成・投函の2コマンドの argv 組み立て）。`appendCloudDoneInstruction()` / `CLOUD_REPORT_HEADING`（投函プロンプトへの完了報告・ラベル付与指示の追記）。`shellQuote()`（作成コマンドを herdr の `pane send-text` へ1トークンで渡すためのクォート）。`buildClaudeEnv()` はクラウド時に print 専用の env を渡さない（herdr と同じ扱い） |
+| `src/claude-args.ts` | `ClaudeInvocation` に `cloud` / `baseRef` / `onBranch` を追加。`buildClaudeArgs()` にクラウド分岐（4.2 の表、共通フラグの組み立て）。`buildCloudCreateArgs()`（作成コマンド1本の argv 組み立て。description にプロンプトを直接埋め込む）。`appendCloudDoneInstruction()` / `CLOUD_REPORT_HEADING`（プロンプトへの完了報告・ラベル付与指示の追記。`buildCloudCreateArgs()` へ渡す前に適用する）。`shellQuote()`（作成コマンドを herdr の `pane send-text` へ1トークンで渡すためのクォート）。`buildClaudeEnv()` はクラウド時に print 専用の env を渡さない（herdr と同じ扱い） |
 | `src/workers/issue-worker.ts` | `cloud` のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へ渡すベースブランチ（`cc-epic-<N>` または default）を `buildClaudeExecution()` に渡す。起動前に対象から `cc-cloud-done` を除去する |
 | `src/workers/pr-worker.ts` | 同上。加えてローカルブランチ掃除・`localBranchExists()` プリフライトをスキップし、`--on-branch <pr.headRefName>` を渡す |
 | `src/workers/scheduled-worker.ts` | `cloud` のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へデフォルトブランチを渡す。実行記録PR（`publishLastRunPr()`）はローカルのまま変更しない。ただし `CLOUD_DENIED_WORKERS` に含まれるため `cloud: true` はワーカー起動時に拒否される |
 | `src/workers/exec-issue.ts` | `onCompleted` の PR 実在検証から「worktreeId を head とする PR」の条件をクラウド時に外し、`selectOwnedClosingPr()`（base ブランチ一致＋作成時刻）へ切り替える |
 | `src/herdr-runner.ts` | `extractCloudSessionId()` を追加（起動コマンドの stdout から `Created cloud session: <id>` / `View: https://claude.ai/code/<id>` をパースしてクラウドセッションIDを取得） |
-| `src/process-manager.ts` | `runViaCloud()`（作成コマンド送信 → `tabClose` → 投函コマンド → `waitForCloudTask()`）、`waitForCloudTask()` / `cloudWaiters` / `ensureCloudPollLoop()` / `pollCloudWaiters()`（`cc-cloud-done` ラベルの共有ポーラー）を追加。`CLOUD_SESSION_TIMEOUT_MS`（120秒）/ `CLOUD_SESSION_POLL_INTERVAL_MS`（1秒）/ `CLOUD_DISPATCH_TIMEOUT_MS`（60秒）/ `CLOUD_POLL_INTERVAL_MS`（30秒）/ `CLOUD_TASK_TIMEOUT_MS`（4時間）の各定数を定義 |
+| `src/process-manager.ts` | `runViaCloud()`（作成コマンド（プロンプト込み）送信 → セッションID抽出 → `tabClose` → `waitForCloudTask()`）、`waitForCloudTask()` / `cloudWaiters` / `ensureCloudPollLoop()` / `pollCloudWaiters()`（`cc-cloud-done` ラベルの共有ポーラー）を追加。`CLOUD_SESSION_TIMEOUT_MS`（120秒）/ `CLOUD_SESSION_POLL_INTERVAL_MS`（1秒）/ `CLOUD_POLL_INTERVAL_MS`（30秒）/ `CLOUD_TASK_TIMEOUT_MS`（4時間）の各定数を定義 |
 | `src/gh.ts` | `findCommentSince()`（タスク起動時刻以降のコメントから見出し一致の最新1件を取得）、`listNumbersWithLabel()`（type ごとに `cc-cloud-done` 付き番号を1クエリで取得）を追加 |
 | `src/config.ts` | `WorkerRuntimeConfig.cloud`（boolean）追加。`DEFAULT_WORKER_CONFIG` / `WORKER_DEFAULTS` に `cloud: false`、`parseWorkerEntry()` にパース追加。`CLOUD_DONE_LABEL`（`"cc-cloud-done"`）/ `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件）を定義。`checkCloudConfig()` / `checkCloudAuth()` を追加 |
 | `src/index.ts` | `assertRunModeAvailable()` の隣に `assertCloudAvailable()`（`checkCloudConfig()` / `checkCloudAuth()` を呼び、`cloud: true` × `mode !== "herdr"` の拒否、`CLOUD_DENIED_WORKERS` の拒否、サインイン前提条件チェックを行う） |
@@ -218,7 +216,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 **ユニットテスト**（純粋関数、既存のローカル実行引数テストは変更しない）:
 
-- `src/claude-args.test.ts`: `buildClaudeArgs` のクラウド分岐（`-p` と `--cloud` 自体を共通フラグに含まない／作成コマンドの共通フラグのみ／`--ref`・`--on-branch` 排他で throw／両方未指定なら両方省く／他フラグ不変／`cloud` 未指定・`false` で不変）、`buildCloudCreateArgs` / `buildCloudDispatchArgs` の argv、`appendCloudDoneInstruction` 3件（原文保持＋ラベル指示付加／見出しを含む／issue と pr で文言が切り替わる）
+- `src/claude-args.test.ts`: `buildClaudeArgs` のクラウド分岐（`-p` と `--cloud` 自体を共通フラグに含まない／作成コマンドの共通フラグのみ／`--ref`・`--on-branch` 排他で throw／両方未指定なら両方省く／他フラグ不変／`cloud` 未指定・`false` で不変）、`buildCloudCreateArgs` の argv、`appendCloudDoneInstruction` 3件（原文保持＋ラベル指示付加／見出しを含む／issue と pr で文言が切り替わる）
 - `src/config.test.ts`: `parseWorkerEntry` の `cloud` パース4件、`checkCloudConfig` 5件、`checkCloudAuth` 各種、`scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-cloud-done)`（定期ワーカー3件が拒否対象であることの固定）
 - `src/herdr-runner.test.ts`: `extractCloudSessionId` 4件（`View:` URL からクエリを落として抽出／`Created cloud session:` 行から抽出／どちらも無ければ undefined／description 自身をIDとして掴まない）
 - `src/gh.test.ts`: `findCommentSince` 4件（gh api のパス／一致コメントの body／複数一致なら最新／不一致なら null）
@@ -232,7 +230,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 - A: `exec-issue` のクラウド実行が `--cloud`/`--ref` を付け worktree を作らない
 - B: `triage-pr` が `--on-branch` を付け `--ref` を付けない
 - C: 定期ワーカーに `cloud: true` があると起動せず終了コード1
-- D: 投函コマンドの非0終了でも `cc-in-progress` を除去し PR ラベルを付けない
+- D: 作成コマンドの非0終了でも `cc-in-progress` を除去し PR ラベルを付けない
 - E1: `mode: default` × `cloud: true` で起動せず終了コード1
 - E2: `mode: herdr` × `CLOUD_DENIED_WORKERS` で起動せず終了コード1
 - F: ローカル実行は `--cloud`/`--ref`/`-p` の扱いが従来どおりで worktree を作る
@@ -248,7 +246,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | クラウドセッションのスキルが空振りし、ワーカーが「完了」と誤認してラベルを進める | 既存の空出力検知（`buildTaskResult`）と `onCompleted` の成果物検証がそのまま効く。加えてクラウド VM の環境設定のセットアップスクリプト欄でプラグインを導入しておくことで空振りの主要因を潰す |
 | GraphQL 403 でスキルが途中失敗し、Issue/PR が中途半端な状態で残る | 失敗は Slack 通知に出る。適合性「△」のワーカーは Phase 1 では既定 `false` のまま、実測でホワイトリスト化する |
 | ~~ドライバがクラウドセッションの完了を検知できない~~（**解消済み**。実測でクラウドをドライブし続けるローカル TUI 自体が存在しないことが確定したため、`cc-cloud-done` ラベルによる完了検知へ切り替えた。→4.4-2） | `CLOUD_TASK_TIMEOUT_MS`（4時間）で打ち切り、`cc-need-human-check` を付けて `failed` にする。残るリスクは「セッションがラベルを付けずに終わるとタイムアウトまで完了扱いにならない」こと（`AskUserQuestion` での停止・VM クラッシュ・プラグイン未導入の空振りが典型） |
-| **セッション量産ループ**: トリガーラベルが再装填されるワーカー（`triage-pr` / `cc-fix-repeat`）で、投函成功を即座に完了扱いにすると毎ポーリングごとにクラウドセッションが作られる | 待機中も台帳エントリ（`herdrTasks`）を `running` のまま維持して `isRunning()` を効かせ、完了検知（`cc-cloud-done`）までは同一 Issue/PR への再起動を防ぐ |
+| **セッション量産ループ**: トリガーラベルが再装填されるワーカー（`triage-pr` / `cc-fix-repeat`）で、作成成功を即座に完了扱いにすると毎ポーリングごとにクラウドセッションが作られる | 待機中も台帳エントリ（`herdrTasks`）を `running` のまま維持して `isRunning()` を効かせ、完了検知（`cc-cloud-done`）までは同一 Issue/PR への再起動を防ぐ |
 | クラウド実行がレート制限を食い、ローカルのワーカーが詰まる | `maxConcurrentTasks` は据え置き。クラウド化はワーカー単位のオプトインなので影響範囲が限定される |
 | ツール制限（`--disallowedTools`）が効かず、`AskUserQuestion` でセッションが停止する | システムプロンプトの自律実行原則が残る。停止した場合は `cc-cloud-done` が付かないまま `CLOUD_TASK_TIMEOUT_MS` まで待機し、タイムアウト後に `cc-need-human-check` 付きの失敗通知で拾われる |
 
@@ -266,7 +264,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 ## 10. 段階導入
 
-- **Phase 1**（本 PRD の主対象、実装済み）: `cloud` 設定 + 作成/投函の2コマンド方式による引数の組み立て + `mode: "herdr"` 限定 + `cc-cloud-done` ラベルポーリングによる完了検知 + Issue/PR コメント経由のレポート回収 + 起動時ガードは `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件 `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`、計6ワーカー）のみを拒否する deny-list 方式（5章・受け入れ基準6参照）。適合性「△/✕」でも同リストに含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot` 等）は起動時に拒否しない。default モード・`CLOUD_DENIED_WORKERS` は起動時エラー
+- **Phase 1**（本 PRD の主対象、実装済み）: `cloud` 設定 + 作成コマンド1本（description にプロンプトを直接渡す）による引数の組み立て + `mode: "herdr"` 限定 + `cc-cloud-done` ラベルポーリングによる完了検知 + Issue/PR コメント経由のレポート回収 + 起動時ガードは `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件 `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`、計6ワーカー）のみを拒否する deny-list 方式（5章・受け入れ基準6参照）。適合性「△/✕」でも同リストに含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot` 等）は起動時に拒否しない。default モード・`CLOUD_DENIED_WORKERS` は起動時エラー
 - **Phase 2**: 以下の残課題に取り組む
   - `mode: "default"` でのクラウド実行。作成コマンドは TTY を要求するため、`script -q /dev/null claude --cloud ...` のような pty 割り当てで実行できる見込みがある（**未検証**。実測していない）
   - 定期ワーカー3件のクラウド化の解禁。現状は「`cc-cloud-done` を置く対象 Issue/PR が無い」ことが理由で `CLOUD_DENIED_WORKERS` に含めているが、実行記録PR（`publishLastRunPr()`）が作る PR をラベルの置き先にできれば解禁できる可能性がある（案の段階で未実装）

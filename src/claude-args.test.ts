@@ -15,7 +15,6 @@ const {
   buildClaudeEnv,
   buildClaudeExecution,
   buildCloudCreateArgs,
-  buildCloudDispatchArgs,
   appendCloudDoneInstruction,
   CLOUD_REPORT_HEADING,
   shellQuote,
@@ -265,11 +264,14 @@ test("buildClaudeArgs (cloud) contains only the create command's common flags", 
   assert.ok(args.includes("--effort"));
 });
 
-test("buildCloudCreateArgs prepends --cloud <description> to the common flags", () => {
+test("buildCloudCreateArgs prepends --cloud <prompt> to the common flags", () => {
+  // 1コマンド方式では description はクラウドセッションの初期プロンプトそのもの
+  // （渡した瞬間に実行される）ため、複数行のタスクプロンプトを渡すケースで検証する。
   const commonArgs = ["--permission-mode", "bypassPermissions", "--model", "opus"];
-  assert.deepEqual(buildCloudCreateArgs(commonArgs, "ctw:my-app:#123"), [
+  const prompt = "/claude-task-worker:exec-issue 123\n\n追加の指示1行目\n追加の指示2行目";
+  assert.deepEqual(buildCloudCreateArgs(commonArgs, prompt), [
     "--cloud",
-    "ctw:my-app:#123",
+    prompt,
     "--permission-mode",
     "bypassPermissions",
     "--model",
@@ -277,15 +279,20 @@ test("buildCloudCreateArgs prepends --cloud <description> to the common flags", 
   ]);
 });
 
-test("buildCloudDispatchArgs builds the dispatch command's argv", () => {
-  assert.deepEqual(buildCloudDispatchArgs("session_abc", "/skill 1"), ["-p", "--cloud", "session_abc", "/skill 1"]);
-});
-
 test("shellQuote wraps values in single quotes and escapes embedded single quotes", () => {
   assert.equal(shellQuote("simple"), "'simple'");
   assert.equal(shellQuote("with space"), "'with space'");
   assert.equal(shellQuote("ctw:my-app:#123"), "'ctw:my-app:#123'");
   assert.equal(shellQuote("it's here"), "'it'\\''s here'");
+});
+
+test("shellQuote keeps a multi-line value as a single quoted token", () => {
+  // herdr の `pane send-text` はシェルへそのまま送るため、改行を含む初期プロンプトも
+  // 単一のシングルクォートトークンに収まっている必要がある（複数トークンに割れると
+  // 後続のコマンド解釈が壊れる）。
+  const quoted = shellQuote("line1\nline2\nline3");
+  assert.equal(quoted, "'line1\nline2\nline3'");
+  assert.equal(quoted.match(/'/g)?.length, 2, "囲む2つのシングルクォート以外が含まれてはいけない");
 });
 
 test("buildClaudeArgs passes --ref when baseRef is given", () => {

@@ -291,7 +291,7 @@ test("herdr モード: blocked を完了扱いせず待機を継続し、working
   assert.ok(agentGetCount >= 3, `agent get の記録件数が不足している: ${agentGetCount}`);
 });
 
-test("herdr モード（クラウド実行）: 作成 → 投函の2コマンド方式でクラウドセッションIDが onComplete まで伝播する", async (t) => {
+test("herdr モード（クラウド実行）: 1コマンド作成でクラウドセッションIDが onComplete まで伝播する", async (t) => {
   const { xdgHome, previousXdg } = setupHerdrConfig();
   const stubs = installCliStubs({
     herdr: {
@@ -348,10 +348,15 @@ test("herdr モード（クラウド実行）: 作成 → 投函の2コマンド
   const sendText = findHerdrRecord(herdrRecords, "pane", "send-text");
   assert.ok(sendText);
   assert.ok(sendText.argv[3].includes("--cloud"), `作成コマンドに --cloud が含まれていない: ${sendText.argv[3]}`);
+  // 1コマンド方式では --cloud の値がタスクの初期プロンプトそのもの（cloudTarget 未指定の
+  // ためそのまま PROMPT）になる。投函コマンドという別経路は存在しない。
+  assert.ok(sendText.argv[3].includes(PROMPT), "作成コマンドの description に初期プロンプトが含まれていない");
 
-  const claudeRecord = stubs.records().find((r) => r.command === "claude");
-  assert.ok(claudeRecord, "投函コマンド（claude スタブ）の記録が見つからない");
-  assert.deepEqual(claudeRecord.argv, ["-p", "--cloud", "session_stubABC", PROMPT]);
+  assert.equal(
+    stubs.records().filter((r) => r.command === "claude").length,
+    0,
+    "1コマンド化後は claude バイナリの直接起動（投函コマンド）が発生してはいけない",
+  );
 
   assert.ok(findHerdrRecord(herdrRecords, "tab", "close"), "作成フェーズ終了後にタブが閉じられていない");
   assert.equal(

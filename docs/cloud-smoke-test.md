@@ -40,10 +40,10 @@ scripts/cloud-smoke-test.sh preflight <worker-name>
 
 対象の `cc-exec-issue`（または対象ワーカーのトリガーラベル）をテスト用Issueに付け、ワーカーを起動する。
 
-- **目視**: herdr のタスクタブ（TTY を持つペイン）で作成コマンド `claude --cloud <description> <共通フラグ...>` が実行され、ペイン出力からクラウドセッションIDが取得できることを確認する（基準2）
+- **目視**: herdr のタスクタブ（TTY を持つペイン）で作成コマンド `claude --cloud <description> <共通フラグ...>` が実行され、`description` にワーカーのプロンプト（`appendCloudDoneInstruction()` 適用後）がそのまま渡っていることを確認する（基準2・7）。作成コマンド1本でセッション作成とプロンプト投入を同時に行う設計のため、投函コマンドは存在しない
 - **目視**: claude.ai/code でクラウドセッションが作成され、対象タスクの内容で走っていることを確認する（基準2）
 - **目視**: ペイン出力からクラウドセッションID（`Created cloud session:` / `View: https://claude.ai/code/<id>`）が読み取れたら、（完了を待たずに）タブが閉じられることを確認する（クラウドセッションはローカルに常駐しないため。タブが残っていれば異常）
-- **目視**: 続けて投函コマンド（`claude -p --cloud <id> <prompt>`）が実行され、即座に return することを確認する（基準7の一部。`runViaCloud()`）
+- **目視**: 作業が二重実行されていないこと（手順4で確認する PR が1件だけ作られること）を確認する。旧・作成→投函の2コマンド方式では description が初期プロンプトとして即実行されたうえ投函コマンドが同じ作業を再実行し、1タスクでPRが2件作られる不具合があった（Issue #302）
 
 投入前に `scripts/cloud-smoke-test.sh snapshot before` を実行し、worktree・ローカルブランチの状態を記録しておく（後片付け確認・基準4で使う）。
 
@@ -54,7 +54,7 @@ scripts/cloud-smoke-test.sh preflight <worker-name>
 - 完了検知は `cc-cloud-done` ラベルのポーリング方式（`waitForCloudTask()`、`src/process-manager.ts`）。herdr の agent ステータスはクラウド側の完了を反映しないため使わない（実測 `docs/cloud-session-launch-flags.md` M-1）
 - **目視**: 台帳エントリ（ステータステーブル）が待機中も `running` のまま維持され、同一 Issue/PR の二重起動が `isRunning()` で防がれることを確認する
 - **目視 → 自動の順で確認する**:
-  1. クラウドセッションが最後の操作として、投函プロンプトの指示（`appendCloudDoneInstruction()`、`src/claude-args.ts`）どおりに固定見出し `## claude-task-worker 実行結果`（`CLOUD_REPORT_HEADING`）を持つコメントを対象 Issue/PR へ投稿し、その直後に `cc-cloud-done` ラベルを付与することを **目視**で確認する
+  1. クラウドセッションが最後の操作として、投入したプロンプトの指示（`appendCloudDoneInstruction()`、`src/claude-args.ts`）どおりに固定見出し `## claude-task-worker 実行結果`（`CLOUD_REPORT_HEADING`）を持つコメントを対象 Issue/PR へ投稿し、その直後に `cc-cloud-done` ラベルを付与することを **目視**で確認する
   2. ワーカーが `cc-cloud-done` の付与をポーリング検知し（`CLOUD_POLL_INTERVAL_MS` = 30秒間隔）、ラベルを除去することを手順4の `check-labels` で確認する（`cc-cloud-done` が残っていないこと）
   3. ワーカーが上記コメント（`findCommentSince()` で回収）を Slack 通知の本文に載せることを手順5で確認する
 - **タイムアウト（`CLOUD_TASK_TIMEOUT_MS` = 4時間）で打ち切られた場合**: `cc-need-human-check` が付いて failed 扱いになり、セッション URL 付きの Slack 失敗通知が届くことを確認する。典型原因は `AskUserQuestion` でのセッション停止・クラウドVMのクラッシュ・プラグイン未導入・ラベル付与自体の失敗
@@ -96,7 +96,7 @@ scripts/cloud-smoke-test.sh snapshot after
 - **失効注記**: `claude --version` / `herdr --version` が上記より新しい場合は、下記5点を再実測すること
 
 1. **引数の受理可否**（S-1）: `-p` と `--cloud` の併用が拒否される／非TTYの `--cloud` が拒否される／`--ref` と `--on-branch` の併用が拒否される／`--permission-mode` `--disallowedTools` `--append-system-prompt-file` `--model` `--effort` `--advisor` `--chrome` は受理される（`--advisor` は `buildClaudeArgs()`（`src/claude-args.ts`）が `advisorModel` 指定時のみ付与する。`--chrome` は本ツールからは付与されないが、claude CLI 側が受理することは `docs/cloud-session-launch-flags.md` T7 で確認済みのため確認対象に含める）
-2. **セッション作成・投函・完了検知の状態遷移**（S-2 / M-2・M-4）: 作成コマンド（`claude --cloud`）のペイン出力からセッションIDが `CLOUD_SESSION_TIMEOUT_MS`（120秒）以内に取得できること、投函コマンド（`claude -p --cloud <sessionId>`）が `CLOUD_DISPATCH_TIMEOUT_MS`（60秒）以内に return すること。完了検知はローカル driver の agent ステータスではなく `cc-cloud-done` ラベルのポーリング方式のため、クラウドセッションが投函プロンプトの指示どおりに最終報告コメント投稿 → ラベル付与まで完遂することを確認する
+2. **セッション作成・完了検知の状態遷移**（S-2 / M-2・M-4）: 作成コマンド（`claude --cloud <description>`。description はプロンプトそのもの）のペイン出力からセッションIDが `CLOUD_SESSION_TIMEOUT_MS`（120秒）以内に取得できること。完了検知はローカル driver の agent ステータスではなく `cc-cloud-done` ラベルのポーリング方式のため、クラウドセッションがプロンプトの指示どおりに最終報告コメント投稿 → ラベル付与まで完遂することを確認する
 3. **`agent_session` の値がクラウドセッションIDと一致しない**（S-2 / PRD 9-9）: `agentGet()` の `agent_session.value` はローカル claude のセッションUUID形式で、クラウドセッションID（`session_01…`形式）とは別物であること
 4. **クラウドターンのローカル transcript が生成されない**（S-2 / PRD 9-4）: `~/.claude/projects/*/<sessionId>.jsonl` がクラウドセッションのターンでは生成されないこと
 5. **クラウドをドライブし続けるローカル TUI の不在**（S-2 の最大の前提）: 2.1.247 時点では `claude --cloud "<desc>"` は作成後すぐ exit し、`claude --cloud <session_id>` の対話アタッチも無効で、herdr の agent ステータスで*クラウド側*の完了を検知する経路が無い。この前提を踏まえ、実装は herdr の agent ステータスに頼らず `cc-cloud-done` ラベルのポーリングで完了検知する方式に倒してある（手順3参照）。**本項目は、この前提（ローカル driver 経由でクラウド側の完了を検知できない）が新バージョンでも変わらず成立しているかを再確認する位置づけ**。もし新バージョンでクラウドをドライブし続ける TUI が現れていた場合は、ラベル駆動方式より確実な検知手段になりうるため、結果記録テンプレートにその旨と挙動の変化を記録すること
@@ -106,7 +106,7 @@ scripts/cloud-smoke-test.sh snapshot after
 | 項目 | 種別 |
 |------|------|
 | claude.ai/code 上のセッション表示 | 目視 |
-| セッションID取得・タブクローズ・投函の状態遷移 | 目視 |
+| セッションID取得・タブクローズの状態遷移 | 目視 |
 | クラウドセッションが最終報告コメント（`## claude-task-worker 実行結果`）を投稿し `cc-cloud-done` を付与・ワーカーが検知して除去する | 目視 |
 | Slack 通知本文とセッションURLの到達性 | 目視 |
 | 事前条件1〜4（mode / cloud設定 / サインイン / herdr疎通） | `scripts/cloud-smoke-test.sh preflight` |
@@ -135,14 +135,14 @@ scripts/cloud-smoke-test.sh snapshot after
 | 3 | ラベル遷移がローカル同一条件 | | |
 | 4 | worktree/ブランチ残骸なし | | |
 | 5 | Slack通知からセッションURLに到達 | | |
-| 7 | セッション作成・投函・`cc-cloud-done`付与→検知・除去→Slack通知の状態遷移が正しく連鎖する | | |
+| 7 | セッション作成（プロンプト込み）・`cc-cloud-done`付与→検知・除去→Slack通知の状態遷移が正しく連鎖する | | |
 
 #### S-1 / S-2 再確認
 
 | # | 項目 | 結果（OK/NG/未実測） | 備考 |
 |---|------|------|------|
 | 1 | 引数の受理可否 | | |
-| 2 | セッション作成・投函・cc-cloud-done完了検知の状態遷移 | | |
+| 2 | セッション作成（プロンプト込み）・cc-cloud-done完了検知の状態遷移 | | |
 | 3 | agent_session ≠ クラウドセッションID | | |
 | 4 | クラウドターンのtranscript不在 | | |
 | 5 | クラウドドライブ用ローカルTUIの不在 | | |

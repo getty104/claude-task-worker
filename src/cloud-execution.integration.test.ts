@@ -198,16 +198,19 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
   assert.ok(createCommand.includes("'--permission-mode'"), "実装は cloud でも --permission-mode を付ける");
   assert.ok(createCommand.includes("'--disallowedTools'"), "実装は cloud でも --disallowedTools を付ける");
 
-  const claudeRecord = records.find((r) => r.command === "claude" && r.argv[0] === "-p" && r.argv.includes("--cloud"));
-  assert.ok(claudeRecord, "投函コマンド（claude -p --cloud <id> <prompt>）の記録が見つからない");
-  assert.equal(claudeRecord!.argv[1], "--cloud");
-  assert.equal(claudeRecord!.argv[2], "session_stubA");
-  const dispatchPrompt = claudeRecord!.argv[3] ?? "";
+  // 1コマンド方式では --cloud の値がクラウドセッションの初期プロンプトそのもの
+  // （cc-cloud-done の投稿指示を含む）になる。投函コマンドは存在しないため、
+  // 作成コマンドの description を直接検証する。
   assert.ok(
-    dispatchPrompt.includes("cc-cloud-done"),
-    "投函プロンプトに cc-cloud-done ラベル付与の指示が含まれていない",
+    createCommand.includes("cc-cloud-done"),
+    "作成コマンドの初期プロンプトに cc-cloud-done ラベル付与の指示が含まれていない",
   );
-  assert.ok(dispatchPrompt.includes("501"), "投函プロンプトに対象 Issue 番号が含まれていない");
+  assert.ok(createCommand.includes("501"), "作成コマンドの初期プロンプトに対象 Issue 番号が含まれていない");
+  assert.equal(
+    records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length,
+    0,
+    "1コマンド化後は claude バイナリが --cloud 付きで直接起動されてはいけない（投函コマンドは廃止済み）",
+  );
 
   const removeCloudDone = records.filter(
     (r) =>
@@ -298,32 +301,29 @@ test("C: 定期ワーカーに cloud: true があると起動せず終了コー�
 // D. 失敗時の cleanup（exec-issue, cloud: true, タスク失敗）
 // ============================================================
 test(
-  "D: exec-issue のクラウド実行が投函コマンドの失敗（非0終了）でも cc-in-progress を除去し PR ラベルを付けない",
-  { timeout: 75_000 },
+  "D: exec-issue のクラウド実行がセッションID抽出失敗でも cc-in-progress を除去し PR ラベルを付けない",
+  { timeout: 45_000 },
   async (t) => {
     const stubs = installCliStubs({
       gh: ISSUE_GH_SCENARIO,
-      // 作成フェーズは成功させ（セッションIDを取得できる）、投函フェーズを非0終了で
-      // 失敗させる。新方式では完了判定に agent ステータス（working/done）を使わないため、
-      // 空のペイン出力ではなく claude の終了コードで失敗を作る。
-      herdr: {
-        paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubD?from=cli&m=0",
-      },
-      claude: { exitCode: 1, stdout: "", stderr: "[stub] dispatch failed" },
+      // 1コマンド方式には投函コマンドが存在しないため、作成コマンドの出力から
+      // セッションIDを抽出できないケース（pane 出力にセッションIDパターンを
+      // 含めない）で失敗を作る。CTW_CLOUD_SESSION_TIMEOUT_MS でタイムアウトを
+      // テスト時間内に収まるよう短縮する。
+      herdr: { paneOutput: "[stub] no session id present in this pane" },
     });
     const handle = await startWorker({
       worker: "exec-issue",
       workerConfig: { workers: { "exec-issue": { cloud: true, pollingIntervalSeconds: 3600 } } },
       userConfig: { mode: "herdr" },
       records: stubs.records,
+      env: { CTW_CLOUD_SESSION_TIMEOUT_MS: "500" },
     });
     t.after(async () => {
       await handle.cleanup();
       stubs.cleanup();
     });
 
-    // readFinalReport() が ~/.claude/projects/*/*.jsonl を総なめするため、実開発機の
-    // transcript 件数によっては既定タイムアウト内に収まらないことがある。長めに取る。
     await handle.waitFor(
       (records) =>
         records.some(
@@ -334,7 +334,7 @@ test(
             r.argv.includes("--remove-label") &&
             r.argv.includes("cc-in-progress"),
         ),
-      45_000,
+      30_000,
     );
 
     const records = stubs.records();
@@ -348,6 +348,11 @@ test(
           r.argv.includes("cc-pr-created"),
       ),
       "失敗したタスクに cc-pr-created が付いている",
+    );
+    assert.equal(
+      records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length,
+      0,
+      "1コマンド化後は claude バイナリが --cloud 付きで直接起動されてはいけない",
     );
     assert.ok(!existsSync(join(handle.repoDir, ".claude", "worktrees")), "worktree ディレクトリが作られている");
   },
@@ -615,8 +620,9 @@ test("I: クラウド完了待機中はトリガーラベルが再装填され�
   ).length;
   assert.equal(sendTextCount, 1, `作成コマンドの pane send-text が複数回記録されている: ${sendTextCount}件`);
 
-  const dispatchCount = records.filter(
-    (r) => r.command === "claude" && r.argv[0] === "-p" && r.argv.includes("--cloud"),
-  ).length;
-  assert.ok(dispatchCount <= 1, `投函コマンドが複数回記録されている: ${dispatchCount}件`);
+  // 1コマンド方式では作成コマンドが唯一のクラウドセッション起動操作であり、
+  // claude バイナリが --cloud 付きで直接（再）起動されることはない
+  // （投函コマンドという別経路自体が存在しない）。
+  const cloudClaudeInvocations = records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length;
+  assert.equal(cloudClaudeInvocations, 0, `claude --cloud の直接起動が記録されている: ${cloudClaudeInvocations}件`);
 });
