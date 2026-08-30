@@ -174,7 +174,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | ワーカー | 適合 | `--cloud` 指定時 | 根拠 / 前提 |
 |---------|------|------------|------------|
 | `exec-issue` | ○（2026-08-29 smoke test で `issue_read` / `create_pull_request` の動作を確認、△ から格上げ。ただし PR一覧検証は未実測のため ◎ ではない） | クラウド実行 | 新規ブランチを自分で作って push・PR 作成するため push 制約には当たらない。Issue本文の読み取り（`issue_read`）と PR作成（`create_pull_request`）が GitHub MCP 経由で成立することを smoke test（claude 2.1.250 / herdr 0.8.2）の `exec-issue` エンドツーエンド実行（2行のファイル追加、所要9分03秒）で確認済み。フェーズ7の `gh pr list --head` によるPR実在検証ステップは今回未確認のまま残る（ラベル遷移自体はワーカー側＝ローカルが行うため影響なし） |
-| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（実測前 ◎） | **ローカル実行のまま**（`CLOUD_DENIED_WORKERS`） | 1日1回・長時間・成果物は新規ブランチの PR。加えて収集スクリプトが `gh api graphql` と `gh (issue\|pr) view --json` に依存し、403 で収集が0件になり空振りする。ローカル実行のまま残るのは適合性とは別の理由: 定期ワーカーは対象 Issue/PR を持たないため `cc-cloud-done` を置く先が無く、Phase 1 の完了検知（ラベルポーリング）が原理的に成立しない |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（実測前 ◎） | クラウド実行 | 1日1回・長時間・成果物は新規ブランチの PR。収集スクリプト3件は `plugin/scripts/gh-compat.sh` 経由の REST へ移行済みで、かつて挙げていた `gh api graphql` / `gh (issue\|pr) view --json` 依存は解消した（ただしクラウドでの収集成功は**未実測**であり、成功と断定しない）。対象 Issue/PR を持たず `cc-cloud-done` を置く先が無い点は変わらないため、ラベルポーリングによる完了検知は行わず、**クラウドセッションの作成をもって完了とする**（`runViaCloud()` の `!cloudTarget` 分岐）。帰結として、収集が失敗しても `lastRun` が進んで次の24時間まで再実行されず、Slack 通知にもセッション URL と定型文しか載らない |
 | `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（実測前 ○） | クラウド実行 | コード変更を伴わない。`gh issue view --json` がフィールドを問わず403のため、分析の入力（本文・コメント）がゼロになる。`--json parent` は加えて VM の `gh` 2.45.0 でも失敗する |
 | `epic-issue`（`create-epic-pr`） | △（実測前 ○） | クラウド実行 | `cc-epic-<N>` を作業ブランチにできれば成立するが、`gh issue view --json` が403 |
 | `fix-review-point` | ✕（実測前 △） | **クラウド実行**（推奨しない） | `gh` の `reviewThreads` クエリで**レビュー指摘を1件も取得できない**。取得（`pull_request_read` の `get_review_comments`）とスレッド解決（`pull_request_review_write` の `resolve_thread`）はいずれも GitHub MCP に代替があり、スキルは MCP 優先へ書き換え済みだが、両ツールとも**動作は未実測**（smoke test で確認できた4ツールに含まれない）のため評価は据え置く |
@@ -183,7 +183,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | `resolve-conflict` | ✕（Phase 1 では非対応） | **ローカル実行のまま**（`CLOUD_DENIED_WORKERS`） | rebase 後の force-push の可否は**引き続き未測定**（可否そのものは断定しない）。ただし smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）で `--on-branch <PR head>` が指定した PR の head ブランチ上で直接作業し push するとその PR が更新されることを確認したため、force-push 可否の**前提条件が整い、再判定可能になった**（実測当時は GitHub App 未設定のため `--on-branch` が前段で拒否されると解釈していたが、実際には Claude Code 側のバグ（[#81776](https://github.com/anthropics/claude-code/issues/81776)）による誤判定だった。回避策 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 適用でセッション作成・`--on-branch` 到達までは確認済みだが、force-push そのものの実測はまだ行っていない。Issue #227 / `docs/cloud-session-force-push.md` → 10章 Phase 2）。`.pen` の解決に `pencil` CLI が必要。加えてコンフリクト判定の入力（`gh pr view --json mergeable`）も403（GitHub MCP の未実測51ツールにこの操作の代替が含まれるかは確認していない） |
 | `create-ui-design` / `apply-ui-design` | ✕（Phase 1 では非対応） | **ローカル実行のまま**（`CLOUD_DENIED_WORKERS`） | `.pen` の編集に `pencil` CLI と認証が必要 |
 
-`--cloud` を指定してもローカル実行のまま残るのは `CLOUD_DENIED_WORKERS`（`src/config.ts`）の**6ワーカー**（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件 `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）である。前者3件は `.pen` 編集・force-push 可否といったクラウド実行そのものの成立性が理由、定期ワーカー3件は「`cc-cloud-done` を置く対象 Issue/PR が無く完了検知できない」ことが理由で、根拠のカテゴリが異なる点に注意。`fix-review-point` / `triage-pr` / `check-dependabot` は適合「✕」でも**`--cloud` 指定時はクラウド実行される**（Phase 1 で確定済みの方針）。上表の「適合」列はクラウド実行の推奨可否の評価であって、ローカル残留の対象を意味しない。運用上は「クラウド実行はされるが、GraphQL ゲートが解除されるかスキルが REST 化されるまでこれらのワーカーには `--cloud` を使わない」ことを推奨する。
+`--cloud` を指定してもローカル実行のまま残るのは `CLOUD_DENIED_WORKERS`（`src/config.ts`）の**3ワーカー**（`resolve-conflict` / `create-ui-design` / `apply-ui-design`）である。いずれも `.pen` 編集・force-push 可否といったクラウド実行そのものの成立性が理由。定期ワーカー3件は「`cc-cloud-done` を置く対象 Issue/PR が無い」状態のままだが、完了検知を作る代わりに「セッション作成＝完了」を正式な経路にしたため deny-list からは外してある。`fix-review-point` / `triage-pr` / `check-dependabot` は適合「✕」でも**`--cloud` 指定時はクラウド実行される**（Phase 1 で確定済みの方針）。上表の「適合」列はクラウド実行の推奨可否の評価であって、ローカル残留の対象を意味しない。運用上は「クラウド実行はされるが、GraphQL ゲートが解除されるかスキルが REST 化されるまでこれらのワーカーには `--cloud` を使わない」ことを推奨する。
 
 ## 6. スコープ外
 
@@ -202,12 +202,12 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 | `src/claude-args.ts` | `ClaudeInvocation` に `cloud` / `baseRef` / `onBranch` を追加。`buildClaudeArgs()` にクラウド分岐（4.2 の表、共通フラグの組み立て）。`buildCloudCreateArgs()`（作成コマンド1本の argv 組み立て。description にプロンプトを直接埋め込む）。`appendCloudDoneInstruction()` / `CLOUD_REPORT_HEADING`（プロンプトへの完了報告・ラベル付与指示の追記。`buildCloudCreateArgs()` へ渡す前に適用する）。`shellQuote()`（作成コマンドを herdr の `pane send-text` へ1トークンで渡すためのクォート）。`buildClaudeEnv()` はクラウド時に print 専用の env を渡さない（herdr と同じ扱い） |
 | `src/workers/issue-worker.ts` | `isCloudWorker(name)` が true のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へ渡すベースブランチ（`cc-epic-<N>` または default）を `buildClaudeExecution()` に渡す。起動前に対象から `cc-cloud-done` を除去する |
 | `src/workers/pr-worker.ts` | 同上。加えてローカルブランチ掃除・`localBranchExists()` プリフライトをスキップし、`--on-branch <pr.headRefName>` を渡す |
-| `src/workers/scheduled-worker.ts` | `isCloudWorker()` が true のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へデフォルトブランチを渡す。実行記録PR（`publishLastRunPr()`）はローカルのまま変更しない。ただし `CLOUD_DENIED_WORKERS` に含まれるため `--cloud` 指定時も常にローカル実行される |
+| `src/workers/scheduled-worker.ts` | `isCloudWorker()` が true のとき worktree 生成・削除をスキップし、cwd をリポジトリルートに。`--ref` へデフォルトブランチを渡し、`run()` の `cloudTarget` には `undefined` を渡す（完了検知の対象が無いため）。実行記録PR（`publishLastRunPr()`）はワーカープロセス側＝ローカルの責務なので、クラウド実行でも GraphQL ゲートの影響を受けず従来どおり動く |
 | `src/workers/exec-issue.ts` | `onCompleted` の PR 実在検証から「worktreeId を head とする PR」の条件をクラウド時に外し、`selectOwnedClosingPr()`（base ブランチ一致＋作成時刻）へ切り替える |
 | `src/herdr-runner.ts` | `extractCloudSessionId()` を追加（起動コマンドの stdout から `Created cloud session: <id>` / `View: https://claude.ai/code/<id>` をパースしてクラウドセッションIDを取得） |
 | `src/process-manager.ts` | `runViaCloud()`（作成コマンド（プロンプト込み）送信 → セッションID抽出 → `tabClose` → `waitForCloudTask()`）、`waitForCloudTask()` / `cloudWaiters` / `ensureCloudPollLoop()` / `pollCloudWaiters()`（`cc-cloud-done` ラベルの共有ポーラー）を追加。`CLOUD_SESSION_TIMEOUT_MS`（120秒）/ `CLOUD_SESSION_POLL_INTERVAL_MS`（1秒）/ `CLOUD_POLL_INTERVAL_MS`（30秒）/ `CLOUD_TASK_TIMEOUT_MS`（4時間）の各定数を定義 |
 | `src/gh.ts` | `findCommentSince()`（タスク起動時刻以降のコメントから見出し一致の最新1件を取得）、`listNumbersWithLabel()`（type ごとに `cc-cloud-done` 付き番号を1クエリで取得）を追加 |
-| `src/config.ts` | `isCloudWorker(name)` を追加（`CLOUD_DENIED_WORKERS` に含まれないワーカー名で true）。`CLOUD_DONE_LABEL`（`"cc-cloud-done"`）/ `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件）を定義。`WorkerRuntimeConfig.cloud` は廃止し、`parseWorkerEntry()` は `cloud` キーが残っていれば警告ログを出して無視する。`checkCloudAuth()` を追加（`--cloud` 指定時のみ呼ばれる） |
+| `src/config.ts` | `isCloudWorker(name)` を追加（`CLOUD_DENIED_WORKERS` に含まれないワーカー名で true）。`CLOUD_DONE_LABEL`（`"cc-cloud-done"`）/ `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` の3件）を定義。`WorkerRuntimeConfig.cloud` は廃止し、`parseWorkerEntry()` は `cloud` キーが残っていれば警告ログを出して無視する。`checkCloudAuth()` を追加（`--cloud` 指定時のみ呼ばれる） |
 | `src/index.ts` | `assertRunModeAvailable()` の隣に `assertCloudAvailable()`（`--cloud` × `mode !== "herdr"` の拒否、サインイン前提条件チェックを行う。`CLOUD_DENIED_WORKERS` はエラーにせず `isCloudWorker()` でローカル実行へ振り分ける） |
 | `src/slack.ts` | 通知本文へのセッション URL 付与（取得できた場合のみ、1行目に配置） |
 
@@ -218,7 +218,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 **ユニットテスト**（純粋関数、既存のローカル実行引数テストは変更しない）:
 
 - `src/claude-args.test.ts`: `buildClaudeArgs` のクラウド分岐（`-p` と `--cloud` 自体を共通フラグに含まない／作成コマンドの共通フラグのみ／`--ref`・`--on-branch` 排他で throw／両方未指定なら両方省く／他フラグ不変／`cloud` フラグ未指定で不変）、`buildCloudCreateArgs` の argv、`appendCloudDoneInstruction` 3件（原文保持＋ラベル指示付加／見出しを含む／issue と pr で文言が切り替わる）
-- `src/config.test.ts`: `isCloudWorker` の判定4件、`parseWorkerEntry` が `cloud` キー残存時に警告して無視すること、`checkCloudAuth` 各種、`scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-cloud-done)`（定期ワーカー3件が対象であることの固定）
+- `src/config.test.ts`: `isCloudWorker` の判定5件（定期ワーカーが `--cloud` で true を返すことの固定を含む）、`parseWorkerEntry` が `cloud` キー残存時に警告して無視すること、`checkCloudAuth` 各種、`scheduled workers are not in CLOUD_DENIED_WORKERS (session creation counts as completion)` と `CLOUD_DENIED_WORKERS holds only the pencil-dependent workers`（denied が pen 系3件だけであることの固定）
 - `src/herdr-runner.test.ts`: `extractCloudSessionId` 4件（`View:` URL からクエリを落として抽出／`Created cloud session:` 行から抽出／どちらも無ければ undefined／description 自身をIDとして掴まない）
 - `src/gh.test.ts`: `findCommentSince` 4件（gh api のパス／一致コメントの body／複数一致なら最新／不一致なら null）
 - `src/process-manager.test.ts`: `waitForCloudTask: cc-cloud-done が付かないまま期限を過ぎると timeout で解決する`
@@ -230,7 +230,7 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 - A: `exec-issue` のクラウド実行が `--cloud`/`--ref` を付け worktree を作らない
 - B: `triage-pr` が `--on-branch` を付け `--ref` を付けない
-- C: 定期ワーカーに `--cloud` を付けても、`CLOUD_DENIED_WORKERS` によりローカル実行のまま起動する
+- C: 定期ワーカーに `--cloud` を付けるとクラウド実行になり（`CLOUD_DENIED_WORKERS` に含まれない）、worktree を作らず `--ref` にデフォルトブランチを渡す。完了検知の対象を持たないためセッション作成をもって完了になる
 - D: 作成コマンドの非0終了でも `cc-in-progress` を除去し PR ラベルを付けない
 - E1: `mode: default` × `--cloud` で起動せず終了コード1
 - E2: `mode: herdr` × `CLOUD_DENIED_WORKERS` で起動せず終了コード1
@@ -266,10 +266,10 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 
 ## 10. 段階導入
 
-- **Phase 1**（本 PRD の主対象、実装済み）: `--cloud` フラグ + 作成コマンド1本（description にプロンプトを直接渡す）による引数の組み立て + `mode: "herdr"` 限定 + `cc-cloud-done` ラベルポーリングによる完了検知 + Issue/PR コメント経由のレポート回収 + `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件 `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`、計6ワーカー）のみをローカル実行へ振り分ける deny-list 方式（5章・受け入れ基準6参照）。適合性「△/✕」でも同リストに含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot` 等）は `--cloud` 指定時にクラウド実行される。default モードでの `--cloud` は起動時エラー
+- **Phase 1**（本 PRD の主対象、実装済み）: `--cloud` フラグ + 作成コマンド1本（description にプロンプトを直接渡す）による引数の組み立て + `mode: "herdr"` 限定 + `cc-cloud-done` ラベルポーリングによる完了検知（対象 Issue/PR を持つワーカーのみ。定期ワーカー3件は対象を持たないため**セッション作成をもって完了**とする）+ Issue/PR コメント経由のレポート回収 + `CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` の計3ワーカー）のみをローカル実行へ振り分ける deny-list 方式（5章・受け入れ基準6参照）。適合性「△/✕」でも同リストに含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot` 等）は `--cloud` 指定時にクラウド実行される。default モードでの `--cloud` は起動時エラー
 - **Phase 2**: 以下の残課題に取り組む
   - `mode: "default"` でのクラウド実行。作成コマンドは TTY を要求するため、`script -q /dev/null claude --cloud ...` のような pty 割り当てで実行できる見込みがある（**未検証**。実測していない）
-  - 定期ワーカー3件のクラウド化の解禁。現状は「`cc-cloud-done` を置く対象 Issue/PR が無い」ことが理由で `CLOUD_DENIED_WORKERS` に含めているが、実行記録PR（`publishLastRunPr()`）が作る PR をラベルの置き先にできれば解禁できる可能性がある（案の段階で未実装）
+  - 定期ワーカー3件の**成果を検証する完了検知**。クラウド実行自体は Phase 1 で解禁済み（deny-list から除外し「セッション作成＝完了」を正式な経路にした）だが、この方式ではクラウド側の収集・PR作成の成否をワーカーが確認できず、収集が失敗しても `lastRun` が進み Slack 通知にも成果が載らない。実行記録PR（`publishLastRunPr()`）が作る PR をラベルの置き先にすれば成果の検証まで踏み込める可能性がある（案の段階で未実装）
   - クラウド環境セットアップスクリプトの提供（`pencil` / `codegraph` / `designmd` の導入。Pencil はさらに認証が要る）。プラグイン・CLI 自体の導入（`npx claude-task-worker install`）は claude.ai の環境設定へ直接記載する方式として Phase 1 で実装済み（Issue #268）
   - `resolve-conflict` の force-push 可否の再測定。回避策 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 適用済みで `--on-branch <PR head>` が PR の head ブランチ上で直接作業できることは smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）で確認済みのため、前提条件は整っている。残るのは force-push（既存コミットの書き換えを伴う push）そのものの実測のみ（→9-6）
   - GitHub MCP の未実測ツール（`mcp__github__*` 55個中、動作確認済みは `issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4つのみ）の検証。特に `fix-review-point` のレビュースレッド解決・`triage-pr` の CI状態取得（`gh pr checks`）・PR一覧取得（`gh pr list`）に相当する MCP 操作が動作するかは未確認で、動けば5章の適合性表を追加で見直せる可能性がある
@@ -282,5 +282,5 @@ Slack 通知の本文・経路は変更しない。クラウド実行時は本�
 3. クラウド実行のタスクで、`cc-in-progress` の付与・除去、`cc-need-human-check` への退避、`cc-pr-created` の検証付き付与が**ローカル実行と同一の条件**で行われること。**検証済み**: smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）の `exec-issue` エンドツーエンド実行（2行のファイル追加、所要9分03秒）で、プロンプト投函 → 最終報告コメント投稿 → `cc-cloud-done` 付与 → ワーカーが検知して除去 → `cc-pr-created` 付与、の完了検知の連鎖が成立することを確認した
 4. クラウド実行のタスクで worktree が作られず、実行後にローカルへ残骸（worktree・ローカルブランチ）が残らないこと。**検証済み**: 上記 smoke test の `exec-issue` エンドツーエンド実行で確認した
 5. クラウド実行の完了・失敗が Slack へ通知され、失敗通知から原因（セッション URL または出力）を辿れること
-6. `--cloud` × `mode: "default"` が、タスクを1件も起動せずにワーカー起動時点でエラー終了すること。`CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3件 `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`、計6ワーカー）は `--cloud` 指定時もエラーにせずローカル実行のまま起動すること。適合性「✕」でも `CLOUD_DENIED_WORKERS` に含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot`）は `--cloud` 指定時にクラウド実行されること（→ 5章の適合性表の「`--cloud` 指定時」列）
+6. `--cloud` × `mode: "default"` が、タスクを1件も起動せずにワーカー起動時点でエラー終了すること。`CLOUD_DENIED_WORKERS`（`resolve-conflict` / `create-ui-design` / `apply-ui-design` の計3ワーカー）は `--cloud` 指定時もエラーにせずローカル実行のまま起動すること。適合性「✕」でも `CLOUD_DENIED_WORKERS` に含まれないワーカー（`fix-review-point` / `triage-pr` / `check-dependabot`）は `--cloud` 指定時にクラウド実行されること。定期ワーカー3件も `--cloud` 指定時はクラウド実行され、完了検知を行わずセッション作成をもって完了となること（→ 5章の適合性表の「`--cloud` 指定時」列）
 7. `cc-cloud-done` ラベルの検知とタイムアウト打ち切りが検証されていること。具体的には: (a) 対象 Issue/PR に `cc-cloud-done` ラベルが付与されると `waitForCloudTask()` が `completed` へ遷移すること、(b) `CLOUD_TASK_TIMEOUT_MS`（4時間）を超過すると `cc-need-human-check` を付けて `failed` になること、(c) 完了検知の待機中は `isRunning()` が真を返し、同一 Issue/PR に対するトリガーラベル再装填でも二重起動が起きないこと。以上を 7.2 のCLIスタブ統合テスト／実クラウドセッションの smoke test で検証する。**(a) は検証済み**: smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）の `exec-issue` エンドツーエンド実行（2行のファイル追加、所要9分03秒）で `cc-cloud-done` の付与検知と `waitForCloudTask()` の完了遷移を確認した。**(b)・(c) はタイムアウト再現に長時間を要するため今回の smoke test では検証していない**

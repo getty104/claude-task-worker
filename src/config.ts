@@ -230,15 +230,13 @@ export const CLOUD_DONE_LABEL = "cc-cloud-done";
 
 // --cloud 指定時もクラウド実行にしないワーカー。resolve-conflict は rebase 後の force-push が
 // クラウド環境で可能か未測定のため、create-ui-design / apply-ui-design は .pen の編集に必要な
-// pencil CLI がクラウド環境に未導入（さらに認証が要る）ため、いずれも拒否する。定期ワーカー
-// （SCHEDULED_WORKER_NAMES）は対象 Issue/PR を持たず cc-cloud-done を置く先が無いため
-// 完了検知できず拒否する（Phase 1 の制約）。
-export const CLOUD_DENIED_WORKERS = [
-  "resolve-conflict",
-  "create-ui-design",
-  "apply-ui-design",
-  ...SCHEDULED_WORKER_NAMES,
-] as const;
+// pencil CLI がクラウド環境に未導入（さらに認証が要る）ため、いずれも拒否する。
+//
+// 定期ワーカー（SCHEDULED_WORKER_NAMES）はここに含めない。対象 Issue/PR を持たず
+// cc-cloud-done を置く先が無いのは変わらないが、完了検知を作る代わりに
+// 「クラウドセッションの作成をもって完了とする」経路（process-manager.ts の
+// runViaCloud() の !cloudTarget 分岐）を正式な経路にしたため、クラウド実行できる。
+export const CLOUD_DENIED_WORKERS = ["resolve-conflict", "create-ui-design", "apply-ui-design"] as const;
 
 // --cloud 指定時に、そのワーカーをクラウド実行するか。CLOUD_DENIED_WORKERS の
 // ワーカーは起動時エラーにせずローカル実行のまま残す。
