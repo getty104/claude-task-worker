@@ -20,7 +20,7 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 
 ## GitHub アクセス
 
-本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順・`gh` → MCP の対応表・`gh` のまま残す操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する（本文中の `gh` コマンド例は、対応表に該当するものについてはフォールバック手段として読むこと）。
+本スキルの GitHub 参照/更新は **`gh` コマンドを優先し、`gh` が使えない場合に GitHub MCP へフォールバックする**（本文中の `gh` コマンド例はそのまま第一手段として読む）。**クラウド実行時のみ優先順位が逆転して GitHub MCP が第一手段になる**が、その指示は起動プロンプトで渡されるので、指示が無ければローカル実行として扱う。判定手順・`gh` ↔ MCP の対応表・MCP に代替が無い操作は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する。
 
 ## 実行モードの制約
 

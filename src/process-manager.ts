@@ -452,7 +452,7 @@ async function runViaCloud(
     const createOutput = `[worker] created cloud session ${cloudSessionId} with the task's initial prompt`;
 
     if (!cloudTarget) {
-      // 定期ワーカーは CLOUD_DENIED_WORKERS で起動時に拒否されるため実際には到達しない。
+      // 定期ワーカーは CLOUD_ALLOWED_WORKERS 外のため実際には到達しない。
       console.warn(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
       result = { status: "completed", output: createOutput };
     } else {
