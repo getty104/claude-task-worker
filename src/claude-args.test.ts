@@ -209,11 +209,13 @@ test("buildClaudeArgs passes --advisor with the model in both modes", () => {
   }
 });
 
-test("buildClaudeEnv drops the print-only ceiling in herdr mode", () => {
+test("buildClaudeEnv drops the print-only ceiling outside print mode (herdr / cloud)", () => {
   assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
   assert.deepEqual(buildClaudeEnv("herdr"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   });
+  // `--cloud` は `--print` と併用できないため、default モードのクラウド実行も print にならない。
+  assert.ok(!("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS" in buildClaudeEnv("default", true)));
 });
 
 test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server, not the pane)", () => {
@@ -227,7 +229,7 @@ test("buildClaudeEnv adds CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC only when clo
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   });
   assert.deepEqual(buildClaudeEnv("default", true), {
-    ...CLAUDE_SPAWN_ENV,
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   });
   assert.deepEqual(buildClaudeEnv("herdr", true), {

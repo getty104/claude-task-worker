@@ -416,8 +416,9 @@ export function buildScriptCommand(
 export interface ClaudeExecution {
   command: string;
   args: string[];
-  // herdr モードのみ設定される、起動後に `herdr agent prompt` で投入するプロンプト。
-  // default モードでは args に含まれるため undefined。
+  // herdr モード（起動後に `herdr agent prompt` で投入）とクラウド実行（`--cloud` の値と
+  // して渡す初期プロンプト）で設定される。default モードの非クラウド実行では args に
+  // 含まれるため undefined。
   prompt?: string;
 }
 
@@ -433,12 +434,16 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
   return {
     command: CLAUDE_COMMAND,
     args: buildClaudeArgs(invocation),
-    ...(invocation.mode === "herdr" ? { prompt: invocation.prompt } : {}),
+    // クラウド実行では `-p` を付けない代わりに `--cloud` の値（初期プロンプト）として
+    // 渡すため、mode に関わらずプロンプトを返す。
+    ...(invocation.mode === "herdr" || invocation.cloud === true ? { prompt: invocation.prompt } : {}),
   };
 }
 
 // claude へ渡す環境変数を組み立てる。
-// herdr モードでは `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` は print モード専用のため渡さない。
+// `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` は print モード（`claude -p`）専用のため、
+// print にならない実行形態には渡さない: herdr モードの TUI 起動と、クラウド実行
+// （`--cloud` は `--print` と併用できず、`buildClaudeArgs` も `-p` を落とす）。
 //
 // かつてここで `HERDR_DISABLE_SOUND=1` も渡していたが、これは**効かない**ので撤去した。
 // 同変数を読むのは herdr 本体の sound モジュール（`src/sound.rs` 冒頭で `NEXTEST` と共に
@@ -449,7 +454,7 @@ export function buildClaudeExecution(invocation: ClaudeInvocation): ClaudeExecut
 // 起動することでしか止められない。
 export function buildClaudeEnv(mode: RunMode, cloud?: boolean): Record<string, string> {
   const base =
-    mode === "herdr"
+    mode === "herdr" || cloud
       ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: CLAUDE_SPAWN_ENV.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }
       : { ...CLAUDE_SPAWN_ENV };
   if (!cloud) return base;

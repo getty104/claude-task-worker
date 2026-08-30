@@ -562,13 +562,14 @@ export function run(
   onComplete?: OnComplete,
   cwd?: string,
   env?: Record<string, string>,
-  // herdr モードで起動後に投入するプロンプト（`buildClaudeExecution` の `prompt`）。
-  // default モードでは args に含まれるため不要。
+  // herdr モード（`herdr agent prompt` で投入）およびクラウド実行（`--cloud` の値として
+  // 渡す初期プロンプト）で使うプロンプト（`buildClaudeExecution` の `prompt`）。
+  // default モードの非クラウド実行では args に `-p` として含まれるため不要。
   prompt?: string,
-  // クラウド実行フラグ（workers.<name>.cloud）。herdr モードのときだけ実行経路を
+  // クラウド実行フラグ（--cloud）。真なら `mode` に関わらず実行経路を
   // runViaCloud（`claude --cloud <prompt> ...` の1コマンド方式）へ切り替える。
-  // `cloud: true` かつ `mode: "default"` は起動時ガード（assertCloudAvailable）で
-  // 弾かれるためここでは扱わない。
+  // pty は script(1) が割り当てるため herdr のペインは不要で、default/herdr で
+  // 同一の経路を通る。
   cloud?: boolean,
   // クラウド実行時に cc-cloud-done を探す対象の種別。番号は id を使う。
   cloudTarget?: "issue" | "pr",
@@ -591,11 +592,14 @@ export function run(
   ensureRenderInterval();
   renderTable();
 
+  // クラウド実行は pty を script(1) で用意するため herdr のペインに依存しない。
+  // `mode` を見ずに分岐させ、default/herdr のどちらでも同じ経路を通す。
+  if (cloud) {
+    void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env, cloudTarget, model);
+    return;
+  }
+
   if (getRunMode() === "herdr") {
-    if (cloud) {
-      void runViaCloud(args, prompt ?? "", id, onComplete, cwd, env, cloudTarget, model);
-      return;
-    }
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、
     // command は渡さず claude のフラグ（args）とプロンプトを渡す。
     void runViaHerdr(args, prompt ?? "", id, onComplete, cwd, env);

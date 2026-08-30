@@ -1,4 +1,4 @@
-import { after, test } from "node:test";
+import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -154,9 +154,15 @@ const ISSUE_GH_SCENARIO = {
 };
 
 // ============================================================
-// A. Issue系ワーカーのクラウド起動引数・env・cwd（exec-issue, herdr, --cloud）
+// A / N / O. クラウド happy path（exec-issue, --cloud）
 // ============================================================
-test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree を作らない", { timeout: 75_000 }, async (t) => {
+// セッション作成は `script(1)` 経由の spawn 1本へ統合されており、herdr のペインに依存しない。
+// そのため経路は `mode` に依らず1本で、A（herdr）と N（default）は mode 以外まったく同じ
+// 期待値になる。両者が同じ assert を通ることをヘルパーの共有で構造的に担保する。
+async function runCloudHappyPath(
+  t: TestContext,
+  options: { mode: "default" | "herdr"; cloudOutput: string },
+): Promise<void> {
   const stubs = installCliStubs({
     gh: ISSUE_GH_SCENARIO,
     // 作成コマンドの stdout からセッションIDを取得するため、実測の出力形状（`View:` の URL）を
@@ -164,14 +170,14 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
     // 付与する（実際のクラウドセッションが最後の操作として行う付与の模倣）。
     claude: {
       stdout: "[stub] exec-issue cloud report",
-      cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubA?from=cli&m=0",
+      cloudOutput: options.cloudOutput,
       cloudComplete: { type: "issue", number: 501 },
     },
   });
   const handle = await startWorker({
     worker: "exec-issue",
     workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
-    userConfig: { mode: "herdr" },
+    userConfig: { mode: options.mode },
     records: stubs.records,
     extraArgs: ["--cloud"],
   });
@@ -236,6 +242,12 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
     "作成コマンドの初期プロンプトに cc-cloud-done ラベル付与の指示が含まれていない",
   );
   assert.ok(description.includes("501"), "作成コマンドの初期プロンプトに対象 Issue 番号が含まれていない");
+  // default モードでもプロンプトが空にならないこと（`-p` を落とす代わりに `--cloud` の値へ
+  // 載せる経路が両モードで働いていること）。
+  assert.ok(
+    description.includes("exec-issue"),
+    "作成コマンドの初期プロンプトにスキル呼び出しが含まれていない（プロンプトが渡っていない）",
+  );
 
   const removeCloudDone = records.filter(
     (r) =>
@@ -256,7 +268,45 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
     branches.every((b) => !/^[a-z]+-[a-z]+-\d{4}$/.test(b)),
     `生成名ローカルブランチが残っている: ${branches.join(", ")}`,
   );
-});
+}
+
+const CLEAN_CLOUD_OUTPUT =
+  "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubA?from=cli&m=0";
+
+test(
+  "A: exec-issue のクラウド実行（herdr）が --cloud/--ref を付け、worktree を作らない",
+  { timeout: 75_000 },
+  async (t) => {
+    await runCloudHappyPath(t, { mode: "herdr", cloudOutput: CLEAN_CLOUD_OUTPUT });
+  },
+);
+
+// mode: "default" でも同じ経路（runViaCloud）を通ることの担保。dispatch が
+// `getRunMode() === "herdr"` の内側に閉じていると、ここで素の spawn（TTY 無しの
+// `claude --cloud`）に落ちて cc-cloud-done の完了検知まで進めない。
+test(
+  "N: exec-issue のクラウド実行が mode: default でも herdr と同一の経路・結果になる",
+  { timeout: 75_000 },
+  async (t) => {
+    await runCloudHappyPath(t, { mode: "default", cloudOutput: CLEAN_CLOUD_OUTPUT });
+  },
+);
+
+// script(1) の擬似 pty 出力には ANSI エスケープと CR が混ざる。normalizePtyOutput の単体
+// テストは herdr-runner.test.ts にあるが、それが作成フェーズへ実際に組み込まれていることは
+// 結合経路でしか示せない（正規化が外れると happy path がセッションID未取得で失敗する）。
+test(
+  "O: pty 由来の制御文字を含む作成コマンド出力からでもセッションIDを抽出して完了する",
+  { timeout: 75_000 },
+  async (t) => {
+    await runCloudHappyPath(t, {
+      mode: "herdr",
+      cloudOutput:
+        "\u001b[?25lCreated cloud session: ctw:demo:#501\r\n" +
+        "View: https://claude.ai/\u001b[0mcode/session_stubO?from=cli&m=0\u001b[?25h\r\n",
+    });
+  },
+);
 
 // ============================================================
 // B. PR系ワーカーのクラウド起動引数（fix-review-point, herdr, --cloud）
