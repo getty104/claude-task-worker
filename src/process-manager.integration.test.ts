@@ -294,12 +294,13 @@ test("herdr モード: blocked を完了扱いせず待機を継続し、working
 test("herdr モード（クラウド実行）: 1コマンド作成でクラウドセッションIDが onComplete まで伝播する", async (t) => {
   const { xdgHome, previousXdg } = setupHerdrConfig();
   const stubs = installCliStubs({
-    herdr: {
-      // 作成フェーズはペイン内容のポーリングでセッションIDを拾う。実測の出力形状に合わせる
-      // （`Created cloud session:` の後ろは description であり、`View:` の URL がID本体）。
-      paneOutput: "Created cloud session: ctw:my-app:#123\nView: https://claude.ai/code/session_stubABC?from=cli&m=0",
+    // 作成コマンドは script(1) 経由で claude スタブを直接起動し、その stdout から
+    // セッションIDを拾う。実測の出力形状に合わせる（`Created cloud session:` の後ろは
+    // description であり、`View:` の URL がID本体）。
+    claude: {
+      stdout: "[stub] cloud dispatch report",
+      cloudOutput: "Created cloud session: ctw:my-app:#123\nView: https://claude.ai/code/session_stubABC?from=cli&m=0",
     },
-    claude: { stdout: "[stub] cloud dispatch report" },
   });
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), "ctw-task-cwd-")));
 
@@ -338,30 +339,20 @@ test("herdr モード（クラウド実行）: 1コマンド作成でクラウ�
   assert.equal(status, "completed");
   assert.equal(cloudSessionId, "session_stubABC");
 
-  const herdrRecords = stubs.records().filter((r) => r.command === "herdr");
-
-  const tabCreate = findHerdrRecord(herdrRecords, "tab", "create");
-  assert.ok(tabCreate);
-  const label = tabCreate.argv[tabCreate.argv.indexOf("--label") + 1];
-  assert.ok(!label.endsWith(":cloud"), `タブラベルが :cloud で終わってはいけない: ${label}`);
-
-  const sendText = findHerdrRecord(herdrRecords, "pane", "send-text");
-  assert.ok(sendText);
-  assert.ok(sendText.argv[3].includes("--cloud"), `作成コマンドに --cloud が含まれていない: ${sendText.argv[3]}`);
-  // 1コマンド方式では --cloud の値がタスクの初期プロンプトそのもの（cloudTarget 未指定の
-  // ためそのまま PROMPT）になる。投函コマンドという別経路は存在しない。
-  assert.ok(sendText.argv[3].includes(PROMPT), "作成コマンドの description に初期プロンプトが含まれていない");
-
-  assert.equal(
-    stubs.records().filter((r) => r.command === "claude").length,
-    0,
-    "1コマンド化後は claude バイナリの直接起動（投函コマンド）が発生してはいけない",
+  const records = stubs.records();
+  const create = records.find((r) => r.command === "claude" && r.argv.includes("--cloud"));
+  assert.ok(create, "クラウドセッション作成コマンド（claude --cloud）の記録が見つからない");
+  // --cloud の値がタスクの初期プロンプトそのもの（cloudTarget 未指定のためそのまま PROMPT）。
+  assert.ok(
+    create.argv[create.argv.indexOf("--cloud") + 1].includes(PROMPT),
+    "作成コマンドの description に初期プロンプトが含まれていない",
   );
+  assert.equal(create.cwd, cwd, "作成コマンドが指定した cwd で起動されていない");
 
-  assert.ok(findHerdrRecord(herdrRecords, "tab", "close"), "作成フェーズ終了後にタブが閉じられていない");
-  assert.equal(
-    findHerdrRecord(herdrRecords, "agent", "start"),
-    undefined,
-    "クラウド実行では herdr agent start を呼んではいけない",
+  const herdrRecords = records.filter((r) => r.command === "herdr");
+  assert.deepEqual(
+    herdrRecords.map((r) => r.argv.slice(0, 2).join(" ")),
+    [],
+    "クラウド実行で herdr のコマンドを呼んではいけない（セッション作成は spawn 1本）",
   );
 });

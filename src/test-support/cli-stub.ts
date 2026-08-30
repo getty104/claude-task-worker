@@ -34,10 +34,16 @@ export interface CliStubOptions {
     exitCode?: number;
     authStatus?: unknown;
     /**
-     * クラウドセッション作成コマンドの送出時に、appendCloudDoneInstruction() の指示
+     * クラウドセッション作成コマンド（`claude --cloud ...`）の stdout。script(1) 経由で
+     * 起動された claude スタブがそのまま出力するので、`extractCloudSessionId()` が拾える
+     * 形状（`View:` の URL 等）を渡すとセッション作成が成功する。未指定なら何も出力せず
+     * exit するため、セッションID未取得の失敗ケースを作れる。
+     */
+    cloudOutput?: string;
+    /**
+     * クラウドセッション作成コマンドの起動時に、appendCloudDoneInstruction() の指示
      * （報告コメント投稿 → cc-cloud-done 付与）を gh スタブの状態ファイルへ模倣書き込み
-     * させる。1コマンド方式では claude バイナリが直接起動されないため、検知は herdr
-     * スタブの `pane send-text`（`--cloud` を含む送出テキスト）側で行う。
+     * させる。実際のクラウドセッションが最後の操作として行う付与を模倣する。
      */
     cloudComplete?: { type: "issue" | "pr"; number: number; report?: string };
   };
@@ -104,6 +110,7 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
     "CTW_STUB_CLAUDE_EXIT_CODE",
     options?.claude?.exitCode === undefined ? undefined : String(options.claude.exitCode),
   );
+  setEnv("CTW_STUB_CLAUDE_CLOUD_OUTPUT", options?.claude?.cloudOutput);
   setEnv("CTW_STUB_HERDR_AGENT_STATUSES", options?.herdr?.agentStatuses?.join(","));
   setEnv("CTW_STUB_HERDR_PANE_OUTPUT", options?.herdr?.paneOutput);
   setEnv(
