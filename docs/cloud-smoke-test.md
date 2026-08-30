@@ -20,6 +20,8 @@
 | 3 | claude.ai サインイン | `claude auth status --json`（判定式は `docs/cloud-prerequisite-checks.md` 参照） |
 | 4 | herdr の疎通 | `herdr --version` が応答すること |
 
+**注記（Issue #374）**: 上記1・4は `scripts/cloud-smoke-test.sh preflight` が要求し続ける項目であり、同スクリプトは本Issueのスコープ外のため未更新のままである。一方 CLI 本体の起動ゲート（`checkCloudConfig()`、`src/config.ts`）は既に `mode` を判定条件に持たず、`script(1)` の可用性（`resolveScriptAvailable()`、`src/index.ts`）のみを見る（`docs/prd-cloud-worker-execution.md` 4.3）。herdr のタスクタブ経由でセッションを作成する経路自体が撤去されているため、herdr の疎通（項目4）は CLI 本体の起動には不要になっているが、preflight は要求し続ける。つまり**このスクリプトの preflight を通すことは CLI 本体の起動ゲートより厳しい**（herdr 未導入でも起動ゲート自体は通る）。ただし `run()` の実行経路振り分けが `mode: "herdr"` 条件のまま未追随（`docs/prd-cloud-worker-execution.md` 4.3）なので、**smoke test を実際に成立させるには項目1・4がいずれも必要**である。表自体はスクリプトの実際の要求どおりであり、変更していない。
+
 クラウド VM 側の事前セットアップとして、claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載し、プラグイン・CLI を導入しておくこと。リポジトリの `.claude/settings.json` へ宣言を書き戻す方式は前提が事実でなかったため撤去した（Issue #268）。
 
 **GitHub App 連携（claude.ai 側）が未設定のリポジトリでは `--ref` / `--on-branch` が拒否される**（`docs/cloud-session-launch-flags.md` 実測）。事前に対象リポジトリで https://claude.ai/code の GitHub 連携を済ませておくこと。連携未設定のまま進めると、後述の「セッション作成」段で `Error: --ref <branch> cannot be honored: ...` を受け取って停止する。
@@ -48,16 +50,16 @@ scripts/cloud-smoke-test.sh preflight <worker-name>
 
 対象の `cc-exec-issue`（または対象ワーカーのトリガーラベル）をテスト用Issueに付け、ワーカーを起動する。
 
-- **目視**: herdr のタスクタブ（TTY を持つペイン）で作成コマンド `claude --cloud <description> <共通フラグ...>` が実行され、`description` にワーカーのプロンプト（`appendCloudDoneInstruction()` 適用後）がそのまま渡っていることを確認する（基準2・7）。作成コマンド1本でセッション作成とプロンプト投入を同時に行う設計のため、投函コマンドは存在しない
+- **確認**: 作成コマンド `claude --cloud <description> <共通フラグ...>` は herdr のタスクタブではなく、`script(1)` の疑似 pty 経由でワーカープロセスの子として `spawn` される（`createCloudSession()`、`src/process-manager.ts`）。`description` にワーカーのプロンプト（`appendCloudDoneInstruction()` 適用後）がそのまま渡っていることを確認したい場合、コマンドライン自体を目視する実測手段は確立していないため、代わりに claude.ai/code 上でセッションが実際にそのタスクのプロンプトどおりに動作していること（次項目）で間接的に確認する（基準2・7）。作成コマンド1本でセッション作成とプロンプト投入を同時に行う設計のため、投函コマンドは存在しない
 - **目視**: claude.ai/code でクラウドセッションが作成され、対象タスクの内容で走っていることを確認する（基準2）
-- **目視**: ペイン出力からクラウドセッションID（`Created cloud session:` / `View: https://claude.ai/code/<id>`）が読み取れたら、（完了を待たずに）タブが閉じられることを確認する（クラウドセッションはローカルに常駐しないため。タブが残っていれば異常）
+- **確認**: 作成コマンドの stdout からクラウドセッションID（`Created cloud session:` / `View: https://claude.ai/code/<id>`）が `CLOUD_SESSION_TIMEOUT_MS`（120秒）以内に読み取れること（`createCloudSession()`）。作成コマンドの spawn プロセス自体は ID 取得後すぐに終了する短命プロセスであり、herdr のタブは介在しないため「タブが閉じられること」の確認は不要
 - **目視**: 作業が二重実行されていないこと（手順4で確認する PR が1件だけ作られること）を確認する。旧・作成→投函の2コマンド方式では description が初期プロンプトとして即実行されたうえ投函コマンドが同じ作業を再実行し、1タスクでPRが2件作られる不具合があった（Issue #302）
 
 投入前に `scripts/cloud-smoke-test.sh snapshot before` を実行し、worktree・ローカルブランチの状態を記録しておく（後片付け確認・基準4で使う）。
 
 ### 3. 完了検知 — 基準7
 
-タスク完了まで待つ。ローカルにクラウドをドライブし続ける TUI は存在しない（手順2でタブは既に閉じている）ため、完了検知は `cc-cloud-done` ラベルのポーリングで行う。
+タスク完了まで待つ。ローカルにクラウドをドライブし続ける TUI は存在しない（手順2の作成コマンドは既に終了している）ため、完了検知は `cc-cloud-done` ラベルのポーリングで行う。
 
 - 完了検知は `cc-cloud-done` ラベルのポーリング方式（`waitForCloudTask()`、`src/process-manager.ts`）。herdr の agent ステータスはクラウド側の完了を反映しないため使わない（実測 `docs/cloud-session-launch-flags.md` M-1）
 - **目視**: 台帳エントリ（ステータステーブル）が待機中も `running` のまま維持され、同一 Issue/PR の二重起動が `isRunning()` で防がれることを確認する
@@ -93,7 +95,6 @@ scripts/cloud-smoke-test.sh snapshot after
 - クラウドセッション: claude.ai/code の一覧から手動で削除する
 - テスト用Issue/PR: 使い捨てのテスト用Issueで検証する方針とする（既存Issueを流用すると `cc-in-progress` 等の実運用ラベルが混ざり判定が汚れるため）。検証後にIssue/PRをクローズする
 - ラベル: `check-labels` の結果を見て、テスト目的で付与されたラベルを外す
-- herdr のタスクタブ: `ctw:<project>:#<n>`（ローカル実行と同一書式。`:cloud` サフィックスは付かない）ラベルのタブが残っていれば閉じる（通常は手順2でセッションID取得後にすぐ閉じられている）
 - worktree・ローカルブランチ: `snapshot after` の差分が `snapshot before` と一致すること（クラウド実行はworktreeを作らないため差分ゼロが正しい。基準4）
 
 ## S-1 / S-2 の前提の再確認
@@ -104,7 +105,7 @@ scripts/cloud-smoke-test.sh snapshot after
 - **失効注記**: `claude --version` / `herdr --version` が上記より新しい場合は、下記5点を再実測すること
 
 1. **引数の受理可否**（S-1）: `-p` と `--cloud` の併用が拒否される／非TTYの `--cloud` が拒否される／`--ref` と `--on-branch` の併用が拒否される／`--permission-mode` `--disallowedTools` `--append-system-prompt-file` `--model` `--effort` `--advisor` `--chrome` は受理される（`--advisor` は `buildClaudeArgs()`（`src/claude-args.ts`）が `advisorModel` 指定時のみ付与する。`--chrome` は本ツールからは付与されないが、claude CLI 側が受理することは `docs/cloud-session-launch-flags.md` T7 で確認済みのため確認対象に含める）
-2. **セッション作成・完了検知の状態遷移**（S-2 / M-2・M-4）: 作成コマンド（`claude --cloud <description>`。description はプロンプトそのもの）のペイン出力からセッションIDが `CLOUD_SESSION_TIMEOUT_MS`（120秒）以内に取得できること。完了検知はローカル driver の agent ステータスではなく `cc-cloud-done` ラベルのポーリング方式のため、クラウドセッションがプロンプトの指示どおりに最終報告コメント投稿 → ラベル付与まで完遂することを確認する
+2. **セッション作成・完了検知の状態遷移**（S-2 / M-2・M-4）: 作成コマンド（`claude --cloud <description>`。description はプロンプトそのもの）の stdout からセッションIDが `CLOUD_SESSION_TIMEOUT_MS`（120秒）以内に取得できること。完了検知はローカル driver の agent ステータスではなく `cc-cloud-done` ラベルのポーリング方式のため、クラウドセッションがプロンプトの指示どおりに最終報告コメント投稿 → ラベル付与まで完遂することを確認する
 3. **`agent_session` の値がクラウドセッションIDと一致しない**（S-2 / PRD 9-9）: `agentGet()` の `agent_session.value` はローカル claude のセッションUUID形式で、クラウドセッションID（`session_01…`形式）とは別物であること
 4. **クラウドターンのローカル transcript が生成されない**（S-2 / PRD 9-4）: `~/.claude/projects/*/<sessionId>.jsonl` がクラウドセッションのターンでは生成されないこと
 5. **クラウドをドライブし続けるローカル TUI の不在**（S-2 の最大の前提）: 2.1.247 時点では `claude --cloud "<desc>"` は作成後すぐ exit し、`claude --cloud <session_id>` の対話アタッチも無効で、herdr の agent ステータスで*クラウド側*の完了を検知する経路が無い。この前提を踏まえ、実装は herdr の agent ステータスに頼らず `cc-cloud-done` ラベルのポーリングで完了検知する方式に倒してある（手順3参照）。**本項目は、この前提（ローカル driver 経由でクラウド側の完了を検知できない）が新バージョンでも変わらず成立しているかを再確認する位置づけ**。もし新バージョンでクラウドをドライブし続ける TUI が現れていた場合は、ラベル駆動方式より確実な検知手段になりうるため、結果記録テンプレートにその旨と挙動の変化を記録すること
@@ -114,7 +115,7 @@ scripts/cloud-smoke-test.sh snapshot after
 | 項目 | 種別 |
 |------|------|
 | claude.ai/code 上のセッション表示 | 目視 |
-| セッションID取得・タブクローズの状態遷移 | 目視 |
+| セッションID取得後に作成コマンドの spawn プロセスが終了すること | 目視 |
 | クラウドセッションが最終報告コメント（`## claude-task-worker 実行結果`）を投稿し `cc-cloud-done` を付与・ワーカーが検知して除去する | 目視 |
 | Slack 通知本文とセッションURLの到達性 | 目視 |
 | 事前条件1〜4（mode / `--cloud`指定 / サインイン / herdr疎通） | `scripts/cloud-smoke-test.sh preflight` |
@@ -166,7 +167,6 @@ scripts/cloud-smoke-test.sh snapshot after
 - 作成したクラウドセッション（削除済み/未削除）:
 - テスト用Issue/PR番号（クローズ済み/未クローズ）:
 - 付与されたラベルの後片付け:
-- herdrタスクタブの後片付け:
 ```
 
 ## 実測記録
