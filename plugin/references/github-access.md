@@ -68,8 +68,10 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 | `gh issue list --search "updated:>=<日時>"` | `list_issues` / `search_issues`（MCP 不可時は `gh-compat.sh` の `list-issues-updated-since <since-iso> [label]`） |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | `create_pull_request` |
-| `gh pr edit` | `update_pull_request` |
-| `gh pr merge` | `merge_pull_request` |
+| `gh pr edit --body` / `--title` | `update_pull_request`（`body` / `title`） |
+| `gh pr edit --add-label` / `--remove-label` | `issue_write`（method: `update`、`labels`）。PR は Issue 番号空間を共有する。**`labels` は差分追加ではなく全量置換**なので、先に現在のラベルを取得し、追加分を足した全量を渡すこと（そうしないと既存ラベルが落ちる） |
+| `gh pr close` | `update_pull_request`（`state: closed`）。`--delete-branch` に相当する引数は無いため、ブランチ削除が必要なら `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` を別途実行する。`--comment` 相当も無いので、コメントが要る場合は `add_issue_comment` を先に呼ぶ |
+| `gh pr merge` | `merge_pull_request`（`merge_method`）。**`--delete-branch` に相当する引数は無い**ため、ブランチ削除が必要なら `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` を別途実行する |
 | `gh pr comment` | `add_issue_comment`（PR は Issue 番号空間を共有する） |
 
 ### Actions
@@ -115,6 +117,24 @@ MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 
 2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。同様の理由で定期ワーカー3件（`update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）の収集スクリプトが依存していた `gh api graphql` / `gh pr list` / `gh issue list` も上記の `list-*` / `pr-*` / `issue-*` サブコマンドへ移行済みである。
 
 PR の一覧系（`list-prs-*`）が `repos/{o}/{r}/pulls` ではなく `repos/{o}/{r}/issues` を叩くのは、更新日時での足切り（`since`）とラベル絞り込み（`labels`）を持つのが後者だけのため。同エンドポイントは Issue と PR の両方を返すので、`pull_request` キーの有無で仕分ける（PR のエントリはその中に `merged_at` も持つ）。
+
+### 2026-08-30 の実測（gh 2.98.0）: 書き込み系コマンドの転送経路
+
+使い捨ての PR / Issue を対象に `GH_DEBUG=api` を付けて実行し、リクエスト行（メソッド・パス）を確認した。以下 9 コマンドは**すべて `POST /graphql` を叩く**（REST 経路のものは1つも無かった）。`gh pr merge` だけは GraphQL を2回叩く（PR 解決 → merge mutation）。
+
+| `gh` コマンド | 転送経路 | 対応する GitHub MCP ツール |
+| --- | --- | --- |
+| `gh pr view <n> --json headRefName` | `POST /graphql` | `pull_request_read`（method: `get`） |
+| `gh pr diff <n> --name-only` | `POST /graphql`（PR 解決） | `pull_request_read`（method: `get_files`） |
+| `gh pr edit <n> --add-label` | `POST /graphql` | `issue_write`（method: `update`、`labels`） |
+| `gh pr edit <n> --body` | `POST /graphql` | `update_pull_request`（`body`） |
+| `gh pr comment <n>` | `POST /graphql` | `add_issue_comment` |
+| `gh pr close <n>` | `POST /graphql` | `update_pull_request`（`state: closed`） |
+| `gh pr merge <n>` | `POST /graphql`（2回） | `merge_pull_request` |
+| `gh issue close <n> [--reason]` | `POST /graphql` | `issue_write`（method: `update`、`state: closed` / `state_reason`） |
+| `gh issue comment <n>` | `POST /graphql` | `add_issue_comment` |
+
+したがって「非推奨」3ワーカー（`triage-pr` / `fix-review-point` / `check-dependabot`）のスキル本文にベタ書きされていた `gh` 書き込みコマンドはすべてクラウドで 403 になる。クラウドセッションのプロキシは `DELETE /repos/{o}/{r}/git/refs/heads/<branch>` などの書き込み REST パスも拒否するため、`--delete-branch` 相当のブランチ削除はクラウドでは実行できない（実測: `Write access to this GitHub API path is not permitted through this proxy.`）。
 
 ### `gh api --paginate` はクラウドでは使えない
 
