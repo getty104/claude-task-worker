@@ -1,0 +1,3 @@
+probe file for Issue #337 cloud smoke test (fix)
+line2: placeholder
+line3: placeholder
