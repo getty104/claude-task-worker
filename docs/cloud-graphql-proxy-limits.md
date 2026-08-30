@@ -331,6 +331,8 @@ CI は3本とも `build` / `preflight` / `code-review` がすべて success だ�
 
 `gh` へのフォールバックは1回も発生しなかった。
 
+**W-19（補足）**: 本 Issue の PR 作成時（`create-pr` スキル）にも同じ問題が現れた。`create_pull_request` / `update_pull_request` のどちらも assignee・label のパラメータを持たないため `gh pr edit` へフォールバックしたところ **403（GraphQL ゲート）** になり、REST（`gh api repos/{o}/{r}/issues/{n}/assignees` / 同 `/labels`）へ切り替えて成立した。**PR への assignee・label 付与は、MCP にも `gh` の高レベルコマンドにも成立する経路が無く、`issue_write`（W-7）か REST 直叩きのいずれかを使う必要がある。**
+
 ### 実測表: `fix-review-point`（PR #351）— **フェーズ0で中断・成果物ゼロ**
 
 | ID | ステップ / 操作 | 手段 | 結果 | 備考 |
