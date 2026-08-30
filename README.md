@@ -61,7 +61,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Pen CLI](https://docs.pen.dev/for-developers/pen-cli) | `.pen` の編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン） |
 | [Playwright](https://playwright.dev/) のブラウザ | Playwright MCP でのブラウザ確認 |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（未導入でも動く） |
-| [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は起動ゲートこそ herdr を要求しないが、実行経路の分岐が未追随のため現状は `mode: "herdr"` が要る） |
+| [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は herdr に依存しない） |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避（任意。Claude 側のコネクタで有効化） |
 
 CLI 本体に npm の実行時依存はない（Node.js 標準モジュールのみで動作する）。
@@ -205,7 +205,7 @@ npx claude-task-worker cloud-setup
 - 完了は `cc-cloud-done` ラベルで検知する。4時間で応答がなければ打ち切り、`cc-need-human-check` を付けて失敗通知する
 - `--project` と併用した場合、`--cloud` は各プロジェクトへそのまま転送される
 - `--cloud` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
-- **現時点では `mode: "default"` での `--cloud` はクラウド経路へ流れない**（実行経路の分岐が `mode: "herdr"` 判定のまま未追随のため）。`--cloud` を使うには `mode: "herdr"` にしておく必要がある。追随は別Issueで対応予定
+- `--cloud` は `mode`（`default` / `herdr`）に依存しない。クラウドセッションの作成は `script` コマンドの疑似 pty で完結し、herdr のペインを使わないため、どちらの `mode` でも同じ経路を通る
 
 詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
 
