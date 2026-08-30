@@ -238,6 +238,11 @@ GraphQL ゲートは**リポジトリ連携済みのセッションでも健在*
 | G-39 | `gh api -X DELETE .../git/refs/heads/<branch>` | 403（プロキシ、同上） | 同上。**クラウドからはブランチを削除できない** |
 | G-40 | `git push origin :refs/heads/<branch>`（削除 push） | `send-pack: unexpected disconnect` → `Everything up-to-date`（ref は残る） | G-39 と同じ制限が git の smart HTTP 経路にも現れる。**エラーで終わらず「最新です」と表示されるため、成功と誤認しやすい** |
 | G-41 | `gh api graphql -f query='query{viewer{login}}'` | 403（プロキシ、GraphQL ゲート） | 連携済みセッションでも**GraphQL ゲートは健在**（B1 の結論を追認） |
+| G-42 | `gh-compat.sh default-branch` | **失敗**（`failed to resolve the default branch`） | 次項を参照 |
+
+**G-42 の詳細（クラウド実行の実害）**: クラウド VM の作業ツリーには `refs/remotes/origin/HEAD` が設定されておらず（`git symbolic-ref --short refs/remotes/origin/HEAD` が `fatal: ref refs/remotes/origin/HEAD is not a symbolic ref` で exit 128）、`gh-compat.sh default-branch` の第一手段が成立しない。フォールバックの `gh repo view --json defaultBranchRef` は GraphQL ゲートで403になるため、サブコマンド全体が失敗する。`exec-issue` のフェーズ0はデフォルトブランチ名を取得できない場合に fail-safe で**中断**する仕様であり、この経路を通るとクラウド実行のタスクが着手前に止まりうる。**REST（`gh api repos/{o}/{r} --jq .default_branch`）は200を返す**（G-31）ので代替手段は存在する。本 Issue はコードを変更しないスコープのため修正は行っていない。
+
+
 
 ### 未実測項目（本実測で埋まらなかったもの）
 
