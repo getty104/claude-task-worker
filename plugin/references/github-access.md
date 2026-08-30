@@ -102,7 +102,7 @@ MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 
 
 | サブコマンド | 置き換えた `gh` | 第一手段 |
 | --- | --- | --- |
-| `default-branch` | `gh repo view --json defaultBranchRef` | `git symbolic-ref refs/remotes/origin/HEAD` |
+| `default-branch` | `gh repo view --json defaultBranchRef` | `git symbolic-ref refs/remotes/origin/HEAD` → `GET repos/{o}/{r}` の `.default_branch`（クラウド VM の作業ツリーには `origin/HEAD` が無いため） |
 | `owner-repo` | `gh repo view --json nameWithOwner` | `git remote get-url origin` |
 | `issue-parent <n>` | `gh issue view --json parent` | `GET repos/{o}/{r}/issues/{n}/parent` |
 | `issue-deps <n>` | `gh issue view --json blockedBy,blocking` | `GET repos/{o}/{r}/issues/{n}/dependencies/{blocked_by,blocking}` |
