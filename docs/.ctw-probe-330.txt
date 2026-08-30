@@ -1,0 +1,1 @@
+GitHub MCP write-path probe target (Issue #330). Temporary file; deleted with the probe branches.
