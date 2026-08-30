@@ -270,6 +270,129 @@ GraphQL ゲートは**リポジトリ連携済みのセッションでも健在*
 - PR #341 に対して CI（`ci.yml`）が3回（初回 + `rerun_workflow_run` + `rerun_failed_jobs`）、レビュー系ワークフロー（`ocr-review.yml` / CodeRabbit）が2回走った。`publish.yml` は実行していない
 - G-32〜G-36 / G-38 / G-39 は存在しないID宛て、または使い捨てブランチ宛てのプローブで、GitHub 側の状態を変えていない
 
+## ワーカー E2E（スキル本文）のクラウド実測（`W-*`）
+
+適合性表で「クラウド実行されるが推奨しない」と判定していた3ワーカー（`triage-pr` / `fix-review-point` / `check-dependabot`）を、実際にクラウドセッション内で走らせた記録（Issue #337）。`G-*` が「MCP ツール単体が動くか」を測ったのに対し、本節は「**スキル本文がクラウド環境で最後まで通るか**」を測っている。
+
+- 実測日: 2026-08-30
+- 実測バージョン: クラウド VM の `claude --version` → `2.1.251 (Claude Code)` / `gh version 2.98.0 (2026-08-20)` / `node v22.22.2` / `claude-task-worker` 0.97.0
+- 実測環境: `exec-issue` ワーカーが `--cloud` で起動した本 Issue のタスクセッション自身。cwd は `/home/user/<repo>`、`git remote` は `origin` 1件、GitHub App 連携済み
+
+### 方法と、その限界（先に読むこと）
+
+**ローカルの herdr ワーカーから `mode: "herdr"` ＋ `--cloud` で3ワーカーを起動する経路は再現していない。** クラウド VM には herdr も `~/.config/claude-task-worker/config.json` も存在せず、クラウドセッションの中からワーカーを起動できないため。代わりに、**同じクラウドセッションの中で3スキルを `Skill` ツールで直接起動**して観測した。ワーカーが `--on-branch` で与える「PR の head ブランチ上でセッションが始まる」状態は、スキル起動前に該当ブランチを checkout することで再現している。
+
+したがって本節が測ったのは E2E の**スキル側の半分**である。
+
+| 区間 | 本節での扱い |
+| --- | --- |
+| ワーカー起動 → herdr タスクタブ → `claude --cloud` によるセッション作成 | **未実測**（クラウドセッションからは再現できない） |
+| クラウドセッション内でのスキル本文の実行 | **本節の実測対象** |
+| `cc-cloud-done` 付与 → ワーカーのポーリング検知 → ラベル遷移 | **未実測**（ワーカー側がローカルにいないため）。ただし `exec-issue` については 2026-08-29 に成立を確認済み（`docs/cloud-smoke-test.md` の実測記録） |
+
+### 結論
+
+3ワーカーで結果が分かれた。
+
+1. **`triage-pr` は成立した**。PR詳細・CI状態・未解決レビューコメントの取得から二分判定・ラベル付与まで全ステップを通り、**`gh` へのフォールバックは1回も発生しなかった**（すべて GitHub MCP で完結）
+2. **`fix-review-point` はフェーズ0で中断し、成果物ゼロだった**。原因は GitHub アクセスではなく、**スキル本文の安全ガード2つがクラウドでは原理的に成立しない**こと（W-10 / W-11）
+3. **`check-dependabot` は CHANGELOG 取得で詰まった**。**セッションの GitHub アクセスは `gh` も MCP も「設定済みリポジトリ」だけにスコープされており、依存元リポジトリ（例: DefinitelyTyped）を読めない**（W-22 / W-23）。外部 HTTPS（`WebFetch`）は通るため代替経路は存在する
+
+最も重要な発見は2点。
+
+- **`.claude/worktrees/` 配下チェックはクラウド実行では常に偽になる**（W-10）。クラウド実行は設計上 worktree を作らず（`isCloudWorker()` 分岐、`src/workers/pr-worker.ts` ほか）、cwd はリポジトリルートである。このチェックを中断条件として持つ `fix-review-point` と `exec-issue` は、**書かれたとおりに判定するとクラウドでは必ず着手前に止まる**。2026-08-29 の `exec-issue` E2E が成立したのは、この中断条件がコードではなくスキル本文の自然言語であり、機械的に強制されていないためと考えられる（＝挙動がモデルの判断に依存し非決定的になる）
+- **リポジトリゲートは「解けた」のではなく「セッションの設定リポジトリに限って開いている」**（W-22 / W-23）。`G-31` の「リポジトリゲートは解けている」という結論は自リポジトリについてのみ成り立ち、第三者リポジトリでは 2026-08-28 と同一本文の403が返る。**GitHub MCP もこのスコープを迂回しない**（`gh` とは別の文言で拒否する）
+
+### プローブ構成
+
+使い捨てブランチ `ctw-probe-337-base`（`cc-epic-328` 由来）をベースに、3本の使い捨て PR を作成した。**デフォルトブランチと既存の PR には一切触れていない**。
+
+| PR | head | 付与ラベル | 仕込んだ状態 |
+| --- | --- | --- | --- |
+| #350 | `ctw-probe-337-triage` | `cc-triage-scope` | 未解決レビュースレッド1件（要修正の指摘） |
+| #351 | `ctw-probe-337-fix` | `cc-fix-onetime` | 未解決レビュースレッド1件（要修正の指摘） |
+| #352 | `ctw-probe-337-dep` | `dependencies` | `@types/node` を 22.0.0 → 22.20.1 に上げた Dependabot 模擬差分（`package.json` + `package-lock.json`） |
+
+CI は3本とも `build` / `preflight` / `code-review` がすべて success だった。
+
+### 実測表: `triage-pr`（PR #350）— **完遂**
+
+| ID | ステップ / 操作 | 手段 | 結果 | 備考 |
+| --- | --- | --- | --- | --- |
+| W-1 | ステップ0 `gh pr checkout` | — | **省略（正しい判定）** | 現在ブランチが `head.ref` と一致したためスキル本文の指示どおり省略。クラウドでの fail-safe が意図どおり働いた |
+| W-2 | ステップ1 コンフリクト検知 | MCP `pull_request_read`（`get`） | **成功（ただし読み替えが必要）** | スキル本文は `mergeable` の3値（`MERGEABLE` / `CONFLICTING` / `UNKNOWN`）を前提にしているが、**MCP が返すのは `mergeable_state`**（今回は `clean`）。本文どおりのマッピングをそのまま適用できない |
+| W-3 | ステップ2 未解決レビューコメント取得 | MCP `pull_request_read`（`get_review_comments`） | **成功** | 1件、`hasNextPage: false` |
+| W-4 | ステップ2 会話コメント取得 | MCP `issue_read`（`get_comments`） | **成功** | 2件（いずれも bot） |
+| W-5 | ステップ2 CI状態取得 | MCP `pull_request_read`（`get_check_runs`） | **成功** | 3件すべて `conclusion: success` |
+| W-6 | 補助スクリプト `fetch-unresolved-comments.sh` | — | **未使用** | MCP が成功したためフォールバック条件に該当せず |
+| W-7 | ステップ3 パターンA ラベル付与 | MCP `issue_write`（`update`） | **成功** | `cc-fix-onetime` 付与を `pull_request_read`（`get`）で事後確認（`labels: ["cc-fix-onetime","cc-triage-scope"]`） |
+| W-8 | `plugin/references/github-access.md` が指す `pull_request_write` | — | **ツールが存在しない** | セッションのツール一覧に無い（`ToolSearch` が0件）。`update_pull_request` は存在するが **`labels` パラメータを持たない**。PR のラベル操作は `issue_write`（`update`）で行う必要がある |
+| W-9 | 素の `gh pr view --json baseRefName`（スキル本文 L291） | `gh`（GraphQL） | **未到達／単独では403** | パターンA で終了したためスキル実行中には到達せず。単独で実行すると `HTTP 403: This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via `gh api repos/{owner}/{repo}/...` instead. (https://api.github.com/graphql)`。**マージへ進むパターンB ではここで落ちる** |
+
+`gh` へのフォールバックは1回も発生しなかった。
+
+**W-19（補足）**: 本 Issue の PR 作成時（`create-pr` スキル）にも同じ問題が現れた。`create_pull_request` / `update_pull_request` のどちらも assignee・label のパラメータを持たないため `gh pr edit` へフォールバックしたところ **403（GraphQL ゲート）** になり、REST（`gh api repos/{o}/{r}/issues/{n}/assignees` / 同 `/labels`）へ切り替えて成立した。**PR への assignee・label 付与は、MCP にも `gh` の高レベルコマンドにも成立する経路が無く、`issue_write`（W-7）か REST 直叩きのいずれかを使う必要がある。**
+
+### 実測表: `fix-review-point`（PR #351）— **フェーズ0で中断・成果物ゼロ**
+
+| ID | ステップ / 操作 | 手段 | 結果 | 備考 |
+| --- | --- | --- | --- | --- |
+| W-10 | フェーズ0 `.claude/worktrees/` 配下チェック | `pwd` | **中断条件に該当** | `pwd` = `/home/user/<repo>`。クラウド実行は worktree を作らない設計のため、**この条件はクラウドでは常に成立しない** |
+| W-11 | フェーズ0 デフォルトブランチ取得（fail-safe） | `gh-compat.sh default-branch` | **失敗 → 中断条件に該当** | 出力 verbatim: `gh-compat: failed to resolve the default branch`（exit 1）。G-42 の再現。代替手段は2つあり、どちらも実測で成立する（W-17 / W-18） |
+| W-17 | 同上・REST による代替 | `gh api repos/{o}/{r} --jq .default_branch` | **成功（200）** | `main` を返す |
+| W-18 | 同上・git 側の修復 | `git remote set-head origin -a` | **成功** | 欠けていた `refs/remotes/origin/HEAD` が `origin/main` に設定され、**以降 `gh-compat.sh default-branch` がそのまま `main` を返すようになる**。クラウド VM でもリモートへの照会は通るため、`gh-compat.sh` の第一手段（git ローカル導出）が成立しない原因は「参照が未設定であること」だけだと分かる |
+| W-12 | フェーズ0 PR状態取得 | MCP `pull_request_read`（`get`） | **成功** | `state: open` / `head.ref: ctw-probe-337-fix` / `labels: ["cc-fix-onetime"]` |
+| W-13 | フェーズ0 `gh pr checkout` | — | **省略（正しい判定）** | 現在ブランチが `headRefName` と一致 |
+| W-14 | フェーズ1 `create-review-fix-plan` | — | **未起動** | フェーズ0中断のため |
+| W-15 | フェーズ5 `commit-push` | — | **未起動** | 同上 |
+| W-16 | フェーズ6 `resolve-pr-comments`（`resolve_thread`） | — | **未起動** | 同上。**`resolveReviewThread` の MCP 代替（G-24 / G-26）が動くかどうか以前に、そこへ到達しない** |
+
+事後確認: PR #351 のレビュースレッドは `is_resolved: false` のまま、ラベル・コミット数にも変化なし（**GitHub 側への書き込みは1件も発生していない**）。
+
+### 実測表: `check-dependabot`（PR #352）— **CHANGELOG 取得で停滞・判定に至らず**
+
+| ID | ステップ / 操作 | 手段 | 結果 | 備考 |
+| --- | --- | --- | --- | --- |
+| W-20 | PR本文・差分の取得 | MCP `pull_request_read`（`get` / `get_diff`） | **成功** | G-2 / G-4 と同じ経路 |
+| W-21 | CI状態の取得 | MCP `pull_request_read`（`get_check_runs`） | **成功** | 3件すべて success |
+| W-22 | 依存元リポジトリの参照（`gh`） | `gh api repos/DefinitelyTyped/DefinitelyTyped` / 同 `/releases` | **403（プロキシ）** | 本文 verbatim: `{"message":"GitHub access to this repository is not enabled for this session. Use add_repo to request access. If add_repo answers that read access is already available and you need GitHub API or write access, call add_repo again with access:\"push\" to attach the repository with credentials.","documentation_url":"https://docs.anthropic.com/en/docs/claude-code/github-actions"}`。`documentation_url` が `docs.anthropic.com` ＝ **プロキシ合成の拒否**。2026-08-28 のリポジトリゲートと同一 |
+| W-23 | 依存元リポジトリの参照（MCP） | MCP `list_releases`（`DefinitelyTyped/DefinitelyTyped`） | **拒否** | 本文 verbatim: `Access denied: repository "definitelytyped/definitelytyped" is not configured for this session. Allowed repositories: getty104/claude-task-worker`。**GitHub MCP はリポジトリスコープを迂回しない**（GraphQL ゲートは迂回するが、こちらは別の制限） |
+| W-24 | 外部 HTTPS の到達性 | `curl https://registry.npmjs.org/@types/node` | **200** | プロキシ経由で外部へ出られる |
+| W-25 | CHANGELOG 相当の取得（`WebFetch`・npm レジストリ） | `WebFetch` | **成功** | `https://registry.npmjs.org/@types/node/22.20.1` から依存（`undici-types ~6.21.0`）と `typeScriptVersion: 5.6` を取得できた |
+| W-26 | CHANGELOG 相当の取得（`WebFetch`・GitHub の HTML ページ） | `WebFetch` | **成功** | `https://github.com/DefinitelyTyped/DefinitelyTyped/commits/master/types/node` のコミット一覧を取得できた。**API は塞がれていても HTML は読める** |
+| W-27 | context7 での型定義パッケージの解決 | MCP `resolve-library-id`（`@types/node`） | **該当なし** | 返ってきたのは `utility-types` / `mime-types` 等の無関係な候補のみ。DefinitelyTyped の型定義パッケージは context7 の索引対象外とみられる |
+| W-28 | 最終判定とマージ／修正 push | — | **未到達** | W-22 でスキルが停滞し、約40分後に打ち切った。PR #352 への書き込みは1件も発生していない |
+
+### この実測で判明した、コード／ドキュメント側の要修正点
+
+いずれも本 Issue のスコープ外（コードを変更しない）のため、別 Issue として起票した。
+
+1. **`fix-review-point` / `exec-issue` のフェーズ0 worktree ガードがクラウド実行と構造的に矛盾する**（W-10）
+2. **`gh-compat.sh default-branch` がクラウドで必ず失敗する**（W-11 / G-42）。REST を手段に加える（W-17）か、`git remote set-head origin -a` で `refs/remotes/origin/HEAD` を補う（W-18）ことで解決する
+3. **`plugin/references/github-access.md` の PR ラベル操作の対応表が実在しないツール（`pull_request_write`）を指している**（W-8）。あわせて `triage-pr` の `mergeable` 3値前提（W-2）と、`issue_read`（`get_labels`）に PR 番号を渡すと `Failed to get issue labels: Could not resolve to an Issue with the number of 350.` で失敗する点も同じ箇所の問題
+4. **`check-dependabot` の CHANGELOG 取得が第三者リポジトリのスコープ制限に阻まれる**（W-22 / W-23）。`WebFetch`（W-25 / W-26）へ寄せれば代替できる
+
+### 未実測項目（本実測で埋まらなかったもの）
+
+1. **ワーカー起動 → クラウドセッション作成 → `cc-cloud-done` 検知 → ラベル遷移の、ワーカー側の半分**
+   - 理由: クラウドセッションの中に herdr も CLI の設定ファイルも無く、ワーカーを起動できない（上記「方法と、その限界」）
+   - 再現手順: ローカルの herdr 環境から `claude-task-worker triage-pr --cloud` 等を、本節と同じ構成のプローブ PR に対して実行する
+2. **`triage-pr` のパターンB（マージ）経路**
+   - 理由: 仕込んだ未解決レビューコメントによりパターンA（`cc-fix-onetime` 付与）で確定したため。マージ自体は G-30 で成立を確認済みだが、**その直後に走る素の `gh pr view --json baseRefName`（W-9）は403になる**ため、マージ後の関連 Issue 連動 Close は失敗する見込み
+3. **`fix-review-point` のフェーズ1以降すべて**
+   - 理由: フェーズ0で中断したため（W-10 / W-11）。中断条件を解消しない限り測れない
+4. **`check-dependabot` の判定・マージ／修正 push**
+   - 理由: CHANGELOG 取得（W-22）で停滞し打ち切ったため
+5. **`triage-pr` のパターンC（CI失敗時の `cc-need-human-check`）と CI 再実行**
+   - 理由: プローブ PR の CI がすべて success だったため。CI 再実行が MCP 経由でのみ成立することは G-27 / G-28 / G-37 で確認済み
+
+### 実測の副作用
+
+- 使い捨てブランチ `ctw-probe-337-base` / `ctw-probe-337-triage` / `ctw-probe-337-fix` / `ctw-probe-337-dep` と、そのブランチ間の PR #350 / #351 / #352（**ベースはデフォルトブランチではない**）を作成した。既存の PR・Issue・デフォルトブランチには書き込んでいない
+- PR #350 に `cc-fix-onetime` ラベルが付与された（`triage-pr` の判定結果そのもの）。#351 / #352 への書き込みは無い
+- 3本の PR に対して CI（`ci.yml` / `ocr-review.yml` / CodeRabbit）が各1回走った
+- **プローブブランチ4本は残っている** — G-38〜G-40 のとおりクラウドセッションからはブランチを削除できないため、**手動での削除が必要**。PR #350 / #351 / #352 も手動クローズが必要
+
 ## 測定ログ（要旨）
 
 - **P-1** GraphQL ゲートの403: `gh api graphql -f query='query{viewer{login}}' -i` → `HTTP/1.1 403`（`Content-Length: 263`）、本文 `{"message":"This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via gh api repos/{owner}/{repo}/... instead.", ...}`。リポジトリを指定したクエリでも**バイト単位で同一本文**。`gh pr list` のみ操作名入りの変種（`This GraphQL query (PullRequestList, sent by gh pr list) is not enabled for this session…`）を返し、ゲートが**操作名単位のアローリスト**でクエリをパース判定していることを示す（ただし本実測で通った操作は1件も無くアローリストの中身は特定できず）
