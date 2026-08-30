@@ -14,8 +14,8 @@ set -euo pipefail
 #   Issue本文＋全コメントはそのまま読むとコンテキストを食い潰すため、
 #   呼び出し側が jq で必要な Issue だけを取り出せるようにしている。
 #
-# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
-# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になり収集が0件になる。
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。GraphQL 直叩きはクラウド
+# セッションのプロキシで403になるため、取得は `gh-compat.sh` の REST サブコマンド経由で行う。
 # 詳細は plugin/references/github-access.md を参照。
 
 DAYS="${1:-1}"
@@ -30,8 +30,6 @@ if ! [[ "$DAYS" =~ ^[0-9]+$ ]]; then
 fi
 
 OWNER_REPO="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" owner-repo)"
-OWNER="$(echo "$OWNER_REPO" | cut -d'/' -f1)"
-REPO="$(echo "$OWNER_REPO" | cut -d'/' -f2)"
 
 if date -v-1d >/dev/null 2>&1; then
   SINCE_DATE="$(date -v-"${DAYS}"d +%Y-%m-%d)"
@@ -51,19 +49,18 @@ fi
 OUT_DIR="$(cd "$(dirname "$OUT_FILE")" && pwd)"
 OUT_FILE="${OUT_DIR}/$(basename "$OUT_FILE")"
 
-# ラベルごとに検索して番号を和集合にする（gh の --label は複数指定するとAND条件になるため）
+# ラベルごとに検索して番号を和集合にする（gh の --label は複数指定するとAND条件になるため、
+# gh-compat.sh 経由でも同じ理由でラベルごとに引く）。
 # 認証失敗（クラウドセッションでの403等）を「該当0件」として握りつぶさないよう、
-# gh issue list の失敗はここで即座にエラー終了させる（呼び出し元が issue_count:0 と誤認しないため）。
+# 一覧取得の失敗はここで即座にエラー終了させる（呼び出し元が issue_count:0 と誤認しないため）。
+# since には SINCE_DATE（その日の 00:00:00Z）を渡す。元の `updated:>=${SINCE_DATE}` と
+# 意味を揃えるためで、SINCE_ISO（現在時刻からN日前の時刻）を渡すと対象がより狭くなり、
+# 移行前後で出力が変わってしまう。
 : > "$TEMP_DIR/numbers.txt"
 for LABEL in $LABELS; do
-  if ! gh issue list \
-    --state all \
-    --label "$LABEL" \
-    --search "updated:>=${SINCE_DATE}" \
-    --json number \
-    --jq '.[].number' \
-    --limit 200 >> "$TEMP_DIR/numbers.txt"; then
-    echo "error: gh issue list failed for label '${LABEL}' (auth/network failure, not zero results)" >&2
+  if ! bash "$(dirname "$0")/../../../scripts/gh-compat.sh" list-issues-updated-since \
+    "${SINCE_DATE}T00:00:00Z" "$LABEL" >> "$TEMP_DIR/numbers.txt"; then
+    echo "error: gh-compat.sh list-issues-updated-since failed for label '${LABEL}' (auth/network failure, not zero results)" >&2
     exit 1
   fi
 done
@@ -77,59 +74,23 @@ if [ -z "$ISSUE_NUMBERS" ]; then
   exit 0
 fi
 
-fetch_comments() {
-  local owner="$1" repo="$2" issue="$3" comments_ndjson="$4"
-  local cursor="" has_next="true"
-
-  : > "$comments_ndjson"
-
-  while [ "$has_next" = "true" ]; do
-    local args=(-f query='query($owner:String!,$repo:String!,$issue:Int!,$cursor:String) {
-      repository(owner:$owner, name:$repo) {
-        issue(number:$issue) {
-          comments(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { author { login } body url createdAt isMinimized }
-          }
-        }
-      }
-    }' -F owner="$owner" -F repo="$repo" -F issue="$issue")
-    if [ -n "$cursor" ]; then
-      args+=(-F cursor="$cursor")
-    fi
-
-    local result
-    result=$(gh api graphql "${args[@]}")
-
-    echo "$result" | jq -c '.data.repository.issue.comments.nodes[]' >> "$comments_ndjson"
-    has_next=$(echo "$result" | jq -r '.data.repository.issue.comments.pageInfo.hasNextPage')
-    cursor=$(echo "$result" | jq -r '.data.repository.issue.comments.pageInfo.endCursor')
-  done
-}
+GH_COMPAT="$(dirname "$0")/../../../scripts/gh-compat.sh"
 
 fetch_issue() {
-  local issue="$1" out_json="$2" owner="$3" repo="$4"
+  local issue="$1" out_json="$2"
 
   local work_dir="$TEMP_DIR/issue_${issue}"
   mkdir -p "$work_dir"
   local meta_file="$work_dir/meta.json"
   local comments_ndjson="$work_dir/comments.ndjson"
 
-  gh api graphql \
-    -f query='query($owner:String!,$repo:String!,$issue:Int!) {
-      repository(owner:$owner, name:$repo) {
-        issue(number:$issue) {
-          number title url state body createdAt updatedAt
-          author { login }
-          labels(first: 30) { nodes { name } }
-        }
-      }
-    }' \
-    -F owner="$owner" -F repo="$repo" -F issue="$issue" \
-    | jq -c '.data.repository.issue' > "$meta_file"
+  bash "$GH_COMPAT" issue-meta "$issue" > "$meta_file"
+  bash "$GH_COMPAT" issue-comments "$issue" > "$comments_ndjson"
 
-  fetch_comments "$owner" "$repo" "$issue" "$comments_ndjson"
-
+  # isMinimized == false フィルタ: REST に isMinimized 相当のフィールドが無いため、
+  # GraphQL が使えない環境（クラウド）では非表示（minimized）コメントを除外できず、
+  # そのまま取り込まれる（除外できる情報を落とすより取り込む側＝安全側に倒している）。
+  # ローカルでは gh-compat.sh が GraphQL で補完した値を返すため、このフィルタは従来どおり効く。
   jq -n \
     --slurpfile meta "$meta_file" \
     --slurpfile comments <(jq -s '.' "$comments_ndjson") \
@@ -170,7 +131,7 @@ wait_batch() {
 }
 
 for ISSUE in $ISSUE_NUMBERS; do
-  fetch_issue "$ISSUE" "$TEMP_DIR/issue_${ISSUE}.json" "$OWNER" "$REPO" &
+  fetch_issue "$ISSUE" "$TEMP_DIR/issue_${ISSUE}.json" &
   PIDS+=("$!")
   PIDS_ISSUE+=("$ISSUE")
 

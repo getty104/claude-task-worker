@@ -26,6 +26,7 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 
 - 収集スクリプト（`fetch-recent-*.sh` 等）は `gh` コマンドの失敗を**正常系として扱わない**。失敗時は握りつぶさず終了コード非0でエラー終了し、原因を stderr へ出す
 - 「本当に0件だった」（`gh` が成功して結果が空）と「取得に失敗した」（`gh` がエラーで終了）は常に区別できる形で返す
+- 定期ワーカー3件（`update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）の収集スクリプトは、下記「`gh-compat.sh`」の `list-*` / `pr-*` / `issue-*` サブコマンド経由の REST 化が完了しており、上記の区別（0件 vs 取得失敗）は REST 化後もそのまま維持されている
 
 ## 書き込み系操作のフォールバック方針（二重実行の防止）
 
@@ -63,6 +64,8 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 | `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`）。スレッドの node ID（`PRRT_...`）と `isResolved` を返す。カーソル方式（`perPage` 最大100 / `after` に前ページの `endCursor`）でページングを取得しきる |
 | `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等） |
 | `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる） |
+| `gh pr list --search "updated:>=<日時>"` | `list_pull_requests` / `search_pull_requests`（MCP 不可時は `gh-compat.sh` の `list-prs-updated-since <since-iso>`） |
+| `gh issue list --search "updated:>=<日時>"` | `list_issues` / `search_issues`（MCP 不可時は `gh-compat.sh` の `list-issues-updated-since <since-iso> [label]`） |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | `create_pull_request` |
 | `gh pr edit` | `pull_request_write`（method: `update`） |
@@ -99,8 +102,33 @@ MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 
 | `add-sub-issue <parent> <child>...` | `gh issue edit --add-sub-issue` | `POST .../sub_issues`（body は `sub_issue_id`） |
 | `pr-mergeable <n>` | `gh pr view --json mergeable` / `gh pr status` | `GET repos/{o}/{r}/pulls/{n}` の `mergeable`（`null` は `UNKNOWN` へ写す） |
 | `pr-for-branch [branch]` | `gh pr view --json number`（カレントブランチのPR導出） | `GET repos/{o}/{r}/pulls?state=open&head={owner}:{branch}` |
+| `list-issues-updated-since <since-iso> [label]` | `gh issue list --search "updated:>=<日時>"`（PRは除外） | `GET repos/{o}/{r}/issues?since=<since-iso>` を降順で番号だけに絞り込み |
+| `list-prs-updated-since <since-iso>` | `gh pr list --search "updated:>=<日時>"` | `GET repos/{o}/{r}/issues?state=all&since=<since-iso>` のうち `pull_request` キーを持つものだけを降順で出力 |
+| `list-prs-merged-since <since-iso> <label>` | `gh pr list --search "is:merged label:<label> merged:>=<日時>"` | `GET repos/{o}/{r}/issues?state=closed&labels=<label>&since=<since-iso>` を `pull_request.merged_at >= since-iso` で絞り込み、`merged_at` 降順で出力 |
+| `pr-meta <pr-number>` | `gh pr view --json ...`（GraphQL 互換） | `GET repos/{o}/{r}/pulls/{n}` |
+| `pr-review-comments <pr-number>` | `gh api graphql`（`reviewThreads`） | `GET repos/{o}/{r}/pulls/{n}/comments`（NDJSON。`is_resolved` は縮退フィールド、後述） |
+| `pr-conversation-comments <pr-number>` | `gh pr view --json comments` | `GET repos/{o}/{r}/issues/{n}/comments`（NDJSON。`isMinimized` は縮退フィールド、後述） |
+| `pr-files <pr-number>` | `gh pr view --json files` / `gh pr diff --name-only` | `GET repos/{o}/{r}/pulls/{n}/files`（NDJSON） |
+| `issue-meta <issue-number>` | `gh issue view --json ...`（GraphQL 互換） | `GET repos/{o}/{r}/issues/{n}` |
+| `issue-comments <issue-number>` | `gh issue view --json comments` | `GET repos/{o}/{r}/issues/{n}/comments`（NDJSON。`isMinimized` は縮退フィールド、後述） |
 
-2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。
+2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。同様の理由で定期ワーカー3件（`update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）の収集スクリプトが依存していた `gh api graphql` / `gh pr list` / `gh issue list` も上記の `list-*` / `pr-*` / `issue-*` サブコマンドへ移行済みである。
+
+PR の一覧系（`list-prs-*`）が `repos/{o}/{r}/pulls` ではなく `repos/{o}/{r}/issues` を叩くのは、更新日時での足切り（`since`）とラベル絞り込み（`labels`）を持つのが後者だけのため。同エンドポイントは Issue と PR の両方を返すので、`pull_request` キーの有無で仕分ける（PR のエントリはその中に `merged_at` も持つ）。
+
+### `gh api --paginate` はクラウドでは使えない
+
+2026-08-30 の実測: `gh api --paginate` は GitHub が返す `Link: <...>; rel="next"` ヘッダの URL をそのまま辿るが、GitHub はそこに **`repositories/{id}/...` という数値IDパス**を載せる。クラウドセッションのプロキシはこれを `Numeric-ID repository paths (repositories/{id}/...) are not supported through this proxy.` として拒否するため、**1ページ目は成功しても2ページ目で必ず失敗する**。100件以内に収まるうちは表面化しないので見落としやすい。
+
+全ページ取得が要る箇所は `-f per_page=100 -f page=N` を明示して `repos/{o}/{r}/...` のパスのまま辿ること（`gh-compat.sh` の `rest_get_all_pages` がこの方式）。
+
+### REST に同等表現が無く縮退するフィールド
+
+REST（およびそれに基づく `gh-compat.sh`）には GraphQL 相当の資源・フィールドが無いものが3点ある。ローカル実行（GraphQL が使える環境）では `gh-compat.sh` が best-effort の GraphQL 補完で埋めるが、GraphQL が塞がれた環境（クラウド）では以下のとおり縮退する。**握りつぶさず、値が欠落しうる旨を利用側スキルの出力フォーマット説明に明記すること。**
+
+- **`is_resolved`（レビュースレッドの解決状態）**: REST に「レビュースレッド」という資源が無い。GraphQL 補完が効かない環境では `null` になる
+- **会話コメント／Issueコメントの `isMinimized`**: REST に同等表現が無い。GraphQL が使えない環境では非表示（minimized）コメントを除外できず、収集結果に含まれる（落とすより取り込む側＝安全側に倒す）
+- **`related_issues`（GraphQL の `closingIssuesReferences`）**: REST に同等資源が無いため、`pr-meta` は PR 本文の closing keyword（`Closes #N` 等）から導出する。GitHub の UI で手動リンクされた closing 参照は本文に現れないため取得できない
 
 ## `gh` のまま残す操作
 
