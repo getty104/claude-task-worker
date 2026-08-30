@@ -17,7 +17,7 @@ GitHub PR `$0` の未解決 Review thread を一括で Resolve するスキル�
 
 ## GitHub アクセス
 
-本スキルの GitHub 参照/更新は **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**。判定手順は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する。
+本スキルの GitHub 参照/更新は **`gh` コマンドを優先し、`gh` が使えない場合に GitHub MCP へフォールバックする**（クラウド実行時のみ優先順位が逆転し、その指示は起動プロンプトで渡される）。判定手順は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照する。
 
 Resolve（`resolveReviewThread`）は REST に該当エンドポイントが無いため、`gh` 経路では GraphQL 直叩きになる。クラウドセッション（`claude --cloud`）では GitHub プロキシが GraphQL を 403 で拒否するため、**`gh` フォールバックはクラウド実行では成立しない**。MCP 経路がクラウドで Resolve できる唯一の手段である。
 

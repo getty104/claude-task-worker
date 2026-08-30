@@ -15,7 +15,7 @@ const {
   DEFAULT_WORKER_CONFIG,
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
-  CLOUD_DENIED_WORKERS,
+  CLOUD_ALLOWED_WORKERS,
   checkCloudConfig,
   checkCloudAuth,
   isCloudWorker,
@@ -171,10 +171,20 @@ test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
   }
 });
 
-test("scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-cloud-done)", () => {
+test("scheduled workers are never cloud-allowed (no Issue/PR to hold cc-cloud-done)", () => {
   for (const name of SCHEDULED_WORKER_NAMES) {
-    assert.ok((CLOUD_DENIED_WORKERS as readonly string[]).includes(name), `${name} must be in CLOUD_DENIED_WORKERS`);
+    assert.ok(
+      !(CLOUD_ALLOWED_WORKERS as readonly string[]).includes(name),
+      `${name} must not be in CLOUD_ALLOWED_WORKERS`,
+    );
   }
+});
+
+// クラウド実行は「成果ゼロでも完了扱いになり、トリガーラベルの再付与で再起動され続ける」
+// 失敗の仕方をするため、許可は明示した2つに固定する。新しいワーカーが黙ってクラウドへ
+// 流れないよう、この一覧自体をテストで固定しておく。
+test("only exec-issue and fix-review-point are allowed to run in the cloud", () => {
+  assert.deepEqual([...CLOUD_ALLOWED_WORKERS], ["exec-issue", "fix-review-point"]);
 });
 
 test("parseWorkerEntry warns and ignores a legacy cloud key (moved to the --cloud runtime flag)", (t) => {
@@ -224,7 +234,7 @@ test("isCloudWorker returns false for every worker when --cloud is not passed", 
   }
 });
 
-test("isCloudWorker returns true for non-denied workers when --cloud is passed", (t) => {
+test("isCloudWorker returns true only for CLOUD_ALLOWED_WORKERS when --cloud is passed", (t) => {
   const originalArgv = process.argv;
   t.after(() => {
     process.argv = originalArgv;
@@ -233,22 +243,15 @@ test("isCloudWorker returns true for non-denied workers when --cloud is passed",
   process.argv = [...originalArgv, "--cloud"];
   resetCloudFlagCache();
 
-  assert.equal(isCloudWorker("exec-issue"), true);
-  assert.equal(isCloudWorker("triage-pr"), true);
-});
-
-test("isCloudWorker returns false for every CLOUD_DENIED_WORKERS entry even when --cloud is passed", (t) => {
-  const originalArgv = process.argv;
-  t.after(() => {
-    process.argv = originalArgv;
-    resetCloudFlagCache();
-  });
-  process.argv = [...originalArgv, "--cloud"];
-  resetCloudFlagCache();
-
-  for (const name of CLOUD_DENIED_WORKERS) {
-    assert.equal(isCloudWorker(name), false, `isCloudWorker(${name}) must stay local under --cloud`);
+  for (const name of Object.keys(WORKER_DEFAULTS)) {
+    const expected = (CLOUD_ALLOWED_WORKERS as readonly string[]).includes(name);
+    assert.equal(isCloudWorker(name), expected, `isCloudWorker(${name}) under --cloud`);
   }
+  assert.equal(isCloudWorker("exec-issue"), true);
+  assert.equal(isCloudWorker("fix-review-point"), true);
+  // かつてクラウド実行を許していたが、空振りしたまま cc-triage-scope が再付与されて
+  // クラウドセッションを焼き続けるためローカルへ戻したワーカー。
+  assert.equal(isCloudWorker("triage-pr"), false);
 });
 
 // M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）

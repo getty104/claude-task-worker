@@ -69,7 +69,7 @@ CodeGraph が扱わない対象（設定ファイル、ドキュメント、コ�
 
 - 一般のWebページ・仕様書 → `WebFetch`
 - ライブラリ/フレームワークの公式ドキュメント → context7 MCP（`resolve-library-id` でIDを解決してから doc を引く）
-- GitHub上のIssue・PR・ファイル → `gh issue view` / `gh pr view` / `gh api`（`WebFetch` より確実）。本エージェントの GitHub 参照も **GitHub MCP を優先し、利用不可なら `gh` コマンドへフォールバックする**（対応表は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照。読み取りなら `issue_read` / `pull_request_read` 等）
+- GitHub上のIssue・PR・ファイル → `gh issue view` / `gh pr view` / `gh api`（`WebFetch` より確実）。本エージェントの GitHub 参照も **`gh` コマンドを優先し、`gh` が使えない場合に GitHub MCP へフォールバックする**（クラウド実行時のみ逆転）（対応表は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` を参照。読み取りなら `issue_read` / `pull_request_read` 等）
 - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を1回だけ探す
 
 **開くのは答えに効くリンクだけ**（バッジ画像・ライセンス・無関係な記事は開かない）。リンク先からさらに辿るのは**1段まで**。取得できなければ1回だけ再試行し、それでも読めなければ「未確認・不明点」に `<URL>` と失敗理由を書いて次へ進む（推測で埋めない）。参照したリンクは「根拠となる場所」に `<URL> — <要点>` の形で `path:line` と並べて書く。

@@ -304,6 +304,22 @@ export function buildCloudCheckoutInstruction(target: { type: "issue" | "pr"; nu
   return `このセッションは PR #${target.number} の head ブランチ上で開始している（ワーカーが \`--on-branch\` で指定済み）。スキル本文が指示する \`gh pr checkout\` は実行しないこと（クラウドでは GraphQL ゲートにより 403 で失敗し、かつ既にブランチ上にいるので不要）。ブランチの確認が要る場合は \`git rev-parse --abbrev-ref HEAD\` を使うこと。`;
 }
 
+// クラウド実行時の GitHub アクセス指示。
+//
+// スキル本文と `plugin/references/github-access.md` の既定は **`gh` 優先**にしてある
+// （ローカル実行では `gh` も MCP も動くが、MCP は1操作＝1ターンでパイプ・`--jq` を
+// まとめられないぶんターン数が増える。MCP は前提条件ではなく最適化であり、未設定の
+// 環境では毎操作が「MCP を試す → 失敗 → `gh`」の2手になる）。
+//
+// クラウドセッションだけは `gh ... --json` が GraphQL ゲートで 403 になり Issue/PR 本文を
+// 1文字も読めないため、優先順位を逆転させる必要がある。実行形態はスキル本文からは
+// 判定できないので、`buildCloudCheckoutInstruction()` と同じくワーカー側から
+// 初期プロンプト本文で伝える（`.claude/requirements/worker-skill-contract.md` の
+// 「実行形態で届かない制御は、その形態で届く経路へ内容ごと移す」）。
+export function buildCloudGitHubAccessInstruction(): string {
+  return "このセッションはクラウド実行のため、GitHub の参照/更新は **GitHub MCP を第一手段**にすること（スキル本文と `references/github-access.md` の既定である `gh` 優先を、このセッションに限り逆転させる）。クラウドの GitHub プロキシは `gh issue view --json` / `gh pr view --json` などの GraphQL 経由の操作をフィールドを問わず 403 にするため、`gh` を第一手段にすると Issue/PR 本文を取得できない。MCP に該当ツールが無い操作は `gh api repos/...`（REST）または `plugin/scripts/gh-compat.sh` を使うこと（REST はクラウドでも成功する）。フォールバックは1操作につき1回まで。";
+}
+
 // `--disallowedTools` の文面（cloud プロンプト用）。DISALLOWED_TOOLS と二重管理しないよう
 // 配列から都度組み立てる。
 export function buildCloudToolRestriction(): string {
@@ -319,7 +335,7 @@ export function buildCloudToolRestriction(): string {
 // 従来どおり CLI フラグ経由のままで、この関数は使わない。
 //
 // target を省略した場合（定期ワーカー）は cc-cloud-done 完了検知の指示を付けない。
-// CLOUD_DENIED_WORKERS により定期ワーカーは実際には cloud で起動されないが、
+// 定期ワーカーは CLOUD_ALLOWED_WORKERS 外のため実際には cloud で起動されないが、
 // buildClaudeArgs 同様に呼び出し可能な形にしておく。
 //
 // タスクプロンプト（prompt）を先頭に置くのは、Claude Code がメッセージ先頭の
@@ -331,7 +347,7 @@ export function buildCloudPrompt(
   model: string,
   target?: { type: "issue" | "pr"; number: number },
 ): string {
-  const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}`;
+  const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}`;
   const withPrinciples = `${prompt}\n\n${principles}`;
   return target ? appendCloudDoneInstruction(withPrinciples, target) : withPrinciples;
 }

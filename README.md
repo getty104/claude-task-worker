@@ -247,7 +247,9 @@ claude-task-worker exec-issue --project app-a --epic 100 --label priority-high
 
 ### `--cloud`
 
-指定したワーカーのタスクを Claude Code on the web（クラウド VM）で実行する。プロセス単位のフラグで既定は無効。`all` / `yolo` に付けると、クラウド実行を拒否するワーカー（`CLOUD_DENIED_WORKERS`: `resolve-conflict` / `create-ui-design` / `apply-ui-design` ＋ 定期ワーカー3つ `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）だけがローカル実行のまま残り、それ以外は全てクラウド実行になる。どのワーカーがローカルに残るかは起動時に1行ログで示される。
+指定したワーカーのタスクを Claude Code on the web（クラウド VM）で実行する。プロセス単位のフラグで既定は無効。クラウドで実行されるのは `exec-issue` / `fix-review-point` の2つだけで（`CLOUD_ALLOWED_WORKERS`）、それ以外のワーカーは `--cloud` を付けてもローカル実行のまま残る。どのワーカーがクラウドで走るかは起動時に1行ログで示される。
+
+許可リスト方式にしているのは、クラウド実行が「成果ゼロでも完了扱いになり、トリガーラベルの再付与で再起動され続ける」失敗の仕方をするため。`triage-pr` などは GraphQL ゲートで判断材料を取得できず空振りするが、完了扱いになるとポーリング間隔ごとにクラウドセッションを焼き続ける。
 
 ```bash
 claude-task-worker exec-issue --cloud

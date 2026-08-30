@@ -261,24 +261,24 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
 });
 
 // ============================================================
-// B. PR系ワーカーのクラウド起動引数（triage-pr, herdr, --cloud）
+// B. PR系ワーカーのクラウド起動引数（fix-review-point, herdr, --cloud）
 // ============================================================
-test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付けない", { timeout: 60_000 }, async (t) => {
+test("B: fix-review-point のクラウド実行が --on-branch を付け、--ref を付けない", { timeout: 60_000 }, async (t) => {
   const stubs = installCliStubs({
     gh: {
       login: "octocat",
       repo: { owner: "acme", name: "demo", defaultBranch: "main" },
-      prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-triage-scope" }], title: "Fix bug" }],
+      prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-fix-onetime" }], title: "Fix bug" }],
       view: { "701": { checks: [] } },
     },
     herdr: {
       paneOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubB?from=cli&m=0",
     },
-    claude: { stdout: "[stub] triage-pr cloud report" },
+    claude: { stdout: "[stub] fix-review-point cloud report" },
   });
   const handle = await startWorker({
-    worker: "triage-pr",
-    workerConfig: { workers: { "triage-pr": { pollingIntervalSeconds: 3600 } } },
+    worker: "fix-review-point",
+    workerConfig: { workers: { "fix-review-point": { pollingIntervalSeconds: 3600 } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
     extraArgs: ["--cloud"],
@@ -300,7 +300,7 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
 // ============================================================
 // C. 定期ワーカーは --cloud 下でもローカル実行に落ちる（update-coding-guidelines, herdr, --cloud）
 // ============================================================
-// 定期ワーカーは CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため、isCloudWorker() が false を
+// 定期ワーカーは CLOUD_ALLOWED_WORKERS（src/config.ts）に含まれないため、isCloudWorker() が false を
 // 返しローカル実行になる（対象 Issue/PR を持たず cc-cloud-done を置く先が無く完了検知できないため。
 // Phase 1 の制約）。新仕様では --cloud はプロセス単位のフラグなので起動時エラーにはならない。
 test(
@@ -464,10 +464,10 @@ test("E1: mode default で --cloud を渡すと起動せず終了コード1", { 
   assert.ok(handle.stdout().includes("herdr"), "エラーメッセージが herdr モードへの切り替えを案内していない");
 });
 
-// resolve-conflict は CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため、--cloud 下でも
+// resolve-conflict は CLOUD_ALLOWED_WORKERS（src/config.ts）に含まれないため、--cloud 下でも
 // 起動時エラーにならずローカル実行（worktree あり・--cloud なしの claude 起動）に落ちる。
 test(
-  "E2: CLOUD_DENIED_WORKERS のワーカー（resolve-conflict）は --cloud 下でもローカル実行に落ちる",
+  "E2: 許可リスト外のワーカー（resolve-conflict）は --cloud 下でもローカル実行に落ちる",
   { timeout: 45_000 },
   async (t) => {
     const stubs = installCliStubs({
@@ -726,17 +726,17 @@ test("I: クラウド完了待機中はトリガーラベルが再装填され�
     gh: {
       login: "octocat",
       repo: { owner: "acme", name: "demo", defaultBranch: "main" },
-      prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-triage-scope" }], title: "Fix bug" }],
+      prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-fix-onetime" }], title: "Fix bug" }],
       view: { "701": { checks: [] } },
     },
     herdr: {
       paneOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubI?from=cli&m=0",
     },
-    claude: { stdout: "[stub] triage-pr cloud report" },
+    claude: { stdout: "[stub] fix-review-point cloud report" },
   });
   const handle = await startWorker({
-    worker: "triage-pr",
-    workerConfig: { workers: { "triage-pr": { pollingIntervalSeconds: 1 } } },
+    worker: "fix-review-point",
+    workerConfig: { workers: { "fix-review-point": { pollingIntervalSeconds: 1 } } },
     userConfig: { mode: "herdr" },
     records: stubs.records,
     extraArgs: ["--cloud"],
