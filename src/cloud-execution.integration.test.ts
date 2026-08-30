@@ -883,3 +883,74 @@ test("L: --cloud を指定しなければ cc-cloud-done ラベルを作成しな
     "cloud ワーカーが無いのにラベルが作成されている",
   );
 });
+
+// ============================================================
+// M. クラウドセッション作成（ID抽出）待機中のシャットダウンで "shutdown" 理由になる（Issue #372）
+// ============================================================
+test(
+  "M: セッションID抽出待機中のシャットダウンで shutdown 理由の孤立セッションコメントを残す",
+  { timeout: 60_000 },
+  async (t) => {
+    const slack = await startSlackCapture();
+    t.after(() => slack.close());
+
+    const stubs = installCliStubs({
+      gh: ISSUE_GH_SCENARIO,
+      // cloudOutput を与えずセッションIDが一度も出ないまま作成コマンドを滞留させる
+      // （createCloudSession の Promise は abort フラグを見るまで解決しない）。
+      claude: { cloudLinger: true },
+    });
+    const handle = await startWorker({
+      worker: "exec-issue",
+      workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      // タイムアウトより先に abort が発生するよう十分大きく取る。
+      env: { CTW_CLOUD_SESSION_TIMEOUT_MS: "60000", CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+      extraArgs: ["--cloud"],
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    // クラウドセッションの作成コマンド起動（ID抽出待ちフェーズへ入ったこと）を確認する。
+    await handle.waitFor((records) => findCreateRecord(records) !== undefined);
+
+    // src/index.ts の SIGINT ハンドラは2段階（J と同じ理由）。1回目で "Stopping new tasks"
+    // が出るのを待ってから2回目を送り、herdrAbortSignal を確実に立てる。
+    handle.child.kill("SIGINT");
+    await waitForStdout(handle, (out) => out.includes("Stopping new tasks"));
+    handle.child.kill("SIGINT");
+
+    await handle.waitFor((records) => findCommentBody(records, "issue", 501) !== undefined, 30_000);
+
+    const records = stubs.records();
+    assert.ok(
+      records.some(
+        (r) =>
+          r.command === "gh" &&
+          r.argv[0] === "issue" &&
+          r.argv[1] === "edit" &&
+          r.argv.includes("--add-label") &&
+          r.argv.includes("cc-need-human-check"),
+      ),
+      "cc-need-human-check が付与されていない",
+    );
+
+    const commentBody = findCommentBody(records, "issue", 501);
+    assert.ok(commentBody, "孤立クラウドセッションのコメントが記録されていない");
+    assert.ok(
+      commentBody!.includes("ワーカーのシャットダウンで待機を打ち切りました"),
+      "shutdown 理由の文面が含まれていない（session-id 理由に固定されている可能性）",
+    );
+    assert.ok(
+      !commentBody!.includes("セッションIDの抽出に失敗して待機を打ち切りました"),
+      "session-id 理由の文面が混入している（修正前の固定 reason のバグが再発している）",
+    );
+    assert.ok(
+      commentBody!.includes("セッションURL不明（ID抽出に失敗）"),
+      "セッションIDが取れない場合のプレースホルダがコメントに含まれていない",
+    );
+  },
+);

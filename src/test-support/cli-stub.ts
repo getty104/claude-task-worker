@@ -46,6 +46,12 @@ export interface CliStubOptions {
      * させる。実際のクラウドセッションが最後の操作として行う付与を模倣する。
      */
     cloudComplete?: { type: "issue" | "pr"; number: number; report?: string };
+    /**
+     * セッションID抽出待ちの間にシャットダウンが走るケースを再現するため、クラウドセッション
+     * 作成コマンドを意図的に終了させず滞留させる（上限30秒で自動 exit）。cloudOutput を
+     * 与えない場合と組み合わせ、IDが一度も出ないまま abort されるケースを作る。
+     */
+    cloudLinger?: boolean;
   };
   herdr?: {
     agentStatuses?: string[];
@@ -111,6 +117,7 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
     options?.claude?.exitCode === undefined ? undefined : String(options.claude.exitCode),
   );
   setEnv("CTW_STUB_CLAUDE_CLOUD_OUTPUT", options?.claude?.cloudOutput);
+  setEnv("CTW_STUB_CLAUDE_CLOUD_LINGER", options?.claude?.cloudLinger ? "1" : undefined);
   setEnv("CTW_STUB_HERDR_AGENT_STATUSES", options?.herdr?.agentStatuses?.join(","));
   setEnv("CTW_STUB_HERDR_PANE_OUTPUT", options?.herdr?.paneOutput);
   setEnv(
