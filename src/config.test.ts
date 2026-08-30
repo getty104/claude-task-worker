@@ -176,17 +176,16 @@ test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
 // 正式な経路にしたためクラウド実行できる。deny-list へ差し戻さないよう固定する。
 test("scheduled workers are not in CLOUD_DENIED_WORKERS (session creation counts as completion)", () => {
   for (const name of SCHEDULED_WORKER_NAMES) {
-    assert.ok(
-      !(CLOUD_DENIED_WORKERS as readonly string[]).includes(name),
-      `${name} must not be in CLOUD_DENIED_WORKERS`,
-    );
+    assert.ok(!CLOUD_DENIED_WORKERS.includes(name), `${name} must not be in CLOUD_DENIED_WORKERS`);
   }
 });
 
-// denied に残るのは pen 系3件だけ。`--cloud` 起動ログ（src/index.ts の "these workers stay
-// local"）はこの配列を join するため、内容がそのままログに出る。
-test("CLOUD_DENIED_WORKERS holds only the pencil-dependent workers", () => {
-  assert.deepEqual([...CLOUD_DENIED_WORKERS], ["resolve-conflict", "create-ui-design", "apply-ui-design"]);
+// resolve-conflict / create-ui-design / apply-ui-design の拒否理由（force-push 未測定 /
+// pencil CLI 未導入）は実測（#332 / #333）で失効したため denied は空。将来ワーカーを
+// denied へ戻す判断が生じた場合のための枠組みとして配列自体は残っており、空であることを
+// 固定して黙って何かが追加されるのを検出する。
+test("CLOUD_DENIED_WORKERS is empty", () => {
+  assert.deepEqual([...CLOUD_DENIED_WORKERS], []);
 });
 
 test("isCloudWorker returns true for every scheduled worker when --cloud is passed", (t) => {
@@ -263,6 +262,8 @@ test("isCloudWorker returns true for non-denied workers when --cloud is passed",
   assert.equal(isCloudWorker("triage-pr"), true);
 });
 
+// CLOUD_DENIED_WORKERS は現在空なのでこのループは0回になるが、将来何かが denied へ
+// 追加された時点で自動的に効くようにテスト自体は残す。
 test("isCloudWorker returns false for every CLOUD_DENIED_WORKERS entry even when --cloud is passed", (t) => {
   const originalArgv = process.argv;
   t.after(() => {
@@ -274,6 +275,22 @@ test("isCloudWorker returns false for every CLOUD_DENIED_WORKERS entry even when
 
   for (const name of CLOUD_DENIED_WORKERS) {
     assert.equal(isCloudWorker(name), false, `isCloudWorker(${name}) must stay local under --cloud`);
+  }
+});
+
+// #335: resolve-conflict / create-ui-design / apply-ui-design を CLOUD_DENIED_WORKERS から
+// 除外したことを固定する。黙って denied へ戻された場合にここが赤くなる。
+test("isCloudWorker returns true for the formerly-denied pencil-dependent workers when --cloud is passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv, "--cloud"];
+  resetCloudFlagCache();
+
+  for (const name of ["resolve-conflict", "create-ui-design", "apply-ui-design"]) {
+    assert.equal(isCloudWorker(name), true, `isCloudWorker(${name}) must run in the cloud under --cloud`);
   }
 });
 

@@ -266,7 +266,9 @@ async function assertCloudAvailable(): Promise<void> {
   }
   if (cloud) {
     console.log(
-      `[worker] cloud execution enabled (--cloud); these workers stay local: ${CLOUD_DENIED_WORKERS.join(", ")}`,
+      CLOUD_DENIED_WORKERS.length === 0
+        ? "[worker] cloud execution enabled (--cloud); all workers run in the cloud"
+        : `[worker] cloud execution enabled (--cloud); these workers stay local: ${CLOUD_DENIED_WORKERS.join(", ")}`,
     );
   }
 }

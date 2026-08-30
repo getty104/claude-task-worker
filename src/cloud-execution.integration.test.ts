@@ -446,7 +446,7 @@ test(
 );
 
 // ============================================================
-// E. 起動拒否
+// E. 起動拒否・denied ワーカー境界
 // ============================================================
 test("E1: mode default で --cloud を渡すと起動せず終了コード1", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
@@ -479,10 +479,12 @@ test("E1: mode default で --cloud を渡すと起動せず終了コード1", { 
   assert.ok(handle.stdout().includes("herdr"), "エラーメッセージが herdr モードへの切り替えを案内していない");
 });
 
-// resolve-conflict は CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため、--cloud 下でも
-// 起動時エラーにならずローカル実行（worktree あり・--cloud なしの claude 起動）に落ちる。
+// resolve-conflict は Issue #335 で CLOUD_DENIED_WORKERS（src/config.ts）から外れ、他の
+// PR系ワーカー（B: triage-pr）と同じ経路で --cloud 下ではクラウドセッション作成に進む。
+// pen 系3件（resolve-conflict / create-ui-design / apply-ui-design）を denied から外した
+// 根拠は docs/cloud-session-force-push.md の F-3 / F-4 の実測（force-push 可否の確認）。
 test(
-  "E2: CLOUD_DENIED_WORKERS のワーカー（resolve-conflict）は --cloud 下でもローカル実行に落ちる",
+  "E2: resolve-conflict は --cloud 下でクラウド起動になり --on-branch を付け worktree を作らない",
   { timeout: 45_000 },
   async (t) => {
     const stubs = installCliStubs({
@@ -494,7 +496,10 @@ test(
         ],
         view: { "801": { checks: [] } },
       },
-      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] resolve-conflict local report" },
+      herdr: {
+        paneOutput: "Created cloud session: ctw:demo:#801\nView: https://claude.ai/code/session_stubE2?from=cli&m=0",
+      },
+      claude: { stdout: "[stub] resolve-conflict cloud report" },
     });
     const handle = await startWorker({
       worker: "resolve-conflict",
@@ -508,20 +513,28 @@ test(
       stubs.cleanup();
     });
 
-    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 30_000);
+    await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined, 30_000);
 
     const records = stubs.records();
     const tabCreate = findRecord(records, "herdr", "tab", "create")!;
-    const cwdArg = argValue(tabCreate.argv, "--cwd")!;
-    assert.ok(
-      cwdArg.startsWith(`${join(realpathSync(handle.repoDir), ".claude", "worktrees")}${sep}`),
-      `worktree 配下の cwd になっていない: ${cwdArg}`,
+    assert.equal(
+      argValue(tabCreate.argv, "--cwd"),
+      realpathSync(handle.repoDir),
+      "クラウド実行では worktree を作らずリポジトリルートを cwd にする",
     );
 
-    const agentStart = findRecord(records, "herdr", "agent", "start")!;
-    const claudeArgs = extractAgentStartArgs(agentStart);
-    assert.ok(!claudeArgs.includes("--cloud"), "denied ワーカーが --cloud 付きで起動している");
-    assert.ok(!claudeArgs.includes("--on-branch"));
+    assert.equal(
+      findRecord(records, "herdr", "agent", "start"),
+      undefined,
+      "クラウド実行で agent start が呼ばれている",
+    );
+
+    const sendText = findRecord(records, "herdr", "pane", "send-text")!;
+    const createCommand = extractCreateCommand(sendText);
+    assert.ok(createCommand.includes("'--cloud'"), "--cloud が付いていない");
+    assert.equal(commandFlagValue(createCommand, "--on-branch"), "conflict-branch");
+    assert.ok(!createCommand.includes("'--ref'"), "PR系ワーカーは --ref を付けてはいけない");
+    assert.ok(!createCommand.includes("'-p'"), "-p が付いてはいけない（クラウド作成コマンドは常に非付与）");
   },
 );
 

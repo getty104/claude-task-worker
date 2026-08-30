@@ -96,7 +96,7 @@ gh pr diff <デザインPR番号> --name-only
 
 固定パスは同一Issueへの並行実行で衝突しうるため `mktemp` で一意な一時ファイルを確保する。さらに、本文の取得（`view`）と書き戻し（`edit`）の間に人間または別プロセスが本文を更新している可能性があるため、`edit` 直前に本文を再取得して差分を検証する。
 
-> GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+> GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）、本文書き戻しに `issue_write`（method: `update`、`body` 引数）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"

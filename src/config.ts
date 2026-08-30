@@ -228,20 +228,25 @@ export const SCHEDULED_WORKER_NAMES = [
 // （cc-cloud-done ラベルのポーリングでクラウドタスクの完了を判定する。#284）。
 export const CLOUD_DONE_LABEL = "cc-cloud-done";
 
-// --cloud 指定時もクラウド実行にしないワーカー。resolve-conflict は rebase 後の force-push が
-// クラウド環境で可能か未測定のため、create-ui-design / apply-ui-design は .pen の編集に必要な
-// pencil CLI がクラウド環境に未導入（さらに認証が要る）ため、いずれも拒否する。
+// --cloud 指定時もクラウド実行にしないワーカー。現時点では0件（--cloud 指定時は全ワーカーが
+// クラウド実行される）。かつては resolve-conflict（rebase 後の force-push 可否が未測定）・
+// create-ui-design / apply-ui-design（.pen の編集に必要な pencil CLI がクラウド環境に未導入）
+// の3件を拒否していたが、実測でいずれも失効した: force-push は docs/cloud-session-force-push.md
+// の F-3（--force-with-lease の成功）・F-4（cc-ui-design-<N> 固定名ブランチの自己作成と push
+// 成功）で可能と確定し、pencil CLI は docs/cloud-pen-cli.md でクラウド VM に @pen.dev/cli が
+// 導入済み・PEN_CLI_KEY で認証できることを確認した（#332 / #333）。ワーカーを denied へ戻す
+// 判断が将来生じた場合のための枠組みとして定数自体は残す。
 //
 // 定期ワーカー（SCHEDULED_WORKER_NAMES）はここに含めない。対象 Issue/PR を持たず
 // cc-cloud-done を置く先が無いのは変わらないが、完了検知を作る代わりに
 // 「クラウドセッションの作成をもって完了とする」経路（process-manager.ts の
 // runViaCloud() の !cloudTarget 分岐）を正式な経路にしたため、クラウド実行できる。
-export const CLOUD_DENIED_WORKERS = ["resolve-conflict", "create-ui-design", "apply-ui-design"] as const;
+export const CLOUD_DENIED_WORKERS: readonly string[] = [];
 
 // --cloud 指定時に、そのワーカーをクラウド実行するか。CLOUD_DENIED_WORKERS の
 // ワーカーは起動時エラーにせずローカル実行のまま残す。
 export function isCloudWorker(name: string): boolean {
-  return hasCloudFlag() && !(CLOUD_DENIED_WORKERS as readonly string[]).includes(name);
+  return hasCloudFlag() && !CLOUD_DENIED_WORKERS.includes(name);
 }
 
 // `claude auth status --json` が読めた場合は判定対象のフィールドを、

@@ -94,7 +94,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`cc-resolve-conflict`ラベルの付与と除去が繰り返される無限ループになる。
 
-> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+> `TARGET_BRANCH`（`baseRefName`）は GitHub MCP が使える場合 `pull_request_read`（method: `get`）を第一手段にする。`MERGEABLE`（`mergeable`）は `gh pr view --json mergeable` が GraphQL 経由でクラウドでは403になるため、MCP 利用不可時は `gh` ではなく `${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-mergeable $ARGUMENTS` へフォールバックする（REST の `mergeable` を `true`→`MERGEABLE` / `false`→`CONFLICTING` / `null`→`UNKNOWN` へ写して返すため、以下の判定基準にそのまま使える）。
 
 ```bash
 TARGET_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)

@@ -54,6 +54,9 @@ pencil status
 いずれかが失敗する（未インストール・未認証など）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**
 
 1. Issue に理由（実行したコマンドとエラー出力の要約）をコメントする
+
+   > GitHub MCP が使える場合は `add_issue_comment` を使う。以下は MCP 利用不可時のフォールバック。
+
    ```bash
    gh issue comment $0 --body-file - <<'EOF'
    ## Pencil を利用できないためデザインを作成できません（要人手確認）
@@ -72,7 +75,7 @@ pencil status
    - デザインなしで実装へ進める場合は、`cc-need-human-check` ラベルを外し `cc-ui-design-ready` と `cc-exec-issue` ラベルを付けてください
    EOF
    ```
-2. `gh issue edit $0 --add-label "cc-need-human-check"` を実行する
+2. `gh issue edit $0 --add-label "cc-need-human-check"` を実行する（GitHub MCP が使える場合は `issue_write`（method: `update`、`labels`）を使う。`labels` は差分追加ではなく全量置換なので、既存ラベルに追加分を足した全量を渡す）
 3. 最終報告に「Pencil 利用不可・`cc-need-human-check` 付与済み」と原因を明記して終了する
 
 ### 0-3. デザイン配置先の解決
@@ -120,7 +123,7 @@ fi
    - 判断理由: <UI変更を伴わないと判断した根拠を1-2行で>
    ```
 
-   > GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+   > GitHub MCP が使える場合は本文取得（取得・検証読み出しとも）に `issue_read`（method: `get`）、本文更新に `issue_write`（method: `update`、`body` 引数）を使う。以下は MCP 利用不可時のフォールバック。
 
    ```bash
    BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"
@@ -134,6 +137,9 @@ fi
 
    `grep` がヒットしない場合はもう一度だけ書き込みを試し、それでも反映されなければフェーズ0-2と同じ手順（`cc-need-human-check` 付与）で終了する（マーカー無しで実装へ戻すとトリアージのループになるため）。
 2. Issue に判断理由をコメントする
+
+   > GitHub MCP が使える場合は `add_issue_comment` を使う。以下は MCP 利用不可時のフォールバック。
+
    ```bash
    gh issue comment $0 --body-file - <<'EOF'
    ## UIデザインは不要と判断しました
@@ -145,6 +151,9 @@ fi
    EOF
    ```
 3. 実装トリガーを付与する（`cc-ui-design-ready` は付けない。exec-issue のフェーズ0ガードは同ラベルがあると `.pen` の実パス行を要求するため、デザイン不要経路では付与せず `cc-exec-issue` のみで実装へ戻す）
+
+   > GitHub MCP が使える場合は `issue_write`（method: `update`、`labels`。全量置換のため既存ラベル+追加分を渡す）を使う。以下は MCP 利用不可時のフォールバック。
+
    ```bash
    gh issue edit $0 --add-label "cc-exec-issue"
    ```
@@ -275,6 +284,8 @@ ME=$(gh api user --jq '.login')
 ```
 
 PR本文は `--body-file -` + heredoc（`<<'EOF'` クォート版）で渡す。プレースホルダは heredoc に渡す前に実値へ置換しておくこと。
+
+> GitHub MCP が使える場合は `create_pull_request` を使う。**同ツールに assignee 指定に相当する引数は無い**ため、Assignee 付与が必要ならフォールバックの `gh pr create --assignee` を使うか、PR作成後に別途 Assignee を付与すること。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr create \
