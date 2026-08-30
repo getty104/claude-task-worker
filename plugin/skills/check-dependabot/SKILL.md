@@ -178,6 +178,8 @@ gh pr checks $ARGUMENTS
 
 追加のコミットは行わず、**CIチェックが全てpassしていることを再確認した上で**、以下のコマンドでPRをマージする。**判定だけで終了せず、必ずマージコマンドを実行すること。**
 
+> GitHub MCP が使える場合は `merge_pull_request`（`merge_method: "merge"`）を優先し、利用不可なら以下にフォールバックする。MCP には `--delete-branch` に相当する引数が無いため、ブランチ削除が必要なら `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` を別途実行する。書き込み系のため、MCP 呼び出しが失敗した場合は、未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず PR のマージ状態を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
 ```bash
 gh pr merge $ARGUMENTS --merge --delete-branch
 ```

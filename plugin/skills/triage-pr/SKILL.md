@@ -55,7 +55,13 @@ gh pr checkout $ARGUMENTS
 ```
 **クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
 
-**チェックアウトを省略した場合のfail-safe**: `git rev-parse --abbrev-ref HEAD` の値が対象PRの `headRefName` と一致することを確認する（GitHub MCP の `pull_request_read` で取得済みならその値を使い、未取得なら `gh pr view $ARGUMENTS --json headRefName -q .headRefName` で取得する）。一致しない場合は `--on-branch` が反映されていない想定外の状態のため、ステップ1以降（コンフリクト判定・ラベル付与・マージ）に進まずその場で中断する。
+**チェックアウトを省略した場合のfail-safe**: `git rev-parse --abbrev-ref HEAD` の値が対象PRの `headRefName` と一致することを確認する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする（取得済みならその値を使う）。
+
+```bash
+gh pr view $ARGUMENTS --json headRefName -q .headRefName
+```
+
+一致しない場合は `--on-branch` が反映されていない想定外の状態のため、ステップ1以降（コンフリクト判定・ラベル付与・マージ）に進まずその場で中断する。
 
 このコマンドが**失敗した場合**（典型例: `fatal: '<branch>' is already used by worktree at ...` — PRブランチが別のworktreeでcheckout中）は、**後続のステップに進まず**、エラー出力をそのまま含めて「判定: エラー」で結果報告を行い終了する。ラベル操作・自前のリトライは行わない（ブロッカー解消後のポーリングで自動的に再実行される）。
 
@@ -77,6 +83,8 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-mergeable $ARGUMENTS
 
 - **マージ可能（`MERGEABLE`）**: ステップ2に進む
 - **コンフリクトあり（`CONFLICTING`）**: `cc-resolve-conflict` ラベルを付与して終了する。ステップ2・3には進まない（コンフリクト解消前に修正要否の判定やマージを行っても意味がないため）
+
+  GitHub MCP の `issue_write`（method: `update`、`labels`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
 
   ```bash
   gh pr edit $ARGUMENTS --add-label "cc-resolve-conflict"
@@ -126,7 +134,7 @@ gh pr view $ARGUMENTS --json title,body,labels
   パースに成功した場合のみ、その内容を「失敗チェックの有無」の判定材料として使う（`CHECKS_EXIT` が非0でもJSONとしてパースできていれば正常系として扱う）。パースに失敗した場合（＝実行時エラーで意味のある出力を返せなかった場合）は、**後続のステップに進まず**、ラベル操作は一切行わずに出力内容をそのまま含めて「判定: エラー」で結果報告を行い終了する（「CI失敗なし」には倒さない。ステップ0の失敗時と同様の扱い）
   - `state` が `FAILURE` / `STARTUP_FAILURE` のチェックについてのみ、`link` から `run-id` を抽出して失敗内容を確認する。GitHub MCP の `get_job_logs`（`failed_only: true`）を優先し、利用不可なら `gh run view <run-id> --log-failed` にフォールバックする。**全Passなら追加のログ取得は行わない**
 - `gh pr view` の結果は「デザインPRか（`cc-ui-design`）」「Epic PRか（`cc-epic-issue`）」「`Refs #<N>` の有無」の確認に使う。ステップ3で同じ情報を再取得せず、ここで取得したラベル一覧を使い回す
-- デザインPR（`cc-ui-design`）と判定した場合のみ、差分ファイル一覧を追加で取得する（実装コードの混入・スナップショットの有無の確認用）
+- デザインPR（`cc-ui-design`）と判定した場合のみ、差分ファイル一覧を追加で取得する（実装コードの混入・スナップショットの有無の確認用）。GitHub MCP の `pull_request_read`（method: `get_files`）を優先し、利用不可なら以下にフォールバックする。
 
   ```bash
   gh pr diff $ARGUMENTS --name-only
@@ -199,6 +207,8 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 「対応すべき」と判定された項目が1つでもある場合、`cc-fix-onetime`ラベルを追加する。**ラベル付与のみで終了し、コード修正は行わない**。修正項目が明確で実装が容易に見えても、コード変更・コミット・pushを行ってはならない（実際の修正は`cc-fix-onetime`ラベルをトリガーに別スキルが担当する）。
 
+GitHub MCP の `issue_write`（method: `update`、`labels`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
 ```
 gh pr edit $ARGUMENTS --add-label "cc-fix-onetime"
 ```
@@ -242,6 +252,8 @@ gh run view <run-id> --json attempt -q .attempt
 
 `cc-need-human-check` を付与し、**同じコマンド内でPRへ理由コメントも投稿する**。ラベルだけを付けるとGitHub上に判断根拠が残らず、後から見た人にはPRが理由なく停止したようにしか見えない。
 
+ラベル付与はGitHub MCP の `issue_write`（method: `update`、`labels`）、コメント投稿は `add_issue_comment` を優先し、利用不可ならそれぞれ以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
 ```bash
 gh pr edit $ARGUMENTS --add-label "cc-need-human-check"
 gh pr comment $ARGUMENTS --body-file - <<'EOF'
@@ -265,6 +277,8 @@ EOF
 
 - **Epic PR の場合（ラベル一覧に `cc-epic-issue` を含む）**: このPRをマージするとデフォルトブランチへの集約反映（＝リリース）になるため、**このスキルではマージせず** `cc-release-ready` ラベルのみを付与して終了する。実際のリリース（マージ）は人間の判断に委ねるゲートとして扱う。以降のマージ手順・関連Issueクローズには進まない。
 
+  GitHub MCP の `issue_write`（method: `update`、`labels`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
   ```bash
   gh pr edit $ARGUMENTS --add-label "cc-release-ready"
   ```
@@ -278,7 +292,7 @@ BASE_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)
 DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 ```
 
-2. **必ずマージを実行する。** GitHub MCP の `pull_request_write`（method: `merge`）を優先し、利用不可なら以下の `gh` コマンドへフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。
+2. **必ずマージを実行する。** GitHub MCP の `merge_pull_request`（`merge_method`）を優先し、利用不可なら以下の `gh` コマンドへフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。`merge_pull_request` には `--delete-branch` 相当の引数が無いため、MCP経路でマージした場合はブランチ削除を `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` で別途実行する。
 
 ```bash
 gh pr merge $ARGUMENTS --merge --delete-branch
@@ -295,6 +309,8 @@ gh pr merge $ARGUMENTS --merge --delete-branch
    ```
 
    3-2. 抽出したIssue番号それぞれに対して、完了クローズを実行する（複数ある場合は全て）。実装がEpicブランチに取り込まれた完了クローズのため、マージせずクローズする場合の`--reason "not planned"`とは異なり`--reason completed`を用いる。
+
+   GitHub MCP の `issue_write`（method: `update`、`state: closed`、`state_reason`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
 
    ```bash
    gh issue close <issue番号> --reason completed
@@ -324,11 +340,15 @@ gh pr view $ARGUMENTS --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd
 
 2. PRをCloseする。
 
+GitHub MCP の `update_pull_request`（`state: closed`）を優先し、利用不可なら以下にフォールバックする。`--delete-branch` 相当の引数が無いため、MCP経路でCloseした場合はブランチ削除を `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` で別途実行する。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
 ```
 gh pr close $ARGUMENTS --delete-branch
 ```
 
 3. 取得したIssue番号それぞれに対してCloseを実行する（複数ある場合は全て）。
+
+GitHub MCP の `issue_write`（method: `update`、`state: closed`、`state_reason`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
 
 ```
 gh issue close <issue番号> --reason "not planned"
@@ -341,7 +361,7 @@ gh issue close <issue番号> --reason "not planned"
 - 作業は全てworktree上で行い、デフォルトブランチで作業は絶対に行わないこと
 - ファイル編集などの作業を行う際は、pwdコマンドでworktree内部であることを確認してから行うこと
   - 作業ディレクトリ: !`pwd`
-- `cc-triage-scope`ラベルがPRに付与されている場合、いかなる操作においても**絶対に削除しない**こと。`gh pr edit`で`--remove-label`を使用する際も`cc-triage-scope`を対象に含めない
+- `cc-triage-scope`ラベルがPRに付与されている場合、いかなる操作においても**絶対に削除しない**こと。`gh pr edit`で`--remove-label`を使用する際も`cc-triage-scope`を対象に含めない。GitHub MCP の `issue_write`（method: `update`、`labels`）でラベルを付与する場合も同様で、**`labels` は差分追加ではなく全量置換**のため、先に現在のラベルを取得し、追加分を足した全量を渡すこと（そうしないと`cc-triage-scope`を含む既存ラベルが落ちる）
 - **このスキル本文では一切コードを変更しない**（「やること・やらないこと」参照）。コンフリクト解消も修正実行もラベル経由で別スキルに委譲する
 
 ## 出力

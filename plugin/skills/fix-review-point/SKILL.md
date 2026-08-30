@@ -125,11 +125,13 @@ GitHub PR `$0` の未解決レビューコメントに対応し、修正のコ�
 
 - **Epic PR の場合**: マージするとデフォルトブランチへの集約反映（＝リリース）になるため、**マージしない**。`triage-pr` の Epic PR 判定と同じリリースゲートとして `cc-release-ready` ラベルのみを付与して終了する（関連Issueの連動Closeにも進まない）。
 
+  GitHub MCP の `issue_write`（method: `update`、`labels`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。`labels` は差分追加ではなく全量置換のため、現在のラベルを取得したうえで追加分を足した全量を渡すこと。
+
   ```bash
   gh pr edit $0 --add-label "cc-release-ready"
   ```
 
-- **通常のPRの場合**: PRをマージする。GitHub MCP の `pull_request_write`（method: `merge`）を優先し、利用不可なら `gh pr merge $0 --merge --delete-branch` へフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。マージ後、下記「マージ後の関連Issue連動Close」を実行して終了する。
+- **通常のPRの場合**: PRをマージする。GitHub MCP の `merge_pull_request`（`merge_method`）を優先し、利用不可なら `gh pr merge $0 --merge --delete-branch` へフォールバックする（フォールバックした場合はその旨を最終報告に1行残す）。`merge_pull_request` には `--delete-branch` 相当の引数が無いため、MCP経路でマージした場合はブランチ削除を `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` で別途実行する。マージ後、下記「マージ後の関連Issue連動Close」を実行して終了する。
 
 ### マージ後の関連Issue連動Close
 
@@ -148,6 +150,11 @@ DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 
 ```bash
 gh pr view $0 --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'
+```
+
+GitHub MCP の `issue_write`（method: `update`、`state: closed`、`state_reason`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
+```bash
 gh issue close <issue番号> --reason completed
 ```
 
@@ -249,7 +256,7 @@ gh issue close <issue番号> --reason completed
 
 1. `resolve-pr-comments` skill を PR 番号 `$0` を渡して呼び出し、対応済みのレビューコメントをすべてResolveする。同スキルは GitHub MCP（`pull_request_review_write` の `resolve_thread`）を優先し、利用不可なら `gh` の GraphQL へフォールバックする。Resolve に失敗したスレッドが報告された場合は、件数と thread ID を本スキルの最終報告にも引き継ぐ
 2. 今回の修正内容を反映してPRのdescriptionを最新化する
-   - `gh pr edit $0 --body "<更新後の本文>"` を使用
+   - GitHub MCP の `update_pull_request`（`body`）を優先し、利用不可なら `gh pr edit $0 --body "<更新後の本文>"` へフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする
    - 変更点の要約・テスト観点の追記・既存セクションの整合性を保つ
    - **`## 修正履歴` セクションを必ず設ける**。既存のdescriptionに無ければ末尾に新規追加し、既にあれば追記する形で残す。各エントリは以下のフォーマットに従う:
      ```markdown
@@ -279,6 +286,9 @@ gh issue close <issue番号> --reason completed
 
 1. クローズ理由を1-3行で言語化する
 2. PRに理由を含むコメントを投稿し、PRをクローズする
+
+   GitHub MCP の `update_pull_request`（`state: closed`）を優先し、利用不可なら以下にフォールバックする。MCP経路には `--comment` / `--delete-branch` に相当する引数が無いため、クローズ理由のコメントは先に `add_issue_comment` で投稿し、ブランチ削除が必要な場合は `gh api -X DELETE repos/{o}/{r}/git/refs/heads/<branch>` を別途実行する。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
    ```bash
    gh pr close $0 --comment "<クローズ理由。代替PR/Issueがあればそのリンクを含める>"
    ```
@@ -287,6 +297,9 @@ gh issue close <issue番号> --reason completed
    - 上記が空の場合は `gh pr view $0 --json body -q '.body'` の本文から `Closes #<n>` / `Fixes #<n>` / `Resolves #<n>` を正規表現で抽出する
 4. 取得した各Issue番号について状態を確認し、`OPEN` の場合のみ以下を実行する。GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
    `gh issue view <n> --json state -q '.state'`
+
+   GitHub MCP の `add_issue_comment` と `issue_write`（method: `update`、`state: closed`、`state_reason`）を優先し、利用不可なら以下にフォールバックする。書き込み系のため、MCP 呼び出しが失敗した場合は未実行が確定するエラー（認証拒否・権限エラー・ツール未検出）なら即フォールバックしてよいが、実行有無が不明なエラー（タイムアウト・接続断）ならまず対象を読み直して反映済みかを確認し、未反映のときだけフォールバックする。
+
    ```bash
    gh issue comment <n> --body-file - <<EOF
    ## 関連PRクローズに伴うクローズ
