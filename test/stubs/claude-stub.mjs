@@ -37,7 +37,9 @@ if (argv.includes("--cloud")) {
   if (cloudCompleteRaw && recordFile) {
     const { type, number, report } = JSON.parse(cloudCompleteRaw);
     const ghStateFile = `${recordFile}.gh-state.json`;
-    const ghState = existsSync(ghStateFile) ? JSON.parse(readFileSync(ghStateFile, "utf8")) : { labels: {}, comments: {} };
+    const ghState = existsSync(ghStateFile)
+      ? JSON.parse(readFileSync(ghStateFile, "utf8"))
+      : { labels: {}, comments: {} };
     if (report) {
       const comments = ghState.comments?.[number] ?? [];
       comments.push({ body: report, created_at: new Date().toISOString() });
