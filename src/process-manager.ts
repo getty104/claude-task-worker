@@ -380,7 +380,7 @@ async function runViaCloud(
   model?: string,
 ): Promise<void> {
   const herdrRunnerMod = await import("./herdr-runner");
-  const { taskTabLabel, waitForPaneReady, extractCloudSessionId } = herdrRunnerMod;
+  const { taskTabLabel, waitForPaneReady, extractCloudSessionId, normalizePtyOutput } = herdrRunnerMod;
   const herdrMod = await import("./herdr");
   const { tabCreate, tabClose, paneSendText, paneSendKeys, paneRead, getCurrentWorkspaceId } = herdrMod;
 
@@ -433,7 +433,7 @@ async function runViaCloud(
         } catch (err) {
           console.error(`[worker] failed to read pane ${created.paneId} while waiting for the cloud session: ${err}`);
         }
-        cloudSessionId = extractCloudSessionId(content);
+        cloudSessionId = extractCloudSessionId(normalizePtyOutput(content));
         if (cloudSessionId) break;
         if (Date.now() >= deadline) {
           throw new Error(`timed out waiting for the cloud session id (pane tail: ${content.slice(-1000)})`);

@@ -255,8 +255,12 @@ export function captureConsole(): void {
 }
 
 // ANSI エスケープ・制御文字はテーブルの桁揃えを壊すため除去する。
-// eslint-disable-next-line no-control-regex -- ANSI/制御文字を意図的に対象にする
-const CONTROL_CHARS = /\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x08\x0b-\x1f\x7f]/g;
+// OSC シーケンス（`\x1b]…\x07` / `\x1b]…\x1b\\`）はCSIパターンに一致せず、C0クラスも
+// ESC/BELしか拾わないためテキスト部分（例: `]0;title`）が残る。session ID 抽出（herdr-runner.ts）
+// と同じ意味論の正規表現を2箇所に持たないよう export する。
+export const CONTROL_CHARS =
+  // eslint-disable-next-line no-control-regex -- ANSI/制御文字を意図的に対象にする
+  /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x08\x0b-\x1f\x7f]/g;
 
 function sanitizeLogText(text: string): string {
   return text.replace(CONTROL_CHARS, " ").replace(/\t/g, " ");

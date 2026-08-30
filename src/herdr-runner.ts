@@ -1,5 +1,6 @@
 import type * as HerdrModule from "./herdr";
 import type { AgentStatus } from "./herdr";
+import { CONTROL_CHARS } from "./table";
 import type { TaskResult } from "./task-result";
 // node --experimental-strip-types は実ファイル解決を要求するため、値のimportは
 // .ts 拡張子付きにする（herdr-runner.ts はテストから直接 .ts で読み込まれる）。
@@ -105,6 +106,13 @@ const CLOUD_SESSION_CREATED_RE = /Created cloud session:\s*(session_[A-Za-z0-9_-
 
 export function extractCloudSessionId(text: string): string | undefined {
   return CLOUD_SESSION_URL_RE.exec(text)?.[1] ?? CLOUD_SESSION_CREATED_RE.exec(text)?.[1];
+}
+
+// script 経由の pty 出力に混入する ANSI エスケープ・制御文字を除去する。空白ではなく
+// 空文字へ置換する（空白に潰すと URL 中に混入したエスケープが `https://claude.ai/code/`
+// の連続一致を壊すため）。extractCloudSessionId() の前段に置く。
+export function normalizePtyOutput(text: string): string {
+  return text.replace(CONTROL_CHARS, "");
 }
 
 /**
