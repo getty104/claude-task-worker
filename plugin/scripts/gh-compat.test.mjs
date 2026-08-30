@@ -145,6 +145,24 @@ test("default-branch は git のローカル導出を優先し gh を呼ばな�
   );
 });
 
+test("default-branch は origin/HEAD 未設定なら REST へ落ち、GraphQL の gh repo view を使わない", () => {
+  // クラウド VM の clone は refs/remotes/origin/HEAD を持たない。ここで `gh repo view --json`
+  // へ落ちると GraphQL ゲートの 403 で解決に失敗し、両スキルのフェーズ0が常に中断する（#353）。
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const repo = path.join(dir, "repo");
+  execFileSync("git", ["init", "-q", "-b", "work", repo]);
+  execFileSync("git", ["-C", repo, "remote", "add", "origin", "https://github.com/acme/widget.git"]);
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "api repos/acme/widget --jq .default_branch": "main\n" });
+  assert.equal(
+    run(["default-branch"], { cwd: repo, env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log } }),
+    "main",
+  );
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /api repos\/acme\/widget --jq \.default_branch/);
+  assert.doesNotMatch(calls, /repo view/);
+});
+
 test("pr-for-branch は REST でカレントブランチの Open PR を引く（-f でクエリをフィールド渡しする）", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
   const log = path.join(dir, "log");

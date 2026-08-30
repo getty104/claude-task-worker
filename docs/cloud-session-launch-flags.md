@@ -105,6 +105,15 @@
    - 再現手順: セッション作成後に claude.ai 側のセッション設定、または `/model` 等のスラッシュコマンドで実際の値を確認する
 4. **`--environment <environment_id>`（自己ホスト環境）**: PRD 6 でスコープ外のため未実測
 
+## `--ref` 起動時のセッション開始時 HEAD（Issue #353）
+
+`--ref <branch>` で起動した Issue 系クラウドセッションが、**セッション開始時点（1コミットも作る前）で既に新規作業ブランチ上にいるのか、ベース ref のままなのか**の実測。ベース ref のままかつそれがデフォルトブランチだと、`exec-issue` フェーズ0の「現在ブランチ＝デフォルトブランチなら中断」に引っかかり、worktree ガードを緩めても別条件で中断してしまう。
+
+- 実測日: 2026-08-30（`exec-issue` の Issue #353 タスク自身のセッションで観測）
+- 結果: **セッション開始時点で既に新規作業ブランチ上にいる**。`git rev-parse --abbrev-ref HEAD` → `claude/task-worker-issue-353-1tj47y`（`claude/<description 由来>-<6文字>` 形式）。`git symbolic-ref refs/remotes/origin/HEAD` は未設定だが、`git remote show origin` / REST（`gh api repos/{o}/{r} --jq .default_branch`）はいずれも `main` を返し、HEAD とは一致しない
+- 帰結: クラウドでもデフォルトブランチ比較は**正しく通過する**ため、実装プランのステップ6で懸念していた「比較対象の調整」は不要。worktree 条件のみを免除すれば足りる
+- 副次（同 Issue で修正済み）: `git symbolic-ref --short refs/remotes/origin/HEAD` はクラウド VM の clone では未設定で失敗する。`gh-compat.sh default-branch` は git 導出の次が `gh repo view --json`（GraphQL → 403）だったため、この環境では解決に失敗していた。フェーズ0は「デフォルトブランチ名の取得失敗＝中断」を fail-safe にしているため、worktree ガードだけを免除しても直後のこの行で必ず中断する。`resolve_default_branch()` に REST（`gh api repos/{owner}/{repo} --jq .default_branch`）を挟んで解消済み（修正後、本 VM で `main` を解決できることを確認）
+
 ## 実測の副作用
 
 本実測により3件のクラウドセッションが作成された（T5・T6・T7/T3/T4、いずれもプロンプト未投入かT3で`"ping"`を1回投函のみ）。不要であれば claude.ai/code から削除してよい（削除操作は行っていない）。セッションURLの閲覧には Anthropic アカウント認証が必要で、URL単体が漏れても第三者は閲覧できない。

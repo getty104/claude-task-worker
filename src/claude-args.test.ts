@@ -19,6 +19,7 @@ const {
   buildCloudToolRestriction,
   appendCloudDoneInstruction,
   buildCloudCheckoutInstruction,
+  buildCloudWorktreeInstruction,
   CLOUD_REPORT_HEADING,
   shellQuote,
   isOpusModel,
@@ -433,6 +434,31 @@ test("buildCloudCheckoutInstruction stays empty for issue tasks", () => {
 test("appendCloudDoneInstruction adds the checkout skip only for pr targets", () => {
   assert.match(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7 }), /gh pr checkout/);
   assert.doesNotMatch(appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }), /gh pr checkout/);
+});
+
+test("buildCloudWorktreeInstruction exempts the worktree guard but keeps the default-branch check", () => {
+  const result = buildCloudWorktreeInstruction();
+  assert.match(result, /\.claude\/worktrees\//);
+  // 免除するのは worktree 条件だけで、ガードの目的である「デフォルトブランチで作業しない」は
+  // 残す。この2点が同時に書かれていないと、スキルが両方を落として保護がゼロになる。
+  assert.match(result, /デフォルトブランチ/);
+});
+
+test("appendCloudDoneInstruction adds the worktree exemption for both issue and pr targets", () => {
+  // exec-issue（Issue 系）と fix-review-point（PR 系）が同じガードを持つため、
+  // checkout 指示と違い両方へ付ける。
+  assert.match(appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }), /\.claude\/worktrees\//);
+  assert.match(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7 }), /\.claude\/worktrees\//);
+});
+
+test("local execution keeps the prompt free of the worktree exemption", () => {
+  // ローカル実行はワーカーが worktree を作るためガードをそのまま効かせる必要がある。
+  // ローカルのプロンプトは `-p` の引数としてそのまま渡り、cloud 系の組み立てを通らない。
+  const args = buildClaudeArgs({ mode: "default", prompt: "/skill 1", model: "sonnet", effort: "high" });
+  assert.deepEqual(
+    args.filter((arg) => arg.includes(".claude/worktrees/")),
+    [],
+  );
 });
 
 test("buildCloudPrompt includes the base system prompt body", () => {

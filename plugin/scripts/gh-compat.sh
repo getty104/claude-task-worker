@@ -44,9 +44,18 @@ parse_owner_repo() {
 }
 
 resolve_default_branch() {
-  local b
+  local b or
   b=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
   if [ -n "$b" ]; then printf '%s\n' "$b"; return 0; fi
+  # クラウド VM の clone では refs/remotes/origin/HEAD が設定されず、最後の
+  # `gh repo view --json` は GraphQL 経由でプロキシに 403 で弾かれるため、間に REST を挟む。
+  # これが無いとクラウドでは default-branch が必ず失敗し、`exec-issue` / `fix-review-point`
+  # のフェーズ0が「デフォルトブランチ名の取得失敗＝中断」の fail-safe で常に中断する（#353）。
+  or=$(resolve_owner_repo)
+  if [ -n "$or" ]; then
+    b=$(gh api "repos/${or}" --jq '.default_branch' 2>/dev/null)
+    if [ -n "$b" ] && [ "$b" != "null" ]; then printf '%s\n' "$b"; return 0; fi
+  fi
   gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null
 }
 

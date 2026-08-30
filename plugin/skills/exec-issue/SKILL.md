@@ -98,7 +98,7 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 
 並列で以下を確認し、判断は自動で行う。ユーザーに質問しないこと。
 
-- `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断** し、理由を出力して終了する（デフォルトブランチで作業してはならない）
+- `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断** し、理由を出力して終了する（デフォルトブランチで作業してはならない）。**ただし起動プロンプトに「このセッションはクラウド実行のため worktree を持たず、cwd はリポジトリルートである」旨の指示がある場合はこの確認をスキップする** — クラウド実行ではワーカーが worktree を作らないため常に worktree 外になる。ガードの目的である「デフォルトブランチで作業しない」は次の確認で担保する。指示が無く worktree 外でもある場合は従来どおり **中断** する（クラウドかもしれないという推測で続行しない）
 - `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）
 - `gh issue view $0 --json number,title,state,labels` でIssueが存在し `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更を確認する。存在する場合は `git stash push -u -m "exec-issue auto-stash $0"` で自動退避し、その旨を最終報告に明記する
@@ -132,7 +132,7 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 
 `cc-need-human-check` は `issue-worker.ts` の共通除外ラベルに含まれるため、付与後はポーリング候補から外れ、人がラベルを外すまで再実行されない。
 
-**完了条件**: worktree内、デフォルトブランチ以外のブランチ、Issue OPEN、作業ツリーがクリーンであること。加えて、`cc-ui-design-ready` が付いている場合は上記の意味で `## UIデザイン` セクションが生きていること。
+**完了条件**: worktree内（クラウド実行では上記のとおり免除）、デフォルトブランチ以外のブランチ、Issue OPEN、作業ツリーがクリーンであること。加えて、`cc-ui-design-ready` が付いている場合は上記の意味で `## UIデザイン` セクションが生きていること。
 
 ## フェーズ1: Issue読み込みとタスク分解
 
