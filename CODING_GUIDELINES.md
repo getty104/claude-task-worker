@@ -23,7 +23,12 @@
 具体的には、許可/拒否リストの列挙、API呼び出しのメソッド名と対応表、取得件数などのマジックナンバー、
 テストの期待値を書くときに、対応する実装側の定義を必ず読んでから書く。
 
-参考: [PR#266 Phase 1 の許可対象と `CLOUD_DENIED_WORKERS` の不一致](https://github.com/getty104/claude-task-worker/pull/266#discussion_r3878136932), [PR#291 MCPメソッド指示が対応表と不一致](https://github.com/getty104/claude-task-worker/pull/291#discussion_r3880281502)
+実装の経路・適用範囲・出力内容を変えたときは、その挙動を説明している文書（README・`CLAUDE.md`・
+スキル本文・PRD）を同じPRで追随させる。実装は正しいのに説明だけが旧経路を指している状態は、
+読んだ人・後続のスキルが古い前提で動くため、実装のバグと同じ結果を招く。ワーカー名やモードのように
+複数の似た対象がある箇所は、総称ではなく実際の対象を列挙して誤読の余地を消す。
+
+参考: [PR#365 定期ワーカーの総称表記が別ワーカーを含む](https://github.com/getty104/claude-task-worker/pull/365#discussion_r3888770414), [PR#324 互換ヘルパー導入後の説明が旧経路のまま](https://github.com/getty104/claude-task-worker/pull/324#discussion_r3886722285)
 
 ### 外部ツールの手順は使用バージョンの契約に合わせて書く
 
@@ -54,7 +59,13 @@ CLI・MCP・ライブラリの呼び出し手順をドキュメントやスキ�
 意図的に無視する失敗は、無視してよい理由（例: 削除対象が元から存在しない）を条件で絞り込んでから
 無視する。すべての失敗を一律に無視しない。
 
-参考: [PR#266 NG検出時に非ゼロ終了する](https://github.com/getty104/claude-task-worker/pull/266#discussion_r3878136937), [PR#266 ローカル実行時の終了コードを伝播する](https://github.com/getty104/claude-task-worker/pull/266#discussion_r3878922758)
+とくに「取得できなかった」を「存在しなかった」と同一視しない。取得失敗を空の成功として返すと、
+呼び出し元は不在として処理を進め、依存関係の再追加・既存設定の上書き・誤ったベースブランチの選択と
+いった破壊的な結果になる。不在を表す条件（HTTPの404、`ENOENT` など）だけを空の成功に落とし、
+それ以外の失敗は非0・例外として返す。複数の取得を合成して1つの結果にする場合は、全ての取得が
+成功したときだけ出力する。
+
+参考: [PR#324 `issue-parent` の取得失敗を「親なし」として扱わない](https://github.com/getty104/claude-task-worker/pull/324#discussion_r3886722290), [PR#364 読み取り失敗を「ファイルなし」として扱わない](https://github.com/getty104/claude-task-worker/pull/364#discussion_r3888616539)
 
 ### 実行の前提は起動時に検証し、崩れていれば即座に失敗させる
 
