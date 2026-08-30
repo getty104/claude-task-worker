@@ -392,6 +392,27 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+// クラウドセッション作成コマンド（TTY必須）に疑似ptyを割り当てる `script` ラッパーを
+// 組み立てる。BSD script（darwin）は `-c` を持たずコマンド・引数をそのまま後続へ並べる形式、
+// util-linux script（linux）は `-c` が単一のコマンド文字列を要求するため shellQuote で連結する。
+// linux は本タスク実行環境（util-linux 2.39.3）で
+// `script -qec "node -e 'console.log(process.stdout.isTTY)'" /dev/null` → true（終了コード0）を実測済み。
+// darwin は `script -q /dev/null node -e 'console.log(process.stdout.isTTY)'` → true（darwin 25.6.0）を実測済み。
+// Windows は本Epicのスコープ外なので、サイレントに壊れた形へ倒さずエラーにする。
+export function buildScriptCommand(
+  command: string,
+  args: string[],
+  platform: string = process.platform,
+): { command: string; args: string[] } {
+  if (platform === "darwin") {
+    return { command: "script", args: ["-q", "/dev/null", command, ...args] };
+  }
+  if (platform === "linux") {
+    return { command: "script", args: ["-qec", [command, ...args].map(shellQuote).join(" "), "/dev/null"] };
+  }
+  throw new Error(`unsupported platform for script(1): ${platform}`);
+}
+
 export interface ClaudeExecution {
   command: string;
   args: string[];
