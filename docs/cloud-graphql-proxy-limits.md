@@ -134,7 +134,7 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 | ワーカー | 判定 | GraphQL 403 で劣化する操作 | ラベル遷移・成果物検証への影響 |
 |---|---|---|---|
 | `exec-issue` | ○（2026-08-29 smoke test で `issue_read`/`create_pull_request` の動作を確認、△ から格上げ。ただし PR一覧検証は未実測のため ◎ ではない） | ~~`gh issue view --json body`（Issue本文の読み取り）~~ → `issue_read` で代替確認済み。~~PR作成~~ → `create_pull_request` で代替確認済み（同 smoke test の `exec-issue` エンドツーエンド実行で実際に成立、所要9分03秒）。フェーズ7の `gh pr list --head` によるPR実在検証は今回未確認のまま残る | Issue本文の読み取りとPR作成はMCP経由で成立することを確認した。PR一覧を使う検証ステップの成否は未確認。ラベル遷移はワーカー側（ローカル）が行うため影響なし |
-| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（`--cloud` 指定時はクラウド実行される。GraphQL 依存は解消済みだが E2E 未実測） | 解消済み。3スクリプト（`fetch-recent-review-comments.sh` / `fetch-recent-requirement-issues.sh` / `fetch-recent-ui-design-prs.sh`）は `plugin/scripts/gh-compat.sh` 経由の REST へ移行済みで、`gh api graphql` / `gh (issue\|pr) view --json` への依存は残っていない | 「収集が403で全滅する」という前提は成立しなくなったが、**クラウドでの収集成功は実測していない**（成功と断定しない）。加えて完了検知を行わない（セッション作成＝完了）ため、収集が失敗しても `lastRun` が進んで次の24時間まで再実行されず、Slack 通知にもセッション URL と定型文しか載らない。実行記録PRはローカルのワーカーが出すため記録自体は従来どおり残る |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（`--cloud` 指定時はクラウド実行される。収集は 2026-08-30 に実測で成功（SW-1〜SW-3）、E2E は依然未実測のため ○ へは格上げしない） | 収集本体に GraphQL 依存が無いことは実測で裏付けられた（SW-1〜SW-3）。3スクリプト（`fetch-recent-review-comments.sh` / `fetch-recent-requirement-issues.sh` / `fetch-recent-ui-design-prs.sh`）は `plugin/scripts/gh-compat.sh` 経由の REST へ移行済みで、`gh api graphql` / `gh (issue\|pr) view --json` への依存は残っていない。一方、スキル本文フェーズ5相当の `gh pr view --json` は403になることを実測した（SW-6） | 収集スクリプト3本はクラウド VM 上で実際に成功した（Issue 26件・コメント48件、PR 28件、PR 0件（正常）をそれぞれ9秒・12秒・0秒で取得）。そのうえで、(i) 完了検知を行わない（セッション作成＝完了）ため収集が失敗しても `lastRun` が進み次の24時間まで再実行されない、(ii) 定期ワーカーの通知には `cloudSessionId` が渡らずセッション URL が載らないことがコードで確定している（`scheduled-worker.ts` の `onComplete`）、(iii) フェーズ5のメタデータ後処理が MCP/REST へフォールバックしない場合、成果物PRへラベル・Assignee が付かずトリアージに拾われないまま滞留しうる（未実測）、の3点は残る。実行記録PRはローカルのワーカーが出すため記録自体は従来どおり残る |
 | `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（PRD の ○ から格下げ） | `gh issue view --json body,comments,labels`（フィールドを問わず403） | Issue本文・コメントが読めず、分析系スキルの入力がゼロになる。`--json parent` は加えて gh 2.45.0 でも失敗する |
 | `epic-issue`（`create-epic-pr`） | △（PRD の ○ から格下げ） | `gh issue view --json` | 同上。PR本文の生成材料（コミットログ）は `git log` で取れるが、Issue情報が欠ける |
 | `fix-review-point` | ✕（PRD の △ から格下げ。据え置き） | `reviewThreads` クエリ（未解決コメント取得）、`resolveReviewThread`（スレッド解決）、`gh pr view --json` | **レビュー指摘を1件も取得できない**。加えてスレッド解決は REST 代替が原理的に存在せず、2026-08-29 の smoke test でも `resolveReviewThread` 代替は確認していない（確認済みの4ツールに該当なし）ため、書き換えでも回復しない。Phase 1 では許可方針が確定済みだが、実質的に何もできないまま完了扱いになる点を明記する |
@@ -392,6 +392,63 @@ CI は3本とも `build` / `preflight` / `code-review` がすべて success だ�
 - PR #350 に `cc-fix-onetime` ラベルが付与された（`triage-pr` の判定結果そのもの）。#351 / #352 への書き込みは無い
 - 3本の PR に対して CI（`ci.yml` / `ocr-review.yml` / CodeRabbit）が各1回走った
 - **プローブブランチ4本は残っている** — G-38〜G-40 のとおりクラウドセッションからはブランチを削除できないため、**手動での削除が必要**。PR #350 / #351 / #352 も手動クローズが必要
+
+## 定期ワーカーのクラウド実測（`SW-*`）
+
+定期ワーカー（`update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）の収集スクリプトと、関連する `gh` 呼び出しをクラウド VM 上で実測した記録（Issue #336）。
+
+- 実測日: 2026-08-30
+- 実測バージョン: クラウド VM の `claude --version` → `2.1.251 (Claude Code)` / `gh version 2.98.0 (2026-08-20)` / `node v22.22.2` / `claude-task-worker` 0.97.0
+
+### 方法と、その限界（先に読むこと）
+
+**本実測は「`exec-issue` ワーカーが `--cloud` で作成したクラウドセッション」の中で行った。定期ワーカーが作成したクラウドセッションではない。** GitHub プロキシのゲートはセッションに紐づくリポジトリ単位で、ワーカー種別には依存しないと**推測**されるが、その同一性自体は検証していない。したがって以下の SW-1〜SW-9 は「**定期ワーカーと同等条件のクラウドセッションでの実測**」であって「定期ワーカーの実測」ではない。
+
+加えて、本セッション自身がクラウド VM 上で動いており、`herdr` コマンドが存在せず、TTY も無く、ローカルのワーカープロセスも存在しない。クラウドセッションの中から `--cloud` を入れ子で起動することもできない。そのため、ワーカーによるセッション作成・完了検知（`cc-cloud-done`）・実行記録PR作成・Slack通知の各段は本実測の対象外である（後述「未実測 / 測定不能項目」）。
+
+### 結論
+
+- **収集スクリプトの残存 GraphQL: 無し**。3本とも実測で成功（SW-1〜SW-3）
+- **スキル本文のPR後処理の GraphQL: 有り**。SW-6 で `gh pr view --json assignees,labels` の 403 を実測した。ただし当該 SKILL.md は同じ箇所に「GitHub MCP が使える場合は `pull_request_read` を使う」と MCP 優先を併記しているため、読み取りは MCP で代替しうる（**MCP 側の動作は今回未実測**）。書き込み側は既存 `W-19` のとおり `gh pr edit` が 403 で REST 代替が成立する
+- **実害の範囲**: 成果物PRの**作成自体**は妨げられない（PR 作成は `create_pull_request` / REST 経路で成立することが既存実測にある）。実害が出るとすれば、フェーズ5のメタデータ後処理が MCP にも REST にもフォールバックしなかった場合に、成果物PRへ `cc-triage-scope` ラベルと Assignee が付かず、`triage-pr` ワーカーに拾われないまま PR が滞留する点。**この滞留が実際に起きるかは未実測**
+- **プラグイン未導入 / GitHub App 連携**: 本セッションでは該当なし（プラグイン 0.97.0 が導入済みで、REST でリポジトリに到達できている）
+
+### 実測表
+
+| ID | 操作 | 手段 | 結果 | 実測値 |
+|---|---|---|---|---|
+| SW-1 | `update-requirement-rules` の収集スクリプト `fetch-recent-requirement-issues.sh 1` を実行 | bash（`gh-compat.sh` 経由の REST） | **成功** | 終了コード 0 / 所要 9 秒 / Issue 26 件・コメント 48 件を取得 / 26 件すべて本文が非空 / stderr に警告なし / 取得ラベルは `cc-cloud-done` `cc-exec-issue` `cc-in-progress` `cc-issue-created` `cc-need-human-check` `cc-pr-created` `cc-triage-scope` |
+| SW-2 | `update-coding-guidelines` の収集スクリプト `fetch-recent-review-comments.sh 1` を実行 | bash（同上） | **成功** | 終了コード 0 / 所要 12 秒 / PR 28 件を取得 / stderr に警告なし |
+| SW-3 | `update-design-md` の収集スクリプト `fetch-recent-ui-design-prs.sh 1` を実行 | bash（同上） | **成功（0件）** | 終了コード 0 / 所要 0 秒 / `pr_count: 0`。対象ラベルの付いたPRが実在しないことによる正常な0件で、403 による0件ではない |
+| SW-4 | REST 到達性 `gh api repos/{owner}/{repo}` | `gh api`（REST） | **成功** | `full_name` と `default_branch` を取得 |
+| SW-5 | `gh issue view <n> --json number,title` | `gh`（GraphQL） | **403** | `This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served.` |
+| SW-6 | `gh pr view <n> --json assignees,labels`（`update-requirement-rules` SKILL.md フェーズ5-3 のPRメタデータ確認に残存するコマンド） | `gh`（GraphQL） | **403** | 同上の本文。**本 Issue が「未実測」としていた項目を新たに実測したもの** |
+| SW-7 | `gh pr list` | `gh`（GraphQL） | **403** | `This GraphQL query (PullRequestList, sent by gh pr list) is not enabled for this session …` |
+| SW-8 | `gh api user` | `gh api`（REST） | **成功** | ログイン名を取得 |
+| SW-9 | `gh auth status` | `gh` | **誤報** | `The token in GH_TOKEN is invalid.` と報告するが、同一セッションで SW-4 / SW-8 の REST 呼び出しは成功する。**`gh auth status` の結果をクラウドでの GitHub 到達性の判定に使ってはいけない** |
+
+### コード確認（実測ではない）
+
+以下はコードを読んで確認した設計上の挙動であり、実行による実測ではない。
+
+- **確認項目(a)「セッション作成＝完了（`cc-cloud-done` を待たない）」**: `src/process-manager.ts` の `runViaCloud()` の `!cloudTarget` 分岐が `result = { status: "completed", output: createOutput }` を返し、`waitForCloudTask()` も `findCommentSince()` も通らないことをコードで確認した。設計どおり。ただし実行には herdr を持つローカルホストが必要で、**本セッションでは実行していない**
+- **確認項目(d)「`publishLastRunPr()` が実行記録PRを作成/force-push する」**: `src/last-run-pr.ts` が固定名ブランチへ force-push し、open PR が無いときだけ PR を作成し、`cc-triage-scope` ラベルと自分自身の Assignee を付けることをコードで確認した。同関数は**ワーカープロセス（ローカル）側**で走るため GraphQL ゲートの影響を受けない。ただし**実行はしていない**
+- **確認項目(e)「Slack 通知にセッション URL が含まれる」**: **NG（コードで確定）**。`src/workers/scheduled-worker.ts` の `onComplete` が `(status, output)` の2引数で `cloudSessionId` を受け取らず、`notifyTaskCompleted` / `notifyTaskFailed` を6引数で呼んでいて第7引数 `cloud` を渡していない。`src/slack.ts` はこの `cloud.sessionId` があるときだけ本文冒頭へセッション URL を付ける実装なので、定期ワーカーの通知にはセッション URL が載らない。修正は本実測のスコープ外
+- 確認項目(b) の前提: 収集スクリプト3本はいずれも `gh-compat.sh` の REST サブコマンド経由で、`gh api graphql` / `gh (issue|pr) view --json` への依存を持たないことをコードで確認済み。SW-1〜SW-3 の実測はこれと整合する
+
+### 未実測 / 測定不能項目
+
+本セッション自身がクラウド VM 上で動いており、`herdr` コマンドが存在せず、TTY も無く、ローカルのワーカープロセスも存在しない。クラウドセッションの中から `--cloud` を入れ子で起動することもできない。そのため以下は**測定不能**:
+
+- 確認項目(a) の実測（ワーカーが `cc-cloud-done` を待たず `completed` で終了する状態遷移の観測）
+- 確認項目(c) の実測（収集結果に基づく成果物PRが実際に作成されるか、または0件早期終了の最終報告）
+- 確認項目(d) の実測（実行記録PRの作成 / force-push の観測）
+- 確認項目(e) の実測（Slack 通知の到達そのもの。NG であることはコードで確定済みだが、通知が飛ぶこと自体は未観測）
+- 所要時間（起動〜ワーカー終了、および成果物PR作成まで）
+- S-1 / S-2 の再確認5項目（引数の受理可否・状態遷移・`agent_session` の値・transcript 不在・ローカル TUI の不在）
+- SKILL.md フェーズ5が MCP（`pull_request_read`）へ実際にフォールバックするかどうか
+
+これらを実測するには、**herdr を導入したローカルホストから `claude-task-worker update-requirement-rules --cloud` を起動する必要がある**。
 
 ## 測定ログ（要旨）
 
