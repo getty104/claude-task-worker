@@ -1,6 +1,9 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
+
+const LOG_PREFIX = "cloud-setup";
 
 // クラウドセッションの既定権限モード。
 //
@@ -79,30 +82,51 @@ async function writeClaudeSettings(force: boolean): Promise<void> {
   try {
     next = withCloudDefaults(existing, force);
   } catch (e) {
-    console.log(`[cloud-setup] Skipped: ${path} (${e instanceof Error ? e.message : String(e)})`);
+    console.log(`[${LOG_PREFIX}] Skipped: ${path} (${e instanceof Error ? e.message : String(e)})`);
     return;
   }
   if (next === null) {
-    console.log(`[cloud-setup] Already set: ${path}`);
+    console.log(`[${LOG_PREFIX}] Already set: ${path}`);
     return;
   }
   try {
     await mkdir(join(path, ".."), { recursive: true });
     await writeFile(path, next, "utf-8");
   } catch (e) {
-    console.log(`[cloud-setup] Failed to write ${path}: ${e instanceof Error ? e.message : String(e)}`);
+    console.log(`[${LOG_PREFIX}] Failed to write ${path}: ${e instanceof Error ? e.message : String(e)}`);
     return;
   }
-  console.log(`[cloud-setup] ${existing === null ? "Created" : "Updated"}: ${path}`);
+  console.log(`[${LOG_PREFIX}] ${existing === null ? "Created" : "Updated"}: ${path}`);
+}
+
+// CodeGraph のセットアップ（`init` コマンドと同じ内容）。
+//
+// `codegraph init` はカレントディレクトリのリポジトリを対象にするため、リポジトリが
+// まだ無い場所（セットアップスクリプトがクローンより前に走る場合）では実行しない。
+// スキップしてもワーカーは動く（探索が CodeGraph からテキスト検索へ落ちるだけ）。
+//
+// CLI 本体（`npm install -g`）はここでは入れない。`install` が同じことをするので、
+// セットアップスクリプトに両方書けば二重に走るだけになる。未導入の場合は
+// `runCodegraphInit()` が `claude-task-worker install` を促すログを出して false を返す。
+async function setupCodegraph(): Promise<void> {
+  await ensureCodegraphGitIgnore(LOG_PREFIX);
+  try {
+    await access(".git");
+  } catch {
+    console.log(`[${LOG_PREFIX}] Skipped codegraph init: the working directory is not a git repository`);
+    return;
+  }
+  await runCodegraphInit(LOG_PREFIX);
 }
 
 // クラウド環境（Claude Code on the web）のセットアップスクリプトから呼ぶ想定のコマンド。
-// VM 側でしか意味を持たない準備をここへ集約する（現状は settings ファイルの書き込みのみ）。
+// VM 側でしか意味を持たない準備をここへ集約する（settings ファイルの書き込み、CodeGraph）。
 //
 // セットアップスクリプトは非0終了でセッションの起動ごと失敗するため、個々のステップは
 // 例外を投げずログのみで終える（このコマンドは常に正常終了する）。環境キャッシュの再構築で
 // 何度も走るので、各ステップは冪等であること。
 export async function cloudSetup(options: { force?: boolean } = {}): Promise<void> {
   await writeClaudeSettings(options.force ?? false);
-  console.log("[cloud-setup] Done.");
+  await setupCodegraph();
+  console.log(`[${LOG_PREFIX}] Done.`);
 }
