@@ -437,18 +437,55 @@ test("appendCloudDoneInstruction adds the checkout skip only for pr targets", ()
 });
 
 test("buildCloudWorktreeInstruction exempts the worktree guard but keeps the default-branch check", () => {
-  const result = buildCloudWorktreeInstruction();
+  const result = buildCloudWorktreeInstruction("/claude-task-worker:exec-issue 1");
   assert.match(result, /\.claude\/worktrees\//);
   // 免除するのは worktree 条件だけで、ガードの目的である「デフォルトブランチで作業しない」は
   // 残す。この2点が同時に書かれていないと、スキルが両方を落として保護がゼロになる。
   assert.match(result, /デフォルトブランチ/);
 });
 
+test("buildCloudWorktreeInstruction only targets exec-issue and fix-review-point", () => {
+  // 同じ worktree ガードを持つ他スキル（クラウドで走る create-issue-from-issue-number /
+  // update-issue を含む）まで巻き添えで免除しないこと。
+  assert.notEqual(buildCloudWorktreeInstruction("/claude-task-worker:fix-review-point 1"), "");
+  for (const skill of [
+    "/claude-task-worker:create-issue-from-issue-number",
+    "/claude-task-worker:update-issue",
+    "/claude-task-worker:triage-pr",
+    "/claude-task-worker:create-ui-design",
+  ]) {
+    assert.equal(buildCloudWorktreeInstruction(`${skill} 1`), "");
+  }
+});
+
 test("appendCloudDoneInstruction adds the worktree exemption for both issue and pr targets", () => {
   // exec-issue（Issue 系）と fix-review-point（PR 系）が同じガードを持つため、
-  // checkout 指示と違い両方へ付ける。
-  assert.match(appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }), /\.claude\/worktrees\//);
-  assert.match(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7 }), /\.claude\/worktrees\//);
+  // checkout 指示と違い両方へ付ける。対象外スキルには付かない。
+  assert.match(
+    appendCloudDoneInstruction("/claude-task-worker:exec-issue 7", { type: "issue", number: 7 }),
+    /\.claude\/worktrees\//,
+  );
+  assert.match(
+    appendCloudDoneInstruction("/claude-task-worker:fix-review-point 7", { type: "pr", number: 7 }),
+    /\.claude\/worktrees\//,
+  );
+  assert.doesNotMatch(
+    appendCloudDoneInstruction("/claude-task-worker:update-issue 7", { type: "issue", number: 7 }),
+    /\.claude\/worktrees\//,
+  );
+});
+
+test("buildCloudPrompt keeps the worktree exemption scoped once principles are prepended", () => {
+  // buildCloudPrompt はタスクプロンプトを先頭に置くため、原則を連結した後も先頭トークンは
+  // スキル名のまま。ここが崩れると対象スキルの判定が効かなくなる。
+  assert.match(
+    buildCloudPrompt("/claude-task-worker:exec-issue 7", "sonnet", { type: "issue", number: 7 }),
+    /\.claude\/worktrees\//,
+  );
+  assert.doesNotMatch(
+    buildCloudPrompt("/claude-task-worker:triage-pr 7", "sonnet", { type: "pr", number: 7 }),
+    /\.claude\/worktrees\//,
+  );
 });
 
 test("local execution keeps the prompt free of the worktree exemption", () => {
