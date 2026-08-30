@@ -172,10 +172,13 @@ Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP �
 
 ### 結論
 
-**GitHub MCP は読み取り系・書き込み系ともにクラウドで動作する**。今回プローブした25項目はすべて期待どおりの結果を返し、プロキシ由来の拒否は1件も無かった。あわせて `gh` 側の REST についても、リポジトリゲートが解けた状態では **Issue/PR への書き込みが GitHub に到達する**ことを確認した（2026-08-28 に「未判定」として残していた D4–D7 の解消）。一方で**新たに2つの制限**が判明した。
+**GitHub MCP は読み取り系・書き込み系ともにクラウドで動作する**。MCP ツールのプローブ30件（G-1〜G-30）は**すべて期待どおりの結果を返し、プロキシ由来の拒否は1件も無かった**（唯一の失敗 G-29 は GitHub 由来の「再実行対象が無い」エラーで、ゲートではない）。あわせて `gh` 側の REST についても、リポジトリゲートが解けた状態では **Issue/PR への書き込みが GitHub に到達する**ことを確認した（2026-08-28 に「未判定」として残していた D4–D7 の解消）。
+
+一方、**`gh` 経路（G-31〜G-42）では新たに3つの制限**が判明した。
 
 1. **`gh api` の REST には「書き込みパス」単位のゲートがある**。`repos/{o}/{r}/git/refs` への `POST` / `DELETE` は、リポジトリ連携済みでも `{"message":"Write access to this GitHub API path is not permitted through this proxy.","documentation_url":"https://docs.anthropic.com/en/docs/claude-code/github-actions"}` の403で拒否される（`documentation_url` が `docs.anthropic.com` ＝**プロキシが合成した拒否**）。対照的に `issues/*` / `pulls/*` への `POST` / `PATCH` / `PUT` は GitHub に到達する（存在しない番号宛てで `404 Not Found` ＋ `documentation_url` が `docs.github.com`）。**メソッド単位ではなくパス単位の制限**であり、ブランチ／タグの作成・削除だけが塞がれている
 2. **CI 再実行は `gh` 経路と MCP 経路で結果が分かれる**。`POST repos/{o}/{r}/actions/runs/{id}/rerun` は GitHub 由来の403（`Resource not accessible by integration`）＝**プロキシが注入するトークンに `actions: write` が無い**。同じ操作を MCP の `actions_run_trigger` で行うと **201 Created で成功する**（`run_attempt` が 1 → 2 へ上がることを確認）。`triage-pr` の C-1（失敗ジョブの再実行）は **MCP 経由でのみ成立する**
+3. **`gh-compat.sh default-branch` がクラウドで必ず失敗する**（G-42）。クラウド VM の作業ツリーに `refs/remotes/origin/HEAD` が無いため git 導出が成立せず、`gh` フォールバックは GraphQL ゲートで403になる。`exec-issue` のフェーズ0はデフォルトブランチを解決できないと fail-safe で中断するため、**クラウドタスクが着手前に止まりうる**
 
 GraphQL ゲートは**リポジトリ連携済みのセッションでも健在**で、`gh api graphql -f query='query{viewer{login}}'` は 2026-08-28 と同一本文の403を返した。これで「GraphQL ゲートはリポジトリ連携と独立している」という B1 の結論が、連携済みセッションでも成り立つことを確認できた（従来は未連携セッションでの実測にとどまっていた）。
 
@@ -257,7 +260,8 @@ GraphQL ゲートは**リポジトリ連携済みのセッションでも健在*
    - 理由: 同ツールの代表 method（G-12 / G-13）で経路の成立を確認したため。個別の可否は未確認
 5. **`mcp__github__*` の残り（本セッションで確認できたのは55ツール中20ツール）**
    - 理由: 3ワーカーが依存する操作に絞ってプローブしたため
-（当初 6 として挙げていた「通常の `git push` の可否」は、本タスク自身の push が成功したことで解消した。上記「未実測項目」4 を参照）
+
+通常の `git push`（新規コミットの push）は、当初この一覧に挙げる予定だったが、**本タスク自身の push が成功したため未実測ではない**（後述の「未実測項目」4 の注記を参照）。
 
 ### 実測の副作用
 
