@@ -14,6 +14,7 @@ const {
   observeAgentStatus,
   buildHerdrTaskResult,
   extractCloudSessionId,
+  normalizePtyOutput,
   waitForHerdrTask,
   startHerdrTask,
   stopHerdrTask,
@@ -133,6 +134,20 @@ test("extractCloudSessionId does not treat the description itself as a session i
   // `Created cloud session:` の後ろは description（例: タスクタブラベル）そのものであり、
   // セッションID（`session_` 始まり）ではない。誤って description を掴まないことを検証する。
   assert.equal(extractCloudSessionId("Created cloud session: ctw:my-app:#123"), undefined);
+});
+
+test("extractCloudSessionId finds the id after normalizePtyOutput strips ANSI escapes mid-URL", () => {
+  // 実測サンプル相当: script 経由の生出力には先頭の制御文字・ANSIカラー・末尾CRが混入し、
+  // URLの途中にもエスケープが挟まる。正規化しないと `https://claude.ai/code/` の連続一致が
+  // 崩れて抽出できない（本Issueの核心の回帰テスト）。
+  const raw = "\x04\x08\x08\x1b[33mView: https://claude.ai/code/\x1b[39msession_011AbCdEf?from=cli&m=0\r\n";
+  assert.equal(extractCloudSessionId(raw), undefined);
+  assert.equal(extractCloudSessionId(normalizePtyOutput(raw)), "session_011AbCdEf");
+});
+
+test("normalizePtyOutput leaves plain text without an id as undefined after extraction", () => {
+  const raw = "\x1b[33m⏺ 修正しました\x1b[39m\r\nctx 7% \x1b[2m│\x1b[22m 5h 26%\r\n";
+  assert.equal(extractCloudSessionId(normalizePtyOutput(raw)), undefined);
 });
 
 interface FakeHerdrOptions {
