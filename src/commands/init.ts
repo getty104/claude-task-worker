@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile, access } from "node:fs/promises";
+import { mkdir, writeFile, access } from "node:fs/promises";
 import { createLabel } from "../gh";
 import {
   DEFAULT_CONFIG,
@@ -139,83 +139,6 @@ async function createConfig(force: boolean): Promise<void> {
   logWriteResult(result, CONFIG_PATH);
 }
 
-// リポジトリの `.claude/settings.json` へ書き出すクラウドセッションの既定権限モード。
-//
-// クラウド実行（`--cloud`）では `--permission-mode` は**受理されるが VM 側に反映されない**
-// （`--disallowedTools` / `--append-system-prompt-file` と同じ。Issue #307）。加えて
-// bypassPermissions はクラウドのモード一覧に無く、既定の acceptEdits（「編集を受け入れる」）へ
-// 落ちる。クラウドで権限モードを決められる経路は「リポジトリにコミットした設定ファイル」だけ
-// なのでここへ書く。ローカル実行（default / herdr）はワーカーが `--permission-mode` フラグを
-// 渡し、フラグが settings に勝つため挙動は変わらない。
-export const CLOUD_DEFAULT_PERMISSION_MODE = "auto";
-
-// 同ファイルへ書き出すトップレベル設定。ワーカーのタスクセッションは応答するユーザーが
-// 常駐しない自律実行なので、確認を挟まず進む Proactive を既定にする。language は成果物
-// （Issueコメント・PR本文・最終報告）の言語を揃えるため。
-// どちらもユーザーの `~/.claude/settings.json` にあってもクラウドセッションには渡らない
-// （公式表: ユーザー側の設定はマシンに閉じ、リポジトリにコミットしたものだけが届く）。
-export const CLAUDE_SETTINGS_DEFAULTS = {
-  outputStyle: "Proactive",
-  language: "Japanese",
-} as const;
-
-export const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
-
-// `.claude/settings.json` へ `permissions.defaultMode` と CLAUDE_SETTINGS_DEFAULTS を
-// 差し込んだ内容を返す。変更不要（すべて指定済みで force なし）なら null。
-//
-// 既存ファイルを丸ごと上書きしないのは、対象リポジトリの settings.json には hooks・
-// enabledPlugins・permissions.allow など無関係な設定が入っているのが普通で、それを消すと
-// init が破壊的な操作になるため。JSON として読めない・`permissions` がオブジェクトでない
-// 場合は書き換えずに投げ、呼び出し側がスキップして人へ委ねる。
-export function withInitDefaults(existing: string | null, force: boolean): string | null {
-  const parsed: unknown = existing === null ? {} : JSON.parse(existing);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("not a JSON object");
-  }
-  const settings = { ...(parsed as Record<string, unknown>) };
-  const current = settings["permissions"] ?? {};
-  if (typeof current !== "object" || current === null || Array.isArray(current)) {
-    throw new Error("`permissions` is not an object");
-  }
-  const permissions = { ...(current as Record<string, unknown>) };
-  let changed = false;
-  // 既に指定がある場合は人の選択を尊重して触らない（--force のときだけ上書きする）。
-  const set = (target: Record<string, unknown>, key: string, value: string): void => {
-    if (key in target && !force) return;
-    if (target[key] === value) return;
-    target[key] = value;
-    changed = true;
-  };
-  set(permissions, "defaultMode", CLOUD_DEFAULT_PERMISSION_MODE);
-  for (const [key, value] of Object.entries(CLAUDE_SETTINGS_DEFAULTS)) set(settings, key, value);
-  if (!changed) return null;
-  return `${JSON.stringify({ ...settings, permissions }, null, 2)}\n`;
-}
-
-async function createClaudeSettings(force: boolean): Promise<void> {
-  let existing: string | null;
-  try {
-    existing = await readFile(CLAUDE_SETTINGS_PATH, "utf-8");
-  } catch {
-    existing = null;
-  }
-  let next: string | null;
-  try {
-    next = withInitDefaults(existing, force);
-  } catch (e) {
-    console.log(`[init] Skipped: ${CLAUDE_SETTINGS_PATH} (${e instanceof Error ? e.message : String(e)})`);
-    return;
-  }
-  if (next === null) {
-    console.log(`[init] Already set: ${CLAUDE_SETTINGS_PATH}`);
-    return;
-  }
-  await mkdir(".claude", { recursive: true });
-  await writeFile(CLAUDE_SETTINGS_PATH, next, "utf-8");
-  logWriteResult(existing === null ? "created" : "overwritten", CLAUDE_SETTINGS_PATH);
-}
-
 export async function init(options: { force?: boolean } = {}): Promise<void> {
   const force = options.force ?? false;
   console.log(`[init] Creating labels...${force ? " (force mode)" : ""}`);
@@ -241,9 +164,6 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
 
   console.log("[init] Creating config file...");
   await createConfig(force);
-
-  console.log("[init] Writing Claude Code settings...");
-  await createClaudeSettings(force);
 
   console.log("[init] Setting up CodeGraph...");
   await ensureCodegraphGitIgnore("init");

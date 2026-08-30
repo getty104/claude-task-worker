@@ -98,7 +98,16 @@ claude plugin install claude-task-worker@claude-task-worker
 
 herdr が必要な場合は `curl -fsSL https://herdr.dev/install.sh | sh` または `brew install herdr`（[ドキュメント](https://herdr.dev/docs/install/)）。
 
-クラウド実行（`--cloud` フラグ）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境設定（Environment setup script / セットアップスクリプト欄）に `npx claude-task-worker install` を直接記載しておく。あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。
+クラウド実行（`--cloud` フラグ）を使う場合は、クラウド VM（Claude Code on the web）側にもプラグイン・CLI が必要になる。claude.ai の環境設定（Environment setup script / セットアップスクリプト欄）に次の2行を記載しておく。
+
+```bash
+npx claude-task-worker install
+npx claude-task-worker cloud-setup
+```
+
+`cloud-setup` は VM 側の `~/.claude/settings.json` に権限モード（`permissions.defaultMode: "auto"`）・出力スタイル（`outputStyle: "Proactive"`）・言語（`language: "Japanese"`）を書き込む。クラウドセッションは起動フラグの `--permission-mode` を受理するだけで反映しないため、この設定ファイルが権限モードを指定する唯一の経路になる（設定しないと「編集を受け入れる」で動く）。書き込みはキー単位のマージで、既存の設定は消さない。
+
+あわせて、クラウドセッションが push / PR 作成を行うには対象リポジトリの GitHub App 連携が必要。
 
 UIデザイン先行ワークフローを使う場合は、同じ claude.ai の環境設定の環境変数欄に `PEN_CLI_KEY` も設定する。`.pen` を扱うスキル（`edit-pencil-design` / `inspect-pencil-node` / `resolve-pencil-conflict`）の Pen CLI 認証に使うもので、クラウド VM では対話ログインができないため。キーの発行元と値の形式は後述の「[Pen CLI のログイン](#pen-cli-のログイン)」を参照。
 
@@ -189,6 +198,7 @@ claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--
 | `yolo` | 全ワーカーを同時にポーリング（`all` + `triage-created-issue` + `triage-pr` + `check-dependabot`） |
 | `init` | ラベル・テンプレート・設定ファイルの作成と CodeGraph セットアップ |
 | `install` / `update` | 上記「セットアップ」を参照 |
+| `cloud-setup [--force]` | クラウドセッションの VM を準備する（`~/.claude/settings.json` に権限モード・出力スタイル・言語を書き込む）。claude.ai の環境設定のセットアップスクリプト欄から呼ぶ想定。既存のキーは上書きしない（`--force` で上書き） |
 | `usage` | Claude API 使用状況（5時間/7日間の利用率とリセット時刻）を表示し、Slack にも通知 |
 | `version` | CLI のバージョンを表示（`--version` / `-v` も可） |
 
@@ -259,7 +269,7 @@ claude-task-worker all --cloud
 - `config.json` の `mode` が `"herdr"` であること。新しいクラウドセッションの作成には TTY が必要で、`"default"` の子プロセス実行では作れない。`mode` が `"herdr"` でないのに `--cloud` を付けた場合は**タスクを1件も起動せずエラー終了する**（`"default"` へフォールバックしない）
 - claude.ai アカウントでのサインインが必須。API キー認証（`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`）・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成では利用できない。この検査（`claude auth status --json` の実行）は `--cloud` を指定したときだけ行う
 - 対象リポジトリの GitHub App 連携（クラウド VM から push / PR 作成を行うため）
-- claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` を記載してプラグイン・CLI を導入しておくこと（手順は「[インストール](#インストール)」参照）
+- claude.ai の環境設定のセットアップスクリプト欄に `npx claude-task-worker install` と `npx claude-task-worker cloud-setup` を記載しておくこと。前者でプラグイン・CLI を導入し、後者で VM 側の `~/.claude/settings.json`（権限モード・出力スタイル・言語）を書き込む（手順は「[インストール](#インストール)」参照）
 - UIデザイン先行ワークフローを使う場合のみ、claude.ai の環境設定の環境変数欄に `PEN_CLI_KEY`（pen.dev の組織設定 > Developer Keys で発行）を設定しておくこと。`.pen` を扱う3スキルの Pen CLI 認証に使う（「[Pen CLI のログイン](#pen-cli-のログイン)」参照）
 
 上記のうち静的検査されるのは1〜2番目だけで、GitHub App 連携・クラウド VM 側の導入状況・環境変数の設定はローカルから確認できないため検査されない。
