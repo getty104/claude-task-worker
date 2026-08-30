@@ -1,4 +1,4 @@
-/* global process */
+/* global process, setTimeout */
 // `claude` の代わりに起動されるスタブ。起動引数・cwd・env を記録し、既定で非空の
 // stdout を返す（buildTaskResult は「exit 0 かつ stdout 空」を失敗扱いにするため）。
 //
@@ -53,13 +53,24 @@ if (argv.includes("--cloud")) {
   }
   const cloudOutput = process.env.CTW_STUB_CLAUDE_CLOUD_OUTPUT ?? "";
   if (cloudOutput) process.stdout.write(cloudOutput.endsWith("\n") ? cloudOutput : `${cloudOutput}\n`);
-  process.exit(0);
+  // セッションID抽出待ちの間にシャットダウンが走るケースを再現するため、意図的に終了せず
+  // 滞留する（テストが暴走しないよう上限だけ設ける）。setTimeout は後続コードのフォール
+  // スルーを止めないため、process.exit(0) で明示的にここで終わらせる。
+  if (process.env.CTW_STUB_CLAUDE_CLOUD_LINGER) {
+    setTimeout(() => process.exit(0), 30000);
+  } else {
+    process.exit(0);
+  }
 }
 
-const stdout = process.env.CTW_STUB_CLAUDE_STDOUT ?? "[stub] claude report";
-process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
+// 上の --cloud ブロックは linger 時 process.exit を setTimeout の中まで遅延させるため、
+// 通常経路（cloud 以外）とここで分けないとフォールスルーしてしまう。
+if (!argv.includes("--cloud")) {
+  const stdout = process.env.CTW_STUB_CLAUDE_STDOUT ?? "[stub] claude report";
+  process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
 
-const stderr = process.env.CTW_STUB_CLAUDE_STDERR;
-if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+  const stderr = process.env.CTW_STUB_CLAUDE_STDERR;
+  if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
 
-process.exit(Number(process.env.CTW_STUB_CLAUDE_EXIT_CODE ?? "0"));
+  process.exit(Number(process.env.CTW_STUB_CLAUDE_EXIT_CODE ?? "0"));
+}

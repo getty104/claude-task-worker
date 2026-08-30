@@ -25,6 +25,8 @@ type TaskStatus = "running" | "completed" | "failed";
 const childProcesses = new Map<number, ChildProcess>();
 
 // herdr モードで実行中のタスク（pane/tab）。default モードの childProcesses に相当する。
+// runViaCloud（herdr 非依存のクラウドタスク）も同じ台帳へ空エントリを載せて相乗りする
+// （abort シグナル・実行中判定を共有するためで、Map の型・構造は変更しない）。
 const herdrTasks = new Map<number, HerdrTask>();
 
 // force kill 時に herdr タスクの待機ループを抜けさせるためのフラグ。
@@ -369,6 +371,8 @@ async function flagOrphanedCloudSession(
 // 現れるセッションIDを返す。TTY が無いと claude が print モード扱いで `--cloud` を拒否する
 // ため script(1) 経由で疑似ptyを割り当てる（buildScriptCommand）。作成後すぐ exit する
 // 短命プロセスなので常駐管理はせず、ID を拾うか終了するかのどちらかで決着させる。
+// この script(1) 子プロセス自体は childProcesses 台帳へ登録しない。短命かつ通常の
+// finishTask 経路（default モードの子プロセス終了ハンドラ）を通らないため。
 async function createCloudSession(
   args: string[],
   initialPrompt: string,
@@ -528,7 +532,11 @@ async function runViaCloud(
       "[worker] note: with the 1-command launch, the cloud session may already have started " +
       "working independently even though this task is being reported as failed locally (orphaned session).";
     if (cloudTarget) {
-      await flagOrphanedCloudSession(cloudTarget, id, "session-id", cloudSessionId);
+      // createCloudSession はシャットダウン起因の abort でも reject するため、abort フラグを
+      // 見て本当の原因（シャットダウン / ID抽出失敗）を区別する。固定で "session-id" にすると
+      // シャットダウン起因でも誤った原因文がコメントされる（Issue #372）。
+      const reason = herdrAbortSignal.aborted ? "shutdown" : "session-id";
+      await flagOrphanedCloudSession(cloudTarget, id, reason, cloudSessionId);
       orphanNote += " added cc-need-human-check so a human can verify whether it completed on its own.";
     }
     result = {
@@ -646,6 +654,8 @@ export function run(
   });
 }
 
+// runViaCloud はセッション確定前に herdrTasks へ仮エントリを置く（上の herdrTasks 宣言参照）
+// ため、作成待機中のクラウドタスクもここで「実行中」として数えられる。
 export function waitForAllProcesses(): Promise<void> {
   return new Promise((resolve) => {
     const check = () => {
