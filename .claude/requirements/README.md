@@ -9,8 +9,8 @@
 |---|---|---|
 | [configuration.md](configuration.md) | 配布・共有される設定ファイルの判断 | 4 |
 | [label-vocabulary.md](label-vocabulary.md) | ラベル語彙の追加とラベル遷移の扱い | 3 |
-| [worker-skill-contract.md](worker-skill-contract.md) | ワーカープロセスとタスクセッションの契約 | 3 |
-| [investigation-records.md](investigation-records.md) | 調査タスクの成果物の扱い | 1 |
+| [worker-skill-contract.md](worker-skill-contract.md) | ワーカープロセスとタスクセッションの契約 | 5 |
+| [investigation-records.md](investigation-records.md) | 調査・再分析の成果物の扱い | 2 |
 
 ## メンテナンス
 
