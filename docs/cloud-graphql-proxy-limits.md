@@ -336,7 +336,9 @@ CI は3本とも `build` / `preflight` / `code-review` がすべて success だ�
 | ID | ステップ / 操作 | 手段 | 結果 | 備考 |
 | --- | --- | --- | --- | --- |
 | W-10 | フェーズ0 `.claude/worktrees/` 配下チェック | `pwd` | **中断条件に該当** | `pwd` = `/home/user/<repo>`。クラウド実行は worktree を作らない設計のため、**この条件はクラウドでは常に成立しない** |
-| W-11 | フェーズ0 デフォルトブランチ取得（fail-safe） | `gh-compat.sh default-branch` | **失敗 → 中断条件に該当** | 出力 verbatim: `gh-compat: failed to resolve the default branch`（exit 1）。G-42 の再現。REST（`gh api repos/{o}/{r} --jq .default_branch`）は 200 で `main` を返すため代替手段はある |
+| W-11 | フェーズ0 デフォルトブランチ取得（fail-safe） | `gh-compat.sh default-branch` | **失敗 → 中断条件に該当** | 出力 verbatim: `gh-compat: failed to resolve the default branch`（exit 1）。G-42 の再現。代替手段は2つあり、どちらも実測で成立する（W-17 / W-18） |
+| W-17 | 同上・REST による代替 | `gh api repos/{o}/{r} --jq .default_branch` | **成功（200）** | `main` を返す |
+| W-18 | 同上・git 側の修復 | `git remote set-head origin -a` | **成功** | 欠けていた `refs/remotes/origin/HEAD` が `origin/main` に設定され、**以降 `gh-compat.sh default-branch` がそのまま `main` を返すようになる**。クラウド VM でもリモートへの照会は通るため、`gh-compat.sh` の第一手段（git ローカル導出）が成立しない原因は「参照が未設定であること」だけだと分かる |
 | W-12 | フェーズ0 PR状態取得 | MCP `pull_request_read`（`get`） | **成功** | `state: open` / `head.ref: ctw-probe-337-fix` / `labels: ["cc-fix-onetime"]` |
 | W-13 | フェーズ0 `gh pr checkout` | — | **省略（正しい判定）** | 現在ブランチが `headRefName` と一致 |
 | W-14 | フェーズ1 `create-review-fix-plan` | — | **未起動** | フェーズ0中断のため |
@@ -364,7 +366,7 @@ CI は3本とも `build` / `preflight` / `code-review` がすべて success だ�
 いずれも本 Issue のスコープ外（コードを変更しない）のため、別 Issue として起票した。
 
 1. **`fix-review-point` / `exec-issue` のフェーズ0 worktree ガードがクラウド実行と構造的に矛盾する**（W-10）
-2. **`gh-compat.sh default-branch` がクラウドで必ず失敗する**（W-11 / G-42）。REST を第一手段にすれば解決する
+2. **`gh-compat.sh default-branch` がクラウドで必ず失敗する**（W-11 / G-42）。REST を手段に加える（W-17）か、`git remote set-head origin -a` で `refs/remotes/origin/HEAD` を補う（W-18）ことで解決する
 3. **`plugin/references/github-access.md` の PR ラベル操作の対応表が実在しないツール（`pull_request_write`）を指している**（W-8）。あわせて `triage-pr` の `mergeable` 3値前提（W-2）と、`issue_read`（`get_labels`）に PR 番号を渡すと `Failed to get issue labels: Could not resolve to an Issue with the number of 350.` で失敗する点も同じ箇所の問題
 4. **`check-dependabot` の CHANGELOG 取得が第三者リポジトリのスコープ制限に阻まれる**（W-22 / W-23）。`WebFetch`（W-25 / W-26）へ寄せれば代替できる
 
