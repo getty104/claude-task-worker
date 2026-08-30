@@ -171,9 +171,35 @@ test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
   }
 });
 
-test("scheduled workers are all in CLOUD_DENIED_WORKERS (no Issue/PR to hold cc-cloud-done)", () => {
+// 定期ワーカーは cc-cloud-done を置く対象 Issue/PR を持たないが、完了検知を作る代わりに
+// 「セッション作成＝完了」（process-manager.ts の runViaCloud() の !cloudTarget 分岐）を
+// 正式な経路にしたためクラウド実行できる。deny-list へ差し戻さないよう固定する。
+test("scheduled workers are not in CLOUD_DENIED_WORKERS (session creation counts as completion)", () => {
   for (const name of SCHEDULED_WORKER_NAMES) {
-    assert.ok((CLOUD_DENIED_WORKERS as readonly string[]).includes(name), `${name} must be in CLOUD_DENIED_WORKERS`);
+    assert.ok(
+      !(CLOUD_DENIED_WORKERS as readonly string[]).includes(name),
+      `${name} must not be in CLOUD_DENIED_WORKERS`,
+    );
+  }
+});
+
+// denied に残るのは pen 系3件だけ。`--cloud` 起動ログ（src/index.ts の "these workers stay
+// local"）はこの配列を join するため、内容がそのままログに出る。
+test("CLOUD_DENIED_WORKERS holds only the pencil-dependent workers", () => {
+  assert.deepEqual([...CLOUD_DENIED_WORKERS], ["resolve-conflict", "create-ui-design", "apply-ui-design"]);
+});
+
+test("isCloudWorker returns true for every scheduled worker when --cloud is passed", (t) => {
+  const originalArgv = process.argv;
+  t.after(() => {
+    process.argv = originalArgv;
+    resetCloudFlagCache();
+  });
+  process.argv = [...originalArgv, "--cloud"];
+  resetCloudFlagCache();
+
+  for (const name of SCHEDULED_WORKER_NAMES) {
+    assert.equal(isCloudWorker(name), true, `isCloudWorker(${name}) must run in the cloud under --cloud`);
   }
 });
 

@@ -452,8 +452,11 @@ async function runViaCloud(
     const createOutput = `[worker] created cloud session ${cloudSessionId} with the task's initial prompt`;
 
     if (!cloudTarget) {
-      // 定期ワーカーは CLOUD_DENIED_WORKERS で起動時に拒否されるため実際には到達しない。
-      console.warn(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
+      // 定期ワーカーが通る正規の経路。ラベルを置く対象 Issue/PR を持たないため
+      // cc-cloud-done による完了検知ができず、セッション作成をもって完了とする。
+      // 帰結（クラウド側の収集が失敗しても lastRun は進む・Slack 通知に成果が載らない）は
+      // CLAUDE.md の「クラウド実行（--cloud）」節に明記してある。
+      console.log(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
       result = { status: "completed", output: createOutput };
     } else {
       // 待機中も台帳エントリを running のまま維持する（finishTask はここより後で呼ぶ）。

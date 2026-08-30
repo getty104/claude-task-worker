@@ -298,18 +298,22 @@ test("B: triage-pr のクラウド実行が --on-branch を付け、--ref を付
 });
 
 // ============================================================
-// C. 定期ワーカーは --cloud 下でもローカル実行に落ちる（update-coding-guidelines, herdr, --cloud）
+// C. 定期ワーカーは --cloud 下でクラウド実行になる（update-coding-guidelines, herdr, --cloud）
 // ============================================================
-// 定期ワーカーは CLOUD_DENIED_WORKERS（src/config.ts）に含まれるため、isCloudWorker() が false を
-// 返しローカル実行になる（対象 Issue/PR を持たず cc-cloud-done を置く先が無く完了検知できないため。
-// Phase 1 の制約）。新仕様では --cloud はプロセス単位のフラグなので起動時エラーにはならない。
+// 定期ワーカーは CLOUD_DENIED_WORKERS（src/config.ts）から外してあるため isCloudWorker() が true を
+// 返し、worktree を作らず cwd をリポジトリルートにしてクラウドセッションを作成する。対象 Issue/PR を
+// 持たず cc-cloud-done を置く先が無いのは変わらないため、完了検知は行わずセッション作成をもって
+// 完了とする（process-manager.ts の runViaCloud() の !cloudTarget 分岐）。その帰結として作成コマンドの
+// 初期プロンプトには cc-cloud-done 付与の指示が載らない。
 test(
-  "C: 定期ワーカーは --cloud 下でも起動時エラーにならずローカル実行になる（worktree 生成・--cloud 未付与）",
+  "C: 定期ワーカーは --cloud 下でクラウド実行になる（worktree 非生成・--cloud 付与・cc-cloud-done 指示なし）",
   { timeout: 30_000 },
   async (t) => {
     const stubs = installCliStubs({
       gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
-      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] update-coding-guidelines local report" },
+      herdr: {
+        paneOutput: "Created cloud session: ctw:demo:sched\nView: https://claude.ai/code/session_stubC?from=cli&m=0",
+      },
     });
     const handle = await startWorker({
       worker: "update-coding-guidelines",
@@ -323,19 +327,30 @@ test(
       stubs.cleanup();
     });
 
-    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 20_000);
+    await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined, 20_000);
 
     const records = stubs.records();
     const tabCreate = findRecord(records, "herdr", "tab", "create")!;
-    const cwdArg = argValue(tabCreate.argv, "--cwd")!;
-    assert.ok(
-      cwdArg.startsWith(`${join(realpathSync(handle.repoDir), ".claude", "worktrees")}${sep}`),
-      `worktree 配下の cwd になっていない: ${cwdArg}`,
+    assert.equal(
+      argValue(tabCreate.argv, "--cwd"),
+      realpathSync(handle.repoDir),
+      "クラウド実行では worktree を作らずリポジトリルートを cwd にする",
     );
 
-    const agentStart = findRecord(records, "herdr", "agent", "start")!;
-    const claudeArgs = extractAgentStartArgs(agentStart);
-    assert.ok(!claudeArgs.includes("--cloud"), "定期ワーカーが --cloud 付きで起動している");
+    assert.equal(
+      findRecord(records, "herdr", "agent", "start"),
+      undefined,
+      "クラウド実行で agent start が呼ばれている",
+    );
+
+    const createCommand = extractCreateCommand(findRecord(records, "herdr", "pane", "send-text")!);
+    assert.ok(createCommand.includes("'--cloud'"), "--cloud が付いていない");
+    assert.equal(commandFlagValue(createCommand, "--ref"), "main");
+    assert.ok(!createCommand.includes("'--on-branch'"), "--on-branch が付いてはいけない");
+    assert.ok(
+      !createCommand.includes("cc-cloud-done"),
+      "完了検知の対象を持たない定期ワーカーに cc-cloud-done 付与の指示が載っている",
+    );
   },
 );
 

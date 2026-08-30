@@ -319,8 +319,9 @@ export function buildCloudToolRestriction(): string {
 // 従来どおり CLI フラグ経由のままで、この関数は使わない。
 //
 // target を省略した場合（定期ワーカー）は cc-cloud-done 完了検知の指示を付けない。
-// CLOUD_DENIED_WORKERS により定期ワーカーは実際には cloud で起動されないが、
-// buildClaudeArgs 同様に呼び出し可能な形にしておく。
+// 定期ワーカーはラベルを置く対象 Issue/PR を持たず、セッション作成をもって完了とする
+// 経路（process-manager.ts の runViaCloud() の !cloudTarget 分岐）を通るため、
+// 付けても検知に使われない指示になる。
 //
 // タスクプロンプト（prompt）を先頭に置くのは、Claude Code がメッセージ先頭の
 // スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
