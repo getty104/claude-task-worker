@@ -57,8 +57,8 @@
 | `--cloud <description>`（値あり・新規作成、非TTY） | なし | 付与 | 拒否（TTY必須） | `Error: --cloud requires an interactive terminal.` | T1 |
 | `--cloud <session_id>`（既存セッションへの追記投函、`-p` 併用） | なし | 付与 | **受理**（TTY不要）。**ただし現行実装（Issue #302 以降）ではこの経路は使わない** — `--cloud <description>` の `description` は表示名ではなく初期プロンプトとして即実行される（claude 2.1.250 実測）ため、作成コマンドの description にプロンプトを直接渡す1コマンド方式へ切り替え、この投函コマンドは廃止した | — | T3 |
 | `--cloud <session_id>`（対話アタッチ） | なし | 付与 | 拒否（アカウント単位で無効） | `Error: Attaching to an existing cloud session is not enabled for your account.` | T4 |
-| `--ref <branch>` | なし | Issue系: ベースブランチ想定 | **確定**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）: 指定ブランチを起点に `claude/<description由来>-<6文字>` 形式の**作業ブランチが新規に作られる**。作業ブランチ名は `--cloud` に渡した description に依存し、ローカル側から事前に名前を決めることはできない | 実測当時のバグ（#81776）による拒否文言: `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9、smoke test（2026-08-29） |
-| `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | **確定**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）: クラウドセッションは指定した PR の head ブランチ上で**直接作業**し、push すると**その PR が更新される**（新しいブランチは切られない） | 実測当時のバグ（#81776）による拒否文言: `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10、smoke test（2026-08-29） |
+| `--ref <branch>` | なし | Issue系: ベースブランチ想定 | **確定**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）: 指定ブランチを起点に `claude/<description由来>-<6文字>` 形式の**作業ブランチが新規に作られる**。作業ブランチ名は `--cloud` に渡した description に依存し、ローカル側から事前に名前を決めることはできない。**追記（2026-08-30、`docs/cloud-session-force-push.md` F-4/F-5）**: この作業ブランチは push 先を縛らない——セッション内から別名の固定ブランチ（例: `cc-ui-design-999`）を自己作成して push できる | 実測当時のバグ（#81776）による拒否文言: `Error: --ref <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --ref to seed from local HEAD.` | T9、smoke test（2026-08-29） |
+| `--on-branch <branch>` | なし | PR系: 既存PRブランチ想定 | **確定**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）: クラウドセッションは指定した PR の head ブランチ上で**直接作業**し、push すると**その PR が更新される**（新しいブランチは切られない）。**追記（2026-08-30、`docs/cloud-session-force-push.md` F-3/F-5/F-7）**: クラウドセッションからの force-push 自体は可能で、作業ブランチ以外への push を禁じる制約も存在しない。ただし実測したのは使い捨てブランチに対する force-push（F-3）であり、**`--on-branch` で作成したセッション自身がその head ブランチを force-push する経路は測定不能**（F-7） | 実測当時のバグ（#81776）による拒否文言: `Error: --on-branch <branch> cannot be honored: the GitHub App is not set up for this repository, so the session would be seeded from your local working tree instead. Set up the GitHub integration at https://claude.ai/code, or drop --on-branch to seed from local HEAD.` | T10、smoke test（2026-08-29） |
 | `--ref` と `--on-branch` の併用 | — | — | 拒否（排他） | `Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other` | T8 |
 | `--permission-mode bypassPermissions` | 付与 | 付けない（PRD想定） | **受理される**（PRD想定と異なる） | エラーなし。セッション作成成功 | T5 |
 | `--disallowedTools` | 付与 | 付けない（PRD想定） | **受理されるが VM 側ではツール制限として効かない**（smoke test、claude 2.1.250、2026-08-29 で確定。Issue #307） | エラーなし。セッション作成成功 | T6 |
@@ -83,6 +83,7 @@
 - **T10** `claude --cloud "<desc>" --on-branch ctw-no-such-branch-xyz123`（pty）→ exit=1、T9と同文言（`--ref`→`--on-branch`に置換のみ）
   - T9/T10 の解釈（訂正済み）: 拒否理由は「ブランチ不在」でも「GitHub App 連携未設定」の実態でもなく、Claude Code 側のバグ（#81776）による誤判定。ブランチ名検証に到達していないため、`--ref`/`--on-branch` の**受理可否そのものが未判定**（回避策適用後はセッション作成まで到達する。上記「訂正」参照）
 - **T11** シード元（T5/T6/T7で毎回観測。当時は GitHub App 未設定時の挙動と解釈していたが、上記の誤判定バグと同一のチェックに起因する可能性があり、実際の連携状態を裏付ける根拠としては扱わない）: `This checkout is a linked working tree, a submodule or a checkout with a separate git directory; the new upload path does not support that yet, so the working tree is being uploaded the previous way for this session.` → クラウドセッションは**ローカル作業ツリーをアップロードしてシードされる**（remote を clone するのではない）。PRD 4.4-1 の「VM は自前で clone するので worktree 不要」という前提が成立するかは**未確認**（連携済み判定のもとでの再実測が必要）
+  - **追記（2026-08-30、`docs/cloud-session-force-push.md` F-5）**: 現行のクラウド実行環境では remote（`origin`）も認証（`credential.helper`）も揃っており、push が成功することを確認済み。本 T11 が観測した「remote が無い」状態は当時の環境固有かバグの影響と見られる
 
 ## PRD 4.2 からの差分
 
@@ -96,7 +97,7 @@
 
 ## 未実測項目
 
-`--ref` / `--on-branch` の基本的な意味論（作業ブランチの作られ方、PR head 上での直接作業）は smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）で確定済み（上記「引数表」参照）。以下は依然として未実測。
+`--ref` / `--on-branch` の基本的な意味論（作業ブランチの作られ方、PR head 上での直接作業）は smoke test（claude 2.1.250 / herdr 0.8.2、2026-08-29）で確定済み（上記「引数表」参照）。force-push の可否・固定名ブランチへの push・「push は作業ブランチのみ」という制約の有無は `docs/cloud-session-force-push.md`（F-3〜F-7、2026-08-30、claude 2.1.251）で実測済み。以下は依然として未実測。
 
 1. ~~**`--ref` / `--on-branch` のブランチ名検証以降の意味論**~~: **実測済み**（smoke test、claude 2.1.250 / herdr 0.8.2、2026-08-29）。上記「引数表」参照。リモート未存在ブランチでの挙動差など細部は引き続き未確認
 2. ~~**`--append-system-prompt-file` の内容がクラウド VM 側で実際にシステムプロンプトへ反映されるか**~~: **実測済み**（smoke test、claude 2.1.250、2026-08-29。Issue #307）。**反映されない**（システムプロンプトに仕込んだ合言葉をセッションが「無し」と回答）。あわせて `--disallowedTools` も受理されるだけで VM 側のツール制限としては効かないことを確定（`AskUserQuestion` を「利用可能」と報告）
@@ -104,6 +105,9 @@
    - 理由: 上と同じく、起動引数として拒否されないことのみを確認
    - 再現手順: セッション作成後に claude.ai 側のセッション設定、または `/model` 等のスラッシュコマンドで実際の値を確認する
 4. **`--environment <environment_id>`（自己ホスト環境）**: PRD 6 でスコープ外のため未実測
+5. **リモートブランチの削除操作が拒否される主体（エージェントプロキシかトークン権限か）**
+   - 理由: `docs/cloud-session-force-push.md` の F-6（2026-08-30、claude 2.1.251）で `git push --delete` および zero-oid refspec による ref 削除が HTTP 403 で拒否されることを確認したが、拒否している側がエージェントプロキシかトークンの権限不足かは切り分けていない
+   - 再現手順: `HTTPS_PROXY` を外した経路での削除操作と、同じトークンでの REST `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}` を比較する
 
 ## 実測の副作用
 
