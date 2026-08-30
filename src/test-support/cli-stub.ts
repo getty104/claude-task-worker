@@ -35,11 +35,11 @@ export interface CliStubOptions {
     authStatus?: unknown;
     /**
      * クラウドセッション作成コマンドの送出時に、appendCloudDoneInstruction() の指示
-     * （報告コメント投稿 → cc-cloud-done 付与）を gh スタブの状態ファイルへ模倣書き込み
-     * させる。1コマンド方式では claude バイナリが直接起動されないため、検知は herdr
-     * スタブの `pane send-text`（`--cloud` を含む送出テキスト）側で行う。
+     * （cc-cloud-done 付与）を gh スタブの状態ファイルへ模倣書き込みさせる。1コマンド方式
+     * では claude バイナリが直接起動されないため、検知は herdr スタブの `pane send-text`
+     * （`--cloud` を含む送出テキスト）側で行う。
      */
-    cloudComplete?: { type: "issue" | "pr"; number: number; report?: string };
+    cloudComplete?: { type: "issue" | "pr"; number: number };
   };
   herdr?: {
     agentStatuses?: string[];

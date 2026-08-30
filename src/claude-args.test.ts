@@ -19,7 +19,6 @@ const {
   buildCloudToolRestriction,
   appendCloudDoneInstruction,
   buildCloudCheckoutInstruction,
-  CLOUD_REPORT_HEADING,
   shellQuote,
   isOpusModel,
   systemPromptFilePath,
@@ -396,9 +395,11 @@ test("appendCloudDoneInstruction keeps the original prompt and appends the label
   assert.ok(result.includes("Issue #123"));
 });
 
-test("appendCloudDoneInstruction includes the cloud report heading", () => {
+test("appendCloudDoneInstruction only instructs label attachment, not report comment posting", () => {
   const result = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
-  assert.ok(result.includes(CLOUD_REPORT_HEADING));
+  assert.ok(result.includes("cc-cloud-done"));
+  assert.ok(!result.includes("add_issue_comment"));
+  assert.ok(!result.includes("gh issue comment"));
 });
 
 test("appendCloudDoneInstruction switches wording between issue and pr targets", () => {
@@ -459,7 +460,6 @@ test("buildCloudPrompt keeps the cc-cloud-done instruction and task prompt when 
   const result = buildCloudPrompt(prompt, "sonnet", { type: "issue", number: 123 });
   assert.ok(result.startsWith(prompt));
   assert.ok(result.includes(prompt));
-  assert.ok(result.includes(CLOUD_REPORT_HEADING));
   assert.ok(result.includes("cc-cloud-done"));
   assert.ok(result.includes("Issue #123"));
 });
@@ -467,7 +467,6 @@ test("buildCloudPrompt keeps the cc-cloud-done instruction and task prompt when 
 test("buildCloudPrompt omits the cc-cloud-done instruction when no target is given", () => {
   const result = buildCloudPrompt("/claude-task-worker:update-coding-guidelines 1", "sonnet");
   assert.ok(!result.includes("cc-cloud-done"));
-  assert.ok(!result.includes(CLOUD_REPORT_HEADING));
   assert.ok(result.includes(SYSTEM_PROMPT_BASE));
   assert.ok(result.includes(DISALLOWED_TOOLS[0]));
 });

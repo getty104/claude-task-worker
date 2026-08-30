@@ -9,13 +9,11 @@ import { promisify } from "node:util";
 import type * as CliStubModule from "./test-support/cli-stub";
 import type { StubRecord } from "./test-support/cli-stub";
 import type * as WorkerHarnessModule from "./test-support/worker-harness";
-import type * as ClaudeArgsModule from "./claude-args";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする（既存テストと同じパターン）。
 const { installCliStubs } = (await import("./test-support/cli-stub.ts")) as typeof CliStubModule;
 const { startWorker } = (await import("./test-support/worker-harness.ts")) as typeof WorkerHarnessModule;
-const { CLOUD_REPORT_HEADING } = (await import("./claude-args")) as typeof ClaudeArgsModule;
 
 // テスト内で使い捨ての HTTP サーバを立て、Slack Webhook 宛の POST 本文（text）を集める。
 async function startSlackCapture(): Promise<{ url: string; texts: () => string[]; close: () => Promise<void> }> {
@@ -586,9 +584,9 @@ test("F: exec-issue のローカル実行は --cloud/--ref/-p を付けず workt
 });
 
 // ============================================================
-// G. cc-cloud-done 検知 → ラベル除去 → レポートコメント取得 → Slack 通知本文への反映
+// G. cc-cloud-done 検知 → ラベル除去 → Slack 通知本文への反映（レポートコメント取得はしない）
 // ============================================================
-test("G: クラウド完了検知後にレポートコメントを取得し Slack 通知本文へ反映する", { timeout: 75_000 }, async (t) => {
+test("G: クラウド完了検知後にレポートコメントを取得せず Slack 通知本文へ反映する", { timeout: 75_000 }, async (t) => {
   const slack = await startSlackCapture();
   t.after(() => slack.close());
 
@@ -599,11 +597,7 @@ test("G: クラウド完了検知後にレポートコメントを取得し Slac
     },
     claude: {
       stdout: "[stub] exec-issue cloud report",
-      cloudComplete: {
-        type: "issue",
-        number: 501,
-        report: `${CLOUD_REPORT_HEADING}\n\n[stub] 最終報告本文`,
-      },
+      cloudComplete: { type: "issue", number: 501 },
     },
   });
   const handle = await startWorker({
@@ -633,11 +627,13 @@ test("G: クラウド完了検知後にレポートコメントを取得し Slac
   );
 
   const records = stubs.records();
+  // Issue #326: レポートコメントの回収を廃止したので、`gh api .../comments?since=`
+  // が呼ばれてはいけない（呼ばれていたら回収処理が復活した合図）。
   assert.ok(
-    records.some(
+    !records.some(
       (r) => r.command === "gh" && r.argv[0] === "api" && /issues\/501\/comments\?since=/.test(r.argv[1] ?? ""),
     ),
-    "レポートコメント取得（gh api .../comments?since=）の記録が見つからない",
+    "レポートコメント取得（gh api .../comments?since=）が呼ばれている",
   );
 
   const removeCloudDone = records.filter(
@@ -650,7 +646,10 @@ test("G: クラウド完了検知後にレポートコメントを取得し Slac
   );
   assert.ok(removeCloudDone.length >= 2, `--remove-label cc-cloud-done が2回以上ない: ${removeCloudDone.length}件`);
 
-  await handle.waitFor(() => slack.texts().some((text) => text.includes("[stub] 最終報告本文")), 20_000);
+  await handle.waitFor(
+    () => slack.texts().some((text) => text.includes("detected completion via the cc-cloud-done label")),
+    20_000,
+  );
 });
 
 // ============================================================

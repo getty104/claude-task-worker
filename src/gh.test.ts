@@ -6,8 +6,7 @@ import type * as GhModule from "./gh";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { hasLabel, hasOpenBlockers, findPrNumberClosingIssue, findCommentSince } =
-  (await import("./gh")) as typeof GhModule;
+const { hasLabel, hasOpenBlockers, findPrNumberClosingIssue } = (await import("./gh")) as typeof GhModule;
 
 const REPO_INFO_STDOUT = JSON.stringify({
   owner: { login: "getty104" },
@@ -184,35 +183,4 @@ test("hasOpenBlockers returns false when every blockedBy issue is closed", async
 test("hasOpenBlockers returns false when the issue has no dependencies", async (t) => {
   mockExecFile(t, JSON.stringify({ number: 3, blockedBy: { nodes: [], totalCount: 0 } }));
   assert.equal(await hasOpenBlockers(3), false);
-});
-
-test("findCommentSince calls gh api with the expected comments path", async (t) => {
-  let capturedArgs: string[] = [];
-  t.mock.method(childProcess, "execFile", (_command: string, args: string[], callback: ExecFileCallback) => {
-    capturedArgs = args;
-    callback(null, "[]", "");
-  });
-  await findCommentSince(42, new Date("2026-08-28T00:00:00.000Z"), "## heading");
-  assert.deepEqual(capturedArgs, ["api", "repos/{owner}/{repo}/issues/42/comments?since=2026-08-28T00:00:00.000Z"]);
-});
-
-test("findCommentSince returns the body of the matching comment", async (t) => {
-  mockExecFile(t, JSON.stringify([{ body: "intro\n## heading\nreport text" }]));
-  assert.equal(
-    await findCommentSince(42, new Date("2026-08-28T00:00:00.000Z"), "## heading"),
-    "intro\n## heading\nreport text",
-  );
-});
-
-test("findCommentSince returns the latest matching comment when there are multiple", async (t) => {
-  mockExecFile(
-    t,
-    JSON.stringify([{ body: "## heading\nfirst" }, { body: "unrelated" }, { body: "## heading\nsecond" }]),
-  );
-  assert.equal(await findCommentSince(42, new Date("2026-08-28T00:00:00.000Z"), "## heading"), "## heading\nsecond");
-});
-
-test("findCommentSince returns null when no comment matches the heading", async (t) => {
-  mockExecFile(t, JSON.stringify([{ body: "unrelated comment" }]));
-  assert.equal(await findCommentSince(42, new Date("2026-08-28T00:00:00.000Z"), "## heading"), null);
 });

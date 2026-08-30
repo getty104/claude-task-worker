@@ -100,26 +100,21 @@ if (sub === "tab" && action === "create") {
   }
   // クラウド実行（1コマンド方式）の作成コマンド（`claude --cloud <prompt> ...`）は、
   // claude バイナリを実起動せずこの pane send-text でターミナル文字列として送出される
-  // だけなので、appendCloudDoneInstruction() がセッションへ指示する最後の2操作
-  // （報告コメント投稿 → cc-cloud-done 付与）をここで gh-stub.mjs の状態ファイルへ
-  // 直接模倣する（旧実装は claude-stub.mjs の投函コマンド起動時に行っていた）。
+  // だけなので、appendCloudDoneInstruction() がセッションへ指示する最後の操作
+  // （cc-cloud-done 付与）をここで gh-stub.mjs の状態ファイルへ直接模倣する
+  // （旧実装は claude-stub.mjs の投函コマンド起動時に行っていた）。
   // gh-stub.mjs と import し合うと installCliStubs() のラッパー構成が複雑になるため、
   // read/write の重複はここでは許容する。
   if (action === "send-text") {
     const text = rest[1] ?? "";
     const cloudCompleteRaw = process.env.CTW_STUB_CLAUDE_CLOUD_COMPLETE;
     if (cloudCompleteRaw && text.includes("'--cloud'") && recordFile) {
-      const { type, number, report } = JSON.parse(cloudCompleteRaw);
+      const { type, number } = JSON.parse(cloudCompleteRaw);
       const ghStateFile = `${recordFile}.gh-state.json`;
       const ghState = existsSync(ghStateFile)
         ? JSON.parse(readFileSync(ghStateFile, "utf8"))
         : { labels: {}, comments: {} };
       const key = `${type}:${number}`;
-      if (report) {
-        const comments = ghState.comments?.[number] ?? [];
-        comments.push({ body: report, created_at: new Date().toISOString() });
-        ghState.comments = { ...ghState.comments, [number]: comments };
-      }
       const labels = new Set(ghState.labels?.[key] ?? []);
       labels.add("cc-cloud-done");
       ghState.labels = { ...ghState.labels, [key]: [...labels] };

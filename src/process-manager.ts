@@ -2,9 +2,9 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { buildCloudCreateArgs, buildCloudPrompt, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
+import { buildCloudCreateArgs, buildCloudPrompt, shellQuote } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
-import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
+import { addLabel, commentOnIssue, commentOnPR, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
 import {
@@ -465,20 +465,9 @@ async function runViaCloud(
         await removeLabel(cloudTarget, id, CLOUD_DONE_LABEL).catch((err: unknown) => {
           console.error(`[worker] failed to remove ${CLOUD_DONE_LABEL} from ${cloudTarget} #${id}: ${err}`);
         });
-        // 完了検知後に1回だけ、セッションが投稿した最終報告コメントを回収する。
-        // 取得できなければ従来どおりの定型文のまま completed を維持する（通知を落とさない）。
-        let reportBody: string | null = null;
-        const startedAt = tasks.get(id)?.startedAt;
-        if (startedAt) {
-          try {
-            reportBody = await findCommentSince(id, startedAt, CLOUD_REPORT_HEADING);
-          } catch (err) {
-            console.error(`[worker] failed to fetch the cloud report comment for ${cloudTarget} #${id}: ${err}`);
-          }
-        }
         result = {
           status: "completed",
-          output: reportBody ?? `${createOutput}\n[worker] detected completion via the ${CLOUD_DONE_LABEL} label`,
+          output: `${createOutput}\n[worker] detected completion via the ${CLOUD_DONE_LABEL} label`,
         };
       } else if (outcome === "timeout") {
         // タイムアウト打ち切りを人手確認へ確実に回すためここで cc-need-human-check を付ける。

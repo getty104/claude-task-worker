@@ -385,23 +385,6 @@ export async function hasLabel(type: "issue" | "pr", number: number, label: stri
 }
 
 /**
- * 指定時刻以降に投稿されたコメントのうち、見出しが一致する最新（配列末尾）の1件の本文を返す。
- * クラウドタスクの完了検知（cc-cloud-done ラベル）後に、最終報告コメントを1回だけ回収する
- * ために使う想定で、ポーリングでは呼ばない。
- * `{owner}/{repo}` は `gh api` が解決するため getRepoInfo() は使わない。PR も issue と
- * 番号空間・エンドポイント（`issues/<number>/comments`）を共有するため type 分岐は不要。
- */
-export async function findCommentSince(number: number, since: Date, heading: string): Promise<string | null> {
-  const output = await execGh(["api", `repos/{owner}/{repo}/issues/${number}/comments?since=${since.toISOString()}`]);
-  const comments: { body: string }[] = JSON.parse(output);
-  const matched = comments.filter((comment) => comment.body.split("\n").some((line) => line.trim() === heading));
-  if (matched.length === 0) {
-    return null;
-  }
-  return matched[matched.length - 1].body;
-}
-
-/**
  * 指定ラベルが付いた issue/PR 番号を列挙する。実行中のクラウドタスク全体を1クエリで
  * 判定するための列挙であり、個別番号の `gh issue view` ポーリングにはしない。
  * `--state all` にするのは、exec-issue の「コード変更なし」経路が Issue をクローズして
