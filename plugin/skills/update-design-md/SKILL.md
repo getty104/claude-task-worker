@@ -104,11 +104,11 @@ MCP経路でもフェーズ2以降（`jq` でのPR単位読み出し、`merge_co
 1. `list_pull_requests` / `search_pull_requests`（`state: closed`, `label: cc-ui-design`, `sort: updated` 等でマージ日時降順に絞り込み）で対象PR番号を確定する（マージ済みのみ。`merged_at` が null のものは除外）
 2. PRごとに `pull_request_read`（`get`）で本文・メタデータ、`get_files` で変更ファイル一覧、`get_review_comments` でレビュースレッド、`get`（もしくは Issue コメント相当）で会話コメントを取得する
 3. 取得した内容から、PRごとに次のオブジェクトを組み立てる（フォールバックスクリプトの `fetch_pr` が生成する構造と同一）:
-   - `pr_number` / `pr_title` / `pr_url` / `pr_body`（本文、なければ `""`）/ `pr_author`（作成者ログイン、不明なら `"unknown"`）/ `merged_at` / `merge_commit`（マージコミットSHA、取得不能なら `null`）/ `base_ref` / `head_ref` / `labels`（名前の配列）/ `related_issues`（closing issue の `{number, title}` 配列）
+   - `pr_number` / `pr_title` / `pr_url` / `pr_body`（本文、なければ `""`）/ `pr_author`（作成者ログイン、不明なら `"unknown"`）/ `merged_at` / `merge_commit`（マージコミットSHA、取得不能なら `null`）/ `base_ref` / `head_ref` / `labels`（名前の配列）/ `related_issues`（closing issue の `{number, title}` 配列。REST に同等資源が無いため PR本文の closing keyword から導出する経路では、GitHub UI で手動リンクされた closing 参照は含まれない）
    - `pen_files`: 変更ファイルパスのうち `.pen` で終わるもの
    - `snapshot_files`: `.pen` ではなく、パスに `snapshots/` を含み、拡張子が `png`/`jpg`/`jpeg`/`webp`/`gif`/`svg`（大小文字無視）のもの
    - `other_files`: 上記2つに該当しない残り
-   - `review_comments[]`: レビュースレッドの各コメントを `{path, line, is_resolved, is_outdated, author, body, url, created_at}` に展開（`path`/`line` はスレッド単位の値をコメントへ複写）
+   - `review_comments[]`: レビュースレッドの各コメントを `{path, line, is_resolved, is_outdated, author, body, url, created_at}` に展開（`path`/`line` はスレッド単位の値をコメントへ複写。`is_resolved` は GraphQL が使えない環境（クラウド）では `null` になりうる）
    - `conversation_comments[]`: 会話コメントのうち非表示（minimized）ではないものを `{author, body, url, created_at}` に展開
 4. 全PR分を `merged_at` 降順に並べ、`{period_since, repo, label, pr_count, output_file, prs: [...]}` の形に組んで `Write` ツールでファイル（例: スクラッチパス配下の一時ファイル）へ書き出す。`period_since` はフェーズ0で確定した日数から算出したISO8601、`output_file` は書き出し先自身の絶対パス、`pr_count` は `prs` の件数
 5. 以降の手順（フェーズ1「本文の読み出し」・フェーズ2の `merge_commit` によるファイル復元）は、この `output_file` を `<output_file>` として同じ `jq` コマンドでそのまま使う

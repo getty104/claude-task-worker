@@ -73,14 +73,14 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
 - `pr_count`: 対象PR数
 - `prs[]`:
   - `pr_number` / `pr_title` / `pr_url` / `pr_author`
-  - `review_comments[]`: コード行に紐づくレビューコメント（`path` / `line` / `is_resolved` / `is_outdated` / `author` / `body` / `url` / `created_at`）
+  - `review_comments[]`: コード行に紐づくレビューコメント（`path` / `line` / `is_resolved` / `is_outdated` / `author` / `body` / `url` / `created_at`）。`is_resolved` は GraphQL が使えない環境（クラウド）では `null` になりうる
   - `conversation_comments[]`: PRのConversationタブに投稿されたコメント（`author` / `body` / `url` / `created_at`）
 
 `pr_count`が0の場合は「対象期間に新規レビューコメントなし」と報告して終了する（CODING_GUIDELINES.mdは更新しない）。
 
 ### ノイズ除外
 
-スクリプト側で`isMinimized: true`の会話コメントは除外済みだが、以下も**ルール化対象から外す**（クラスタリング対象には含めるが、抽出条件の判断時に除外する）:
+スクリプト側で`isMinimized: true`の会話コメントは除外済みだが（GraphQL が使える環境限定。GraphQL が使えない環境（クラウド）では`isMinimized`相当を取得できず、非表示コメントも収集結果に含まれる）、以下も**ルール化対象から外す**（クラスタリング対象には含めるが、抽出条件の判断時に除外する）:
 
 - PR作成者自身のコメント（セルフコメント・進捗報告）
 - ボット起動コマンド（`/gemini review`等）やCIの自動投稿

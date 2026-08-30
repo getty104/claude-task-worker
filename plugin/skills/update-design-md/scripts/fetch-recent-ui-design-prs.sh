@@ -21,8 +21,8 @@ set -euo pipefail
 #                      README/docs 配下等の無関係な画像を混入させない）
 #   - other_files:    それ以外（pen_files にも snapshot_files にも該当しないもの）
 #
-# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
-# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になり収集が0件になる。
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。GraphQL 直叩きはクラウド
+# セッションのプロキシで403になるため、取得は `gh-compat.sh` の REST サブコマンド経由で行う。
 # 詳細は plugin/references/github-access.md を参照。
 
 DAYS="${1:-1}"
@@ -37,8 +37,6 @@ if ! [[ "$DAYS" =~ ^[0-9]+$ ]]; then
 fi
 
 OWNER_REPO="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" owner-repo)"
-OWNER="$(echo "$OWNER_REPO" | cut -d'/' -f1)"
-REPO="$(echo "$OWNER_REPO" | cut -d'/' -f2)"
 
 if date -v-1d >/dev/null 2>&1; then
   SINCE_DATE="$(date -v-"${DAYS}"d +%Y-%m-%d)"
@@ -64,86 +62,30 @@ empty_result() {
     | tee "$OUT_FILE"
 }
 
-# `merged:>=DATE` の検索は「マージ済み」だけを拾うので --state merged と併せて二重に絞る
+GH_COMPAT="$(dirname "$0")/../../../scripts/gh-compat.sh"
+
 # MAX_PRS で切り捨てる基準はPR番号ではなくマージ日時（降順）にする。
 # 番号順で切ると、長期間openだった低番号PRが直近マージされた場合に
-# 本来含めるべき直近マージPRが除外されてしまう。
-PR_NUMBERS=$(gh pr list \
-  --state merged \
-  --label "$LABEL" \
-  --search "merged:>=${SINCE_DATE}" \
-  --json number,mergedAt \
-  --jq 'sort_by(.mergedAt) | reverse | .[].number' \
-  --limit 200 | head -n "$MAX_PRS")
+# 本来含めるべき直近マージPRが除外されてしまう（list-prs-merged-since は merged_at 降順で返す）。
+# 認証失敗（クラウドセッションでの403等）を「該当0件」として握りつぶさないよう、
+# 一覧取得の失敗はここで即座にエラー終了させる（呼び出し元が pr_count:0 と誤認しないため）。
+# since には `${SINCE_DATE}T00:00:00Z`（その日の 00:00:00Z）を渡す。元の
+# `merged:>=${SINCE_DATE}`（日付粒度）と意味を揃えるためで、SINCE_ISO（現在時刻から
+# N日前の時刻）を渡すと対象がより狭くなり、移行前後で出力が変わってしまう。
+if ! PR_NUMBERS_ALL=$(bash "$GH_COMPAT" list-prs-merged-since "${SINCE_DATE}T00:00:00Z" "$LABEL"); then
+  echo "error: gh-compat.sh list-prs-merged-since failed for label '${LABEL}' (auth/network failure, not zero results)" >&2
+  exit 1
+fi
+
+PR_NUMBERS=$(echo "$PR_NUMBERS_ALL" | head -n "$MAX_PRS")
 
 if [ -z "$PR_NUMBERS" ]; then
   empty_result
   exit 0
 fi
 
-fetch_paginated() {
-  # $1: 対象フィールド名（reviewThreads / comments / files）に応じたGraphQLクエリを受け取り、
-  # ページングしてノードを NDJSON へ落とす汎用ヘルパー。
-  local query="$1" path="$2" out_ndjson="$3" owner="$4" repo="$5" pr="$6"
-  local cursor="" has_next="true"
-
-  : > "$out_ndjson"
-
-  while [ "$has_next" = "true" ]; do
-    local args=(-f query="$query" -F owner="$owner" -F repo="$repo" -F pr="$pr")
-    if [ -n "$cursor" ]; then
-      args+=(-F cursor="$cursor")
-    fi
-
-    local result
-    result=$(gh api graphql "${args[@]}")
-
-    echo "$result" | jq -c ".data.repository.pullRequest.${path}.nodes[]" >> "$out_ndjson"
-    has_next=$(echo "$result" | jq -r ".data.repository.pullRequest.${path}.pageInfo.hasNextPage")
-    cursor=$(echo "$result" | jq -r ".data.repository.pullRequest.${path}.pageInfo.endCursor")
-  done
-}
-
-REVIEW_THREADS_QUERY='query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$pr) {
-      reviewThreads(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          isResolved isOutdated path line
-          comments(first: 100) {
-            nodes { author { login } body url createdAt }
-          }
-        }
-      }
-    }
-  }
-}'
-
-COMMENTS_QUERY='query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$pr) {
-      comments(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { author { login } body url createdAt isMinimized }
-      }
-    }
-  }
-}'
-
-FILES_QUERY='query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-  repository(owner:$owner, name:$repo) {
-    pullRequest(number:$pr) {
-      files(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { path additions deletions changeType }
-      }
-    }
-  }
-}'
-
 fetch_pr() {
-  local pr="$1" out_json="$2" owner="$3" repo="$4"
+  local pr="$1" out_json="$2"
 
   local work_dir="$TEMP_DIR/pr_${pr}"
   mkdir -p "$work_dir"
@@ -152,25 +94,22 @@ fetch_pr() {
   local comments_ndjson="$work_dir/comments.ndjson"
   local files_ndjson="$work_dir/files.ndjson"
 
-  gh api graphql \
-    -f query='query($owner:String!,$repo:String!,$pr:Int!) {
-      repository(owner:$owner, name:$repo) {
-        pullRequest(number:$pr) {
-          number title url body mergedAt baseRefName headRefName
-          author { login }
-          mergeCommit { oid }
-          labels(first: 30) { nodes { name } }
-          closingIssuesReferences(first: 10) { nodes { number title } }
-        }
-      }
-    }' \
-    -F owner="$owner" -F repo="$repo" -F pr="$pr" \
-    | jq -c '.data.repository.pullRequest' > "$meta_file"
+  bash "$GH_COMPAT" pr-meta "$pr" > "$meta_file"
+  bash "$GH_COMPAT" pr-review-comments "$pr" > "$threads_ndjson"
+  bash "$GH_COMPAT" pr-conversation-comments "$pr" > "$comments_ndjson"
+  bash "$GH_COMPAT" pr-files "$pr" > "$files_ndjson"
 
-  fetch_paginated "$REVIEW_THREADS_QUERY" "reviewThreads" "$threads_ndjson" "$owner" "$repo" "$pr"
-  fetch_paginated "$COMMENTS_QUERY" "comments" "$comments_ndjson" "$owner" "$repo" "$pr"
-  fetch_paginated "$FILES_QUERY" "files" "$files_ndjson" "$owner" "$repo" "$pr"
-
+  # REST に同等表現が無いフィールドの縮退:
+  # - is_resolved: REST にレビュースレッドという資源が無いため、GraphQLが使えない環境
+  #   （クラウド）では null になる。ローカルでは gh-compat.sh の GraphQL 補完が値を埋める。
+  # - conversation_comments の isMinimized == false フィルタ: REST に isMinimized 相当が
+  #   無いため、GraphQLが使えない環境では非表示（minimized）コメントを除外できず取り込まれる
+  #   （落とすより取り込む側＝安全側に倒している）。
+  # - related_issues（closingIssuesReferences）: REST に同等資源が無いため、pr-meta は
+  #   PR本文の closing keyword（`Closes #N` 等）から導出する。GitHubのUIで手動リンクされた
+  #   closing 参照は本文に現れないため取れない。なお cc-ui-design の運用ではデザインPRが
+  #   `Refs #N`（closing keyword ではない）を使うため、そもそも related_issues は空になる
+  #   のが正常。
   jq -n \
     --slurpfile meta "$meta_file" \
     --slurpfile threads <(jq -s '.' "$threads_ndjson") \
@@ -231,7 +170,7 @@ wait_batch() {
 }
 
 for PR in $PR_NUMBERS; do
-  fetch_pr "$PR" "$TEMP_DIR/pr_${PR}.json" "$OWNER" "$REPO" &
+  fetch_pr "$PR" "$TEMP_DIR/pr_${PR}.json" &
   PIDS+=("$!")
   PIDS_PR+=("$PR")
 

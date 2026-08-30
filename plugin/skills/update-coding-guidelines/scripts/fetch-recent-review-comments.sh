@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。クラウドセッションでは
-# `gh api graphql` / `gh (issue|pr) view --json` がプロキシで403になり収集が0件になる。
-# 詳細は plugin/references/github-access.md を参照。
+# このスクリプトは GitHub MCP 利用不可時のフォールバック経路。GraphQL 経由の gh
+# コマンド（内部が GraphQL の一覧・照会系サブコマンド）はクラウドセッションの
+# プロキシで403になるため、取得は `gh-compat.sh` の REST サブコマンド経由で行う
+# （ローカル実行では同スクリプト内で GraphQL による補完が働く）。詳細は
+# plugin/references/github-access.md を参照。
 
 DAYS="${1:-1}"
 JOB_LIMIT="${JOB_LIMIT:-10}"
 
-OWNER_REPO="$(bash "$(dirname "$0")/../../../scripts/gh-compat.sh" owner-repo)"
-OWNER="$(echo "$OWNER_REPO" | cut -d'/' -f1)"
-REPO="$(echo "$OWNER_REPO" | cut -d'/' -f2)"
+GH_COMPAT="$(dirname "$0")/../../../scripts/gh-compat.sh"
+
+OWNER_REPO="$(bash "$GH_COMPAT" owner-repo)"
 
 if date -v-1d >/dev/null 2>&1; then
   SINCE_DATE="$(date -v-"${DAYS}"d +%Y-%m-%d)"
@@ -20,7 +22,14 @@ else
   SINCE_ISO="$(date -u -d "${DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
-PR_NUMBERS=$(gh pr list --state all --search "updated:>=${SINCE_DATE}" --json number --jq '.[].number' --limit 100)
+# `${SINCE_DATE}T00:00:00Z`（その日の00:00:00Z以降）を渡すのは、旧実装が持って
+# いた「updated:>=<日付>」という日付粒度の意味を揃えるため。SINCE_ISO（現在
+# 時刻からDAYS日前の時刻）を渡すと対象範囲がより狭くなり、移行前後で出力が
+# 変わってしまう。
+if ! PR_NUMBERS=$(bash "$GH_COMPAT" list-prs-updated-since "${SINCE_DATE}T00:00:00Z"); then
+  echo "error: failed to list PRs updated since ${SINCE_DATE}" >&2
+  exit 1
+fi
 
 TEMP_DIR=$(mktemp -d)
 WORK_DIR="$TEMP_DIR/work"
@@ -33,87 +42,10 @@ if [ -z "$PR_NUMBERS" ]; then
   exit 0
 fi
 
-fetch_review_threads() {
-  local owner="$1"
-  local repo="$2"
-  local pr="$3"
-  local threads_ndjson="$4"
-
-  local cursor=""
-  local has_next="true"
-
-  : > "$threads_ndjson"
-
-  while [ "$has_next" = "true" ]; do
-    local args=(-f query='query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-      repository(owner:$owner, name:$repo) {
-        pullRequest(number:$pr) {
-          reviewThreads(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              isResolved isOutdated path line
-              comments(first: 100) {
-                nodes { author { login } body url createdAt }
-              }
-            }
-          }
-        }
-      }
-    }' -F owner="$owner" -F repo="$repo" -F pr="$pr")
-    if [ -n "$cursor" ]; then
-      args+=(-F cursor="$cursor")
-    fi
-
-    local result
-    result=$(gh api graphql "${args[@]}")
-
-    echo "$result" | jq -c '.data.repository.pullRequest.reviewThreads.nodes[]' >> "$threads_ndjson"
-    has_next=$(echo "$result" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
-    cursor=$(echo "$result" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
-  done
-}
-
-fetch_conversation_comments() {
-  local owner="$1"
-  local repo="$2"
-  local pr="$3"
-  local comments_ndjson="$4"
-
-  local cursor=""
-  local has_next="true"
-
-  : > "$comments_ndjson"
-
-  while [ "$has_next" = "true" ]; do
-    local args=(-f query='query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
-      repository(owner:$owner, name:$repo) {
-        pullRequest(number:$pr) {
-          comments(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { author { login } body url createdAt isMinimized }
-          }
-        }
-      }
-    }' -F owner="$owner" -F repo="$repo" -F pr="$pr")
-    if [ -n "$cursor" ]; then
-      args+=(-F cursor="$cursor")
-    fi
-
-    local result
-    result=$(gh api graphql "${args[@]}")
-
-    echo "$result" | jq -c '.data.repository.pullRequest.comments.nodes[]' >> "$comments_ndjson"
-    has_next=$(echo "$result" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage')
-    cursor=$(echo "$result" | jq -r '.data.repository.pullRequest.comments.pageInfo.endCursor')
-  done
-}
-
 fetch_pr() {
   local pr="$1"
   local out_file="$2"
   local since="$3"
-  local owner="$4"
-  local repo="$5"
 
   local pr_work_dir="$WORK_DIR/pr_${pr}"
   mkdir -p "$pr_work_dir"
@@ -121,20 +53,18 @@ fetch_pr() {
   local threads_ndjson="$pr_work_dir/threads.ndjson"
   local comments_ndjson="$pr_work_dir/comments.ndjson"
 
-  gh api graphql \
-    -f query='query($owner:String!,$repo:String!,$pr:Int!) {
-      repository(owner:$owner, name:$repo) {
-        pullRequest(number:$pr) {
-          number title url author { login }
-        }
-      }
-    }' \
-    -F owner="$owner" -F repo="$repo" -F pr="$pr" \
-    | jq -c '.data.repository.pullRequest' > "$meta_file"
+  bash "$GH_COMPAT" pr-meta "$pr" > "$meta_file"
+  bash "$GH_COMPAT" pr-review-comments "$pr" > "$threads_ndjson"
+  bash "$GH_COMPAT" pr-conversation-comments "$pr" > "$comments_ndjson"
 
-  fetch_review_threads "$owner" "$repo" "$pr" "$threads_ndjson"
-  fetch_conversation_comments "$owner" "$repo" "$pr" "$comments_ndjson"
-
+  # REST に同等表現が無いフィールドの縮退（gh-compat.sh の契約どおり）:
+  # - is_resolved: REST にレビュースレッドという資源が無いため、GraphQL が
+  #   使えない環境（クラウド）では null になる。ローカルでは gh-compat.sh の
+  #   GraphQL 補完が値を埋める。
+  # - conversation_comments の isMinimized == false フィルタ: REST に
+  #   isMinimized 相当が無いため、GraphQL が使えない環境では非表示
+  #   （minimized）コメントを除外できず取り込まれる。落とすより取り込む側
+  #   （安全側）に倒している。
   jq -n --arg since "$since" \
     --slurpfile meta "$meta_file" \
     --slurpfile threads <(jq -s '.' "$threads_ndjson") \
@@ -182,7 +112,7 @@ wait_batch() {
 }
 
 for PR in $PR_NUMBERS; do
-  fetch_pr "$PR" "$TEMP_DIR/pr_${PR}.json" "$SINCE_ISO" "$OWNER" "$REPO" &
+  fetch_pr "$PR" "$TEMP_DIR/pr_${PR}.json" "$SINCE_ISO" &
   PIDS+=("$!")
   PIDS_PR+=("$PR")
 
