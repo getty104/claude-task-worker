@@ -281,9 +281,41 @@ export function buildCloudCreateArgs(commonArgs: string[], prompt: string): stri
 export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
   const checkoutInstruction = buildCloudCheckoutInstruction(target);
+  const worktreeInstruction = buildCloudWorktreeInstruction(prompt);
   const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
   const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
-  return [prompt, checkoutInstruction, reportInstruction, labelInstruction].filter((part) => part !== "").join("\n\n");
+  return [prompt, checkoutInstruction, worktreeInstruction, reportInstruction, labelInstruction]
+    .filter((part) => part !== "")
+    .join("\n\n");
+}
+
+// Issue 系・PR 系の両方へ付与する worktree ガードの免除指示。
+//
+// `exec-issue` / `fix-review-point` のフェーズ0には「`pwd` が `.claude/worktrees/` 配下で
+// なければ中断する」というガードがあるが、クラウド実行はワーカーが worktree を作らない
+// （`isCloudWorker()` 分岐、`issue-worker.ts` / `pr-worker.ts`）ため cwd がリポジトリルートに
+// なり、このガードは常に中断側へ倒れる。ガードの真の目的は「デフォルトブランチで作業しない」
+// ことであり、両スキルが既に持つデフォルトブランチ比較で担保できるため、worktree 条件だけを
+// 免除する。
+//
+// 判定手段を環境変数の推定ではなくプロンプト注入にするのは、要件ルール
+// （`.claude/requirements/worker-skill-contract.md`「実行形態で届かない制御は、その形態で
+// 届く経路へ内容ごと移す」）に従うため。buildCloudCheckoutInstruction() と同じ形で、
+// 文言の定義元をここ1箇所に保つ。ローカル実行ではこの指示が付かないため、スキル本文は
+// 従来どおり worktree を必須とする（指示が無ければ中断する fail-safe）。
+// worktree ガードを持つスキルは9個あるが、本指示の対象は #353 がスコープした2つだけ。
+// 無条件に注入すると、クラウドで走る `create-issue-from-issue-number` / `update-issue` の
+// 同じガードまで巻き添えで免除してしまう（それらは免除の可否を検討していない）。
+// ワーカーのプロンプトは必ず `/claude-task-worker:<skill> <番号>` で始まる
+// （`buildCloudPrompt()` がタスクプロンプトを先頭に置くため、原則を連結した後も先頭のまま）
+// なので、先頭トークンのスキル名で対象を絞る。形式が変わればマッチせず指示が付かない＝
+// スキルは従来どおり中断する側へ倒れるため、失敗方向も安全側。
+const CLOUD_WORKTREE_EXEMPT_SKILLS = ["exec-issue", "fix-review-point"] as const;
+
+export function buildCloudWorktreeInstruction(prompt: string): string {
+  const skill = prompt.trim().split(/\s+/)[0] ?? "";
+  if (!CLOUD_WORKTREE_EXEMPT_SKILLS.some((name) => skill.endsWith(`:${name}`))) return "";
+  return "このセッションはクラウド実行のため worktree を持たず、cwd はリポジトリルートである（ワーカーはクラウド実行時に worktree を作らない）。スキル本文のフェーズ0にある「`pwd` が `.claude/worktrees/` 配下でなければ中断する」確認は、この指示がある場合に限り適用しないこと。ただしガードの目的である「デフォルトブランチで作業しない」は維持すること — 同じフェーズ0の「デフォルトブランチ名を取得し、現在ブランチと一致する場合は中断する（取得失敗も中断）」は必ず実行し、一致した場合は従来どおり中断すること。";
 }
 
 // PR 系タスク向けの `gh pr checkout` スキップ指示。
