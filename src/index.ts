@@ -40,6 +40,7 @@ import {
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
 import { checkCloudConfig, CLOUD_ALLOWED_WORKERS, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -238,9 +239,26 @@ async function readCloudAuthStatus(): Promise<CloudAuthStatus> {
   }
 }
 
-// --cloud フラグ指定時の構成が非対応（mode !== "herdr"、claude.ai 未サインイン）だと
+// --cloud に必要な pty は `script(1)` で割り当てるため、platform 対応（buildScriptCommand が
+// throw するかどうかで判定。darwin/linux の列挙をここへ二重定義しない）と PATH 上の存在の
+// 両方を確認する。`which` の ENOENT・非0終了はいずれも「利用不可」へ倒す。
+async function resolveScriptAvailable(): Promise<boolean> {
+  try {
+    buildScriptCommand("true", []);
+  } catch {
+    return false;
+  }
+  try {
+    await execFileAsync("which", ["script"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --cloud フラグ指定時の構成が非対応（script(1) によるpty割り当て不可、claude.ai 未サインイン）だと
 // タスク起動が壊れた形で失敗し続けるため、サイレントにローカル実行へフォールバックせず起動時に落とす。
-// サインイン状態の I/O は --cloud が指定されていなければ行わない
+// サインイン状態・script可否の I/O は --cloud が指定されていなければ行わない
 // （--cloud を書かない既存の使い方での挙動を完全に不変に保つため）。
 async function assertCloudAvailable(): Promise<void> {
   const cloud = hasCloudFlag();
@@ -251,9 +269,10 @@ async function assertCloudAvailable(): Promise<void> {
   // color は init.ts の LABELS の CLOUD_DONE_LABEL エントリと同じ値。
   const labelReady = cloud ? await createLabel(CLOUD_DONE_LABEL, "33cfff", true) : true;
   const status = cloud ? await readCloudAuthStatus() : undefined;
+  const scriptAvailable = cloud ? await resolveScriptAvailable() : undefined;
   const errors = checkCloudConfig({
     cloud,
-    mode: getRunMode(),
+    scriptAvailable,
     auth: status ? { status, baseUrl: process.env.ANTHROPIC_BASE_URL } : undefined,
   });
   if (!labelReady) {

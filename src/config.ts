@@ -291,17 +291,17 @@ export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: strin
 
 // --cloud フラグ指定時に非対応の組み合わせが無いかを検査する。引数をオブジェクト1つに
 // してあるのは、検査項目を追加してもシグネチャを壊さずフィールドを足せるようにするため。
-// `auth` は cloud が false なら一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
+// `auth` / `scriptAvailable` は cloud が false なら一切参照しない（既存リポジトリでの挙動を完全に不変に保つため）。
 export function checkCloudConfig(input: {
   cloud: boolean;
-  mode: string;
+  scriptAvailable?: boolean;
   auth?: { status: CloudAuthStatus; baseUrl?: string };
 }): string[] {
   if (!input.cloud) return [];
   const errors: string[] = [];
-  if (input.mode !== "herdr") {
+  if (input.scriptAvailable === false) {
     errors.push(
-      `--cloud requires mode "herdr" but mode is "${input.mode}" (creating a new cloud session requires a TTY, which "default" mode's spawn does not have). Set mode to "herdr" in config.json, or drop the --cloud flag.`,
+      `--cloud requires a pty, provided via the "script" command (creating a new cloud session requires a TTY, which the worker's spawn does not have on its own). "script" is unavailable — either the platform is not darwin/linux, or "script" is not on PATH. Drop the --cloud flag, or run on darwin/linux where "script" is available.`,
     );
   }
   if (input.auth !== undefined) errors.push(...checkCloudAuth(input.auth));

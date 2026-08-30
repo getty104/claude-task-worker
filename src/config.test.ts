@@ -196,25 +196,32 @@ test("parseWorkerEntry warns and ignores a legacy cloud key (moved to the --clou
   assert.match(String(warn.mock.calls[0]?.arguments[0]), /workers\.exec-issue\.cloud is removed/);
 });
 
-test("checkCloudConfig returns nothing when cloud is false, regardless of mode", () => {
-  assert.deepEqual(checkCloudConfig({ cloud: false, mode: "default" }), []);
+test("checkCloudConfig returns nothing when cloud is false", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: false }), []);
 });
 
-test("checkCloudConfig allows cloud: true when mode is herdr", () => {
-  assert.deepEqual(checkCloudConfig({ cloud: true, mode: "herdr" }), []);
+test("checkCloudConfig allows cloud: true regardless of mode (mode is no longer a field)", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: true }), []);
 });
 
-test("checkCloudConfig rejects cloud: true when mode is not herdr", () => {
-  const errors = checkCloudConfig({ cloud: true, mode: "default" });
+test("checkCloudConfig rejects cloud: true when scriptAvailable is false", () => {
+  const errors = checkCloudConfig({ cloud: true, scriptAvailable: false });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /--cloud/);
-  assert.match(errors[0], /herdr/);
+  assert.match(errors[0], /script/);
+});
+
+test("checkCloudConfig allows cloud: true when scriptAvailable is true", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: true, scriptAvailable: true }), []);
+});
+
+test("checkCloudConfig does not inspect scriptAvailable when cloud is false", () => {
+  assert.deepEqual(checkCloudConfig({ cloud: false, scriptAvailable: false }), []);
 });
 
 test("checkCloudConfig does not inspect auth when cloud is false", () => {
   const errors = checkCloudConfig({
     cloud: false,
-    mode: "herdr",
     auth: { status: { kind: "ok", loggedIn: false, authMethod: "none", apiProvider: "firstParty" } },
   });
   assert.deepEqual(errors, []);

@@ -1,7 +1,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, sep } from "node:path";
@@ -430,14 +430,26 @@ test(
   },
 );
 
+// resolveScriptAvailable() は `which script` の成否で scriptAvailable を決める。テスト環境の
+// PATH には実 script(1) がほぼ確実に存在するため、installCliStubs の PATH 先頭（dir）へ常に
+// 失敗する which スタブを置いて scriptAvailable: false を強制する（E1 / K が共有）。
+function makeScriptUnavailable(dir: string): void {
+  const whichPath = join(dir, "which");
+  writeFileSync(whichPath, "#!/bin/sh\nexit 1\n");
+  chmodSync(whichPath, 0o755);
+}
+
 // ============================================================
 // E. 起動拒否
 // ============================================================
-test("E1: mode default で --cloud を渡すと起動せず終了コード1", { timeout: 30_000 }, async (t) => {
+test("E1: script が利用できない環境で --cloud を渡すと起動せず終了コード1", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
+  makeScriptUnavailable(stubs.dir);
   const handle = await startWorker({
     worker: "exec-issue",
     workerConfig: { workers: {} },
+    // mode は checkCloudConfig の拒否理由ではなくなった（script 利用不可のみが理由）。
+    // 既定の default のままにして、mode 差が結果に影響しないことも兼ねて確認する。
     userConfig: { mode: "default" },
     records: stubs.records,
     extraArgs: ["--cloud"],
@@ -461,7 +473,7 @@ test("E1: mode default で --cloud を渡すと起動せず終了コード1", { 
   // console.error はステータステーブル描画用にキャプチャされ stdout 側のログテーブルへ
   // 流れる（src/table.ts の captureConsole()）ため、stderr ではなく stdout を見る。
   assert.ok(handle.stdout().includes("--cloud"), "エラーメッセージが --cloud を指していない");
-  assert.ok(handle.stdout().includes("herdr"), "エラーメッセージが herdr モードへの切り替えを案内していない");
+  assert.ok(handle.stdout().includes("script"), "エラーメッセージが script(1) の不可用を案内していない");
 });
 
 // resolve-conflict は CLOUD_ALLOWED_WORKERS（src/config.ts）に含まれないため、--cloud 下でも
@@ -841,10 +853,11 @@ test(
 // ============================================================
 test("K: --cloud 指定時は起動時に cc-cloud-done ラベルを作成する", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
+  makeScriptUnavailable(stubs.dir);
   const handle = await startWorker({
     worker: "exec-issue",
     workerConfig: {},
-    // mode: "default" は --cloud 指定として無効（E1 参照）だが、assertCloudAvailable の
+    // script 利用不可（E1 参照）で checkCloudConfig が拒否するが、assertCloudAvailable の
     // ラベル作成は checkCloudConfig の妥当性判定より前に行われるため、この組み合わせでも
     // 素早く（起動失敗を待つだけで）ラベル作成の記録を確認できる。
     userConfig: { mode: "default" },
