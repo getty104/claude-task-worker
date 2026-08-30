@@ -22,7 +22,7 @@ Dependabot PRに対して、依存ライブラリのバージョンアップに�
 
 !`git fetch origin "$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)" >/dev/null 2>&1 || true`
 
-（`gh-compat.sh default-branch` は git のローカル導出を第一手段にし、失敗時のみ `gh repo view` へフォールバックする。クラウドセッションでは `gh repo view --json` が GraphQL ゲートで 403 になるため直接呼ばない）
+（`gh-compat.sh default-branch` は git のローカル導出 → REST（`GET repos/{o}/{r}` の `.default_branch`）→ `gh repo view` の3段で解決する。クラウドセッションでは作業ツリーに `refs/remotes/origin/HEAD` が無く `gh repo view --json` も GraphQL ゲートで 403 になるため、REST 段が実質の解決手段になる。直接 `gh repo view` を呼ばない）
 
 > **プリアンブル（`!` インライン実行）に失敗しうるコマンドを置かないこと**: プリアンブルのコマンドが失敗すると、セッションはモデル未起動のまま何も出力せず exit 0 で終了し、ワーカーが空振り実行を延々と繰り返す。プリアンブルには `|| true` で非致命化したコマンドだけを置き、`gh pr checkout` のような失敗しうるコマンドは本文のステップ0で実行する。
 
