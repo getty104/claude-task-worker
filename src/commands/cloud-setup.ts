@@ -1,7 +1,7 @@
-import { mkdir, writeFile, readFile, access } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
+import { ensureCodegraphGitIgnore } from "./codegraph.js";
 
 const LOG_PREFIX = "cloud-setup";
 
@@ -99,34 +99,21 @@ async function writeClaudeSettings(force: boolean): Promise<void> {
   console.log(`[${LOG_PREFIX}] ${existing === null ? "Created" : "Updated"}: ${path}`);
 }
 
-// CodeGraph のセットアップ（`init` コマンドと同じ内容）。
-//
-// `codegraph init` はカレントディレクトリのリポジトリを対象にするため、リポジトリが
-// まだ無い場所（セットアップスクリプトがクローンより前に走る場合）では実行しない。
-// スキップしてもワーカーは動く（探索が CodeGraph からテキスト検索へ落ちるだけ）。
-//
-// CLI 本体（`npm install -g`）はここでは入れない。`install` が同じことをするので、
-// セットアップスクリプトに両方書けば二重に走るだけになる。未導入の場合は
-// `runCodegraphInit()` が `claude-task-worker install` を促すログを出して false を返す。
-async function setupCodegraph(): Promise<void> {
-  await ensureCodegraphGitIgnore(LOG_PREFIX);
-  try {
-    await access(".git");
-  } catch {
-    console.log(`[${LOG_PREFIX}] Skipped codegraph init: the working directory is not a git repository`);
-    return;
-  }
-  await runCodegraphInit(LOG_PREFIX);
-}
-
 // クラウド環境（Claude Code on the web）のセットアップスクリプトから呼ぶ想定のコマンド。
-// VM 側でしか意味を持たない準備をここへ集約する（settings ファイルの書き込み、CodeGraph）。
+// VM 側でしか意味を持たない準備をここへ集約する（settings ファイルの書き込み、
+// グローバル gitignore への `.codegraph/` 登録）。
 //
 // セットアップスクリプトは非0終了でセッションの起動ごと失敗するため、個々のステップは
 // 例外を投げずログのみで終える（このコマンドは常に正常終了する）。環境キャッシュの再構築で
 // 何度も走るので、各ステップは冪等であること。
+//
+// CodeGraph の**インデックス構築**（`codegraph init`）はここではなく SessionStart フック
+// （`plugin/scripts/setup-codegraph.sh`）で行う。セットアップスクリプトは環境キャッシュが
+// 無いときしか走らず、キャッシュはリポジトリを問わず再利用されるため、毎セッションの
+// インデックスを保証できないため。ここで行うのは `.codegraph/` を誤ってコミットしないための
+// gitignore 登録だけで、こちらは VM 全体に一度効けばよい（キャッシュに残る）。
 export async function cloudSetup(options: { force?: boolean } = {}): Promise<void> {
   await writeClaudeSettings(options.force ?? false);
-  await setupCodegraph();
+  await ensureCodegraphGitIgnore(LOG_PREFIX);
   console.log(`[${LOG_PREFIX}] Done.`);
 }
