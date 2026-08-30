@@ -61,7 +61,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Pen CLI](https://docs.pen.dev/for-developers/pen-cli) | `.pen` の編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン） |
 | [Playwright](https://playwright.dev/) のブラウザ | Playwright MCP でのブラウザ確認 |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（未導入でも動く） |
-| [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` / `--cloud` 使用時のみ |
+| [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は起動ゲートこそ herdr を要求しないが、実行経路の分岐が未追随のため現状は `mode: "herdr"` が要る） |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避（任意。Claude 側のコネクタで有効化） |
 
 CLI 本体に npm の実行時依存はない（Node.js 標準モジュールのみで動作する）。
@@ -181,7 +181,7 @@ claude-task-worker all --cloud
 
 | 前提 | 備考 |
 |---|---|
-| `config.json` の `mode` が `"herdr"` | クラウドセッションの作成には TTY が必要。満たさない場合はタスクを1件も起動せずエラー終了する（フォールバックしない） |
+| `script` コマンドが使える環境（macOS / Linux） | クラウドセッションの作成には TTY が必要で、それを `script` コマンドの疑似 pty で供給する。platform が darwin/linux でない、または `script` が PATH に無い場合はタスクを1件も起動せずエラー終了する（フォールバックしない） |
 | claude.ai アカウントでのサインイン | API キー認証・第三者プロバイダ（Bedrock / Vertex）構成では利用不可。`--cloud` 指定時のみ検査される |
 | 対象リポジトリの GitHub App 連携 | クラウド VM から push / PR 作成を行うため |
 | claude.ai の「プルリクエストを自動的に作成する」「プルリクエストの自動修正」が **OFF** | 下記 |
@@ -205,6 +205,7 @@ npx claude-task-worker cloud-setup
 - 完了は `cc-cloud-done` ラベルで検知する。4時間で応答がなければ打ち切り、`cc-need-human-check` を付けて失敗通知する
 - `--project` と併用した場合、`--cloud` は各プロジェクトへそのまま転送される
 - `--cloud` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
+- **現時点では `mode: "default"` での `--cloud` はクラウド経路へ流れない**（実行経路の分岐が `mode: "herdr"` 判定のまま未追随のため）。`--cloud` を使うには `mode: "herdr"` にしておく必要がある。追随は別Issueで対応予定
 
 詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
 
@@ -244,7 +245,7 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 |---|---|---|
 | `projects` | - | プロジェクト名 → 絶対パス |
 | `projectGroups` | `{}` | グループ名 → プロジェクト名配列 |
-| `mode` | `"default"` | `"default"`: `claude -p` の子プロセスとして実行 / `"herdr"`: herdr のタブ内で TUI 起動し、実行中の様子を覗ける（`--project` / `--cloud` はこちらが必要） |
+| `mode` | `"default"` | `"default"`: `claude -p` の子プロセスとして実行 / `"herdr"`: herdr のタブ内で TUI 起動し、実行中の様子を覗ける（`--project` はこちらが必要） |
 | `advisor` | `false` | `true` で `--advisor <model>` を渡す。モデルは `claude-task-worker.json` の `advisorModel` |
 | `permission` | `"bypassPermissions"` | Claude CLI の[権限モード](https://code.claude.com/docs/ja/permission-modes)（`bypassPermissions` / `dontAsk` / `auto` / `acceptEdits` / `manual` / `plan`） |
 

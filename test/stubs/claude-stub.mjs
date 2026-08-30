@@ -1,12 +1,12 @@
-/* global process */
+/* global process, setTimeout */
 // `claude` の代わりに起動されるスタブ。起動引数・cwd・env を記録し、既定で非空の
 // stdout を返す（buildTaskResult は「exit 0 かつ stdout 空」を失敗扱いにするため）。
 //
-// クラウド実行（1コマンド方式）ではこのバイナリは実際には起動されない
-// （`claude --cloud <prompt> ...` は herdr の pane send-text でターミナル文字列として
-// 送出されるだけで、テストプロセスからは実行されない）。そのためクラウド完了検知の
-// 模倣（cc-cloud-done ラベル付与）は herdr-stub.mjs の pane send-text ハンドラ側で行う。
-import { appendFileSync } from "node:fs";
+// クラウド実行（1コマンド方式）ではこのバイナリが script(1) 経由で直接起動される。
+// セッション作成コマンドの stdout は CTW_STUB_CLAUDE_CLOUD_OUTPUT で差し替えられ、
+// 実際のクラウドセッションが最後の操作として行う報告コメント投稿・cc-cloud-done 付与は
+// CTW_STUB_CLAUDE_CLOUD_COMPLETE の指定時にここで gh-stub.mjs の状態ファイルへ模倣する。
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const recordFile = process.env.CTW_STUB_RECORD_FILE;
@@ -30,10 +30,47 @@ if (argv[0] === "auth" && argv[1] === "status" && argv[2] === "--json") {
   process.exit(0);
 }
 
-const stdout = process.env.CTW_STUB_CLAUDE_STDOUT ?? "[stub] claude report";
-process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
+// クラウドセッション作成コマンド（`claude --cloud <prompt> ...`）。実バイナリはセッションを
+// 作って即 exit するため、セッションIDを含む起動出力だけを再現する。
+if (argv.includes("--cloud")) {
+  const cloudCompleteRaw = process.env.CTW_STUB_CLAUDE_CLOUD_COMPLETE;
+  if (cloudCompleteRaw && recordFile) {
+    const { type, number, report } = JSON.parse(cloudCompleteRaw);
+    const ghStateFile = `${recordFile}.gh-state.json`;
+    const ghState = existsSync(ghStateFile)
+      ? JSON.parse(readFileSync(ghStateFile, "utf8"))
+      : { labels: {}, comments: {} };
+    if (report) {
+      const comments = ghState.comments?.[number] ?? [];
+      comments.push({ body: report, created_at: new Date().toISOString() });
+      ghState.comments = { ...ghState.comments, [number]: comments };
+    }
+    const key = `${type}:${number}`;
+    const labels = new Set(ghState.labels?.[key] ?? []);
+    labels.add("cc-cloud-done");
+    ghState.labels = { ...ghState.labels, [key]: [...labels] };
+    writeFileSync(ghStateFile, JSON.stringify(ghState));
+  }
+  const cloudOutput = process.env.CTW_STUB_CLAUDE_CLOUD_OUTPUT ?? "";
+  if (cloudOutput) process.stdout.write(cloudOutput.endsWith("\n") ? cloudOutput : `${cloudOutput}\n`);
+  // セッションID抽出待ちの間にシャットダウンが走るケースを再現するため、意図的に終了せず
+  // 滞留する（テストが暴走しないよう上限だけ設ける）。setTimeout は後続コードのフォール
+  // スルーを止めないため、process.exit(0) で明示的にここで終わらせる。
+  if (process.env.CTW_STUB_CLAUDE_CLOUD_LINGER) {
+    setTimeout(() => process.exit(0), 30000);
+  } else {
+    process.exit(0);
+  }
+}
 
-const stderr = process.env.CTW_STUB_CLAUDE_STDERR;
-if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+// 上の --cloud ブロックは linger 時 process.exit を setTimeout の中まで遅延させるため、
+// 通常経路（cloud 以外）とここで分けないとフォールスルーしてしまう。
+if (!argv.includes("--cloud")) {
+  const stdout = process.env.CTW_STUB_CLAUDE_STDOUT ?? "[stub] claude report";
+  process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
 
-process.exit(Number(process.env.CTW_STUB_CLAUDE_EXIT_CODE ?? "0"));
+  const stderr = process.env.CTW_STUB_CLAUDE_STDERR;
+  if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+
+  process.exit(Number(process.env.CTW_STUB_CLAUDE_EXIT_CODE ?? "0"));
+}

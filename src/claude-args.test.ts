@@ -22,6 +22,7 @@ const {
   buildCloudWorktreeInstruction,
   CLOUD_REPORT_HEADING,
   shellQuote,
+  buildScriptCommand,
   isOpusModel,
   systemPromptFilePath,
   systemPromptFor,
@@ -208,11 +209,13 @@ test("buildClaudeArgs passes --advisor with the model in both modes", () => {
   }
 });
 
-test("buildClaudeEnv drops the print-only ceiling in herdr mode", () => {
+test("buildClaudeEnv drops the print-only ceiling outside print mode (herdr / cloud)", () => {
   assert.deepEqual(buildClaudeEnv("default"), { ...CLAUDE_SPAWN_ENV });
   assert.deepEqual(buildClaudeEnv("herdr"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   });
+  // `--cloud` は `--print` と併用できないため、default モードのクラウド実行も print にならない。
+  assert.ok(!("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS" in buildClaudeEnv("default", true)));
 });
 
 test("buildClaudeEnv does not pass HERDR_DISABLE_SOUND (read by the herdr server, not the pane)", () => {
@@ -226,7 +229,7 @@ test("buildClaudeEnv adds CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC only when clo
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   });
   assert.deepEqual(buildClaudeEnv("default", true), {
-    ...CLAUDE_SPAWN_ENV,
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   });
   assert.deepEqual(buildClaudeEnv("herdr", true), {
@@ -313,6 +316,28 @@ test("shellQuote keeps a multi-line value as a single quoted token", () => {
   const quoted = shellQuote("line1\nline2\nline3");
   assert.equal(quoted, "'line1\nline2\nline3'");
   assert.equal(quoted.match(/'/g)?.length, 2, "囲む2つのシングルクォート以外が含まれてはいけない");
+});
+
+test("buildScriptCommand builds a BSD script(1) argv on darwin", () => {
+  const result = buildScriptCommand("claude", ["--cloud", "do it"], "darwin");
+  assert.deepEqual(result, {
+    command: "script",
+    args: ["-q", "/dev/null", "claude", "--cloud", "do it"],
+  });
+});
+
+test("buildScriptCommand builds a util-linux script(1) argv on linux with a single quoted command string", () => {
+  const prompt = "line1\nline2 with 'quotes' and spaces";
+  const result = buildScriptCommand("claude", ["--cloud", prompt], "linux");
+  assert.equal(result.command, "script");
+  assert.equal(result.args.length, 3);
+  assert.equal(result.args[0], "-qec");
+  assert.equal(result.args[2], "/dev/null");
+  assert.equal(result.args[1], [shellQuote("claude"), shellQuote("--cloud"), shellQuote(prompt)].join(" "));
+});
+
+test("buildScriptCommand throws for an unsupported platform, naming it in the message", () => {
+  assert.throws(() => buildScriptCommand("claude", [], "win32"), /win32/);
 });
 
 test("buildClaudeArgs passes --ref when baseRef is given", () => {

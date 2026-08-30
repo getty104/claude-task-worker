@@ -116,9 +116,10 @@ test("buildClaudeEnv is pinned for default and herdr modes", () => {
   assert.deepEqual(buildClaudeEnv("herdr"), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   });
+  // クラウド実行は mode に関わらず print モードにならないため、print 専用の
+  // CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS は default モードでも付かない。
   assert.deepEqual(buildClaudeEnv("default", true), {
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
-    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   });
   assert.deepEqual(buildClaudeEnv("herdr", true), {
