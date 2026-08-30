@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { buildCloudCreateArgs, buildCloudPrompt, CLOUD_REPORT_HEADING, shellQuote } from "./claude-args";
+import { buildCloudCreateArgs, buildCloudPrompt, buildScriptCommand, CLOUD_REPORT_HEADING } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
 import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
@@ -365,6 +365,68 @@ async function flagOrphanedCloudSession(
   });
 }
 
+// クラウドセッションの作成コマンド（`claude --cloud <prompt> ...`）を起動し、標準出力へ
+// 現れるセッションIDを返す。TTY が無いと claude が print モード扱いで `--cloud` を拒否する
+// ため script(1) 経由で疑似ptyを割り当てる（buildScriptCommand）。作成後すぐ exit する
+// 短命プロセスなので常駐管理はせず、ID を拾うか終了するかのどちらかで決着させる。
+async function createCloudSession(
+  args: string[],
+  initialPrompt: string,
+  cwd?: string,
+  env?: Record<string, string>,
+): Promise<string> {
+  const { extractCloudSessionId, normalizePtyOutput } = await import("./herdr-runner");
+  const spec = buildScriptCommand("claude", buildCloudCreateArgs(args, initialPrompt));
+  const child = spawn(spec.command, spec.args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    ...(cwd ? { cwd } : {}),
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
+
+  let output = "";
+  return await new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const finish = (err?: Error, sessionId?: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(abortCheck);
+      if (err) {
+        child.kill();
+        reject(err);
+      } else {
+        resolve(sessionId as string);
+      }
+    };
+    // pty 出力には ANSI/OSC エスケープが混ざるため、抽出前に必ず正規化する。
+    const scan = (): void => {
+      const sessionId = extractCloudSessionId(normalizePtyOutput(output));
+      if (sessionId) finish(undefined, sessionId);
+    };
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf-8");
+      scan();
+    });
+    child.on("error", (err) => finish(new Error(`failed to spawn the cloud session command: ${err.message}`)));
+    // ID を出さないまま終了した場合はタイムアウトを待たずに失敗を確定させる。
+    child.on("close", () => {
+      scan();
+      finish(new Error(`the cloud session command exited without a session id (output tail: ${output.slice(-1000)})`));
+    });
+
+    const timer = setTimeout(
+      () => finish(new Error(`timed out waiting for the cloud session id (output tail: ${output.slice(-1000)})`)),
+      CLOUD_SESSION_TIMEOUT_MS,
+    );
+    const abortCheck = setInterval(() => {
+      if (herdrAbortSignal.aborted) {
+        finish(new Error("the worker is shutting down before the cloud session could be created"));
+      }
+    }, CLOUD_SESSION_POLL_INTERVAL_MS);
+  });
+}
+
 // クラウド実行（workers.<name>.cloud）のタスク実行。`claude --cloud <prompt> ...`
 // 1コマンドでセッション作成と初期プロンプトの実行を同時に行う（description が
 // そのまま初期プロンプトとして即実行されるため）。作成後は cc-cloud-done ラベルの
@@ -379,19 +441,14 @@ async function runViaCloud(
   cloudTarget?: CloudTargetType,
   model?: string,
 ): Promise<void> {
-  const herdrRunnerMod = await import("./herdr-runner");
-  const { taskTabLabel, waitForPaneReady, extractCloudSessionId, normalizePtyOutput } = herdrRunnerMod;
-  const herdrMod = await import("./herdr");
-  const { tabCreate, tabClose, paneSendText, paneSendKeys, paneRead, getCurrentWorkspaceId } = herdrMod;
-
   // 起動が完了する前にシャットダウンが走っても waitForAllProcesses() が
-  // 「実行中タスクなし」と誤判定しないよう、タブ確定前から台帳に載せておく
-  // （runViaHerdr と同じ狙い）。
+  // 「実行中タスクなし」と誤判定しないよう、セッション確定前から台帳に載せておく
+  // （runViaHerdr と同じ狙い）。クラウドセッションはローカルに pane/tab を持たないため
+  // 空のエントリを置くだけで、abort フラグの効き方は変わらない。
   herdrTasks.set(id, { paneId: "", tabId: "" });
 
-  const label = taskTabLabel(resolveProjectName(), id);
-  // 作成コマンドの description は herdr のタスクタブラベルではなく、クラウドセッションの
-  // 初期プロンプトそのもの。cc-cloud-done の投稿指示に加え、クラウドでは反映されない
+  // 作成コマンドの description はクラウドセッションの初期プロンプトそのもの。
+  // cc-cloud-done の投稿指示に加え、クラウドでは反映されない
   // システムプロンプト・ツール制限もここへ本文として含めておく（渡した瞬間に実行される
   // ため、後から追加投函する余地は無い）。
   const initialPrompt = buildCloudPrompt(
@@ -403,49 +460,7 @@ async function runViaCloud(
   let cloudSessionId: string | undefined;
 
   try {
-    // env は tabCreate（herdr の --env）で渡す。1コマンド方式では `claude` はこの
-    // ペインのシェルへ直接送信されるため（下記 paneSendText）、env はここ1箇所に
-    // 渡せば CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 等が確実に効く。
-    const created = await tabCreate({ label, cwd: cwd ?? process.cwd(), workspaceId: getCurrentWorkspaceId(), env });
-    herdrTasks.set(id, created);
-
-    try {
-      const ready = await waitForPaneReady(created.paneId, herdrMod);
-      if (!ready) {
-        console.warn(`[worker] pane ${created.paneId} produced no prompt before the timeout, launching anyway`);
-      }
-
-      const command = ["claude", ...buildCloudCreateArgs(args, initialPrompt)].map(shellQuote).join(" ");
-      await paneSendText(created.paneId, command);
-      await paneSendKeys(created.paneId, "enter");
-
-      const deadline = Date.now() + CLOUD_SESSION_TIMEOUT_MS;
-      for (;;) {
-        if (herdrAbortSignal.aborted) {
-          throw new Error("the worker is shutting down before the cloud session could be created");
-        }
-        let content = "";
-        try {
-          // `recent` は「末尾N行」を空行パディング込みで数えるため、作成直後のペイン
-          // （出力がビューポート下端に届いていない）では必ず空文字になる。既定の
-          // `visible`（ビューポート全体）で読む。詳細は CLAUDE.md の herdr 節を参照。
-          content = await paneRead(created.paneId);
-        } catch (err) {
-          console.error(`[worker] failed to read pane ${created.paneId} while waiting for the cloud session: ${err}`);
-        }
-        cloudSessionId = extractCloudSessionId(normalizePtyOutput(content));
-        if (cloudSessionId) break;
-        if (Date.now() >= deadline) {
-          throw new Error(`timed out waiting for the cloud session id (pane tail: ${content.slice(-1000)})`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, CLOUD_SESSION_POLL_INTERVAL_MS));
-      }
-    } finally {
-      // クラウドセッションはローカルに常駐しないため、取得可否に関わらずタブを残さない。
-      await tabClose(created.tabId).catch((err: unknown) => {
-        console.error(`[worker] failed to close cloud task tab ${created.tabId}: ${err}`);
-      });
-    }
+    cloudSessionId = await createCloudSession(args, initialPrompt, cwd, env);
 
     // 1コマンド方式のため投函フェーズは無い。ここに到達した時点でセッションは作成済みで、
     // 初期プロンプト（＝タスク本体）の実行が既に始まっている。

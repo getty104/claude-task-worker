@@ -93,10 +93,10 @@ function extractAgentStartArgs(record: StubRecord): string[] {
   return record.argv.slice(idx + 1);
 }
 
-// クラウド実行の作成コマンドは `herdr pane send-text <paneId> "claude --cloud <desc> ..."`
-// としてシェルへ送出される（クォート済みの1文字列）。argv[2] が paneId、argv[3] がその文字列。
-function extractCreateCommand(record: StubRecord): string {
-  return record.argv[3] ?? "";
+// クラウド実行の作成コマンドは script(1) 経由で `claude --cloud <desc> ...` を直接起動する。
+// claude スタブが記録する argv は claude のフラグそのもの。
+function findCreateRecord(records: StubRecord[]): StubRecord | undefined {
+  return records.find((r) => r.command === "claude" && r.argv.includes("--cloud"));
 }
 
 function argValue(argv: string[], flag: string): string | undefined {
@@ -130,13 +130,6 @@ async function waitForStdout(
   }
 }
 
-// クォート済みのシェルコマンド文字列から `--flag <value>` の値を取り出す。トークンはすべて
-// shellQuote() でシングルクォートされているため、フラグ自身も `'--flag'` の形で現れる。
-function commandFlagValue(command: string, flag: string): string | undefined {
-  const match = new RegExp(`'${flag}' '([^']*)'`).exec(command);
-  return match?.[1];
-}
-
 async function gitBranchList(repoDir: string): Promise<string[]> {
   const { stdout } = await execFileAsync("git", ["branch", "--list"], { cwd: repoDir });
   return stdout
@@ -166,15 +159,14 @@ const ISSUE_GH_SCENARIO = {
 test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree を作らない", { timeout: 75_000 }, async (t) => {
   const stubs = installCliStubs({
     gh: ISSUE_GH_SCENARIO,
-    // 作成フェーズがペイン内容をポーリングしてセッションIDを取得するため、実測の出力形状
-    // （`View:` の URL）を含めておく。含めないと作成フェーズがタイムアウトする。
-    herdr: {
-      paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubA?from=cli&m=0",
+    // 作成コマンドの stdout からセッションIDを取得するため、実測の出力形状（`View:` の URL）を
+    // 含めておく。含めないと作成フェーズが失敗する。あわせて claude スタブが cc-cloud-done を
+    // 付与する（実際のクラウドセッションが最後の操作として行う付与の模倣）。
+    claude: {
+      stdout: "[stub] exec-issue cloud report",
+      cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubA?from=cli&m=0",
+      cloudComplete: { type: "issue", number: 501 },
     },
-    // claude スタブが投函コマンド実行時に cc-cloud-done を付与する（実際のクラウドセッションが
-    // 最後の操作として行う付与を模倣）。静的な cloudDone 分岐は撤去したため、この付与タイミングで
-    // 起動前ポーリングと投函後ポーリングを区別できる。
-    claude: { stdout: "[stub] exec-issue cloud report", cloudComplete: { type: "issue", number: 501 } },
   });
   const handle = await startWorker({
     worker: "exec-issue",
@@ -204,40 +196,46 @@ test("A: exec-issue のクラウド実行が --cloud/--ref を付け、worktree 
   );
 
   const records = stubs.records();
-  const tabCreate = findRecord(records, "herdr", "tab", "create");
-  assert.ok(tabCreate, "tab create の記録が見つからない");
-  assert.equal(argValue(tabCreate!.argv, "--cwd"), realpathSync(handle.repoDir));
-  assert.ok(!tabCreate!.argv.includes("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"));
-  assert.ok(
-    !tabCreate!.argv.some((a) => a.startsWith("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=")),
-    "--env に CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS が含まれてはいけない",
+  const create = findCreateRecord(records);
+  assert.ok(create, "クラウドセッション作成コマンド（claude --cloud）の記録が見つからない");
+  assert.equal(create!.cwd, realpathSync(handle.repoDir), "作成コマンドがリポジトリルートで起動されていない");
+  assert.equal(
+    create!.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+    "1",
+    "作成コマンドの env に CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 が届いていない",
+  );
+  assert.equal(
+    create!.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS,
+    undefined,
+    "env に CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS が含まれてはいけない",
   );
 
-  assert.equal(findRecord(records, "herdr", "agent", "start"), undefined, "クラウド実行で agent start が呼ばれている");
+  // セッション作成は spawn 1本なので、タスクタブの作成・ペイン操作・agent 起動はいずれも
+  // 発生しない（`tab list` は herdr モードの起動時疎通確認なので対象外）。
+  assert.deepEqual(
+    records
+      .filter((r) => r.command === "herdr" && ["pane", "agent"].includes(r.argv[0]))
+      .concat(records.filter((r) => r.command === "herdr" && r.argv[0] === "tab" && r.argv[1] !== "list"))
+      .map((r) => r.argv.slice(0, 2).join(" ")),
+    [],
+    "クラウド実行でタスクタブ・ペイン操作・agent 起動が行われている",
+  );
 
-  const sendText = findRecord(records, "herdr", "pane", "send-text");
-  assert.ok(sendText, "作成コマンドの pane send-text 記録が見つからない");
-  const createCommand = extractCreateCommand(sendText!);
-  assert.ok(createCommand.includes("'--cloud'"), "--cloud が付いていない");
-  assert.equal(commandFlagValue(createCommand, "--ref"), "main");
-  assert.ok(!createCommand.includes("'--on-branch'"), "--on-branch が付いてはいけない");
-  assert.ok(!createCommand.includes("'-p'"), "-p が付いてはいけない（クラウド作成コマンドは常に非付与）");
-  assert.ok(createCommand.includes("'--permission-mode'"), "実装は cloud でも --permission-mode を付ける");
-  assert.ok(createCommand.includes("'--disallowedTools'"), "実装は cloud でも --disallowedTools を付ける");
+  assert.equal(argValue(create!.argv, "--ref"), "main");
+  assert.ok(!create!.argv.includes("--on-branch"), "--on-branch が付いてはいけない");
+  assert.ok(!create!.argv.includes("-p"), "-p が付いてはいけない（クラウド作成コマンドは常に非付与）");
+  assert.ok(create!.argv.includes("--permission-mode"), "実装は cloud でも --permission-mode を付ける");
+  assert.ok(create!.argv.includes("--disallowedTools"), "実装は cloud でも --disallowedTools を付ける");
 
   // 1コマンド方式では --cloud の値がクラウドセッションの初期プロンプトそのもの
   // （cc-cloud-done の投稿指示を含む）になる。投函コマンドは存在しないため、
   // 作成コマンドの description を直接検証する。
+  const description = create!.argv[create!.argv.indexOf("--cloud") + 1];
   assert.ok(
-    createCommand.includes("cc-cloud-done"),
+    description.includes("cc-cloud-done"),
     "作成コマンドの初期プロンプトに cc-cloud-done ラベル付与の指示が含まれていない",
   );
-  assert.ok(createCommand.includes("501"), "作成コマンドの初期プロンプトに対象 Issue 番号が含まれていない");
-  assert.equal(
-    records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length,
-    0,
-    "1コマンド化後は claude バイナリが --cloud 付きで直接起動されてはいけない（投函コマンドは廃止済み）",
-  );
+  assert.ok(description.includes("501"), "作成コマンドの初期プロンプトに対象 Issue 番号が含まれていない");
 
   const removeCloudDone = records.filter(
     (r) =>
@@ -271,10 +269,10 @@ test("B: fix-review-point のクラウド実行が --on-branch を付け、--ref
       prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-fix-onetime" }], title: "Fix bug" }],
       view: { "701": { checks: [] } },
     },
-    herdr: {
-      paneOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubB?from=cli&m=0",
+    claude: {
+      stdout: "[stub] fix-review-point cloud report",
+      cloudOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubB?from=cli&m=0",
     },
-    claude: { stdout: "[stub] fix-review-point cloud report" },
   });
   const handle = await startWorker({
     worker: "fix-review-point",
@@ -288,13 +286,11 @@ test("B: fix-review-point のクラウド実行が --on-branch を付け、--ref
     stubs.cleanup();
   });
 
-  await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined);
+  await handle.waitFor((records) => findCreateRecord(records) !== undefined);
 
-  const sendText = findRecord(stubs.records(), "herdr", "pane", "send-text")!;
-  const createCommand = extractCreateCommand(sendText);
-  assert.equal(commandFlagValue(createCommand, "--on-branch"), "feature-x");
-  assert.ok(!createCommand.includes("'--ref'"), "PR系ワーカーは --ref を付けてはいけない");
-  assert.ok(createCommand.includes("'--cloud'"));
+  const create = findCreateRecord(stubs.records())!;
+  assert.equal(argValue(create.argv, "--on-branch"), "feature-x");
+  assert.ok(!create.argv.includes("--ref"), "PR系ワーカーは --ref を付けてはいけない");
 });
 
 // ============================================================
@@ -351,11 +347,10 @@ test(
 
     const stubs = installCliStubs({
       gh: ISSUE_GH_SCENARIO,
-      // 1コマンド方式には投函コマンドが存在しないため、作成コマンドの出力から
-      // セッションIDを抽出できないケース（pane 出力にセッションIDパターンを
-      // 含めない）で失敗を作る。CTW_CLOUD_SESSION_TIMEOUT_MS でタイムアウトを
-      // テスト時間内に収まるよう短縮する。
-      herdr: { paneOutput: "[stub] no session id present in this pane" },
+      // 作成コマンドの stdout からセッションIDを抽出できないケース（セッションIDパターンを
+      // 含めない出力）で失敗を作る。ID未出力のまま exit した時点で失敗が確定するため、
+      // CTW_CLOUD_SESSION_TIMEOUT_MS の満了は待たない。
+      claude: { cloudOutput: "[stub] no session id in this launch output" },
     });
     const handle = await startWorker({
       worker: "exec-issue",
@@ -395,11 +390,7 @@ test(
       ),
       "失敗したタスクに cc-pr-created が付いている",
     );
-    assert.equal(
-      records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length,
-      0,
-      "1コマンド化後は claude バイナリが --cloud 付きで直接起動されてはいけない",
-    );
+    assert.ok(findCreateRecord(records), "クラウドセッション作成コマンドが起動されていない");
     assert.ok(!existsSync(join(handle.repoDir, ".claude", "worktrees")), "worktree ディレクトリが作られている");
 
     // セッションID抽出失敗（catch経路）は孤立クラウドセッションの可能性があるため、
@@ -594,11 +585,9 @@ test("G: クラウド完了検知後にレポートコメントを取得し Slac
 
   const stubs = installCliStubs({
     gh: ISSUE_GH_SCENARIO,
-    herdr: {
-      paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubG?from=cli&m=0",
-    },
     claude: {
       stdout: "[stub] exec-issue cloud report",
+      cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubG?from=cli&m=0",
       cloudComplete: {
         type: "issue",
         number: 501,
@@ -665,10 +654,10 @@ test(
 
     const stubs = installCliStubs({
       gh: ISSUE_GH_SCENARIO,
-      herdr: {
-        paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubH?from=cli&m=0",
+      claude: {
+        stdout: "[stub] exec-issue cloud report",
+        cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubH?from=cli&m=0",
       },
-      claude: { stdout: "[stub] exec-issue cloud report" },
     });
     const handle = await startWorker({
       worker: "exec-issue",
@@ -729,10 +718,10 @@ test("I: クラウド完了待機中はトリガーラベルが再装填され�
       prList: [{ number: 701, headRefName: "feature-x", labels: [{ name: "cc-fix-onetime" }], title: "Fix bug" }],
       view: { "701": { checks: [] } },
     },
-    herdr: {
-      paneOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubI?from=cli&m=0",
+    claude: {
+      stdout: "[stub] fix-review-point cloud report",
+      cloudOutput: "Created cloud session: ctw:demo:#701\nView: https://claude.ai/code/session_stubI?from=cli&m=0",
     },
-    claude: { stdout: "[stub] fix-review-point cloud report" },
   });
   const handle = await startWorker({
     worker: "fix-review-point",
@@ -746,23 +735,14 @@ test("I: クラウド完了待機中はトリガーラベルが再装填され�
     stubs.cleanup();
   });
 
-  await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined);
+  await handle.waitFor((records) => findCreateRecord(records) !== undefined);
 
   // ポーリング2周分以上（4〜5秒）待って、trigger label が静的シナリオ由来で毎周再装填されて
-  // いても投函が重複しないことを確認する。
+  // いても作成コマンドが重複起動されないことを確認する。
   await new Promise((resolve) => setTimeout(resolve, 5000));
 
-  const records = stubs.records();
-  const sendTextCount = records.filter(
-    (r) => r.command === "herdr" && r.argv[0] === "pane" && r.argv[1] === "send-text",
-  ).length;
-  assert.equal(sendTextCount, 1, `作成コマンドの pane send-text が複数回記録されている: ${sendTextCount}件`);
-
-  // 1コマンド方式では作成コマンドが唯一のクラウドセッション起動操作であり、
-  // claude バイナリが --cloud 付きで直接（再）起動されることはない
-  // （投函コマンドという別経路自体が存在しない）。
-  const cloudClaudeInvocations = records.filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length;
-  assert.equal(cloudClaudeInvocations, 0, `claude --cloud の直接起動が記録されている: ${cloudClaudeInvocations}件`);
+  const createCount = stubs.records().filter((r) => r.command === "claude" && r.argv.includes("--cloud")).length;
+  assert.equal(createCount, 1, `クラウドセッション作成コマンドが複数回起動されている: ${createCount}件`);
 });
 
 // ============================================================
@@ -779,8 +759,8 @@ test(
       gh: ISSUE_GH_SCENARIO,
       // cloudComplete を設定しないため cc-cloud-done は自発的に付かず、
       // ワーカーは waitForCloudTask() の待機に入ったままになる（aborted 経路を確実に踏むため）。
-      herdr: {
-        paneOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubJ?from=cli&m=0",
+      claude: {
+        cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubJ?from=cli&m=0",
       },
     });
     const handle = await startWorker({
@@ -796,8 +776,8 @@ test(
       stubs.cleanup();
     });
 
-    // クラウドセッションの作成（pane send-text）を確認してから完了待機フェーズへ進ませる。
-    await handle.waitFor((records) => findRecord(records, "herdr", "pane", "send-text") !== undefined);
+    // クラウドセッションの作成コマンド起動を確認してから完了待機フェーズへ進ませる。
+    await handle.waitFor((records) => findCreateRecord(records) !== undefined);
 
     // src/index.ts の SIGINT ハンドラは2段階: 1回目は graceful shutdown へ入るだけで
     // herdrAbortSignal は立たない（waitForCloudTask は timeout まで解決しない）。2回目で
