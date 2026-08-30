@@ -6,6 +6,7 @@
 - 実測バージョン: `claude --version` → `2.1.247 (Claude Code)`
 - 後続Issueが失効判定できるよう、`claude --version` がここより新しい場合はフラグの受理可否を再実測すること
 - **追記（Issue #302 / claude 2.1.250）**: `--cloud <description>` の `description` は表示名ではなく**初期プロンプトとして即実行される**ことが後続の smoke test で判明した。本ファイルの測定時点ではこの前提を認識しておらず「作成 → 既存セッションへの投函」という2コマンド運用を想定していたが、description が即実行されるためその運用は同じ作業を2回実行させてしまう（1タスクで PR が2件作られる不具合の原因）。現行実装は作成コマンド1本で description にプロンプトを直接渡す方式に切り替えた（`docs/prd-cloud-worker-execution.md` 4.2）。以下の T1〜T11 の測定結果自体は改変していない
+- **追記（Issue #374）**: T1 が示す「非TTY での `--cloud` 新規作成は拒否される」という TTY 要件自体は変わらないが、**現行実装は疑似 pty を割り当てることでこの要件を満たしている**。ワーカーは `createCloudSession()`（`src/process-manager.ts`）で `script(1)` 経由の `spawn`（`buildScriptCommand()`、`src/claude-args.ts`）を使って作成コマンドを起動しており、これは本ファイルの「実測環境」節で TTY のある実行に使っていた `script -q /dev/null <cmd>` と同じ手法を herdr のタスクタブに頼らず採用したものである。pty 出力に混ざる ANSI/OSC エスケープは `normalizePtyOutput()`（`src/herdr-runner.ts`）で除去してから `extractCloudSessionId()` にかける。T1 の測定結果（非TTY では拒否される）自体は現行実装でも有効である
 
 ## 実測環境
 
