@@ -23,6 +23,8 @@ GitHub アクセスは **3つの独立したゲート**で塞がれており、`
 | **リポジトリゲート** | `repos/{owner}/{repo}/...` の全パス（メソッド不問） | `GitHub access to this repository is not enabled for this session. Use add_repo to request access. …` | 解ける見込み（未実測） |
 | **パスゲート** | リポジトリスコープでない REST パス（`/octocat`、`search/issues` 等） | `This GitHub API path is not available: sessions are bound to their configured repositories. Use repository-scoped endpoints (repos/{owner}/{repo}/...).` | 対象外（設計上の制限） |
 
+> 2026-08-30 の `G-*` 実測で、リポジトリ連携済みのセッションには**4つ目のゲート（書き込みパスゲート）**があることが判明した。`repos/{o}/{r}/git/refs` への書き込みだけが `Write access to this GitHub API path is not permitted through this proxy.` で拒否される（`issues/*` / `pulls/*` への書き込みは通る）。詳細は「GitHub MCP ツールのクラウド実測」を参照。
+
 要点は3つ。
 
 1. **GraphQL ゲートはリポジトリ連携と独立している**。リポジトリを一切含まない `query{viewer{login}}` が、リポジトリ指定クエリと**バイト単位で同一**の403本文（`Content-Length: 263`）を返した。リポジトリをアタッチしても解けない性質のゲートである。
@@ -158,6 +160,108 @@ Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP �
 
 レビュースレッドの Resolve（`resolveReviewThread`）は本移行のスコープ外（別Issue担当）で、今回も動作確認しておらず、`fix-review-point` の判定に変更はない。
 
+## GitHub MCP ツールのクラウド実測（`G-*`）
+
+2026-08-29 の smoke test で未実測のまま残っていた GitHub MCP ツール（読み取り系・書き込み系）を、クラウドセッション内から実際に呼んで確認した記録（Issue #330）。
+
+- 実測日: 2026-08-30
+- 実測バージョン: クラウド VM の `claude --version` → `2.1.251 (Claude Code)` / `gh version 2.98.0 (2026-08-20)` / `node v22.22.2`
+- 実測環境: **`exec-issue` ワーカーが `--cloud` で起動した本 Issue のタスクセッション自身**（`docs/cloud-smoke-test.md` の手動プローブではなく、実運用と同じ経路）。`git remote` は `origin` 1件（`https://github.com/getty104/claude-task-worker`）で、**GitHub App 連携済み**のセッションである
+- **2026-08-28 の実測（P-1〜P-7）との最大の違いは、リポジトリゲートが解けていること**。当時は `repos/{o}/{r}/...` が全リポジトリで403だったため書き込み系の可否が「未判定」で残っていたが（D4–D7）、本実測ではその手前のゲートが無い状態で個々の操作に到達できている
+- **プローブ対象は本リポジトリ自身**（使い捨ての private リポジトリではない）。本セッションの GitHub アクセスは `getty104/claude-task-worker` にスコープされており、別リポジトリを作成・使用できないため。書き込み系は `ctw-probe-330-base` ← `ctw-probe-330-head` という使い捨てブランチ間の PR #341 に閉じて実施し、**デフォルトブランチと既存 PR には一切触れていない**（→「実測の副作用」）
+
+### 結論
+
+**GitHub MCP は読み取り系・書き込み系ともにクラウドで動作する**。今回プローブした25項目はすべて期待どおりの結果を返し、プロキシ由来の拒否は1件も無かった。あわせて `gh` 側の REST についても、リポジトリゲートが解けた状態では **Issue/PR への書き込みが GitHub に到達する**ことを確認した（2026-08-28 に「未判定」として残していた D4–D7 の解消）。一方で**新たに2つの制限**が判明した。
+
+1. **`gh api` の REST には「書き込みパス」単位のゲートがある**。`repos/{o}/{r}/git/refs` への `POST` / `DELETE` は、リポジトリ連携済みでも `{"message":"Write access to this GitHub API path is not permitted through this proxy.","documentation_url":"https://docs.anthropic.com/en/docs/claude-code/github-actions"}` の403で拒否される（`documentation_url` が `docs.anthropic.com` ＝**プロキシが合成した拒否**）。対照的に `issues/*` / `pulls/*` への `POST` / `PATCH` / `PUT` は GitHub に到達する（存在しない番号宛てで `404 Not Found` ＋ `documentation_url` が `docs.github.com`）。**メソッド単位ではなくパス単位の制限**であり、ブランチ／タグの作成・削除だけが塞がれている
+2. **CI 再実行は `gh` 経路と MCP 経路で結果が分かれる**。`POST repos/{o}/{r}/actions/runs/{id}/rerun` は GitHub 由来の403（`Resource not accessible by integration`）＝**プロキシが注入するトークンに `actions: write` が無い**。同じ操作を MCP の `actions_run_trigger` で行うと **201 Created で成功する**（`run_attempt` が 1 → 2 へ上がることを確認）。`triage-pr` の C-1（失敗ジョブの再実行）は **MCP 経由でのみ成立する**
+
+GraphQL ゲートは**リポジトリ連携済みのセッションでも健在**で、`gh api graphql -f query='query{viewer{login}}'` は 2026-08-28 と同一本文の403を返した。これで「GraphQL ゲートはリポジトリ連携と独立している」という B1 の結論が、連携済みセッションでも成り立つことを確認できた（従来は未連携セッションでの実測にとどまっていた）。
+
+### 実測表（読み取り系）
+
+| ID | ツール | method / 引数 | 成否 | 備考 |
+|---|---|---|---|---|
+| G-1 | `list_pull_requests` | `state: all` / `head` / `base` / `fields` | **成功** | `fields` で返却フィールドを絞れる。**`merged` はマージ済み PR でも `false` を返す**（REST の PR 一覧が同フィールドを埋めないため）。マージ済みかどうかは `pull_request_read`（`get`）で判定する |
+| G-2 | `pull_request_read` | `get` | **成功** | `merged` / `mergeable_state` / `labels` / `head` / `base` / `merged_at` を返す。`gh pr view --json` の代替として成立 |
+| G-3 | `pull_request_read` | `get_files` | **成功** | `patch` 込み。`perPage` が効く |
+| G-4 | `pull_request_read` | `get_diff` | **成功** | 生の unified diff |
+| G-5 | `pull_request_read` | `get_status` | **成功** | **旧 Status API の combined status のみ**。GitHub Actions のチェックは含まれないため、CI 判定に使うなら G-6 と併用する |
+| G-6 | `pull_request_read` | `get_check_runs` | **成功** | Actions のチェックラン（`name` / `status` / `conclusion` / `html_url`）。`gh pr checks` 相当はこちら |
+| G-7 | `pull_request_read` | `get_review_comments` | **成功** | スレッドの node ID（`PRRT_...`）と解決状態を返す。**返却キーは `is_resolved` / `is_outdated` / `is_collapsed` の snake_case**（`isResolved` ではない）。`pageInfo.endCursor` によるカーソルページング |
+| G-8 | `pull_request_read` | `get_reviews` | **成功** | レビューが無い PR では空配列 |
+| G-9 | `pull_request_read` | `get_commits` | **成功** | — |
+| G-10 | `pull_request_read` | `get_comments` | **成功** | 会話コメント（レビュースレッドではない）。bot コメントも含む |
+| G-11 | `search_pull_requests` | `query` / `fields` | **成功** | `repo:` 修飾子付きのクエリが通る |
+| G-12 | `actions_list` | `list_workflow_runs` | **成功** | **`per_page` が効かない**（`3` を指定して30件返却）。`workflow_runs_filter.branch` / `.status` は効くので、絞り込みはこちらで行う。無指定で呼ぶと応答が数万トークン規模になる |
+| G-13 | `actions_get` | `get_workflow_run` | **成功** | `run_attempt` / `conclusion` を返す |
+| G-14 | `get_job_logs` | `job_id` + `return_content` + `tail_lines` | **成功** | 本文が返る |
+| G-15 | `get_job_logs` | `run_id` + `failed_only: true` | **成功** | 失敗ジョブのみを `failed_jobs` 件数付きで返す |
+| G-16 | `get_me` | — | **成功** | — |
+
+### 実測表（書き込み系）
+
+すべて使い捨てブランチ間の PR #341 に対して実行した。
+
+| ID | ツール | method / 操作 | 成否 | 備考 |
+|---|---|---|---|---|
+| G-17 | `create_branch` | `from_branch` 指定 | **成功** | 2本作成 |
+| G-18 | `create_or_update_file` | 新規ファイル作成 | **成功** | 2件。`gh api git/refs` が塞がれている一方、MCP のファイル書き込みは通る |
+| G-19 | `create_pull_request` | — | **成功** | 2026-08-29 に確認済みだが、使い捨てブランチをベースにしても成立することを再確認 |
+| G-20 | `update_pull_request` | `title` / `body` | **成功** | 変更後に G-2 で読み直して反映を確認。**`pull_request_write`（method: `update`）は存在しない** |
+| G-21 | `pull_request_review_write` | `create`（`event` 省略＝ pending） | **成功** | — |
+| G-22 | `add_comment_to_pending_review` | `subjectType: LINE` | **成功** | — |
+| G-23 | `pull_request_review_write` | `submit_pending`（`event: COMMENT`） | **成功** | 自分の PR でも `COMMENT` は通る |
+| G-24 | `pull_request_review_write` | `resolve_thread` | **成功** | G-7 で `is_resolved: true` を確認。**2回目の呼び出しも成功**（冪等な no-op であることを実測） |
+| G-25 | `pull_request_review_write` | `unresolve_thread` | **成功** | — |
+| G-26 | `resolve_review_thread`（単独ツール） | `owner` / `repo` / `threadId` | **成功** | G-24 と同じ結果。`pull_request_review_write` と並存しており、どちらを使ってもよい |
+| G-27 | `actions_run_trigger` | `rerun_workflow_run` | **成功** | 201 Created。G-13 で `run_attempt` が 1 → 2 になることを確認 |
+| G-28 | `actions_run_trigger` | `rerun_failed_jobs`（失敗ランに対して） | **成功** | 201 Created |
+| G-29 | `actions_run_trigger` | `rerun_failed_jobs`（**成功**ランに対して） | **失敗（GitHub 由来）** | `403 This workflow run cannot be retried`。**プロキシの403と紛らわしいので注意** — 本文に `documentation_url` が無く GitHub 由来である。再実行対象が無いだけで、ゲートではない |
+| G-30 | `merge_pull_request` | `merge_method: squash` | **成功** | `{"merged":true}`。マージ後に head ブランチがリポジトリ設定で自動削除された |
+
+### 実測表（`gh` の REST 書き込み — 2026-08-28 の D4–D7 の再測）
+
+リポジトリゲートが解けた状態で、2026-08-28 に「未判定」として残していた書き込み系を同じ「存在しないID宛て」の形で再実行した。**404 は GitHub に到達した証拠**（`documentation_url` が `docs.github.com`）、**403 かつ `documentation_url` が `docs.anthropic.com` はプロキシによる拒否**として読む。
+
+| ID | コマンド | 結果 | 判定 |
+|---|---|---|---|
+| G-31 | `gh api repos/{o}/{r}` / `.../issues/{n}`（GET） | **200** | リポジトリゲートは解けている |
+| G-32 | `gh api -X POST .../issues/999999/comments` | 404（GitHub） | **プロキシは通す**（D7 の解消） |
+| G-33 | `gh api -X POST .../issues/999999/labels` | 404（GitHub） | **プロキシは通す**（D6 の解消） |
+| G-34 | `gh api -X PATCH .../issues/999999` | 404（GitHub） | プロキシは通す |
+| G-35 | `gh api -X PUT .../pulls/999999/merge` | 404（GitHub） | **プロキシは通す**（D4 の解消） |
+| G-36 | `gh api -X PATCH .../pulls/999999` | 404（GitHub） | プロキシは通す |
+| G-37 | `gh api -X POST .../actions/runs/{id}/rerun` | 403（GitHub: `Resource not accessible by integration`） | **トークンに `actions: write` が無い**。プロキシではなく権限（D5 は「プロキシは通すが権限で落ちる」が正解）。MCP の `actions_run_trigger` なら成功する（G-27 / G-28） |
+| G-38 | `gh api -X POST .../git/refs` | 403（プロキシ: `Write access to this GitHub API path is not permitted through this proxy.`） | **書き込みパスゲート**（新規発見） |
+| G-39 | `gh api -X DELETE .../git/refs/heads/<branch>` | 403（プロキシ、同上） | 同上。**クラウドからはブランチを削除できない** |
+| G-40 | `git push origin :refs/heads/<branch>`（削除 push） | `send-pack: unexpected disconnect` → `Everything up-to-date`（ref は残る） | G-39 と同じ制限が git の smart HTTP 経路にも現れる。**エラーで終わらず「最新です」と表示されるため、成功と誤認しやすい** |
+| G-41 | `gh api graphql -f query='query{viewer{login}}'` | 403（プロキシ、GraphQL ゲート） | 連携済みセッションでも**GraphQL ゲートは健在**（B1 の結論を追認） |
+
+### 未実測項目（本実測で埋まらなかったもの）
+
+1. **`actions_run_trigger` の `run_workflow`（`workflow_dispatch`）**
+   - 理由: 本セッションがアクセスできる唯一のリポジトリで `workflow_dispatch` を持つワークフローは `publish.yml`（npm への公開）だけで、実行すると不可逆な外部副作用（リリース）が発生する。安全側に倒して実行していない
+   - 再現手順: 副作用の無い `workflow_dispatch` ワークフローを持つリポジトリで `actions_run_trigger`（`run_workflow`、`workflow_id` + `ref`）を呼ぶ
+2. **`actions_run_trigger` の `cancel_workflow_run` / `delete_workflow_run_logs`**
+   - 理由: 同一ツール・同一エンドポイント群の書き込み経路は G-27 / G-28 で成立を確認済みのため、追加の CI 実行を焼いてまで個別に確認していない
+3. **`pull_request_review_write` の `delete_pending`、および `create` に `event` を渡して即 submit する経路**
+   - 理由: pending の作成・コメント追加・submit（G-21〜G-23）で必要な経路は確認できたため
+4. **`actions_get` の `get_workflow` / `get_workflow_job` / `get_workflow_run_usage` / `get_workflow_run_logs_url` / `download_workflow_run_artifact`、`actions_list` の `list_workflows` / `list_workflow_jobs` / `list_workflow_run_artifacts`**
+   - 理由: 同ツールの代表 method（G-12 / G-13）で経路の成立を確認したため。個別の可否は未確認
+5. **`mcp__github__*` の残り（本セッションで確認できたのは55ツール中20ツール）**
+   - 理由: 3ワーカーが依存する操作に絞ってプローブしたため
+6. **クラウドセッションからの通常の `git push`（新規コミットの push）**
+   - 理由: 削除 push（G-40）だけを実測した。`git fetch` は成功する
+
+### 実測の副作用
+
+- 使い捨てブランチ `ctw-probe-330-base` / `ctw-probe-330-head` と PR #341（両ブランチ間、**ベースはデフォルトブランチではない**）を作成し、`update_pull_request` / レビュー投稿 / Resolve / CI 再実行 / squash マージを実行した。既存の PR・Issue・デフォルトブランチには書き込んでいない
+- `ctw-probe-330-head` はマージ時にリポジトリ設定で自動削除された。**`ctw-probe-330-base` は残っている** — G-38〜G-40 のとおり、クラウドセッションからはブランチを削除する手段が無い（MCP にブランチ削除ツールが無く、REST も git 経路もプロキシに塞がれる）。**手動での削除が必要**
+- PR #341 に対して CI（`ci.yml`）が3回（初回 + `rerun_workflow_run` + `rerun_failed_jobs`）、レビュー系ワークフロー（`ocr-review.yml` / CodeRabbit）が2回走った。`publish.yml` は実行していない
+- G-32〜G-36 / G-38 / G-39 は存在しないID宛て、または使い捨てブランチ宛てのプローブで、GitHub 側の状態を変えていない
+
 ## 測定ログ（要旨）
 
 - **P-1** GraphQL ゲートの403: `gh api graphql -f query='query{viewer{login}}' -i` → `HTTP/1.1 403`（`Content-Length: 263`）、本文 `{"message":"This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via gh api repos/{owner}/{repo}/... instead.", ...}`。リポジトリを指定したクエリでも**バイト単位で同一本文**。`gh pr list` のみ操作名入りの変種（`This GraphQL query (PullRequestList, sent by gh pr list) is not enabled for this session…`）を返し、ゲートが**操作名単位のアローリスト**でクエリをパース判定していることを示す（ただし本実測で通った操作は1件も無くアローリストの中身は特定できず）
@@ -178,18 +282,24 @@ Issue #270 で `plugin/` 配下スキルの GitHub アクセスを GitHub MCP �
 
 ## 未実測項目
 
+> 以下は 2026-08-28 時点の未実測項目。**1 / 2 / 4 は 2026-08-30 の `G-*` 実測（上記「GitHub MCP ツールのクラウド実測」）で解消または部分解消している**（各項目の末尾を参照）。3 は未解消のまま。
+
 1. **リポジトリ連携済みセッションでの REST 代替の実行検証**
    - 理由: `add_repo` がこのセッション種別に存在せず（P-7）、リポジトリゲートを解く手段が無かった。「REST 代替表」のエンドポイントはドキュメント上の実在確認に留まり、プロキシが個々の REST パスを通すかは未確認
    - 再現手順: claude.ai で対象リポジトリの GitHub 連携を設定したうえでクラウドセッションを作り直し、本メモの「REST 代替」表の各コマンドを実行する
+   - **2026-08-30: 解消**。連携済みセッションで `repos/{o}/{r}/...` の GET が200を返すことを確認した（G-31）
 2. **書き込み系操作（マージ・CI再実行・ラベル付与・コメント投稿）の個別可否**
    - 理由: D4–D7 はリポジトリゲートで先に落ちており、メソッド／パス単位のポリシーに到達していない
    - 再現手順: 1 の環境で D4–D7 を同じ「存在しないID宛て」の形で再実行し、403（プロキシ）と 404/422（GitHub 到達）を区別する
+   - **2026-08-30: 解消**（G-32〜G-39）。マージ・ラベル付与・コメント投稿はプロキシを通って GitHub に到達する。CI再実行は `gh` 経路ではトークン権限（`actions: write` 欠如）で落ち、MCP 経由でのみ成立する。あわせて `git/refs` への書き込みだけを塞ぐ**書き込みパスゲート**を新たに発見した
 3. **GraphQL アローリストに載っている操作の特定**
    - 理由: エラー本文が「pinned set of PR-review operations」の存在を示すが、本実測で通った GraphQL 操作は1件も無い
    - 再現手順: 1 の環境で `gh pr view --json reviews` 等の PR レビュー系操作を再実行し、リポジトリ連携でアローリストが変化するかを確認する
+   - **2026-08-30: 未解消**。連携済みセッションでも GraphQL ゲートは同一本文の403を返した（G-41）。アローリストの中身は依然として特定できていない
 4. **クラウドセッションからの push 可否**
    - 理由: 作業ツリーに remote が0件のため、push が資格情報に到達する前に失敗する（P-6）。remote の追加はリポジトリの変更にあたるため実施していない
    - 再現手順: 1 の環境（clone 由来で remote があるセッション）で `git push --dry-run` を実行する
+   - **2026-08-30: 部分解消**。`git fetch` は成功し、**削除 push（`git push origin :refs/heads/<branch>`）は失敗する**ことを確認した（G-40）。通常の（新規コミットの）push は未実測
 
 ## 実測の副作用
 

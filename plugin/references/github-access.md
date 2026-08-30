@@ -60,26 +60,26 @@ MCP でのコメント投稿・ラベル更新・マージ等の書き込みが�
 | `gh pr view <n> --json <fields>` | `pull_request_read`（method: `get`） |
 | `gh pr view --json files` / `gh pr diff --name-only` | `pull_request_read`（method: `get_files`） |
 | `gh pr diff` | `pull_request_read`（method: `get_diff`） |
-| `gh pr checks` | `pull_request_read`（method: `get_status` / `get_check_runs`） |
-| `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`）。スレッドの node ID（`PRRT_...`）と `isResolved` を返す。カーソル方式（`perPage` 最大100 / `after` に前ページの `endCursor`）でページングを取得しきる |
-| `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等） |
+| `gh pr checks` | `pull_request_read`（method: `get_check_runs`）。**`get_status` は旧 Status API の combined status しか返さず GitHub Actions のチェックを含まない**ため、CI の成否判定には `get_check_runs` を使い、`get_status` は外部サービスの status を見たいときだけ併用する |
+| `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`）。スレッドの node ID（`PRRT_...`）と `is_resolved` を返す（返却は snake_case）。カーソル方式（`perPage` 最大100 / `after` に前ページの `endCursor`）でページングを取得しきる |
+| `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等）。単独ツール `resolve_review_thread` / `unresolve_review_thread` も並存し、どちらでも同じ結果になる |
 | `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる） |
 | `gh pr list --search "updated:>=<日時>"` | `list_pull_requests` / `search_pull_requests`（MCP 不可時は `gh-compat.sh` の `list-prs-updated-since <since-iso>`） |
 | `gh issue list --search "updated:>=<日時>"` | `list_issues` / `search_issues`（MCP 不可時は `gh-compat.sh` の `list-issues-updated-since <since-iso> [label]`） |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | `create_pull_request` |
-| `gh pr edit` | `pull_request_write`（method: `update`） |
-| `gh pr merge` | `pull_request_write`（method: `merge`） |
+| `gh pr edit` | `update_pull_request` |
+| `gh pr merge` | `merge_pull_request` |
 | `gh pr comment` | `add_issue_comment`（PR は Issue 番号空間を共有する） |
 
 ### Actions
 
 | `gh` | GitHub MCP |
 | --- | --- |
-| `gh run view <id> --log-failed` | `get_job_logs`（`failed_only: true`） |
-| `gh run view <id> --json ...` / `gh workflow view` | `actions_get` |
-| `gh run list` | `actions_list` |
-| `gh run rerun --failed` | `actions_run_trigger` |
+| `gh run view <id> --log-failed` | `get_job_logs`（`failed_only: true` + `run_id`。単一ジョブなら `job_id`。`return_content: true` で本文、`tail_lines` で末尾行数） |
+| `gh run view <id> --json ...` / `gh workflow view` | `actions_get`（method: `get_workflow_run` 他） |
+| `gh run list` | `actions_list`（method: `list_workflow_runs`）。**`per_page` が効かず既定30件が返る**ため、`workflow_runs_filter.branch` 等で絞ってから呼ぶ |
+| `gh run rerun --failed` | `actions_run_trigger`（method: `rerun_failed_jobs`）。実行全体の再実行は method: `rerun_workflow_run` |
 
 ### その他
 
