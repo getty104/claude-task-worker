@@ -456,9 +456,7 @@ async function runViaCloud(
       // cc-cloud-done による完了検知ができず、セッション作成をもって完了とする。
       // 帰結（クラウド側の収集が失敗しても lastRun は進む・Slack 通知に成果が載らない）は
       // CLAUDE.md の「クラウド実行（--cloud）」節に明記してある。
-      console.log(
-        `[worker] #${id} has no completion-detection target, treating session creation as completion`,
-      );
+      console.log(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
       result = { status: "completed", output: createOutput };
     } else {
       // 待機中も台帳エントリを running のまま維持する（finishTask はここより後で呼ぶ）。
