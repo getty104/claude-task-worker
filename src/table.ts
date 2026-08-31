@@ -2,7 +2,8 @@ import { format } from "node:util";
 
 export function getDisplayWidth(str: string): number {
   let width = 0;
-  for (const char of str) {
+  // ANSI エスケープ（色付けした Worktree 列など）は桁を占めないので除外する。
+  for (const char of str.replace(CONTROL_CHARS, "")) {
     const code = char.codePointAt(0)!;
     if (
       (code >= 0x1100 && code <= 0x115f) ||
@@ -46,6 +47,13 @@ export function padToWidth(str: string, targetWidth: number): string {
   const padding = targetWidth - currentWidth;
   return padding > 0 ? str + " ".repeat(padding) : str;
 }
+
+/**
+ * クラウド実行（`--cloud`）のタスクは worktree を作らないため、Worktree 列にローカルの
+ * パスの代わりにこの表示を入れる（空欄だと「どこで動いているのか分からない」ため）。
+ * ANSI の色付きだが、getDisplayWidth がエスケープを除外するので桁揃えは崩れない。
+ */
+export const CLOUD_WORKTREE_LABEL = "\x1b[36m☁ running in cloud\x1b[0m";
 
 /** ステータステーブル1行分のタスク情報。process-manager の TaskEntry を構造的に受け取る。 */
 export interface TaskTableEntry {
