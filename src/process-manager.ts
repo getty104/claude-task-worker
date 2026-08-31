@@ -8,6 +8,7 @@ import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWit
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
 import {
+  CLOUD_WORKTREE_LABEL,
   TASK_DISPLAY_LIMIT,
   buildLogTableLines,
   buildTaskTableLines,
@@ -585,7 +586,9 @@ export function run(
     title,
     status: "running",
     workerName,
-    path,
+    // クラウド実行は worktree を持たない（ワーカーが path に undefined を渡す）ため、
+    // 空欄ではなく実行場所が分かる表示を入れる。
+    path: cloud ? CLOUD_WORKTREE_LABEL : path,
     startedAt: new Date(),
   });
 

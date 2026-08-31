@@ -14,7 +14,32 @@ const {
   buildLogTableLines,
   captureConsole,
   logLines,
+  CLOUD_WORKTREE_LABEL,
 } = (await import("./table")) as typeof TableModule;
+
+test("getDisplayWidth ignores ANSI escape sequences", () => {
+  assert.equal(getDisplayWidth(CLOUD_WORKTREE_LABEL), getDisplayWidth("☁ running in cloud"));
+});
+
+test("buildTaskTableLines keeps columns aligned for a colored cloud worktree cell", () => {
+  const startedAt = new Date("2026-01-01T00:00:00Z");
+  const lines = buildTaskTableLines(
+    [
+      {
+        id: 1,
+        title: "cloud",
+        status: "running",
+        workerName: "exec-issue",
+        path: CLOUD_WORKTREE_LABEL,
+        startedAt,
+      },
+      { id: 2, title: "local", status: "running", workerName: "exec-issue", path: "brave-otter-1234", startedAt },
+    ],
+    new Date("2026-01-01T00:00:10Z"),
+  );
+  assert.ok(lines.some((l) => l.includes(CLOUD_WORKTREE_LABEL)));
+  assert.equal(new Set(lines.map((l) => getDisplayWidth(l))).size, 1);
+});
 
 test("getDisplayWidth returns 0 for empty string", () => {
   assert.equal(getDisplayWidth(""), 0);
