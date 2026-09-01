@@ -148,7 +148,10 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
     cleanup(): void {
       process.env.PATH = previousPath;
       for (const [key, value] of previousEnv) swapEnv(key, value);
-      rmSync(dir, { recursive: true, force: true });
+      // ワーカーが SIGKILL された後もスタブ（gh / claude のシェルスクリプト）が孫プロセスとして
+      // 生き残り、記録ファイルへ追記し続けることがある。削除中に書き込まれると rmSync が
+      // ENOTEMPTY で落ちてテスト自体を失敗させるため、リトライ付きで消す（CI で実際に発生）。
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }
