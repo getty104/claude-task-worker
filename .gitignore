@@ -137,3 +137,6 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# claude-task-worker のローカル上書き設定（個人ごとの値を置く）
+claude-task-worker.local.json

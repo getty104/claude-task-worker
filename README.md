@@ -258,9 +258,24 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 | キー | 型 | 既定 | 説明 |
 |---|---|---|---|
 | `fixReviewPointCallbackCommentMessage` | string | - | `fix-review-point` 完了時に PR へ投稿するコメント（未設定なら投稿しない） |
+| `remoteEnvId` | string \| null | `null` | クラウド実行（`--cloud`）時に `--environment` へ渡すクラウド環境ID。`null` なら渡さず claude 側の既定解決に任せる（下記） |
 | `uiDesign` | object | `{ "enabled": false, "designDir": "designs", "yolo": false }` | UIデザイン先行ワークフロー（下記） |
 | `workers` | object | `{}` | ワーカーごとの上書き設定（下記） |
 | `lastRun` | object | `{}` | 定期ワーカーの最終実行時刻。ワーカーが自動更新するため手で編集しない |
+
+#### `claude-task-worker.local.json`（ローカル上書き）
+
+同じディレクトリに `claude-task-worker.local.json` を置くと、`claude-task-worker.json` と同じキーを書けて**同じキーはローカル側が勝つ**。マージはネストしたオブジェクトのキー単位（`workers.<name>.model` だけを差し替えられる。配列・スカラーは丸ごと置き換え）。
+
+コミットしない前提のファイルで、`claude-task-worker init` が `.gitignore` へ登録する。`remoteEnvId` のように各自の環境で値が違う設定を置く。
+
+#### クラウド環境の指定（`remoteEnvId`）
+
+`--cloud` 実行時に `claude --environment <id>` へ渡す環境ID。指定しない場合の選択は claude CLI に任せる（`~/.claude/settings.json` の `remote.defaultEnvironmentId` → アカウントの最初の `anthropic_cloud` 環境 → 無ければ自動作成）。ID は claude.ai の環境設定、または `/remote-env` で確認できる。自己ホスト環境（`ccpool_...`）も同じキーに書ける。
+
+```json
+{ "remoteEnvId": "env_xxxxxxxx" }
+```
 
 #### ワーカーごとの設定
 

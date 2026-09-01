@@ -1,13 +1,15 @@
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { basename } from "node:path";
 import { createLabel } from "../gh";
 import {
   DEFAULT_CONFIG,
   DEFAULT_UI_DESIGN_CONFIG,
   CONFIG_PATH,
+  LOCAL_CONFIG_PATH,
   SCHEDULED_WORKER_NAMES,
   CLOUD_DONE_LABEL,
 } from "../config.js";
-import { ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
+import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
 // 制約下で「**同時に付きうるラベル同士**の最小 ΔE(CIE2000) を最大化する15色」を数値最適化した。
@@ -139,6 +141,27 @@ async function createConfig(force: boolean): Promise<void> {
   logWriteResult(result, CONFIG_PATH);
 }
 
+// claude-task-worker.local.json はコミットしない前提（個人ごとの remoteEnvId などを置く）の
+// ため、対象リポジトリの .gitignore へ登録する。グローバル gitignore に入れる .codegraph/ と
+// 違い、このファイルの存在自体はリポジトリの運用上の約束なので各リポジトリ側に書く。
+async function ensureLocalConfigGitIgnore(): Promise<void> {
+  const entry = basename(LOCAL_CONFIG_PATH);
+  const path = ".gitignore";
+  let current = "";
+  try {
+    current = await readFile(path, "utf-8");
+  } catch {
+    // 未作成なら空から作る
+  }
+  const next = appendIgnoreEntry(current, entry);
+  if (next === null) {
+    console.log(`[init] Already ignored: ${entry} (${path})`);
+    return;
+  }
+  await writeFile(path, next, "utf-8");
+  console.log(`[init] Added ${entry} to ${path}`);
+}
+
 export async function init(options: { force?: boolean } = {}): Promise<void> {
   const force = options.force ?? false;
   console.log(`[init] Creating labels...${force ? " (force mode)" : ""}`);
@@ -164,6 +187,7 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
 
   console.log("[init] Creating config file...");
   await createConfig(force);
+  await ensureLocalConfigGitIgnore();
 
   console.log("[init] Setting up CodeGraph...");
   await ensureCodegraphGitIgnore("init");

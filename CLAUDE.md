@@ -335,9 +335,29 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - PR 系のローカルブランチ掃除（`removeWorktreeByBranch()` / `deleteLocalBranch()` / `localBranchExists()` のプリフライト）は**スキップする**。ローカルの checkout 競合はクラウド実行では発生しない（`gh pr checkout` はクラウド VM 側で走る）
 - **副作用**: `exec-issue` の PR 実在検証で「worktreeId を head とする PR」の条件が成立しなくなる（クラウドセッションは作業ブランチ名を自分で決め、ローカルからはその名前を取得する手段が無い）。代わりに `selectOwnedClosingPr()`（`src/workers/exec-issue.ts`）が closing 参照PRの **base ブランチ一致 ＋ 作成時刻がタスク起動時刻以降**で所有権を判定する。所有権を確認できなければ `cc-pr-created` を付けず `cc-need-human-check` へ倒す
 
+#### クラウド環境の指定（`remoteEnvId`）
+
+`claude-task-worker.json` のトップレベル `remoteEnvId`（string | null、既定 `null`）で、クラウド実行時に `claude --environment <id>` へ渡す環境IDを指定する。`null`（既定）ならフラグごと省き、claude CLI 側の既定解決に委ねる。`buildClaudeArgs()` は `--advisor` と同じく**値とセットのときだけ**フラグを付ける（値なしの `--environment` は後続フラグを値として食う）。反映するのは `cloud: true` のときだけ — ローカル実行の `claude -p` は同フラグを受け付けない。
+
+claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`remoteEnvId` を指定しない限りこの経路が使われる:
+
+1. settings の `remote.defaultEnvironmentId`（`policySettings → flagSettings → localSettings → projectSettings → userSettings` の順に見て最初に定義されたものが勝つ。`ccpool_` 値は policy / flag / user からのみ有効）
+2. その ID がアカウントの環境一覧に無ければ、最初の `anthropic_cloud` 環境 → 最初の非 bridge 環境 → 一覧の先頭
+3. 一覧が空なら Default 環境を自動作成
+
+つまり**指定しない場合の環境はワーカー実行マシンの `~/.claude/settings.json` に依存する**。`remoteEnvId` はこれをリポジトリ側から固定するための設定で、値が各自の環境で違うため `claude-task-worker.local.json`（下記）へ置く運用を想定している。
+
+#### `claude-task-worker.local.json`（ローカル上書き）
+
+`claude-task-worker.json` と同じキーを書ける**コミットしない**上書きファイル。`loadConfig()` は両方を生JSONで読み、`mergeConfigRaw()` で重ねてから既存のパースへ通す（**同じキーはローカル側が勝つ**）。マージはプレーンオブジェクト同士だけ再帰する（`workers.<name>.model` のような深いキーを単独で差し替えられる。配列・スカラー・型違いはローカル側の値で丸ごと置き換え）。
+
+`.gitignore` への登録は `init` が行う（`ensureLocalConfigGitIgnore()`、`appendIgnoreEntry()` を `codegraph.ts` から再利用）。`.codegraph/` と違いグローバル gitignore ではなく**対象リポジトリの `.gitignore`** に書くのは、このファイルの存在自体がリポジトリの運用上の約束であるため。
+
+**`writeLastRun()` は本体（`claude-task-worker.json`）だけを書く**。定期ワーカーの実行記録はコミットして共有する値であり、ローカル上書きの対象ではない。
+
 #### `--cloud` 付与時の起動引数の差分
 
-- `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` のみ**。`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
+- `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` のみ**。逆にクラウド時のみ付くのは `--environment`（`remoteEnvId` 指定時、前節）と `--ref` / `--on-branch`。`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
 - 実測（`docs/cloud-session-launch-flags.md` の T5 / T6 / T7、claude 2.1.247）でこれらのフラグはいずれも**受理された**。ただし「受理された＝クラウド VM 側で実際に反映される」ことまでは未確認（起動引数として拒否されないことのみを確認）
 - **「クラウドセッションが受理しないフラグを渡すと起動そのものが失敗する（黙って無視されない）」という原則は維持する**。実際にそれへ該当するのは2つだけ: (a) `-p` との併用（`Error: --cloud cannot be combined with --print.`）、(b) `--ref` と `--on-branch` の同時指定（`Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）
 - `--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**。実装は起動前に `buildClaudeArgs()` が例外で弾く（外部プロセスのエラーで気づく形にしないため）。Issue 系ワーカーはベースブランチを `--ref` へ、PR 系は PR の head ブランチを `--on-branch` へ渡す
