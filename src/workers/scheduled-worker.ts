@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
-import { getLastRunAt, getWorkerConfig, isCloudWorker } from "../config";
+import { getLastRunAt, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
 import { getRepoInfo } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { publishLastRunPr } from "../last-run-pr";
@@ -70,7 +70,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           effort,
           advisorModel: isAdvisorEnabled() ? advisorModel : "",
           permissionMode: getPermissionMode(),
-          ...(cloud ? { cloud: true, baseRef: defaultBranch } : {}),
+          ...(cloud ? { cloud: true, baseRef: defaultBranch, remoteEnvId: getRemoteEnvId() ?? "" } : {}),
         });
 
         // 実行記録は成果物とは別PRでワーカー自身が出す。材料が無くてスキルがPRを

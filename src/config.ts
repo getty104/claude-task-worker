@@ -53,6 +53,11 @@ export type LastRunLog = Record<string, string>;
 
 interface Config {
   fixReviewPointCallbackCommentMessage?: string;
+  // クラウド実行（--cloud）時に `claude --environment <id>` へ渡す環境ID。null なら渡さず、
+  // claude 側の既定解決（settings の remote.defaultEnvironmentId → 一覧の最初の
+  // anthropic_cloud 環境）に任せる。個人ごとに違う値になりやすいので
+  // claude-task-worker.local.json 側で指定する想定。
+  remoteEnvId: string | null;
   uiDesign: UiDesignConfig;
   lastRun: LastRunLog;
   workers: Record<string, WorkerRuntimeConfig>;
@@ -310,12 +315,16 @@ export function checkCloudConfig(input: {
 
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
+  remoteEnvId: null,
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
   lastRun: {},
   workers: {},
 };
 
 export const CONFIG_PATH = join(process.cwd(), "claude-task-worker.json");
+// 個人ごとに違う設定（remoteEnvId など）を置くためのローカル上書きファイル。
+// gitignore 対象で、同じキーは CONFIG_PATH より優先される。
+export const LOCAL_CONFIG_PATH = join(process.cwd(), "claude-task-worker.local.json");
 
 function defaultsFor(name: string): WorkerRuntimeConfig {
   return WORKER_DEFAULTS[name] ?? DEFAULT_WORKER_CONFIG;
@@ -458,19 +467,53 @@ export function parseLastRunEntry(val: unknown): LastRunLog {
   return result;
 }
 
-export function loadConfig(): Config {
-  const configPath = CONFIG_PATH;
-  let raw: Record<string, unknown>;
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return typeof val === "object" && val !== null && !Array.isArray(val);
+}
+
+// claude-task-worker.local.json を claude-task-worker.json へ重ねる。同じキーは local が勝つ。
+// プレーンオブジェクト同士だけ再帰的にマージするので、`workers.<name>.model` のような深い
+// キーだけをローカルで差し替えられる（配列・スカラー・型違いは local の値で丸ごと置き換え）。
+export function mergeConfigRaw(base: Record<string, unknown>, local: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, val] of Object.entries(local)) {
+    const current = result[key];
+    result[key] = isPlainObject(current) && isPlainObject(val) ? mergeConfigRaw(current, val) : val;
+  }
+  return result;
+}
+
+// 設定ファイルを生JSONとして読む。不在なら空オブジェクト（＝上書きなし）を返す。
+function readRawConfig(path: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
-    }
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw err;
   }
+  if (!isPlainObject(parsed)) {
+    console.warn(`[config] invalid ${path}: expected object, ignoring`);
+    return {};
+  }
+  return parsed;
+}
+
+export function loadConfig(): Config {
+  const raw = mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
 
   const result: Config = { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
+
+  if ("remoteEnvId" in raw) {
+    const val = raw["remoteEnvId"];
+    if (val === null) {
+      result.remoteEnvId = null;
+    } else if (typeof val === "string" && val.trim().length > 0) {
+      result.remoteEnvId = val.trim();
+    } else {
+      console.warn(`[config] invalid remoteEnvId: ${String(val)}, using default null`);
+    }
+  }
 
   if ("lastRun" in raw) {
     result.lastRun = parseLastRunEntry(raw["lastRun"]);
@@ -546,6 +589,17 @@ export function writeLastRun(repoRoot: string, workerName: string, at: Date = ne
 
 // 設定ファイル不在・破損でもワークフローが勝手に有効化されないよう、
 // 読み込みに失敗した場合は既定（無効）へ倒す。
+// クラウド実行時に --environment へ渡す環境ID。設定ファイル不在・破損では null
+// （＝フラグを渡さず claude 側の既定解決に任せる）へ倒す。
+export function getRemoteEnvId(): string | null {
+  try {
+    return loadConfig().remoteEnvId;
+  } catch (err) {
+    console.warn(`[config] failed to load remoteEnvId, not passing --environment: ${err}`);
+    return null;
+  }
+}
+
 export function getUiDesignConfig(): UiDesignConfig {
   try {
     return loadConfig().uiDesign;

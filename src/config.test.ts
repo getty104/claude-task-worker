@@ -19,6 +19,7 @@ const {
   checkCloudConfig,
   checkCloudAuth,
   isCloudWorker,
+  mergeConfigRaw,
 } = (await import("./config")) as typeof ConfigModule;
 const { resetCloudFlagCache } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
@@ -330,4 +331,26 @@ test("checkCloudAuth rejects a custom ANTHROPIC_BASE_URL even with an otherwise 
 
 test("checkCloudAuth treats an indeterminate status as not an error", () => {
   assert.deepEqual(checkCloudAuth({ status: { kind: "unknown" } }), []);
+});
+
+test("mergeConfigRaw lets the local file win on the same key", () => {
+  const merged = mergeConfigRaw({ remoteEnvId: null, uiDesign: { enabled: false } }, { remoteEnvId: "env_local" });
+  assert.deepEqual(merged, { remoteEnvId: "env_local", uiDesign: { enabled: false } });
+});
+
+test("mergeConfigRaw merges nested objects key by key instead of replacing them", () => {
+  const merged = mergeConfigRaw(
+    { workers: { "exec-issue": { model: "opus", effort: "high" }, "triage-pr": { model: "opus" } } },
+    { workers: { "exec-issue": { model: "sonnet" } } },
+  );
+  assert.deepEqual(merged, {
+    workers: { "exec-issue": { model: "sonnet", effort: "high" }, "triage-pr": { model: "opus" } },
+  });
+});
+
+test("mergeConfigRaw replaces arrays and scalars wholesale and leaves the base untouched", () => {
+  const base = { tags: ["a", "b"], uiDesign: { enabled: true } };
+  const merged = mergeConfigRaw(base, { tags: ["c"], uiDesign: false });
+  assert.deepEqual(merged, { tags: ["c"], uiDesign: false });
+  assert.deepEqual(base, { tags: ["a", "b"], uiDesign: { enabled: true } });
 });

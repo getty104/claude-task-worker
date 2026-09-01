@@ -559,3 +559,27 @@ test("buildCloudPrompt omits the cc-cloud-done instruction when no target is giv
   assert.ok(result.includes(SYSTEM_PROMPT_BASE));
   assert.ok(result.includes(DISALLOWED_TOOLS[0]));
 });
+
+test("buildClaudeArgs passes --environment with the id only for cloud runs", () => {
+  const base = { prompt: "/skill 1", model: "opus", effort: "high", remoteEnvId: "env_abc" } as const;
+  const cloudArgs = buildClaudeArgs({ mode: "default", cloud: true, ...base });
+  assert.equal(cloudArgs[cloudArgs.indexOf("--environment") + 1], "env_abc");
+  // 値なしの --environment は後続フラグを値として食うため、必ず末尾に値が続くこと。
+  assert.ok(cloudArgs.indexOf("--environment") < cloudArgs.length - 1);
+  // ローカル実行（--cloud なし）では claude が受け付けないので付けない。
+  assert.ok(!buildClaudeArgs({ mode: "default", ...base }).includes("--environment"));
+});
+
+test("buildClaudeArgs omits --environment unless a remote env id is given", () => {
+  for (const remoteEnvId of [undefined, "", "   "]) {
+    const args = buildClaudeArgs({
+      mode: "default",
+      cloud: true,
+      prompt: "/skill 1",
+      model: "opus",
+      effort: "high",
+      remoteEnvId,
+    });
+    assert.ok(!args.includes("--environment"), `--environment must be omitted for ${JSON.stringify(remoteEnvId)}`);
+  }
+});

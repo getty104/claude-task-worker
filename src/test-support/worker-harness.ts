@@ -158,8 +158,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
       child.kill("SIGKILL");
       await Promise.race([exitPromise, new Promise((resolve) => setTimeout(resolve, 5_000))]);
     }
-    rmSync(root, { recursive: true, force: true });
-    rmSync(xdgConfigHome, { recursive: true, force: true });
+    // 孫プロセス（git / gh スタブ）が書き込み中だと ENOTEMPTY で落ちうるため、
+    // cli-stub.ts の cleanup と同じくリトライ付きで消す。
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(xdgConfigHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   async function waitFor(predicate: (records: StubRecord[]) => boolean, timeoutMs?: number): Promise<void> {

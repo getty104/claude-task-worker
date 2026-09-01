@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { CLOUD_DONE_LABEL, getWorkerConfig, isCloudWorker } from "../config";
+import { CLOUD_DONE_LABEL, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
 import {
   type PullRequestWithChecks,
   getCurrentUser,
@@ -110,6 +110,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               advisorModel: isAdvisorEnabled() ? advisorModel : "",
               permissionMode: getPermissionMode(),
               cloud: isCloud,
+              remoteEnvId: isCloud ? (getRemoteEnvId() ?? "") : undefined,
               onBranch: isCloud ? pr.headRefName : undefined,
             });
             if (isCloud) {

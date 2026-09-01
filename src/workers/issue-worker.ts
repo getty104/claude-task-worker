@@ -1,5 +1,5 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
-import { CLOUD_DONE_LABEL, getWorkerConfig, isCloudWorker } from "../config";
+import { CLOUD_DONE_LABEL, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
 import {
   getCurrentUser,
   getRepoInfo,
@@ -145,7 +145,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
               advisorModel: isAdvisorEnabled() ? advisorModel : "",
               permissionMode: getPermissionMode(),
-              ...(cloud ? { cloud: true, baseRef: baseBranch } : {}),
+              ...(cloud ? { cloud: true, baseRef: baseBranch, remoteEnvId: getRemoteEnvId() ?? "" } : {}),
             });
 
             let cwd: string | undefined;

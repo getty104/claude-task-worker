@@ -161,6 +161,11 @@ export interface ClaudeInvocation {
   // クラウドセッションは print モード非対応なので `-p <prompt>` を付けない
   // （実測: `Error: --cloud cannot be combined with --print.`）。
   cloud?: boolean;
+  // `--environment` に渡すクラウド環境ID（claude-task-worker.json の `remoteEnvId`）。
+  // 空文字・未指定ならフラグ自体を渡さず、claude 側の既定解決に任せる
+  // （settings の remote.defaultEnvironmentId → 一覧の最初の anthropic_cloud 環境）。
+  // クラウド実行（`cloud: true`）のときだけ反映する。
+  remoteEnvId?: string;
   // `--ref` に渡すクラウドセッションのベースブランチ。`onBranch` とは排他。
   baseRef?: string;
   // `--on-branch` に渡すクラウドセッションのベースブランチ。`baseRef` とは排他。
@@ -217,6 +222,7 @@ export function buildClaudeArgs({
   advisorModel,
   permissionMode,
   cloud,
+  remoteEnvId,
   baseRef,
   onBranch,
 }: ClaudeInvocation): string[] {
@@ -228,6 +234,7 @@ export function buildClaudeArgs({
     throw new Error("--on-branch and --ref both set the cloud session's base branch; pass one or the other");
   }
   const advisor = advisorModel?.trim() ?? "";
+  const remoteEnv = remoteEnvId?.trim() ?? "";
   const permission = permissionMode ?? DEFAULT_PERMISSION_MODE;
   return [
     // default モードはプロンプトを引数で渡す（print モード）。herdr モードでは渡さない:
@@ -251,6 +258,9 @@ export function buildClaudeArgs({
     // advisor 未指定（空文字）ならフラグごと省く。値なしの `--advisor` を渡すと
     // 後続フラグを値として食われるため、必ずモデル名とセットでのみ付ける。
     ...(advisor === "" ? [] : ["--advisor", advisor]),
+    // クラウド環境の指名。値なしの `--environment` は後続フラグを値として食うため、
+    // `--advisor` と同じく ID とセットでのみ付ける。
+    ...(cloud === true && remoteEnv !== "" ? ["--environment", remoteEnv] : []),
     // クラウド実行時は「作成コマンドの共通フラグ」だけをここで返す。`--cloud` 自体は
     // 付けない（値として渡す description（＝クラウドセッションの初期プロンプト。
     // appendCloudDoneInstruction() 適用後のタスクプロンプトそのもの）は
