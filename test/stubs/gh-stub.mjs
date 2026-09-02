@@ -102,6 +102,7 @@ if (sub === "api" && action === "user") {
         created_at: pr.createdAt,
         head: { ref: pr.headRefName },
         base: { ref: pr.baseRefName },
+        body: pr.body ?? "",
       }),
     );
   } else if (/\/issues\/\d+$/.test(path)) {

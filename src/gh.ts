@@ -249,7 +249,11 @@ export async function listPrsClosingIssue(issueNumber: number): Promise<ClosingP
   }));
 }
 
-async function fetchPrRef(owner: string, name: string, prNumber: number): Promise<ClosingPrRef | null> {
+async function fetchPrRef(
+  owner: string,
+  name: string,
+  prNumber: number,
+): Promise<(ClosingPrRef & { body: string }) | null> {
   try {
     const parsed = JSON.parse(await execGh(["api", `repos/${owner}/${name}/pulls/${prNumber}`]));
     return {
@@ -258,6 +262,7 @@ async function fetchPrRef(owner: string, name: string, prNumber: number): Promis
       headRefName: parsed?.head?.ref ?? "",
       baseRefName: parsed?.base?.ref ?? "",
       createdAt: parsed?.created_at ?? "",
+      body: typeof parsed?.body === "string" ? parsed.body : "",
     };
   } catch (err) {
     console.error(`[gh] failed to read PR #${prNumber}: ${err}`);
@@ -265,10 +270,21 @@ async function fetchPrRef(owner: string, name: string, prNumber: number): Promis
   }
 }
 
-// Issue を参照している PR の候補一覧を timeline（REST）から取得する（絞り込みは呼び出し側の責務）。
+// PR body が対象Issueを closing keyword（Closes/Fixes/Resolves 等）で指しているかを判定する（GitHubの解釈に合わせる）。
+export function bodyClosesIssue(body: string, issueNumber: number): boolean {
+  const pattern = new RegExp(`\\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s*#${issueNumber}\\b(?!\\d)`, "i");
+  return pattern.test(body);
+}
+
+// Issue を closing keyword で参照している PR の候補一覧を timeline（REST）から取得する（所有権判定は呼び出し側の責務）。
 // GitHub は base がデフォルトブランチでない PR に closing reference を作らないため、Epic 配下
 // （base: cc-epic-<N>）の PR は body に `Closes #N` があっても listPrsClosingIssue() では 1 件も返らない。
 // cross-referenced イベントは base に依存せずPR作成と同時に記録されるので、その穴をこちらで埋める。
+// ただし cross-referenced は単なる言及（`Related to #N` 等）でも記録され closing keyword を保証しないため、
+// body を closing keyword で検証したうえで採用する（無関係PRの誤紐付け防止）。
+//
+// `--paginate` に `--slurp` は付けない。gh は REST の JSON 配列を全ページ通しの単一配列へマージして出力し、
+// `--slurp` を付けるとページ単位の配列で包まれた形（配列の配列）に変わる（gh 2.98.0 で実測）。
 export async function listPrsCrossReferencingIssue(issueNumber: number): Promise<ClosingPrRef[]> {
   const { owner, name } = await getRepoInfo();
   const output = await execGh(["api", `repos/${owner}/${name}/issues/${issueNumber}/timeline`, "--paginate"]);
@@ -290,7 +306,9 @@ export async function listPrsCrossReferencingIssue(issueNumber: number): Promise
     ),
   ];
   const refs = await Promise.all(numbers.map((number) => fetchPrRef(owner, name, number)));
-  return refs.filter((ref): ref is ClosingPrRef => ref !== null);
+  return refs
+    .filter((ref): ref is ClosingPrRef & { body: string } => ref !== null && bodyClosesIssue(ref.body, issueNumber))
+    .map(({ body: _body, ...ref }) => ref);
 }
 
 const ADD_CLOSE_ISSUE_REFERENCES = `mutation($issueId: ID!, $prId: ID!) {

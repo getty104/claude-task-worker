@@ -29,7 +29,14 @@ export interface GhScenario {
    * `gh api repos/{o}/{r}/issues/<n>/timeline`（listPrsCrossReferencingIssue）が
    * cross-referenced として返すPR。同じ配列が `repos/{o}/{r}/pulls/<n>` の応答元にもなる。
    */
-  crossRefPrs?: { number: number; state?: string; headRefName: string; baseRefName: string; createdAt: string }[];
+  crossRefPrs?: {
+    number: number;
+    state?: string;
+    headRefName: string;
+    baseRefName: string;
+    createdAt: string;
+    body?: string;
+  }[];
 }
 
 export interface CliStubOptions {
