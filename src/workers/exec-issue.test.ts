@@ -221,3 +221,69 @@ test("verifyPrCreated: no matching PR found, marks cc-need-human-check and comme
     true,
   );
 });
+
+test("verifyPrCreated (cloud): adopts an Epic-based PR via cross-reference and links it", async (t) => {
+  const startedAt = Date.now() - 60_000;
+  const stubs = installCliStubs({
+    gh: {
+      view: { "5": { labels: [], state: "OPEN" } },
+      // base がデフォルトブランチでないため GitHub は closing reference を作らない。
+      closingPrs: [],
+      crossRefPrs: [
+        {
+          number: 9,
+          state: "OPEN",
+          headRefName: "claude/task-worker-execution-abc123",
+          baseRefName: "cc-epic-1",
+          createdAt: new Date(Date.now() - 30_000).toISOString(),
+        },
+      ],
+    },
+  });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: true,
+    baseBranch: "cc-epic-1",
+    startedAt,
+  });
+
+  assert.equal(result, undefined);
+  const records = stubs.records();
+  assert.equal(addLabelArgv(records, "issue"), true);
+  assert.equal(
+    records.some((r) => r.command === "gh" && r.argv.some((arg) => arg.includes("addCloseIssueReferences"))),
+    true,
+  );
+});
+
+test("verifyPrCreated (cloud): a cross-referenced PR on another base is not adopted", async (t) => {
+  const stubs = installCliStubs({
+    gh: {
+      view: { "5": { labels: [], state: "OPEN" } },
+      closingPrs: [],
+      crossRefPrs: [
+        {
+          number: 9,
+          state: "OPEN",
+          headRefName: "claude/task-worker-execution-abc123",
+          baseRefName: "cc-epic-999",
+          createdAt: new Date(Date.now() - 30_000).toISOString(),
+        },
+      ],
+    },
+  });
+  t.after(() => stubs.cleanup());
+
+  const result = await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: true,
+    baseBranch: "cc-epic-1",
+    startedAt: Date.now() - 60_000,
+  });
+
+  assert.equal(result, false);
+  assert.equal(
+    stubs.records().some((r) => r.command === "gh" && r.argv.some((arg) => arg.includes("addCloseIssueReferences"))),
+    false,
+  );
+});

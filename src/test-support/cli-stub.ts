@@ -25,6 +25,11 @@ export interface GhScenario {
   prList?: unknown[];
   /** `gh api graphql`（listPrsClosingIssue）が返す closedByPullRequestsReferences.nodes */
   closingPrs?: unknown[];
+  /**
+   * `gh api repos/{o}/{r}/issues/<n>/timeline`（listPrsCrossReferencingIssue）が
+   * cross-referenced として返すPR。同じ配列が `repos/{o}/{r}/pulls/<n>` の応答元にもなる。
+   */
+  crossRefPrs?: { number: number; state?: string; headRefName: string; baseRefName: string; createdAt: string }[];
 }
 
 export interface CliStubOptions {
