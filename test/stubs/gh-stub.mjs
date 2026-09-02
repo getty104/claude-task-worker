@@ -46,15 +46,21 @@ const [sub, action] = argv;
 if (sub === "api" && action === "user") {
   process.stdout.write(`${scenario.login ?? "worker-user"}\n`);
 } else if (sub === "api" && action === "graphql") {
-  process.stdout.write(
-    JSON.stringify({
-      data: {
-        repository: {
-          issue: { closedByPullRequestsReferences: { nodes: scenario.closingPrs ?? [] } },
+  // linkClosingPr() の addCloseIssueReferences ミューテーションは記録だけして成功扱いにする。
+  // 読み取り（listPrsClosingIssue）と区別できないと、紐付けの呼び出しが closingPrs を返してしまう。
+  if (argv.some((arg) => arg.includes("addCloseIssueReferences"))) {
+    process.stdout.write(JSON.stringify({ data: { addCloseIssueReferences: { issue: { number: 0 } } } }));
+  } else {
+    process.stdout.write(
+      JSON.stringify({
+        data: {
+          repository: {
+            issue: { closedByPullRequestsReferences: { nodes: scenario.closingPrs ?? [] } },
+          },
         },
-      },
-    }),
-  );
+      }),
+    );
+  }
 } else if (sub === "api") {
   // findCommentSince() が叩く `gh api repos/{owner}/{repo}/issues/<n>/comments?since=<ISO8601>`。
   const path = argv[1] ?? "";
@@ -65,6 +71,42 @@ if (sub === "api" && action === "user") {
     const state = readState();
     const comments = (state.comments?.[numberStr] ?? []).filter((comment) => Date.parse(comment.created_at) >= sinceMs);
     process.stdout.write(JSON.stringify(comments.map((comment) => ({ body: comment.body }))));
+  } else if (/\/issues\/\d+\/timeline$/.test(path)) {
+    // listPrsCrossReferencingIssue() が叩く timeline。scenario.crossRefPrs のPR番号を
+    // cross-referenced イベントとして返す。
+    const repo = scenario.repo ?? { owner: "acme", name: "demo", defaultBranch: "main" };
+    const events = (scenario.crossRefPrs ?? []).map((pr) => ({
+      event: "cross-referenced",
+      source: {
+        issue: {
+          number: pr.number,
+          pull_request: { url: `https://api.github.com/repos/${repo.owner}/${repo.name}/pulls/${pr.number}` },
+          repository: { full_name: `${repo.owner}/${repo.name}` },
+        },
+      },
+    }));
+    process.stdout.write(JSON.stringify(events));
+  } else if (/\/pulls\/\d+$/.test(path)) {
+    // fetchPrRef() / linkClosingPr() が叩くPR詳細（REST 形状）。
+    const number = Number(path.split("/").pop());
+    const pr = (scenario.crossRefPrs ?? []).find((candidate) => candidate.number === number);
+    if (!pr) {
+      process.stderr.write(`unknown pull request: ${number}\n`);
+      process.exit(1);
+    }
+    process.stdout.write(
+      JSON.stringify({
+        node_id: `PR_${number}`,
+        state: pr.state === "MERGED" ? "closed" : (pr.state ?? "OPEN").toLowerCase(),
+        merged_at: pr.state === "MERGED" ? "2026-01-01T00:00:00Z" : null,
+        created_at: pr.createdAt,
+        head: { ref: pr.headRefName },
+        base: { ref: pr.baseRefName },
+        body: pr.body ?? "",
+      }),
+    );
+  } else if (/\/issues\/\d+$/.test(path)) {
+    process.stdout.write(JSON.stringify({ node_id: `I_${path.split("/").pop()}` }));
   } else {
     process.stderr.write(`unknown gh api command: ${argv.join(" ")}\n`);
     process.exit(1);

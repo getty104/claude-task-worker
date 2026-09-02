@@ -1,4 +1,13 @@
-import { addLabel, commentOnIssue, findPrNumberByHeadRef, getIssueState, hasLabel, listPrsClosingIssue } from "../gh";
+import {
+  addLabel,
+  commentOnIssue,
+  findPrNumberByHeadRef,
+  getIssueState,
+  hasLabel,
+  linkClosingPr,
+  listPrsClosingIssue,
+  listPrsCrossReferencingIssue,
+} from "../gh";
 import type { ClosingPrRef } from "../gh";
 import { createIssuePollingWorker } from "./issue-worker";
 
@@ -89,19 +98,35 @@ export async function verifyPrCreated(
   // ケースの保険として closing 参照PR（headRefName一致）も探す。
   // クラウド実行: worktreeId のブランチは存在しないため findPrNumberByHeadRef は使わず、
   // closing 参照PRの所有権（base一致＋起動時刻以降の作成）だけを根拠にする。
+  const ownership = {
+    cloud: ctx.cloud,
+    expectedHeadRefName: worktreeId,
+    baseBranch: ctx.baseBranch,
+    startedAt: ctx.startedAt,
+    now: Date.now(),
+  };
   let prNumber: number | null = null;
   if (!ctx.cloud) {
     prNumber = await findPrNumberByHeadRef(worktreeId, "all");
   }
   if (prNumber === null) {
-    const candidates = await listPrsClosingIssue(issueNumber);
-    prNumber = selectOwnedClosingPr(candidates, {
-      cloud: ctx.cloud,
-      expectedHeadRefName: worktreeId,
-      baseBranch: ctx.baseBranch,
-      startedAt: ctx.startedAt,
-      now: Date.now(),
+    prNumber = selectOwnedClosingPr(await listPrsClosingIssue(issueNumber), ownership);
+  }
+  // GitHub は base がデフォルトブランチでない PR に closing reference を作らないため、Epic 配下
+  // （base: cc-epic-<N>）の PR は body に `Closes #N` があっても上の経路には現れない。クラウド実行は
+  // 作業ブランチ名も分からずここまでの判定材料が尽きるので、timeline の cross-referenced から拾い直す。
+  // 採用したら明示的に紐付け、次回以降は closing reference 側の一次判定が効くようにする。
+  if (prNumber === null) {
+    const candidates = await listPrsCrossReferencingIssue(issueNumber).catch((err) => {
+      console.error(`[exec-issue] listPrsCrossReferencingIssue failed for #${issueNumber}: ${err}`);
+      return [];
     });
+    prNumber = selectOwnedClosingPr(candidates, ownership);
+    if (prNumber !== null) {
+      await linkClosingPr(issueNumber, prNumber).catch((err) =>
+        console.error(`[exec-issue] linkClosingPr failed for #${issueNumber} -> #${prNumber}: ${err}`),
+      );
+    }
   }
   if (prNumber !== null) {
     await addLabel("issue", issueNumber, "cc-pr-created");

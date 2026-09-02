@@ -249,6 +249,94 @@ export async function listPrsClosingIssue(issueNumber: number): Promise<ClosingP
   }));
 }
 
+async function fetchPrRef(
+  owner: string,
+  name: string,
+  prNumber: number,
+): Promise<(ClosingPrRef & { body: string }) | null> {
+  try {
+    const parsed = JSON.parse(await execGh(["api", `repos/${owner}/${name}/pulls/${prNumber}`]));
+    return {
+      number: prNumber,
+      state: parsed?.merged_at ? "MERGED" : String(parsed?.state ?? "").toUpperCase(),
+      headRefName: parsed?.head?.ref ?? "",
+      baseRefName: parsed?.base?.ref ?? "",
+      createdAt: parsed?.created_at ?? "",
+      body: typeof parsed?.body === "string" ? parsed.body : "",
+    };
+  } catch (err) {
+    console.error(`[gh] failed to read PR #${prNumber}: ${err}`);
+    return null;
+  }
+}
+
+// PR body が対象Issueを closing keyword（Closes/Fixes/Resolves 等）で指しているかを判定する（GitHubの解釈に合わせる）。
+export function bodyClosesIssue(body: string, issueNumber: number): boolean {
+  const pattern = new RegExp(`\\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s*#${issueNumber}\\b(?!\\d)`, "i");
+  return pattern.test(body);
+}
+
+// Issue を closing keyword で参照している PR の候補一覧を timeline（REST）から取得する（所有権判定は呼び出し側の責務）。
+// GitHub は base がデフォルトブランチでない PR に closing reference を作らないため、Epic 配下
+// （base: cc-epic-<N>）の PR は body に `Closes #N` があっても listPrsClosingIssue() では 1 件も返らない。
+// cross-referenced イベントは base に依存せずPR作成と同時に記録されるので、その穴をこちらで埋める。
+// ただし cross-referenced は単なる言及（`Related to #N` 等）でも記録され closing keyword を保証しないため、
+// body を closing keyword で検証したうえで採用する（無関係PRの誤紐付け防止）。
+//
+// `--paginate` に `--slurp` は付けない。gh は REST の JSON 配列を全ページ通しの単一配列へマージして出力し、
+// `--slurp` を付けるとページ単位の配列で包まれた形（配列の配列）に変わる（gh 2.98.0 で実測）。
+export async function listPrsCrossReferencingIssue(issueNumber: number): Promise<ClosingPrRef[]> {
+  const { owner, name } = await getRepoInfo();
+  const output = await execGh(["api", `repos/${owner}/${name}/issues/${issueNumber}/timeline`, "--paginate"]);
+  const events: {
+    event?: string;
+    source?: { issue?: { number?: number; pull_request?: unknown; repository?: { full_name?: string } } };
+  }[] = JSON.parse(output);
+  const numbers = [
+    ...new Set(
+      events
+        .filter(
+          (e) =>
+            e.event === "cross-referenced" &&
+            e.source?.issue?.pull_request != null &&
+            e.source.issue.repository?.full_name === `${owner}/${name}` &&
+            typeof e.source.issue.number === "number",
+        )
+        .map((e) => e.source?.issue?.number as number),
+    ),
+  ];
+  const refs = await Promise.all(numbers.map((number) => fetchPrRef(owner, name, number)));
+  return refs
+    .filter((ref): ref is ClosingPrRef & { body: string } => ref !== null && bodyClosesIssue(ref.body, issueNumber))
+    .map(({ body: _body, ...ref }) => ref);
+}
+
+const ADD_CLOSE_ISSUE_REFERENCES = `mutation($issueId: ID!, $prId: ID!) {
+  addCloseIssueReferences(input: { issueId: $issueId, pullRequestIds: [$prId] }) { issue { number } }
+}`;
+
+// PR を Issue の closing reference（GitHub UI の Development パネルの紐付け）として明示的に登録する。
+// body の `Closes #N` は base がデフォルトブランチのときしか効かないため、Epic 配下の PR はここで張る。
+// 同じ組み合わせの再実行は no-op（冪等）。
+export async function linkClosingPr(issueNumber: number, prNumber: number): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  const issueId = JSON.parse(await execGh(["api", `repos/${owner}/${name}/issues/${issueNumber}`]))?.node_id;
+  const prId = JSON.parse(await execGh(["api", `repos/${owner}/${name}/pulls/${prNumber}`]))?.node_id;
+  if (typeof issueId !== "string" || typeof prId !== "string") {
+    throw new Error(`node_id not found (issue #${issueNumber} / PR #${prNumber})`);
+  }
+  await execGh([
+    "api",
+    "graphql",
+    "-f",
+    `query=${ADD_CLOSE_ISSUE_REFERENCES}`,
+    "-F",
+    `issueId=${issueId}`,
+    "-F",
+    `prId=${prId}`,
+  ]);
+}
+
 // マージ済み・オープン中のPRのみを対象とし、無関係な却下済み（未マージでクローズ）のPRを誤検出しないよう除外する。
 // さらに、今回の実行の作業ブランチ（expectedHeadRefName）と headRefName が一致するPRのみを有効とみなし、
 // 無関係な既存PRの誤検出を防ぐ。
