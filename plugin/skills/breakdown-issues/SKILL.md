@@ -1,12 +1,17 @@
 ---
 name: breakdown-issues
-description: "依頼された内容を要件とTODOに分解し、タスクごとにGitHub Issueを作成するスキル。タスクの整理・分解、複数Issueの一括作成、依存関係の明示が必要な場合に使用する。「この機能をIssueに分けて」「タスクを洗い出してIssueにして」「要件を整理してチケット化して」といったリクエストで発動する。"
-argument-hint: "[task-description]"
+description: "依頼された内容（自然言語の説明、または既存のIssue番号）を要件とTODOに分解し、タスクごとにGitHub Issueを作成するスキル。タスクの整理・分解、複数Issueの一括作成、依存関係の明示が必要な場合に使用する。「この機能をIssueに分けて」「タスクを洗い出してIssueにして」「PRDのIssue #123 を分解して」といったリクエストで発動する。"
+argument-hint: "[task-description | issue-number]"
 ---
 
 # Breakdown Issues
 
 依頼された内容を requirement-todo-organizer エージェントで要件・TODOに分解し、各タスクをGitHub Issueとして作成するスキル。
+
+引数は2形態を受け付ける。どちらでも作成する子Issueは同じで、違いは**親（Epic）Issue を新規作成するか、既存Issueを Epic に格上げするか**だけ。
+
+- **自然言語のタスク説明**: その内容を分解し、親Issueを新規作成する
+- **既存のIssue番号**（数値のみ・`#`付き数値・Issue URL）: そのIssueの description を分解対象とし、**そのIssue自身を親（Epic）にする**（`/create-prd` が作った PRD Issue を分解する経路）
 
 # Instructions
 
@@ -22,11 +27,26 @@ argument-hint: "[task-description]"
 
 ### 2. タスクの分解
 
-requirement-todo-organizer サブエージェントを使用して、以下の依頼内容を要件定義・TODO分解する。
-
-#### 依頼内容
+引数:
 
 $ARGUMENTS
+
+#### 2-1. 引数の判定と分解対象の確定
+
+引数が**数値のみ**（例: `123`）・**`#`付き数値**（例: `#123`）・**Issue URL**（`.../issues/<番号>`）のいずれかなら「Issue番号モード」、それ以外は「タスク説明モード」として扱う。
+
+Issue番号モードの場合は対象Issueの本文を取得し、それを分解対象にする。取得に失敗した（存在しない・権限が無い）場合は中断する。
+
+```bash
+EPIC_ISSUE_NUMBER=<引数から切り出した番号>
+gh issue view "$EPIC_ISSUE_NUMBER" --json number,title,body,state
+```
+
+Issue が `CLOSED` の場合は、分解して良いか `AskUserQuestion` で確認してから進む。
+
+#### 2-2. 分解
+
+requirement-todo-organizer サブエージェントを使用して、確定した分解対象（タスク説明モードなら引数の依頼内容、Issue番号モードなら取得した Issue のタイトル＋本文）を要件定義・TODO分解する。
 
 ### 3. タスクの不明点のブラッシュアップ
 
@@ -35,9 +55,25 @@ $ARGUMENTS
 - 回答を受けて要件・TODOを更新し、不明点がなくなるまで繰り返す
 - 不明点がない場合はスキップする
 
-### 4. 親（Epic）Issue の作成
+### 4. 親（Epic）Issue の確定
 
-子Issueを作る前に、ステップ2で分解した全TODOを束ねる「親Issue（Epic）」を1つ作成する。子Issueは後段でこの親Issueの sub-issue として作成するため、先に親番号を確定させる。親Issueは全体像と進捗を1つの番号で追えるようにするサマリとして機能する。
+子Issueは後段でこの親Issueの sub-issue として作成するため、先に親番号（`EPIC_ISSUE_NUMBER`）を確定させる。親Issueは全体像と進捗を1つの番号で追えるようにするサマリとして機能する。
+
+#### 4-a. Issue番号モード: 引数のIssueを Epic に格上げする
+
+新しい親Issueは**作らない**（同じ内容のIssueが2つ並び、どちらを追えばよいか分からなくなるため）。引数で渡されたIssueに `cc-epic-issue` ラベルを付け、その番号をそのまま `EPIC_ISSUE_NUMBER` として使う。本文は書き換えない（分解対象そのものであり、PRD として人がレビューした内容を上書きしない）。
+
+```bash
+gh issue edit "$EPIC_ISSUE_NUMBER" --add-label "cc-epic-issue"
+```
+
+ラベル付与に失敗した場合は中断する（Epic として扱われないIssueに sub-issue だけ生やすと、`create-epic-pr` などのEpicフローに乗らない）。ラベルが既に付いている場合は成功として扱う（冪等）。
+
+確定したらステップ5へ進む（4-b は実行しない）。
+
+#### 4-b. タスク説明モード: 親（Epic）Issue を新規作成する
+
+子Issueを作る前に、ステップ2で分解した全TODOを束ねる「親Issue（Epic）」を1つ作成する。
 
 - **ラベル**: `cc-epic-issue`（親 Epic Issue であることを示す。必ず付与）
 - **タイトル**: 依頼内容全体のサマリを短くまとめたもの（例：「ユーザー認証機能の実装」）
@@ -117,7 +153,7 @@ Skill tool 呼び出しは `Skill(skill='post-scope-issue-body', args=<上記YAM
 
 全Issueの作成が完了したら、以下を報告する。結論（親Issue番号と子Issue件数）から書き、各項目は1行に収める。分解内容の再掲・言い換えは書かない。
 
-- 作成した親Issue（Epic）の番号・タイトル・URL
+- 親Issue（Epic）の番号・タイトル・URL（Issue番号モードでは「既存Issueを Epic に格上げした」旨を1行で添える）
 - 作成した子Issueの一覧（番号・タイトル・blocked-by先）
 - 依存関係図（テキストベース。依存が2段以上あるときだけ出す）
 - 推奨される実行順序
