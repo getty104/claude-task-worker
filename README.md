@@ -105,7 +105,8 @@ claude-task-worker init --force   # 強制上書き
 
 | ラベル | 用途 |
 |---|---|
-| `cc-triage-scope` | トリアージ対象マーク（Issue/PR） |
+| `cc-triage-scope` | トリアージ対象マーク（Issue/PR）＝ワーカーのキュー合流口 |
+| `cc-issue-request` | 人が Issue テンプレートから作成を依頼した印。起票者を assignee に自動設定するワークフローの発火条件（`cc-triage-scope` と役割を分けてあり、ワーカーの自動起票では付かない） |
 | `cc-issue-created` | `create-issue` 由来の Issue マーク |
 | `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` | Issue の更新 / 確認事項回答 / 実行トリガー |
 | `cc-fix-onetime` / `cc-resolve-conflict` | PR の修正 / コンフリクト解消トリガー |

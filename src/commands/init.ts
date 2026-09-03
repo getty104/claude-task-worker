@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { basename } from "node:path";
 import { createLabel } from "../gh";
 import {
@@ -43,7 +43,7 @@ import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from ".
 // される文字色とのコントラスト比が 4.5:1 以上、(5) cc-triage-scope 以外は HSL 彩度 90 以上、
 // (6) 共起する有彩色ラベルとの色相差が確保でき、最寄りの色相が混同を避けたい相手でない、の
 // 6点を確認すること。
-const LABELS: { name: string; color: string }[] = [
+export const LABELS: { name: string; color: string }[] = [
   { name: "cc-need-human-check", color: "eb1700" }, // vivid red (H6 S100 L46 / L*50 C*97)
   { name: "cc-fix-onetime", color: "960837" }, // vivid wine red (H340 S90 L31 / L*32 C*56)
   { name: "cc-resolve-conflict", color: "6e7e07" }, // vivid olive (H68 S90 L26 / L*50 C*57)
@@ -61,13 +61,18 @@ const LABELS: { name: string; color: string }[] = [
   { name: "cc-ui-design-pr-created", color: "947100" }, // vivid bronze (H46 S100 L29 / L*50 C*56)
   { name: "cc-ui-design-ready", color: "0c73e9" }, // vivid azure (H212 S90 L48 / L*50 C*69)
   { name: CLOUD_DONE_LABEL, color: "33cfff" }, // vivid sky blue (H194 S100 L60 / L*78 C*42)
+  // 追加時点で有彩色ラベルが色相環をほぼ埋めており、上記6点を全て満たす色は残っていない。
+  // 最寄り色相との差は27°が上限（H185 が最大）で、その相手は cc-cloud-done（クラウド実行中だけ
+  // 現れる短命なマーカー・L*78 と明度が倍近く違う）＝見分けたい相手ではない側に倒してある。
+  { name: "cc-issue-request", color: "03656d" }, // vivid deep teal (H185 S95 L22 / L*39 C*24)
 ];
 
-const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
+export const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
 description: claude-task-workerでGitHub Issueを作成する
 title: "[claude-task-worker] Issue作成依頼"
 labels:
   - cc-triage-scope
+  - cc-issue-request
 body:
   - type: textarea
     id: request
@@ -78,7 +83,11 @@ body:
       required: true
 `;
 
-const ASSIGN_CREATOR_WORKFLOW = `name: Assign creator on cc-triage-scope
+// 発火条件は `cc-issue-request`（人がフォームから依頼した印）であって `cc-triage-scope`
+// （ワーカーのキュー合流）ではない。1ラベルに「キュー合流」と「依頼者の紐付け」の2つの役割を
+// 載せると、ワーカーやパイプラインの自動起票にも起票者の assign が発火し、その bot アカウントが
+// 全 Issue の assignee になる。役割ごとにラベルを分けることで、author の特例条件を書かずに分離する。
+export const ASSIGN_CREATOR_WORKFLOW = `name: Assign creator on issue request
 
 on:
   issues:
@@ -86,7 +95,7 @@ on:
 
 jobs:
   assign:
-    if: contains(github.event.issue.labels.*.name, 'cc-triage-scope')
+    if: contains(github.event.issue.labels.*.name, 'cc-issue-request')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -162,6 +171,42 @@ async function ensureLocalConfigGitIgnore(): Promise<void> {
   console.log(`[init] Added ${entry} to ${path}`);
 }
 
+// cc-triage-scope 単独で発火していた頃の Issue テンプレートとワークフロー。**2つセットで**消す。
+// ワークフローだけ残すと cc-triage-scope（ワーカーのキュー合流）で起票者 assign が復活し、
+// テンプレートだけ残すと cc-issue-request が付かず assign が一切効かなくなる。既存ファイルを
+// 保護する --force の対象外にしてあるのは、残存＝分離前のバグがそのまま生き続けることを意味し、
+// かつ新パスへ同じ内容が必ず書き出されるため（手を入れていた場合の差分は git 側で見える）。
+const LEGACY_PATHS = [
+  ".github/ISSUE_TEMPLATE/cc-triage-scope.yml",
+  ".github/workflows/assign-creator-on-cc-triage-scope.yml",
+];
+
+// 新パスが "skipped"（既存ファイル＋force未指定）だった場合、その中身は分離前の手動編集を
+// 含む未知の内容でありテンプレート/ワークフローの最新版と一致する保証が無い。旧ファイルを
+// 削除する前に一致を確認しないと、新ファイルが古いまま旧ファイルだけが失われ復元できなくなる。
+export function isContentMismatch(
+  result: "created" | "overwritten" | "skipped",
+  expected: string,
+  actual: string,
+): boolean {
+  return result === "skipped" && actual !== expected;
+}
+
+async function removeLegacyIssueRequestFiles(): Promise<void> {
+  for (const path of LEGACY_PATHS) {
+    try {
+      await rm(path);
+      console.log(`[init] Removed legacy file: ${path}`);
+    } catch (err) {
+      // 未作成のリポジトリでは何もしない。それ以外の失敗は握り潰すと、旧ファイルが残ったまま
+      // init が成功したことになり、分離前の誤発火（または assign 不発）が生き続ける。
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
+    }
+  }
+}
+
 export async function init(options: { force?: boolean } = {}): Promise<void> {
   const force = options.force ?? false;
   console.log(`[init] Creating labels...${force ? " (force mode)" : ""}`);
@@ -177,13 +222,27 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
 
   console.log("[init] Creating issue template...");
   await mkdir(".github/ISSUE_TEMPLATE", { recursive: true });
-  const templatePath = ".github/ISSUE_TEMPLATE/cc-triage-scope.yml";
-  logWriteResult(await writeFileWithMode(templatePath, ISSUE_TEMPLATE, force), templatePath);
+  const templatePath = ".github/ISSUE_TEMPLATE/cc-issue-request.yml";
+  const templateResult = await writeFileWithMode(templatePath, ISSUE_TEMPLATE, force);
+  logWriteResult(templateResult, templatePath);
 
   console.log("[init] Creating GitHub Actions workflow...");
   await mkdir(".github/workflows", { recursive: true });
-  const workflowPath = ".github/workflows/assign-creator-on-cc-triage-scope.yml";
-  logWriteResult(await writeFileWithMode(workflowPath, ASSIGN_CREATOR_WORKFLOW, force), workflowPath);
+  const workflowPath = ".github/workflows/assign-creator-on-issue-request.yml";
+  const workflowResult = await writeFileWithMode(workflowPath, ASSIGN_CREATOR_WORKFLOW, force);
+  logWriteResult(workflowResult, workflowPath);
+
+  if (isContentMismatch(templateResult, ISSUE_TEMPLATE, await readFile(templatePath, "utf-8"))) {
+    throw new Error(
+      `[init] ${templatePath} は既存の内容が最新のテンプレートと一致しません。--force で再実行してください。旧ファイルは削除していません。`,
+    );
+  }
+  if (isContentMismatch(workflowResult, ASSIGN_CREATOR_WORKFLOW, await readFile(workflowPath, "utf-8"))) {
+    throw new Error(
+      `[init] ${workflowPath} は既存の内容が最新のワークフローと一致しません。--force で再実行してください。旧ファイルは削除していません。`,
+    );
+  }
+  await removeLegacyIssueRequestFiles();
 
   console.log("[init] Creating config file...");
   await createConfig(force);
