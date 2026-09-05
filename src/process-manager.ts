@@ -2,7 +2,13 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { buildCloudCreateArgs, buildCloudPrompt, buildScriptCommand, CLOUD_REPORT_HEADING } from "./claude-args";
+import {
+  buildCloudCreateArgs,
+  buildCloudPrompt,
+  buildScriptCommand,
+  CLOUD_REPORT_HEADING,
+  type CloudPromptTarget,
+} from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
 import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
@@ -254,13 +260,19 @@ export const CLOUD_TASK_TIMEOUT_MS = Number(process.env.CTW_CLOUD_TASK_TIMEOUT_M
 
 type CloudTargetType = "issue" | "pr";
 
+// 完了検知・レポート回収・プロンプト生成で同じ対象を指す（定義は claude-args 側）。
+export type CloudTarget = CloudPromptTarget;
+
 interface CloudWaiter {
   type: CloudTargetType;
+  number: number;
   deadline: number;
   settle: (outcome: "completed" | "timeout" | "aborted") => void;
 }
 
-// キーは `${type}:${number}`（issue #N と PR #N の番号衝突を避ける）。
+// キーはタスクID込みの `${type}:${number}:${taskId}`。番号だけをキーにすると、
+// 同じPR（定期ワーカーの実行記録PRなど）を別タスクが同時に待った場合に
+// 上書きで待機が解決不能になる。
 const cloudWaiters = new Map<string, CloudWaiter>();
 let cloudPollLoopRunning = false;
 
@@ -304,8 +316,7 @@ async function pollCloudWaiters(): Promise<void> {
     const now = Date.now();
     for (const [key, waiter] of [...cloudWaiters.entries()]) {
       const done = doneKeys.get(waiter.type);
-      const number = Number(key.split(":")[1]);
-      if (done?.has(number)) {
+      if (done?.has(waiter.number)) {
         waiter.settle("completed");
         cloudWaiters.delete(key);
       } else if (now >= waiter.deadline) {
@@ -324,10 +335,11 @@ async function pollCloudWaiters(): Promise<void> {
   }
 }
 
-export function waitForCloudTask(id: number, type: CloudTargetType): Promise<"completed" | "timeout" | "aborted"> {
+export function waitForCloudTask(id: number, target: CloudTarget): Promise<"completed" | "timeout" | "aborted"> {
   return new Promise((resolve) => {
-    cloudWaiters.set(`${type}:${id}`, {
-      type,
+    cloudWaiters.set(`${target.type}:${target.number}:${id}`, {
+      type: target.type,
+      number: target.number,
       deadline: Date.now() + CLOUD_TASK_TIMEOUT_MS,
       settle: resolve,
     });
@@ -341,13 +353,13 @@ export function waitForCloudTask(id: number, type: CloudTargetType): Promise<"co
 // cc-in-progress を残す案は採らない: finally で無条件に外されるため残すには分岐追加が要り、
 // かつ「実行中に見えるが実行していない」状態を作ってしまう。
 async function flagOrphanedCloudSession(
-  target: CloudTargetType,
-  id: number,
+  target: CloudTarget,
   reason: "session-id" | "shutdown",
   cloudSessionId?: string,
 ): Promise<void> {
-  await addLabel(target, id, "cc-need-human-check").catch((err: unknown) => {
-    console.error(`[worker] failed to add cc-need-human-check to ${target} #${id}: ${err}`);
+  const { type, number: id } = target;
+  await addLabel(type, id, "cc-need-human-check").catch((err: unknown) => {
+    console.error(`[worker] failed to add cc-need-human-check to ${type} #${id}: ${err}`);
   });
 
   const causeLine =
@@ -362,9 +374,9 @@ async function flagOrphanedCloudSession(
     `**セッションURL**: ${sessionLine}\n\n` +
     `**再開方法**: 孤立セッションの成果物が届いていないか確認したうえで、\`cc-need-human-check\` ラベルを外すとポーリング対象に戻ります。`;
 
-  const commentFn = target === "issue" ? commentOnIssue : commentOnPR;
+  const commentFn = type === "issue" ? commentOnIssue : commentOnPR;
   await commentFn(id, body).catch((err: unknown) => {
-    console.error(`[worker] failed to comment on ${target} #${id} about the orphaned cloud session: ${err}`);
+    console.error(`[worker] failed to comment on ${type} #${id} about the orphaned cloud session: ${err}`);
   });
 }
 
@@ -443,7 +455,7 @@ async function runViaCloud(
   onComplete?: OnComplete,
   cwd?: string,
   env?: Record<string, string>,
-  cloudTarget?: CloudTargetType,
+  cloudTarget?: CloudTarget,
   model?: string,
 ): Promise<void> {
   // 起動が完了する前にシャットダウンが走っても waitForAllProcesses() が
@@ -456,11 +468,7 @@ async function runViaCloud(
   // cc-cloud-done の投稿指示に加え、クラウドでは反映されない
   // システムプロンプト・ツール制限もここへ本文として含めておく（渡した瞬間に実行される
   // ため、後から追加投函する余地は無い）。
-  const initialPrompt = buildCloudPrompt(
-    prompt,
-    model ?? "",
-    cloudTarget ? { type: cloudTarget, number: id } : undefined,
-  );
+  const initialPrompt = buildCloudPrompt(prompt, model ?? "", cloudTarget);
   let result: TaskResult;
   let cloudSessionId: string | undefined;
 
@@ -472,7 +480,7 @@ async function runViaCloud(
     const createOutput = `[worker] created cloud session ${cloudSessionId} with the task's initial prompt`;
 
     if (!cloudTarget) {
-      // 定期ワーカーは CLOUD_ALLOWED_WORKERS 外のため実際には到達しない。
+      // 完了検知の置き先が無いケース（定期ワーカーで実行記録PRを作れなかった場合など）。
       console.warn(`[worker] #${id} has no completion-detection target, treating session creation as completion`);
       result = { status: "completed", output: createOutput };
     } else {
@@ -480,10 +488,11 @@ async function runViaCloud(
       // herdrTasks はセッション作成後も残るため waitForAllProcesses()/shutdown() の
       // abort フラグは引き続き効く。
       const outcome = await waitForCloudTask(id, cloudTarget);
+      const { type: targetType, number: targetNumber } = cloudTarget;
 
       if (outcome === "completed") {
-        await removeLabel(cloudTarget, id, CLOUD_DONE_LABEL).catch((err: unknown) => {
-          console.error(`[worker] failed to remove ${CLOUD_DONE_LABEL} from ${cloudTarget} #${id}: ${err}`);
+        await removeLabel(targetType, targetNumber, CLOUD_DONE_LABEL).catch((err: unknown) => {
+          console.error(`[worker] failed to remove ${CLOUD_DONE_LABEL} from ${targetType} #${targetNumber}: ${err}`);
         });
         // 完了検知後に1回だけ、セッションが投稿した最終報告コメントを回収する。
         // 取得できなければ従来どおりの定型文のまま completed を維持する（通知を落とさない）。
@@ -491,9 +500,11 @@ async function runViaCloud(
         const startedAt = tasks.get(id)?.startedAt;
         if (startedAt) {
           try {
-            reportBody = await findCommentSince(id, startedAt, CLOUD_REPORT_HEADING);
+            reportBody = await findCommentSince(targetNumber, startedAt, CLOUD_REPORT_HEADING);
           } catch (err) {
-            console.error(`[worker] failed to fetch the cloud report comment for ${cloudTarget} #${id}: ${err}`);
+            console.error(
+              `[worker] failed to fetch the cloud report comment for ${targetType} #${targetNumber}: ${err}`,
+            );
           }
         }
         result = {
@@ -503,8 +514,8 @@ async function runViaCloud(
       } else if (outcome === "timeout") {
         // タイムアウト打ち切りを人手確認へ確実に回すためここで cc-need-human-check を付ける。
         // ワーカーの onComplete の失敗経路は同ラベルを付けないため。
-        await addLabel(cloudTarget, id, "cc-need-human-check").catch((err: unknown) => {
-          console.error(`[worker] failed to add cc-need-human-check to ${cloudTarget} #${id}: ${err}`);
+        await addLabel(targetType, targetNumber, "cc-need-human-check").catch((err: unknown) => {
+          console.error(`[worker] failed to add cc-need-human-check to ${targetType} #${targetNumber}: ${err}`);
         });
         result = {
           status: "failed",
@@ -517,7 +528,7 @@ async function runViaCloud(
         // aborted: ワーカー側の停止でありタスクの失敗ではないが、クラウドセッションは
         // 継続稼働しうる（孤立セッション）ため timeout と同じく cc-need-human-check を付ける。
         // タスクの失敗か否かの区別はラベルではなく output/コメントの文面で行う。
-        await flagOrphanedCloudSession(cloudTarget, id, "shutdown", cloudSessionId);
+        await flagOrphanedCloudSession(cloudTarget, "shutdown", cloudSessionId);
         result = {
           status: "failed",
           output:
@@ -537,7 +548,7 @@ async function runViaCloud(
       // 見て本当の原因（シャットダウン / ID抽出失敗）を区別する。固定で "session-id" にすると
       // シャットダウン起因でも誤った原因文がコメントされる（Issue #372）。
       const reason = herdrAbortSignal.aborted ? "shutdown" : "session-id";
-      await flagOrphanedCloudSession(cloudTarget, id, reason, cloudSessionId);
+      await flagOrphanedCloudSession(cloudTarget, reason, cloudSessionId);
       orphanNote += " added cc-need-human-check so a human can verify whether it completed on its own.";
     }
     result = {
@@ -572,8 +583,8 @@ export function run(
   // pty は script(1) が割り当てるため herdr のペインは不要で、default/herdr で
   // 同一の経路を通る。
   cloud?: boolean,
-  // クラウド実行時に cc-cloud-done を探す対象の種別。番号は id を使う。
-  cloudTarget?: "issue" | "pr",
+  // クラウド実行時に cc-cloud-done を探す対象（種別・番号・--on-branch の有無）。
+  cloudTarget?: CloudTarget,
   // クラウド実行時のプロンプト本文組み立て（buildCloudPrompt）に使う `--model` の値。
   // default/herdr（非cloud）では未使用。
   model?: string,

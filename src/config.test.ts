@@ -15,7 +15,6 @@ const {
   DEFAULT_WORKER_CONFIG,
   WORKER_DEFAULTS,
   SCHEDULED_WORKER_NAMES,
-  CLOUD_ALLOWED_WORKERS,
   checkCloudConfig,
   checkCloudAuth,
   isCloudWorker,
@@ -172,22 +171,6 @@ test("SCHEDULED_WORKER_NAMES all have worker defaults", () => {
   }
 });
 
-test("scheduled workers are never cloud-allowed (no Issue/PR to hold cc-cloud-done)", () => {
-  for (const name of SCHEDULED_WORKER_NAMES) {
-    assert.ok(
-      !(CLOUD_ALLOWED_WORKERS as readonly string[]).includes(name),
-      `${name} must not be in CLOUD_ALLOWED_WORKERS`,
-    );
-  }
-});
-
-// クラウド実行は「成果ゼロでも完了扱いになり、トリガーラベルの再付与で再起動され続ける」
-// 失敗の仕方をするため、許可は明示した2つに固定する。新しいワーカーが黙ってクラウドへ
-// 流れないよう、この一覧自体をテストで固定しておく。
-test("only exec-issue and fix-review-point are allowed to run in the cloud", () => {
-  assert.deepEqual([...CLOUD_ALLOWED_WORKERS], ["exec-issue", "fix-review-point"]);
-});
-
 test("parseWorkerEntry warns and ignores a legacy cloud key (moved to the --cloud runtime flag)", (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   const result = parseWorkerEntry("exec-issue", { cloud: true });
@@ -242,7 +225,10 @@ test("isCloudWorker returns false for every worker when --cloud is not passed", 
   }
 });
 
-test("isCloudWorker returns true only for CLOUD_ALLOWED_WORKERS when --cloud is passed", (t) => {
+// 許可リストは撤去済み（定期ワーカーは実行記録PRを cc-cloud-done の置き先に使い、
+// create-ui-design には worktree ガードの免除指示が届くようになったため）。--cloud を
+// 付けたプロセスでは全ワーカーがクラウド実行になる。
+test("isCloudWorker returns true for every worker when --cloud is passed", (t) => {
   const originalArgv = process.argv;
   t.after(() => {
     process.argv = originalArgv;
@@ -252,14 +238,11 @@ test("isCloudWorker returns true only for CLOUD_ALLOWED_WORKERS when --cloud is 
   resetCloudFlagCache();
 
   for (const name of Object.keys(WORKER_DEFAULTS)) {
-    const expected = (CLOUD_ALLOWED_WORKERS as readonly string[]).includes(name);
-    assert.equal(isCloudWorker(name), expected, `isCloudWorker(${name}) under --cloud`);
+    assert.equal(isCloudWorker(name), true, `isCloudWorker(${name}) under --cloud`);
   }
-  assert.equal(isCloudWorker("exec-issue"), true);
-  assert.equal(isCloudWorker("fix-review-point"), true);
-  // かつてクラウド実行を許していたが、空振りしたまま cc-triage-scope が再付与されて
-  // クラウドセッションを焼き続けるためローカルへ戻したワーカー。
-  assert.equal(isCloudWorker("triage-pr"), false);
+  for (const name of SCHEDULED_WORKER_NAMES) {
+    assert.equal(isCloudWorker(name), true, `isCloudWorker(${name}) under --cloud`);
+  }
 });
 
 // M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）

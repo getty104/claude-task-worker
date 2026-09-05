@@ -49,8 +49,12 @@ async function git(cwd: string, args: string[]): Promise<string> {
  * スキルの成果物PRとは独立させている。材料が無くてスキルがPRを作らなかった日でも
  * `lastRun` をマージで恒久化する必要があり、それをスキル本文の手順（＝モデルの遵守）に
  * 依存させると、材料ゼロの早期終了パスで黙って落ちる。
+ *
+ * 返り値のPR番号は、クラウド実行の完了検知（cc-cloud-done）の置き先としても使う。
+ * 定期ワーカーは Issue/PR を起点に走らないため、他に検知対象になるものが無い。
+ * PRを作らなかった場合（差分なし・失敗）は null。
  */
-export async function publishLastRunPr(workerName: string, defaultBranch: string, at: Date): Promise<void> {
+export async function publishLastRunPr(workerName: string, defaultBranch: string, at: Date): Promise<number | null> {
   const branch = lastRunBranchName(workerName);
   const cwd = getWorktreePath(branch);
   try {
@@ -58,7 +62,7 @@ export async function publishLastRunPr(workerName: string, defaultBranch: string
     writeLastRun(cwd, workerName, at);
     if (!hasLastRunChange(await git(cwd, ["status", "--porcelain", CONFIG_FILE]))) {
       console.log(`[${workerName}] lastRun unchanged, skipping PR`);
-      return;
+      return null;
     }
     await git(cwd, ["add", CONFIG_FILE]);
     await git(cwd, ["commit", "-m", lastRunPrTitle(workerName)]);
@@ -69,7 +73,7 @@ export async function publishLastRunPr(workerName: string, defaultBranch: string
     const existing = await findOpenPrNumberByHeadRef(branch);
     if (existing !== null) {
       console.log(`[${workerName}] updated lastRun PR #${existing}`);
-      return;
+      return existing;
     }
 
     // マージは triage-pr ワーカーに任せる（cc-triage-scope + 自分自身をAssignee）。
@@ -82,6 +86,7 @@ export async function publishLastRunPr(workerName: string, defaultBranch: string
       { labels: [LABEL_TRIAGE_SCOPE], assignee: await getCurrentUser() },
     );
     console.log(`[${workerName}] opened lastRun PR #${prNumber}`);
+    return prNumber;
   } finally {
     await removeWorktree(branch).catch((err) => console.error(`[${workerName}] removeWorktree failed: ${err}`));
   }

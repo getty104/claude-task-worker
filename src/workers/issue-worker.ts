@@ -1,4 +1,4 @@
-import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
+import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
 import { CLOUD_DONE_LABEL, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
 import {
   getCurrentUser,
@@ -252,7 +252,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               buildClaudeEnv(mode, cloud),
               execution.prompt,
               cloud,
-              cloud ? "issue" : undefined,
+              cloud ? { type: "issue" as const, number: issue.number } : undefined,
               model,
             );
           } catch (err) {

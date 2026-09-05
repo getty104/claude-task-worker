@@ -285,10 +285,19 @@ export function buildCloudCreateArgs(commonArgs: string[], prompt: string): stri
   return ["--cloud", prompt, ...commonArgs];
 }
 
+// クラウド実行の完了検知（cc-cloud-done）とプロンプト生成の対象。
+// 番号はタスクIDと一致するとは限らない（定期ワーカーは実行記録PRを置き先に使う）。
+export interface CloudPromptTarget {
+  type: "issue" | "pr";
+  number: number;
+  // `--on-branch` でそのPRの head ブランチ上からセッションを開始したか。
+  onBranch?: boolean;
+}
+
 // クラウドタスクの完了検知（cc-cloud-done ラベル、#284）用の指示を、作成コマンドの
 // description（＝クラウドセッションの初期プロンプト）へ追加する。
 // スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で初期プロンプトへ付加する方針。
-export function appendCloudDoneInstruction(prompt: string, target: { type: "issue" | "pr"; number: number }): string {
+export function appendCloudDoneInstruction(prompt: string, target: CloudPromptTarget): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
   const checkoutInstruction = buildCloudCheckoutInstruction(target);
   const worktreeInstruction = buildCloudWorktreeInstruction(prompt);
@@ -313,14 +322,15 @@ export function appendCloudDoneInstruction(prompt: string, target: { type: "issu
 // 届く経路へ内容ごと移す」）に従うため。buildCloudCheckoutInstruction() と同じ形で、
 // 文言の定義元をここ1箇所に保つ。ローカル実行ではこの指示が付かないため、スキル本文は
 // 従来どおり worktree を必須とする（指示が無ければ中断する fail-safe）。
-// worktree ガードを持つスキルは9個あるが、本指示の対象は #353 がスコープした2つだけ。
-// 無条件に注入すると、クラウドで走る `create-issue-from-issue-number` / `update-issue` の
-// 同じガードまで巻き添えで免除してしまう（それらは免除の可否を検討していない）。
+// 対象は worktree 外を「中断」で扱う3スキルだけ。他のスキル
+// （`create-issue-from-issue-number` / `update-issue` / `commit-push` / `resolve-pr-conflict` /
+// `triage-sentry-issues`）は worktree 外でもその場で作業する書き方なので免除は不要で、
+// 無条件に注入すると免除の可否を検討していないガードまで巻き添えで外してしまう。
 // ワーカーのプロンプトは必ず `/claude-task-worker:<skill> <番号>` で始まる
 // （`buildCloudPrompt()` がタスクプロンプトを先頭に置くため、原則を連結した後も先頭のまま）
 // なので、先頭トークンのスキル名で対象を絞る。形式が変わればマッチせず指示が付かない＝
 // スキルは従来どおり中断する側へ倒れるため、失敗方向も安全側。
-const CLOUD_WORKTREE_EXEMPT_SKILLS = ["exec-issue", "fix-review-point"] as const;
+const CLOUD_WORKTREE_EXEMPT_SKILLS = ["exec-issue", "fix-review-point", "create-ui-design"] as const;
 
 export function buildCloudWorktreeInstruction(prompt: string): string {
   const skill = prompt.trim().split(/\s+/)[0] ?? "";
@@ -341,8 +351,11 @@ export function buildCloudWorktreeInstruction(prompt: string): string {
 // checkout をワーカー側の起動フラグで済ませ、スキルには「済んでいる」ことだけを伝える。
 // ローカル実行（default / herdr）はワーカーが worktree を作るだけで PR ブランチには
 // 移らないため、この指示は付けず従来どおりスキルが checkout する。
-export function buildCloudCheckoutInstruction(target: { type: "issue" | "pr"; number: number }): string {
-  if (target.type !== "pr") return "";
+export function buildCloudCheckoutInstruction(target: CloudPromptTarget): string {
+  // 条件は「対象がPRか」ではなく「`--on-branch` でそのPRの head ブランチから始めたか」。
+  // 定期ワーカーは実行記録PRを完了検知の置き先に使うだけで、セッション自体は `--ref` で
+  // デフォルトブランチから始まる（そのPRのブランチ上にはいない）。
+  if (target.type !== "pr" || !target.onBranch) return "";
   return `このセッションは PR #${target.number} の head ブランチ上で開始している（ワーカーが \`--on-branch\` で指定済み）。スキル本文が指示する \`gh pr checkout\` は実行しないこと（クラウドでは GraphQL ゲートにより 403 で失敗し、かつ既にブランチ上にいるので不要）。ブランチの確認が要る場合は \`git rev-parse --abbrev-ref HEAD\` を使うこと。`;
 }
 
@@ -376,19 +389,14 @@ export function buildCloudToolRestriction(): string {
 // プロンプト本文（`--cloud` の description）へ載せる。ローカル実行（default / herdr）は
 // 従来どおり CLI フラグ経由のままで、この関数は使わない。
 //
-// target を省略した場合（定期ワーカー）は cc-cloud-done 完了検知の指示を付けない。
-// 定期ワーカーは CLOUD_ALLOWED_WORKERS 外のため実際には cloud で起動されないが、
-// buildClaudeArgs 同様に呼び出し可能な形にしておく。
+// target を省略した場合は cc-cloud-done 完了検知の指示を付けない（定期ワーカーが
+// 実行記録PRを作れず、ラベルの置き先が無いケース）。
 //
 // タスクプロンプト（prompt）を先頭に置くのは、Claude Code がメッセージ先頭の
 // スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
 // 連結すると本来先頭にあるべきスラッシュコマンドが本文中ほどへずれ、リテラル
 // 文字列として扱われて SKILL.md がロードされなくなる。
-export function buildCloudPrompt(
-  prompt: string,
-  model: string,
-  target?: { type: "issue" | "pr"; number: number },
-): string {
+export function buildCloudPrompt(prompt: string, model: string, target?: CloudPromptTarget): string {
   const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}`;
   const withPrinciples = `${prompt}\n\n${principles}`;
   return target ? appendCloudDoneInstruction(withPrinciples, target) : withPrinciples;

@@ -1,4 +1,4 @@
-import { buildClaudeEnv, buildClaudeExecution } from "../claude-args.js";
+import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
 import { CLOUD_DONE_LABEL, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
 import {
   type PullRequestWithChecks,
@@ -189,7 +189,7 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               buildClaudeEnv(mode, isCloud),
               execution.prompt,
               isCloud,
-              isCloud ? "pr" : undefined,
+              isCloud ? { type: "pr" as const, number: pr.number, onBranch: true } : undefined,
               model,
             );
           } catch (err) {

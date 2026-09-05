@@ -311,11 +311,11 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 ### クラウド実行（`--cloud`）
 
-`claude-task-worker <command> --cloud`（boolean フラグ、既定は無効）で、対象コマンドの全タスクを claude CLI の `--cloud`（Claude Code on the web）へ振る。`--project` と同様 `process.argv` から解決し、プロセス内で一度だけ解決してキャッシュする。ワーカー単位の設定ではなくプロセス単位の指定であり、実行時にどのワーカーをクラウドへ振るかは選べない（クラウドで走るのは後述の `CLOUD_ALLOWED_WORKERS` に載っている2つだけで、残りはローカル実行のまま）。
+`claude-task-worker <command> --cloud`（boolean フラグ、既定は無効）で、対象コマンドの全タスクを claude CLI の `--cloud`（Claude Code on the web）へ振る。`--project` と同様 `process.argv` から解決し、プロセス内で一度だけ解決してキャッシュする。ワーカー単位の設定ではなくプロセス単位の指定であり、実行時にどのワーカーをクラウドへ振るかは選べない（`--cloud` を付けたプロセスが起動するワーカーはすべてクラウド実行になる）。
 
 `claude-task-worker.json` の `workers.<name>.cloud` 設定は廃止した。ワーカーごとにクラウド適合性が大きく違う（後述の適合性表）ため、静的な設定より実行のたびに `--cloud` を付け外しする運用の方が事故が起きにくい（推奨されないワーカーへ `cloud: true` を書いたまま放置される、といった設定の陳腐化を防げる）。設定ファイルに `cloud` キーが残っている場合は「`--cloud` へ移行した」旨を警告ログに出したうえで無視する（`parseWorkerEntry()`、`src/config.ts`）。
 
-ワーカー名からクラウド実行可否を返す単一ヘルパー `isCloudWorker(name)`（`src/config.ts`）に denied 判定を集約し、`issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts` の3ワーカーがこれを読む。
+クラウド実行可否は `isCloudWorker(name)`（`src/config.ts`）が返し、`issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts` の3ワーカーがこれを読む。かつては許可リスト（`CLOUD_ALLOWED_WORKERS` = `exec-issue` / `fix-review-point`）で絞っていたが、除外の根拠だった2つの構造的ブロッカー（定期ワーカーに `cc-cloud-done` の置き先が無い／`create-ui-design` が worktree ガードで中断する）を解消したためリストごと撤去し、現在は `--cloud` フラグの有無だけを見る。
 
 #### TTY 要件を `script(1)` の疑似 pty で満たす
 
@@ -325,9 +325,10 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - `claude --cloud` は作成後すぐ exit する短命プロセスなので、常駐タブ・TUI の管理は不要。`createCloudSession()`（`src/process-manager.ts`）は `buildScriptCommand("claude", buildCloudCreateArgs(args, initialPrompt))` を `spawn()` し、stdout の `data` ごとに ID 抽出を試みて、ID を拾うか終了するかのどちらかで決着させる。この script(1) 子プロセス自体は短命かつ通常の `finishTask` 経路を通らないため `childProcesses` 台帳へは登録しない
 - セッション作成のメカニズムはこの1本（`buildScriptCommand()` + `spawn()`）に統合済みで、herdr のタブ操作（`tabCreate` / `agentStart` / `agentPrompt`）は削除されている。ローカル herdr 実行とクラウド実行でセッション作成の経路が独立し、mode に依存しなくなった
 - **未追随（本Issueのスコープ外）**: `process-manager.ts` の `run()` は依然として `mode === "herdr"` の場合のみ `cloud` を見て `runViaCloud()` へ分岐する構造が残っており、`mode: "default"` + `--cloud` は起動ゲートを通過してもクラウド経路へ流れない。この分岐の追随は Epic #367 配下の別Issueで対応する
-- **クラウド実行の対象は許可リスト（`CLOUD_ALLOWED_WORKERS`）で明示した `exec-issue` / `fix-review-point` の2つだけ**。それ以外のワーカーは `--cloud` を付けても**起動時エラーにはせず**ローカル実行のまま残す（`all` / `yolo` には必ず対象外ワーカーが含まれるため、エラー終了させると `--cloud` をこれらのコマンドで使えなくなる）。どのワーカーがクラウドで走るかは起動時に1行ログで示す
-- **拒否リストではなく許可リストにしてある**のは、クラウド実行が「成果ゼロでも完了扱いになり、トリガーラベルの再付与で再起動され続ける」失敗の仕方をするため。`pr-worker.ts` は完了/失敗を問わず `finally` で `cc-triage-scope` を再付与し、`cooldownSeconds` は全ワーカー 0 なので、クラウドで空振りするワーカーを既定で通すと**ポーリング間隔ごとにクラウドセッションを焼き続ける**（ローカルでは同じループでもセッションが実際に状態を進めるので収束する）。既定をローカルにしておけば、新しく足したワーカーが黙ってクラウドへ流れることもない。許可リストの内容は `src/config.test.ts` の「only exec-issue and fix-review-point are allowed to run in the cloud」で固定してある
-- 許可した2つは 2026-08-29 の smoke test でエンドツーエンドの成立を確認した経路であり、実装本体という最も重い作業をクラウドへ逃がせる。他が対象外なのは、GraphQL ゲートで判断材料を取得できない（`triage-pr` / `check-dependabot` / `resolve-conflict`）、`.pen` の編集に `pencil` CLI と認証が要る（`create-ui-design` / `apply-ui-design`）、**完了検知の `cc-cloud-done` を置く対象 Issue/PR が無い**（定期ワーカー3件、`SCHEDULED_WORKER_NAMES`）ため
+- **`--cloud` を付けたプロセスが起動するワーカーはすべてクラウド実行になる**。かつての許可リスト（`exec-issue` / `fix-review-point`）は撤去済み
+- 撤去できたのは、除外の根拠が**成立するかどうか**の2点だったから。(1) 定期ワーカーは `cc-cloud-done` を置く対象 Issue/PR を持たなかった → **実行記録PR（`ctw-last-run-<worker>`）を置き先に使う**（後述）。(2) `create-ui-design` は worktree 外で必ず中断した → worktree ガードの免除指示（`CLOUD_WORKTREE_EXEMPT_SKILLS`）を同スキルへも渡し、あわせてスキル本文へデフォルトブランチ比較を追加した（免除でガードがゼロにならないようにするため）
+- **「成立する」と「有用」は別**。GraphQL ゲート（`gh ... --json` の 403）は残っているため、PR 詳細・CI 結果・レビュースレッドを大量に読むワーカー（`triage-pr` / `check-dependabot` / `resolve-conflict`）は MCP に代替の無い操作へ当たると空振りしうる。`.pen` を編集するワーカー（`create-ui-design` / `apply-ui-design`）はクラウド VM 側に `pencil` CLI と認証（`PEN_CLI_KEY`）が要る。下表の適合性を見て、実行のたびに `--cloud` の付け外しで選ぶ
+- 空振りが**ループにならない**ことは既存の経路で担保されている。タイムアウト・セッションID抽出失敗・シャットダウン中断はいずれも `runViaCloud()` が `cc-need-human-check` を付け、同ラベルは `issue-worker.ts` / `pr-worker.ts` 共通の除外ラベルなのでポーリング対象から外れる。危険なのは「セッションが `cc-cloud-done` を付けたが成果はゼロ」の場合で、これはトリガーラベルが再付与されるワーカー（`triage-pr` / `cc-fix-repeat`）でクラウドセッションを焼き続けうる（ローカルでも同じループになるが、セッションが実際に状態を進めるので収束する）
 - **`--cloud` を指定しない実行（ローカル default / herdr）の挙動は一切変わらない**。`checkCloudConfig()` は `cloud` が false のとき `scriptAvailable` / `auth` を一切参照せず、そのための I/O（`resolveScriptAvailable()` / `readCloudAuthStatus()`）自体を行わない
 
 #### クラウド時に worktree を作らない理由
@@ -381,13 +382,15 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 - **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。セッション作成完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` / `cc-fix-repeat` で毎ポーリングごとにクラウドセッションが量産されていた
 - **検知したら `cc-cloud-done` を除去してから `finishTask()` へ渡す**。以降のラベル遷移（`onCompleted` の PR 実在検証 → `cc-pr-created` / `cc-need-human-check`）はローカル実行と完全に同一の経路を通る
 - **起動前に対象から `cc-cloud-done` を除去する**（`issue-worker.ts` / `pr-worker.ts`）。前回実行の残骸で即座に完了と誤判定するのを防ぐ。同一番号の同時実行は `isRunning()` が止めるため nonce は不要
+- **定期ワーカーの置き先は実行記録PR**（`publishLastRunPr()` が返すPR番号）。同ワーカーは Issue/PR を起点に走らないため他に検知対象が無く、記録PRはスキルの起動前に必ず作られる（差分なし・作成失敗で作れなかった場合のみ置き先が無く、従来どおりセッション作成をもって完了扱いにする）。ラベルの置き先と「セッションがどのブランチから始まったか」は別物なので、`cc-cloud-done` の対象は `CloudTarget`（`type` / `number` / `onBranch`）で表し、`gh pr checkout` スキップ指示は `onBranch`（PR系ワーカーが `--on-branch` を渡した場合のみ真）を条件にする。定期ワーカーは PR を置き先にするが `--ref` でデフォルトブランチから始まるため、この指示は付かない。実行記録PRは固定ブランチで再利用されるので、Issue/PR 系と同じく**起動前に `cc-cloud-done` の残骸を外し**、さらに待機中は **`cc-in-progress` を付けて `triage-pr` から隠す**（同PRには `cc-triage-scope` が付いているため、隠さないと `triage-pr` が同じPRをクラウドで処理し、そちらのセッションが付けた `cc-cloud-done` を定期ワーカーの完了と誤検知する）。完了時に外すと `triage-pr` が通常どおり拾ってマージする
+- **待機キーはタスクID込み**（`${type}:${number}:${taskId}`）。番号だけをキーにすると、同じPR（実行記録PRなど）を別タスクが同時に待った際に上書きで待機が解決不能になる
 - **`CLOUD_TASK_TIMEOUT_MS`（4時間）で打ち切る**。`AskUserQuestion` で停止したセッション・VM 側クラッシュ・プラグイン未導入による空振り・ラベル付与自体の失敗はすべてここへ落ちる。打ち切り時は `cc-need-human-check` を付けて failed とし、セッション URL 付きの Slack 失敗通知を送る。**`cc-need-human-check` の付与を `runViaCloud()` 側で行っている**のは、ワーカーの `onComplete` の失敗経路が同ラベルを付けないため（付けないと打ち切られたタスクが誰にも拾われない）
 - 人が手動で `cc-cloud-done` を付けても同じ経路で完了扱いになる（張り付いたタスクの救済手段）。シャットダウン時は `herdrAbortSignal` で待機ループを抜ける（1秒刻みで確認するため30秒の間隔待ちに引きずられない）
-- **セッションID抽出失敗（catch 経路）と `aborted`（シャットダウン）も `runViaCloud()` 側で `cc-need-human-check` を付け、対象 Issue/PR へ孤立セッション（クラウド側は生き残っている可能性がある）である旨とセッションURL（不明なら「セッションURL不明（ID抽出に失敗）」）をコメントする**（`cloudTarget` を持たない定期ワーカーは対象外）。`cc-in-progress` を残す案は採らない — 無条件に外す `finally` へ分岐が要るうえ「実行中に見えるが実行していない」状態を作るため
+- **セッションID抽出失敗（catch 経路）と `aborted`（シャットダウン）も `runViaCloud()` 側で `cc-need-human-check` を付け、対象 Issue/PR へ孤立セッション（クラウド側は生き残っている可能性がある）である旨とセッションURL（不明なら「セッションURL不明（ID抽出に失敗）」）をコメントする**（`cloudTarget` を解決できなかったタスクは対象外）。`cc-in-progress` を残す案は採らない — 無条件に外す `finally` へ分岐が要るうえ「実行中に見えるが実行していない」状態を作るため
 
 #### ワーカー別の適合性
 
-判定は「クラウド実行が成立するか」であり、下表で ○ 以外のワーカーは `CLOUD_ALLOWED_WORKERS` に入っていないため `--cloud` を付けてもローカル実行のまま残る。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
+下表は「クラウド実行が**有用**か」の目安であり、実行の可否ではない（許可リスト撤去後は `--cloud` を付けた全ワーカーがクラウドで走る）。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
 
 前節「GitHub アクセス（ローカルは `gh` 優先 / クラウドのみ GitHub MCP 優先）」のクラウド側の切り替えにより、下表の劣化要因（GraphQL 403）は MCP 経由で回避されうる見込みだった。2026-08-29 の smoke test で実際にクラウド VM 上の GitHub MCP（`mcp__github__*`、55ツール）を確認したところ、`issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4ツールが動作した。一方 `gh … --json`（GraphQL 経由）は引き続き403で、GraphQL ゲート自体は解消していない（MCP はゲートを迂回する別経路であり、ゲートを塞いだわけではない）。`gh api repos/...`（REST）は成功する。動作確認できたのはこの4ツールのみで、`gh pr view --json` / `gh pr checks` / `reviewThreads` / `resolveReviewThread` に相当する MCP 操作は未実測のため、**下表はこの4ツールで代替できる範囲の行のみ見直し、それ以外は従来の判定を据え置いている**。
 
@@ -398,16 +401,24 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 | ワーカー | 判定 | 主な劣化要因 |
 |---|---|---|
 | `exec-issue` | ○（2026-08-29 smoke test でE2E成立を実測。GitHub MCP の `issue_read` でIssue本文を読み、`create_pull_request` でPRを作成し、`cc-cloud-done` 経由の完了検知まで通した。小規模タスク1件・9分03秒の実測のみで、`gh pr list --head` に相当するMCP操作は未実測） | （実測により大半の劣化要因を解消。未実測操作のみ残存） |
-| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | ✕（`--cloud` 指定時もローカル実行のまま（許可リスト外）。`cc-cloud-done` を置く対象 Issue/PR が無く完了検知できない。加えて収集も0件で空振り終了） | 収集スクリプトの `gh api graphql` / `gh (issue\|pr) view --json` |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | △（完了検知は実行記録PRで成立。収集スクリプトは 403 で落ちるが、3スキルとも MCP 経路の収集契約を持つため MCP で代替できる。E2E未検証） | 収集スクリプトの `gh api graphql` / `gh (issue\|pr) view --json`（MCP代替を明文化） |
 | `create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue` | △（据え置き。`issue_read` / `add_issue_comment` / `issue_write` の動作をMCPプローブで確認し、Issue本文・コメントの読み取りと書き戻しの経路自体は成立するが、これら4ワーカー自身のE2E実行は今回未実施） | `gh issue view --json body,comments,labels`（MCP代替を確認、E2E未検証） |
 | `epic-issue`（`create-epic-pr`） | △（据え置き。`issue_read` でのIssue読み取り・`create_pull_request` でのPR作成が動作することをMCPプローブで確認したが、ワーカー自身のE2E実行は未実施） | `gh issue view --json`（MCP代替を確認、E2E未検証） |
-| `fix-review-point` | ✕（レビュー指摘を1件も取得できず、スレッド解決も回復不能） | `reviewThreads` / `resolveReviewThread` / `gh pr view --json` |
-| `triage-pr` | ✕（マージ判断の材料がゼロ） | `gh pr view --json` / `gh pr checks` / `reviewThreads` / `gh pr list` |
-| `check-dependabot` | ✕（依存更新の内容もCI結果も読めない） | `gh pr view --json` / `gh pr checks` |
-| `resolve-conflict` | ✕（`--cloud` 指定時もローカル実行のまま（許可リスト外）。加えてコンフリクト判定の入力も取れない） | `gh pr view --json` |
-| `create-ui-design` / `apply-ui-design` | ✕（`--cloud` 指定時もローカル実行のまま（許可リスト外）。`pencil` CLI と認証が理由） | `gh issue view --json` |
+| `fix-review-point` | ○（2026-08-29 smoke test でE2E成立を実測。レビュースレッドの取得・Resolve とも MCP 経路で成立する） | （`get_review_comments` / `resolve_thread` が GraphQL ゲートを迂回） |
+| `triage-pr` | △（判断材料はすべて MCP 経路を持つ（`pull_request_read` の `get` / `get_status` / `get_check_runs` / `get_review_comments`、`mergeable` は `gh-compat.sh pr-mergeable` の REST）。E2E未検証） | `gh pr view --json` / `gh pr checks` / `reviewThreads` / `gh pr list`（いずれも MCP / REST で代替） |
+| `check-dependabot` | △（PR本文・CI結果とも `pull_request_read` で代替できる。E2E未検証） | `gh pr view --json` / `gh pr checks`（MCP代替あり） |
+| `resolve-conflict` | △（コンフリクト判定は `gh-compat.sh pr-mergeable` の REST、PR詳細は `pull_request_read` で取れる。E2E未検証） | `gh pr view --json`（REST / MCP で代替） |
+| `create-ui-design` / `apply-ui-design` | ✕（クラウド VM 側に `pencil` CLI と認証（`PEN_CLI_KEY`）が要る） | `gh issue view --json` |
 
-`fix-review-point` / `triage-pr` / `check-dependabot` / `resolve-conflict` の判定を据え置いたのは、必要な操作（`gh pr view --json` 相当のPR詳細取得、`gh pr checks`、`reviewThreads`、`resolveReviewThread`）がいずれも今回動作確認した4ツールの範囲外だからである（特に `resolveReviewThread` は REST 代替が原理的に存在せず、今回も実測対象外）。このうち `fix-review-point` / `triage-pr` / `check-dependabot` の3ワーカーは `--cloud` でも拒否されない（ローカルへは残らない）方針だが、成果物を出せずタスクが空振りするため、運用上はこれらのワーカーへ `--cloud` を使わないことを推奨する。
+かつて `fix-review-point` / `triage-pr` / `check-dependabot` / `resolve-conflict` を ✕ としていたのは、必要な操作（PR詳細取得・`gh pr checks`・`reviewThreads`・`resolveReviewThread`）に MCP 経路が無いという前提だったが、これは現在の実装と合っていない。**全スキル本文が「MCP優先 → `gh` フォールバック」で書き直され、対応表（`plugin/references/github-access.md`）にもこれらの MCP ツールが載っている**ため、判定を △（成立しうるが E2E 未検証）へ引き上げた。残る ✕ は `pencil` CLI と認証を要する UI デザイン系だけである。
+
+#### ヘルパースクリプトは「`gh` 経路」なので、失敗したら MCP へ切り替える
+
+`fetch-recent-*.sh` / `fetch-unresolved-comments.sh` / `resolve-pr-comments.sh` は中で `gh` を呼ぶため、クラウドでは `gh api graphql` / `gh pr list` / `gh issue list` が 403 になり必ず落ちる。**シェルスクリプトからは MCP を呼べない**ので、フォールバックはスキル本文側に置くしかない。方針は `plugin/references/github-access.md` の「ヘルパースクリプトが失敗したときの扱い」に集約してある:
+
+- スクリプトの失敗は `gh` 経路の失敗なので、**同じスクリプトを再試行せず** MCP で同じデータを取り直す
+- **スクリプトの失敗を「0件」に読み替えない**。取得失敗と空振りを混同すると、未対応の指摘を残したまま PR がマージされたり、その期間の収集が丸ごとスキップされたりする
+- MCP 経路の出力は**スクリプトの出力と同じキー**で組む。後続フェーズは経路を区別せず同じ `jq` で読むため。`output_file` を作る収集スキル3つ（`update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）は、それぞれ本文に「MCP経路の（`output_file`）契約」を持つ
 
 **`src/gh.ts` の GraphQL 依存関数（`findPrNumberClosingIssue` / `hasOpenBlockers` / `getIssueSubIssuesSummary` / `getPrMergeable` / `listIssuesByLabel` / `listIssuesByNumbers`）はワーカープロセス（ローカル）が呼ぶため `--cloud` を指定しても影響を受けない**。クラウドで走るのはタスクセッション（スキル）だけであり、上表の劣化はすべてスキル本文の `gh` 呼び出しに起因する。ここを取り違えると影響範囲を誤って見積もる。
 

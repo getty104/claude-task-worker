@@ -84,6 +84,8 @@ Issue番号はフェーズ7で `create-pr` に渡す。指定なしの場合はP
 
 GitHub MCP が使える場合は対応表のツール（`list_pull_requests` / `search_pull_requests` / `pull_request_read` 等）で同等の収集を行い、下記「MCP経路の `output_file` 契約」に従って自分で `output_file` を作る。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
 
+**スクリプトが認証エラー（401 / 403）で落ちた場合は、同じスクリプトを再試行せず MCP 経路へ切り替える**（スクリプトは中で `gh` を呼ぶ「`gh` 経路」そのもの。クラウドセッションでは `gh api graphql` / `gh pr list` が必ず 403 になる）。**スクリプトの失敗を「対象期間にマージ済みデザインPRなし」に読み替えてはならない。** MCP 経路でも取得できなかった場合に限り、取得失敗とその原因を報告して終了する（`DESIGN.md` は更新しない）。
+
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-ui-design-prs.sh <フェーズ0で確定した日数>
 ```

@@ -233,26 +233,22 @@ export const SCHEDULED_WORKER_NAMES = [
 // （cc-cloud-done ラベルのポーリングでクラウドタスクの完了を判定する。#284）。
 export const CLOUD_DONE_LABEL = "cc-cloud-done";
 
-// --cloud 指定時にクラウド実行するワーカー（許可リスト）。ここに無いワーカーは --cloud を
-// 付けてもローカル実行のまま残す（起動時エラーにはしない。`all` / `yolo` から一括起動される
-// ため、拒否すると --cloud がそれらのコマンドで使えなくなる）。
+// --cloud 指定時に、そのワーカーをクラウド実行するか。
 //
-// 拒否リストではなく許可リストにしてあるのは、クラウド実行が「成果ゼロでも完了扱いになり、
-// トリガーラベルの再付与で再起動され続ける」失敗の仕方をするため。`triage-pr` /
-// `fix-review-point` 系はワーカー側（pr-worker.ts）が完了時に `cc-triage-scope` を再付与し、
-// cooldown も無いので、クラウドで空振りするワーカーを既定で通すと 60 秒ごとにクラウド
-// セッションを焼き続ける。新しいワーカーが黙ってクラウドへ流れないよう、既定はローカルにする。
+// かつては許可リスト（exec-issue / fix-review-point のみ）で絞っていた。他のワーカーは
+// 完了検知（cc-cloud-done）の置き先が無い（定期ワーカー）・worktree ガードで中断する
+// （create-ui-design）といった理由で成立しなかったため。前者は定期ワーカーの実行記録PR
+// （ctw-last-run-<worker>）を検知対象に使うことで、後者は worktree ガードの免除指示を
+// 同スキルへも渡すことで解消したので、リスト自体を撤去して全ワーカーを対象にする。
 //
-// 現在の許可は `exec-issue` / `fix-review-point` の2つ。どちらも 2026-08-29 の smoke test で
-// エンドツーエンドの成立を確認した経路（`docs/cloud-graphql-proxy-limits.md` の適合性表）で、
-// 実装本体という最も重い作業をクラウドへ逃がせる。他のワーカーは GraphQL ゲートで判断材料を
-// 取得できない・`pencil` CLI が無い・完了検知の置き先が無いなどの理由で成立しない。
-export const CLOUD_ALLOWED_WORKERS = ["exec-issue", "fix-review-point"] as const;
-
-// --cloud 指定時に、そのワーカーをクラウド実行するか。許可リスト外のワーカーは
-// 起動時エラーにせずローカル実行のまま残す。
-export function isCloudWorker(name: string): boolean {
-  return hasCloudFlag() && (CLOUD_ALLOWED_WORKERS as readonly string[]).includes(name);
+// 成立しうるかどうかと、実際に有用かどうかは別。`gh ... --json`（GraphQL）がクラウドの
+// プロキシで 403 になる制約は残っているため、PR 詳細・CI 結果を大量に読むワーカー
+// （triage-pr / check-dependabot / resolve-conflict）は GitHub MCP で代替できない操作に
+// 当たると空振りしうる。`.pen` を編集するワーカー（create-ui-design / apply-ui-design）は
+// クラウド VM 側に `pencil` CLI と認証（PEN_CLI_KEY）が要る。どのワーカーをクラウドへ
+// 振るかは実行のたびに --cloud の付け外しで選ぶ。
+export function isCloudWorker(_name: string): boolean {
+  return hasCloudFlag();
 }
 
 // `claude auth status --json` が読めた場合は判定対象のフィールドを、

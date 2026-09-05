@@ -39,6 +39,27 @@ test("makeLogFeeder: 複数chunkにまたがる1行が正しく1行として結�
   assert.equal(pushed[0].text, line);
 });
 
+test("waitForCloudTask: 同じPR番号を別タスクが同時に待っても両方が解決する", async () => {
+  // 定期ワーカー（taskId 負値）と PR 系ワーカーが同じ実行記録PRを待ちうる。番号だけをキーに
+  // すると後から入れた側が先の待機を上書きし、上書きされた側は永久に解決しない。
+  const stubs = installCliStubs({ gh: {} });
+  const realNow = Date.now;
+  Date.now = () => realNow() - CLOUD_TASK_TIMEOUT_MS - 1000;
+  let a: Promise<"completed" | "timeout" | "aborted">;
+  let b: Promise<"completed" | "timeout" | "aborted">;
+  try {
+    a = waitForCloudTask(-1, { type: "pr", number: 9002 });
+    b = waitForCloudTask(9002, { type: "pr", number: 9002, onBranch: true });
+  } finally {
+    Date.now = realNow;
+  }
+  try {
+    assert.deepEqual(await Promise.all([a, b]), ["timeout", "timeout"]);
+  } finally {
+    stubs.cleanup();
+  }
+});
+
 test("waitForCloudTask: cc-cloud-done が付かないまま期限を過ぎると timeout で解決する", async () => {
   // CLOUD_TASK_TIMEOUT_MS（4時間）を実時間で待てないため、deadline 計算時だけ
   // Date.now() を過去へずらして「既に期限切れの待機」を作る。以降の判定は実時間の
@@ -48,7 +69,7 @@ test("waitForCloudTask: cc-cloud-done が付かないまま期限を過ぎると
   Date.now = () => realNow() - CLOUD_TASK_TIMEOUT_MS - 1000;
   let promise: Promise<"completed" | "timeout" | "aborted">;
   try {
-    promise = waitForCloudTask(9001, "issue");
+    promise = waitForCloudTask(9001, { type: "issue", number: 9001 });
   } finally {
     Date.now = realNow;
   }
