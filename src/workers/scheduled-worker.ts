@@ -1,6 +1,6 @@
 import { buildClaudeEnv, buildClaudeExecution } from "../claude-args";
-import { getLastRunAt, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
-import { getRepoInfo } from "../gh";
+import { CLOUD_DONE_LABEL, getLastRunAt, getRemoteEnvId, getWorkerConfig, isCloudWorker } from "../config";
+import { addLabel, getRepoInfo, removeLabel } from "../gh";
 import { syncDefaultBranch } from "../git";
 import { publishLastRunPr } from "../last-run-pr";
 import { isRunning, isShuttingDown, run } from "../process-manager";
@@ -14,6 +14,12 @@ import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "../wo
 export const SCHEDULE_INTERVAL_HOURS = 24;
 const SCHEDULE_INTERVAL_MS = SCHEDULE_INTERVAL_HOURS * 60 * 60 * 1000;
 const SCOPE_DAYS = SCHEDULE_INTERVAL_HOURS / 24;
+
+// 実行記録PRをクラウドタスクの完了検知に使う間、同PRを PR 系ワーカー（triage-pr）から
+// 隠すためのラベル。pr-worker.ts と同じ値で、同ワーカーの excludeLabels に入っている。
+// 付けないと triage-pr が同じPRをクラウドで処理し、そちらのセッションが付けた
+// cc-cloud-done を定期ワーカーの完了と誤検知する（同じ PR 番号・同じラベルを待つため）。
+const LABEL_IN_PROGRESS = "cc-in-progress";
 
 export interface ScheduledWorkerConfig {
   name: string;
@@ -76,9 +82,28 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
         // 実行記録は成果物とは別PRでワーカー自身が出す。材料が無くてスキルがPRを
         // 作らない日でも lastRun がマージで恒久化するようにするため、スキル側の手順には
         // 載せない。失敗してもスキルの起動は止めない（次回ポーリングで作り直せる）。
-        await publishLastRunPr(config.name, defaultBranch, new Date(now)).catch((err) =>
-          console.error(`[${config.name}] publishLastRunPr failed: ${err}`),
-        );
+        // クラウド実行では、この実行記録PRが cc-cloud-done の置き先も兼ねる。定期ワーカーは
+        // Issue/PR を起点に走らないため、セッションが完了を知らせられる対象が他に無い。
+        const lastRunPr = await publishLastRunPr(config.name, defaultBranch, new Date(now)).catch((err) => {
+          console.error(`[${config.name}] publishLastRunPr failed: ${err}`);
+          return null;
+        });
+        if (cloud && lastRunPr === null) {
+          console.warn(
+            `[${config.name}] no lastRun PR to carry the cc-cloud-done label; the cloud session will be reported as completed as soon as it is created`,
+          );
+        }
+        if (cloud && lastRunPr !== null) {
+          // 実行記録PRは固定ブランチで再利用されるため、前回の残骸（cc-cloud-done）が残って
+          // いると起動直後に完了と誤検知する。Issue/PR 系ワーカーと同じく起動前に外す。
+          await removeLabel("pr", lastRunPr, CLOUD_DONE_LABEL).catch((err) =>
+            console.error(`[${config.name}] removeLabel ${CLOUD_DONE_LABEL} failed for PR #${lastRunPr}: ${err}`),
+          );
+          // 待機中は triage-pr に同PRを拾わせない（上記 LABEL_IN_PROGRESS のコメント参照）。
+          await addLabel("pr", lastRunPr, LABEL_IN_PROGRESS).catch((err) =>
+            console.error(`[${config.name}] addLabel ${LABEL_IN_PROGRESS} failed for PR #${lastRunPr}: ${err}`),
+          );
+        }
 
         let cwd: string | undefined;
         if (cloud) {
@@ -107,6 +132,13 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
             } catch (err) {
               console.error(`[${config.name}] post-task error: ${err}`);
             } finally {
+              if (cloud && lastRunPr !== null) {
+                await removeLabel("pr", lastRunPr, LABEL_IN_PROGRESS).catch((err) =>
+                  console.error(
+                    `[${config.name}] removeLabel ${LABEL_IN_PROGRESS} failed for PR #${lastRunPr}: ${err}`,
+                  ),
+                );
+              }
               if (!cloud) {
                 await removeWorktree(worktreeId).catch((err) =>
                   console.error(`[${config.name}] removeWorktree failed: ${err}`),
@@ -118,7 +150,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           buildClaudeEnv(mode, cloud),
           execution.prompt,
           cloud,
-          undefined,
+          cloud && lastRunPr !== null ? { type: "pr" as const, number: lastRunPr } : undefined,
           model,
         );
       } catch (err) {

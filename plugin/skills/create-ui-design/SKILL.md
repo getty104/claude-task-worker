@@ -40,7 +40,8 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 ### 0-1. 作業ディレクトリとIssueの確認
 
-- `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断**（デフォルトブランチで作業してはならない）
+- `pwd` で `.claude/worktrees/` 配下にいることを確認する。worktree外なら **中断**（デフォルトブランチで作業してはならない）。**ただし起動プロンプトに「このセッションはクラウド実行のため worktree を持たず、cwd はリポジトリルートである」旨の指示がある場合はこの確認をスキップする** — クラウド実行ではワーカーが worktree を作らないため常に worktree 外になる。ガードの目的である「デフォルトブランチで作業しない」は次の確認で担保する。指示が無く worktree 外でもある場合は従来どおり **中断** する（クラウドかもしれないという推測で続行しない）
+- `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch` でデフォルトブランチ名を取得し、`git rev-parse --abbrev-ref HEAD` の現在ブランチと比較する。一致する場合は **中断**。デフォルトブランチ名の取得に失敗した場合も **中断** する（fail-safe）
 - `gh issue view $0 --json number,title,body,state,labels,comments` でIssueが `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`。コメント取得は `get_comments`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更があれば `git stash push -u -m "create-ui-design auto-stash $0"` で自動退避し、その旨を最終報告に明記する
 

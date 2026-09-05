@@ -70,7 +70,9 @@ Issue番号はフェーズ5で `create-pr` に渡す。指定なしの場合はP
 
 ## フェーズ1: Issueの収集
 
-GitHub MCP が使える場合は対応表のツール（`list_issues` / `search_issues` / `issue_read` 等）で同等の収集を行う。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
+GitHub MCP が使える場合は下記「MCP経路の `output_file` 契約」に従って同等の収集を行い、`output_file` を自分で作る。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
+
+**スクリプトが認証エラー（401 / 403）で落ちた場合は、同じスクリプトを再試行せず MCP 経路へ切り替える**（スクリプトは中で `gh` を呼ぶ「`gh` 経路」そのもの。クラウドセッションでは `gh issue list` / `gh api graphql` が必ず 403 になる）。**スクリプトの失敗を「対象期間に該当Issueなし」に読み替えてはならない。** MCP 経路でも取得できなかった場合に限り、取得失敗とその原因を報告して終了する（ファイルは更新しない）。
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-requirement-issues.sh <フェーズ0で確定した日数>
@@ -84,6 +86,18 @@ stdout に返るのは**インデックスJSONのみ**で、Issue本文とコメ
 - `issues[]`: `issue_number` / `issue_title` / `issue_state` / `labels` / `updated_at` / `comment_count` / `body_chars` / `comment_chars`
 
 `issue_count` が0の場合は「対象期間に該当Issueなし」と報告して終了する（ファイルは更新しない）。
+
+### MCP経路の `output_file` 契約
+
+MCP 経路でも下記「本文の読み出し」以降は同じ `jq` コマンドで読むため、**`output_file` に書き出すJSONの構造（キー名・値の意味）をフォールバックスクリプトと完全に一致させる**。
+
+1. `search_issues`（`query` に `repo:{owner}/{repo} label:<ラベル> updated:>=<収集起点の日付>`）をラベル（`cc-triage-scope` / `cc-pr-created`）ごとに実行し、番号を**和集合**にする（ラベルをAND条件にしない）。番号降順で最大80件
+2. Issueごとに `issue_read`（`get`）で本文・メタデータ、`issue_read`（`get_comments`）で全コメントを取得する（コメントはページングが尽きるまで取得しきる）
+3. Issueごとに次のオブジェクトを組み立てる（スクリプトの `fetch_issue` が生成する構造と同一）:
+   - `issue_number` / `issue_title` / `issue_url` / `issue_state` / `issue_author`（作成者ログイン、不明なら `"unknown"`）/ `labels`（名前の配列）/ `created_at` / `updated_at` / `body`（なければ `""`）
+   - `comments[]`: 非表示（minimized）でないコメントを `{author, body, url, created_at}` へ展開
+4. 全Issue分を `issue_number` 降順に並べ、`{period_since, repo, issue_count, output_file, issues: [...]}` の形に組んで `Write` ツールでファイル（例: スクラッチパス配下の一時ファイル）へ書き出す。`period_since` はフェーズ0で確定した日数から算出したISO8601、`output_file` は書き出し先自身の絶対パス、`issue_count` は `issues` の件数
+5. 以降の手順は、この `output_file` を `<output_file>` として同じ `jq` コマンドでそのまま使う
 
 ### 本文の読み出し
 

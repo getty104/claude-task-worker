@@ -58,7 +58,9 @@ Issue番号はフェーズ5でcreate-prに渡す。指定なしの場合はPR本
 
 ## フェーズ1: レビューコメント収集
 
-GitHub MCP が使える場合は対応表のツール（`list_pull_requests` / `pull_request_read` の `get_review_comments` 等）で同等の収集を行う。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
+GitHub MCP が使える場合は下記「MCP経路の収集契約」に従って同等の収集を行う。以下のスクリプトは MCP 利用不可時のフォールバックとして使う。
+
+**スクリプトが認証エラー（401 / 403）で落ちた場合は、同じスクリプトを再試行せず MCP 経路へ切り替える**（スクリプトは中で `gh` を呼ぶ「`gh` 経路」そのもの。クラウドセッションでは `gh api graphql` / `gh pr list` が必ず 403 になる）。**スクリプトの失敗を「対象期間に新規レビューコメントなし」に読み替えてはならない。** MCP 経路でも取得できなかった場合に限り、取得失敗とその原因を報告して終了する（`CODING_GUIDELINES.md` は更新しない）。
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0で確定した日数>
@@ -77,6 +79,18 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-recent-review-comments.sh <フェーズ0�
   - `conversation_comments[]`: PRのConversationタブに投稿されたコメント（`author` / `body` / `url` / `created_at`）
 
 `pr_count`が0の場合は「対象期間に新規レビューコメントなし」と報告して終了する（CODING_GUIDELINES.mdは更新しない）。
+
+### MCP経路の収集契約
+
+MCP 経路でもフェーズ2以降は同じキーで読むため、**上の構造（キー名・値の意味）をフォールバックスクリプトと完全に一致させる**。
+
+1. `search_pull_requests`（`query` に `repo:{owner}/{repo} updated:>=<収集起点の日付>`）で対象PR番号を確定する（状態は問わない。上限100件）
+2. PRごとに `pull_request_read`（`get`）でメタデータ、`get_review_comments` でレビュースレッド、`issue_read`（`get_comments`）で会話コメントを取得する。どちらもページングがあるため、次ページが無くなるまで取得しきる
+3. PRごとに次のオブジェクトを組み立てる（スクリプトの `fetch_pr` が生成する構造と同一）:
+   - `pr_number` / `pr_title` / `pr_url` / `pr_author`（作成者ログイン、不明なら `"unknown"`）
+   - `review_comments[]`: レビュースレッドの各コメントを `{path, line, is_resolved, is_outdated, author, body, url, created_at}` へ展開（`path` / `line` / `is_resolved` / `is_outdated` はスレッド単位の値をコメントへ複写）。**`created_at` が収集起点より前のコメントは除外する**
+   - `conversation_comments[]`: 会話コメントのうち非表示（minimized）でないものを `{author, body, url, created_at}` へ展開。同じく収集起点より前のものは除外する
+4. `review_comments` と `conversation_comments` がどちらも空のPRを落としたうえで、`{period_since, repo, pr_count, prs: [...]}` に組む。`period_since` はフェーズ0で確定した日数から算出したISO8601、`pr_count` は `prs` の件数
 
 ### ノイズ除外
 

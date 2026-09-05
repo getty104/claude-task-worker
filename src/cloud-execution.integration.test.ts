@@ -344,18 +344,20 @@ test("B: fix-review-point のクラウド実行が --on-branch を付け、--ref
 });
 
 // ============================================================
-// C. 定期ワーカーは --cloud 下でもローカル実行に落ちる（update-coding-guidelines, herdr, --cloud）
+// C. 定期ワーカーのクラウド起動（update-coding-guidelines, herdr, --cloud）
 // ============================================================
-// 定期ワーカーは CLOUD_ALLOWED_WORKERS（src/config.ts）に含まれないため、isCloudWorker() が false を
-// 返しローカル実行になる（対象 Issue/PR を持たず cc-cloud-done を置く先が無く完了検知できないため。
-// Phase 1 の制約）。新仕様では --cloud はプロセス単位のフラグなので起動時エラーにはならない。
+// 定期ワーカーは対象 Issue/PR を持たないため、実行記録PR（ctw-last-run-<worker>）を
+// cc-cloud-done の置き先に使う。ここではスタブ環境で記録PRを作れないため置き先は無いが、
+// 起動そのものはクラウド経路（--cloud + --ref、worktree なし）へ乗ることを確認する。
 test(
-  "C: 定期ワーカーは --cloud 下でも起動時エラーにならずローカル実行になる（worktree 生成・--cloud 未付与）",
+  "C: 定期ワーカーが --cloud 下でクラウド実行になる（worktree を作らず --ref を付ける）",
   { timeout: 30_000 },
   async (t) => {
     const stubs = installCliStubs({
       gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
-      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] update-coding-guidelines local report" },
+      claude: {
+        cloudOutput: "Created cloud session: ctw:demo:#0\nView: https://claude.ai/code/session_stubC?from=cli&m=0",
+      },
     });
     const handle = await startWorker({
       worker: "update-coding-guidelines",
@@ -369,19 +371,17 @@ test(
       stubs.cleanup();
     });
 
-    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 20_000);
+    await handle.waitFor((records) => findCreateRecord(records) !== undefined, 20_000);
 
     const records = stubs.records();
-    const tabCreate = findRecord(records, "herdr", "tab", "create")!;
-    const cwdArg = argValue(tabCreate.argv, "--cwd")!;
-    assert.ok(
-      cwdArg.startsWith(`${join(realpathSync(handle.repoDir), ".claude", "worktrees")}${sep}`),
-      `worktree 配下の cwd になっていない: ${cwdArg}`,
+    const create = findCreateRecord(records)!;
+    assert.equal(argValue(create.argv, "--ref"), "main");
+    assert.ok(!create.argv.includes("--on-branch"), "定期ワーカーは --on-branch を付けてはいけない");
+    assert.equal(
+      findRecord(records, "herdr", "tab", "create"),
+      undefined,
+      "クラウド実行では herdr のタスクタブを作らない",
     );
-
-    const agentStart = findRecord(records, "herdr", "agent", "start")!;
-    const claudeArgs = extractAgentStartArgs(agentStart);
-    assert.ok(!claudeArgs.includes("--cloud"), "定期ワーカーが --cloud 付きで起動している");
   },
 );
 
@@ -517,51 +517,46 @@ test("E1: script が利用できない環境で --cloud を渡すと起動せず
   assert.ok(handle.stdout().includes("script"), "エラーメッセージが script(1) の不可用を案内していない");
 });
 
-// resolve-conflict は CLOUD_ALLOWED_WORKERS（src/config.ts）に含まれないため、--cloud 下でも
-// 起動時エラーにならずローカル実行（worktree あり・--cloud なしの claude 起動）に落ちる。
-test(
-  "E2: 許可リスト外のワーカー（resolve-conflict）は --cloud 下でもローカル実行に落ちる",
-  { timeout: 45_000 },
-  async (t) => {
-    const stubs = installCliStubs({
-      gh: {
-        login: "octocat",
-        repo: { owner: "acme", name: "demo", defaultBranch: "main" },
-        prList: [
-          { number: 801, headRefName: "conflict-branch", labels: [{ name: "cc-resolve-conflict" }], title: "Fix" },
-        ],
-        view: { "801": { checks: [] } },
-      },
-      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] resolve-conflict local report" },
-    });
-    const handle = await startWorker({
-      worker: "resolve-conflict",
-      workerConfig: { workers: {} },
-      userConfig: { mode: "herdr" },
-      records: stubs.records,
-      extraArgs: ["--cloud"],
-    });
-    t.after(async () => {
-      await handle.cleanup();
-      stubs.cleanup();
-    });
+// 許可リストは撤去済み。--cloud を付けたプロセスでは resolve-conflict のような
+// PR 系ワーカーもクラウド実行になる（worktree を作らず --on-branch で PR ブランチから始める）。
+test("E2: --cloud 下では resolve-conflict もクラウド実行になる", { timeout: 45_000 }, async (t) => {
+  const stubs = installCliStubs({
+    gh: {
+      login: "octocat",
+      repo: { owner: "acme", name: "demo", defaultBranch: "main" },
+      prList: [
+        { number: 801, headRefName: "conflict-branch", labels: [{ name: "cc-resolve-conflict" }], title: "Fix" },
+      ],
+      view: { "801": { checks: [] } },
+    },
+    claude: {
+      cloudOutput: "Created cloud session: ctw:demo:#801\nView: https://claude.ai/code/session_stubE2?from=cli&m=0",
+    },
+  });
+  const handle = await startWorker({
+    worker: "resolve-conflict",
+    workerConfig: { workers: {} },
+    userConfig: { mode: "herdr" },
+    records: stubs.records,
+    extraArgs: ["--cloud"],
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
 
-    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "start") !== undefined, 30_000);
+  await handle.waitFor((records) => findCreateRecord(records) !== undefined, 30_000);
 
-    const records = stubs.records();
-    const tabCreate = findRecord(records, "herdr", "tab", "create")!;
-    const cwdArg = argValue(tabCreate.argv, "--cwd")!;
-    assert.ok(
-      cwdArg.startsWith(`${join(realpathSync(handle.repoDir), ".claude", "worktrees")}${sep}`),
-      `worktree 配下の cwd になっていない: ${cwdArg}`,
-    );
-
-    const agentStart = findRecord(records, "herdr", "agent", "start")!;
-    const claudeArgs = extractAgentStartArgs(agentStart);
-    assert.ok(!claudeArgs.includes("--cloud"), "denied ワーカーが --cloud 付きで起動している");
-    assert.ok(!claudeArgs.includes("--on-branch"));
-  },
-);
+  const records = stubs.records();
+  const create = findCreateRecord(records)!;
+  assert.equal(argValue(create.argv, "--on-branch"), "conflict-branch");
+  assert.ok(!create.argv.includes("--ref"), "PR系ワーカーは --ref を付けてはいけない");
+  assert.equal(
+    findRecord(records, "herdr", "tab", "create"),
+    undefined,
+    "クラウド実行では herdr のタスクタブを作らない",
+  );
+});
 
 test("E3: 未サインイン（claude auth status）だと起動せず終了コード1", { timeout: 30_000 }, async (t) => {
   const stubs = installCliStubs({

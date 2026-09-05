@@ -8,8 +8,8 @@ import {
   LOCAL_CONFIG_PATH,
   SCHEDULED_WORKER_NAMES,
   CLOUD_DONE_LABEL,
-} from "../config.js";
-import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph.js";
+} from "../config";
+import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
 // 制約下で「**同時に付きうるラベル同士**の最小 ΔE(CIE2000) を最大化する15色」を数値最適化した。

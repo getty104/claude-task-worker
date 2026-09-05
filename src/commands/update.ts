@@ -1,9 +1,9 @@
-import { upgradeCodegraphCli } from "./codegraph.js";
+import { upgradeCodegraphCli } from "./codegraph";
 import { printGlobalPackageVersions } from "./install";
 import { installDesignMdCli } from "./design-md";
 import { installPenCli } from "./pen";
 import { installPlaywrightBrowsers } from "./playwright";
-import { npmInstallGlobalLatest, runCommand } from "./run-command.js";
+import { npmInstallGlobalLatest, runCommand } from "./run-command";
 
 const PLUGIN_NAME = "claude-task-worker";
 const MARKETPLACE_NAME = "claude-task-worker";

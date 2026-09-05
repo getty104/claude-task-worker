@@ -39,7 +39,7 @@ import {
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
-import { checkCloudConfig, CLOUD_ALLOWED_WORKERS, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import { checkCloudConfig, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
 import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
@@ -287,9 +287,7 @@ async function assertCloudAvailable(): Promise<void> {
     process.exit(1);
   }
   if (cloud) {
-    console.log(
-      `[worker] cloud execution enabled (--cloud); only these workers run in the cloud: ${CLOUD_ALLOWED_WORKERS.join(", ")} (all others stay local)`,
-    );
+    console.log("[worker] cloud execution enabled (--cloud); every worker started by this process runs in the cloud");
   }
 }
 

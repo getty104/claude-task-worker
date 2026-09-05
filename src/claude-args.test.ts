@@ -444,10 +444,16 @@ test("buildCloudToolRestriction lists every DISALLOWED_TOOLS entry", () => {
 });
 
 test("buildCloudCheckoutInstruction tells PR tasks to skip gh pr checkout", () => {
-  const result = buildCloudCheckoutInstruction({ type: "pr", number: 42 });
+  const result = buildCloudCheckoutInstruction({ type: "pr", number: 42, onBranch: true });
   assert.match(result, /PR #42/);
   assert.match(result, /gh pr checkout/);
   assert.match(result, /--on-branch/);
+});
+
+test("buildCloudCheckoutInstruction stays empty for a PR target the session did not start on", () => {
+  // 定期ワーカーは実行記録PRを cc-cloud-done の置き先に使うだけで、セッションは `--ref` で
+  // デフォルトブランチから始まる。そのPRのブランチ上にはいないので checkout 指示を出さない。
+  assert.equal(buildCloudCheckoutInstruction({ type: "pr", number: 42 }), "");
 });
 
 test("buildCloudCheckoutInstruction stays empty for issue tasks", () => {
@@ -456,8 +462,9 @@ test("buildCloudCheckoutInstruction stays empty for issue tasks", () => {
   assert.equal(buildCloudCheckoutInstruction({ type: "issue", number: 42 }), "");
 });
 
-test("appendCloudDoneInstruction adds the checkout skip only for pr targets", () => {
-  assert.match(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7 }), /gh pr checkout/);
+test("appendCloudDoneInstruction adds the checkout skip only for on-branch pr targets", () => {
+  assert.match(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7, onBranch: true }), /gh pr checkout/);
+  assert.doesNotMatch(appendCloudDoneInstruction("/skill 1", { type: "pr", number: 7 }), /gh pr checkout/);
   assert.doesNotMatch(appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }), /gh pr checkout/);
 });
 
@@ -469,15 +476,16 @@ test("buildCloudWorktreeInstruction exempts the worktree guard but keeps the def
   assert.match(result, /デフォルトブランチ/);
 });
 
-test("buildCloudWorktreeInstruction only targets exec-issue and fix-review-point", () => {
-  // 同じ worktree ガードを持つ他スキル（クラウドで走る create-issue-from-issue-number /
-  // update-issue を含む）まで巻き添えで免除しないこと。
-  assert.notEqual(buildCloudWorktreeInstruction("/claude-task-worker:fix-review-point 1"), "");
+test("buildCloudWorktreeInstruction only targets the skills that abort outside a worktree", () => {
+  // 免除するのは worktree 外を「中断」で扱う3スキルだけ。worktree 外でもその場で作業する
+  // 書き方の他スキルまで巻き添えで免除しないこと。
+  for (const skill of ["/claude-task-worker:fix-review-point", "/claude-task-worker:create-ui-design"]) {
+    assert.notEqual(buildCloudWorktreeInstruction(`${skill} 1`), "");
+  }
   for (const skill of [
     "/claude-task-worker:create-issue-from-issue-number",
     "/claude-task-worker:update-issue",
     "/claude-task-worker:triage-pr",
-    "/claude-task-worker:create-ui-design",
   ]) {
     assert.equal(buildCloudWorktreeInstruction(`${skill} 1`), "");
   }
