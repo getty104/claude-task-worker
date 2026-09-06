@@ -1,11 +1,16 @@
-import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
+import type * as ChildProcess from "node:child_process";
 import { promisify } from "node:util";
 import { readdir, rm, stat } from "node:fs/promises";
 import { basename, resolve, sep } from "node:path";
 import { isWorktreeInUse } from "./process-manager";
 import { isGeneratedWorktreeName } from "./random-name";
 
-const execFileAsync = promisify(execFile);
+const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
+
+// promisify を呼び出しのたびに行うのは、テストが childProcess.execFile を差し替えられるようにするため
+// （モジュール読み込み時に束縛すると実コマンドが走る）。gh.ts の execGh と同じ理由。
+const execFileAsync = (command: string, args: string[]) => promisify(childProcess.execFile)(command, args);
 
 const WORKTREES_DIR = ".claude/worktrees";
 
