@@ -297,12 +297,18 @@ export interface CloudPromptTarget {
 // クラウドタスクの完了検知（cc-cloud-done ラベル、#284）用の指示を、作成コマンドの
 // description（＝クラウドセッションの初期プロンプト）へ追加する。
 // スキル本文（`plugin/skills/*`）は変更せず、ワーカー側で初期プロンプトへ付加する方針。
-export function appendCloudDoneInstruction(prompt: string, target: CloudPromptTarget): string {
+//
+// 最終報告コメント（CLOUD_REPORT_HEADING）の投稿指示は `debug`（CLI の `--debug`）が
+// 立っているときだけ付ける。通常運用ではワーカーが Slack へ通知するので十分で、
+// 毎タスク投稿すると Issue/PR が実行ログで埋まるため。
+export function appendCloudDoneInstruction(prompt: string, target: CloudPromptTarget, debug = false): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
   const checkoutInstruction = buildCloudCheckoutInstruction(target);
   const worktreeInstruction = buildCloudWorktreeInstruction(prompt);
-  const reportInstruction = `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`;
-  const labelInstruction = `上記コメントの投稿後、このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
+  const reportInstruction = debug
+    ? `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`
+    : "";
+  const labelInstruction = `${debug ? "上記コメントの投稿後、" : ""}このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
   return [prompt, checkoutInstruction, worktreeInstruction, reportInstruction, labelInstruction]
     .filter((part) => part !== "")
     .join("\n\n");
@@ -396,10 +402,15 @@ export function buildCloudToolRestriction(): string {
 // スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
 // 連結すると本来先頭にあるべきスラッシュコマンドが本文中ほどへずれ、リテラル
 // 文字列として扱われて SKILL.md がロードされなくなる。
-export function buildCloudPrompt(prompt: string, model: string, target?: CloudPromptTarget): string {
+export function buildCloudPrompt(
+  prompt: string,
+  model: string,
+  target?: CloudPromptTarget,
+  debug = false,
+): string {
   const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}`;
   const withPrinciples = `${prompt}\n\n${principles}`;
-  return target ? appendCloudDoneInstruction(withPrinciples, target) : withPrinciples;
+  return target ? appendCloudDoneInstruction(withPrinciples, target, debug) : withPrinciples;
 }
 
 // POSIX シェル向けのシングルクォート引用。herdr の `pane send-text` はシェルへ

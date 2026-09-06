@@ -10,6 +10,7 @@ import {
   type CloudPromptTarget,
 } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
+import { hasDebugFlag } from "./dispatch-args";
 import { addLabel, commentOnIssue, commentOnPR, findCommentSince, listNumbersWithLabel, removeLabel } from "./gh";
 import type { AgentStatus } from "./herdr";
 import type { HerdrTask } from "./herdr-runner";
@@ -468,7 +469,8 @@ async function runViaCloud(
   // cc-cloud-done の投稿指示に加え、クラウドでは反映されない
   // システムプロンプト・ツール制限もここへ本文として含めておく（渡した瞬間に実行される
   // ため、後から追加投函する余地は無い）。
-  const initialPrompt = buildCloudPrompt(prompt, model ?? "", cloudTarget);
+  const debug = hasDebugFlag();
+  const initialPrompt = buildCloudPrompt(prompt, model ?? "", cloudTarget, debug);
   let result: TaskResult;
   let cloudSessionId: string | undefined;
 
@@ -496,9 +498,10 @@ async function runViaCloud(
         });
         // 完了検知後に1回だけ、セッションが投稿した最終報告コメントを回収する。
         // 取得できなければ従来どおりの定型文のまま completed を維持する（通知を落とさない）。
+        // --debug が無ければコメント自体を投稿させていないので回収も行わない。
         let reportBody: string | null = null;
         const startedAt = tasks.get(id)?.startedAt;
-        if (startedAt) {
+        if (debug && startedAt) {
           try {
             reportBody = await findCommentSince(targetNumber, startedAt, CLOUD_REPORT_HEADING);
           } catch (err) {

@@ -104,6 +104,7 @@ Workers:
 
 Options:
   --project <name>  Dispatch to project(s) via herdr instead of running the worker locally. Accepts a project name, a project group name, or "all". Repeatable.
+  --debug           With --cloud, make each cloud session post its final report as an Issue/PR comment (off by default; the report is only sent to Slack).
   --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue. Repeatable: any matching parent (OR).
   --label <name>    Limit issue-based workers to issues that also carry the specified label. Repeatable: all must be present (AND).
 

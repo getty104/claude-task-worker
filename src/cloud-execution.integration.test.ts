@@ -636,7 +636,7 @@ test("F: exec-issue のローカル実行は --cloud/--ref/-p を付けず workt
 // ============================================================
 // G. cc-cloud-done 検知 → ラベル除去 → レポートコメント取得 → Slack 通知本文への反映
 // ============================================================
-test("G: クラウド完了検知後にレポートコメントを取得し Slack 通知本文へ反映する", { timeout: 75_000 }, async (t) => {
+test("G: --debug 時はクラウド完了検知後にレポートコメントを取得し Slack 通知本文へ反映する", { timeout: 75_000 }, async (t) => {
   const slack = await startSlackCapture();
   t.after(() => slack.close());
 
@@ -658,7 +658,8 @@ test("G: クラウド完了検知後にレポートコメントを取得し Slac
     userConfig: { mode: "herdr" },
     records: stubs.records,
     env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
-    extraArgs: ["--cloud"],
+    // レポートコメントの投稿・回収は --debug のときだけ行う。
+    extraArgs: ["--cloud", "--debug"],
   });
   t.after(async () => {
     await handle.cleanup();
