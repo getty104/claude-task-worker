@@ -636,69 +636,73 @@ test("F: exec-issue のローカル実行は --cloud/--ref/-p を付けず workt
 // ============================================================
 // G. cc-cloud-done 検知 → ラベル除去 → レポートコメント取得 → Slack 通知本文への反映
 // ============================================================
-test("G: --debug 時はクラウド完了検知後にレポートコメントを取得し Slack 通知本文へ反映する", { timeout: 75_000 }, async (t) => {
-  const slack = await startSlackCapture();
-  t.after(() => slack.close());
+test(
+  "G: --debug 時はクラウド完了検知後にレポートコメントを取得し Slack 通知本文へ反映する",
+  { timeout: 75_000 },
+  async (t) => {
+    const slack = await startSlackCapture();
+    t.after(() => slack.close());
 
-  const stubs = installCliStubs({
-    gh: ISSUE_GH_SCENARIO,
-    claude: {
-      stdout: "[stub] exec-issue cloud report",
-      cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubG?from=cli&m=0",
-      cloudComplete: {
-        type: "issue",
-        number: 501,
-        report: `${CLOUD_REPORT_HEADING}\n\n[stub] 最終報告本文`,
+    const stubs = installCliStubs({
+      gh: ISSUE_GH_SCENARIO,
+      claude: {
+        stdout: "[stub] exec-issue cloud report",
+        cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubG?from=cli&m=0",
+        cloudComplete: {
+          type: "issue",
+          number: 501,
+          report: `${CLOUD_REPORT_HEADING}\n\n[stub] 最終報告本文`,
+        },
       },
-    },
-  });
-  const handle = await startWorker({
-    worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
-    userConfig: { mode: "herdr" },
-    records: stubs.records,
-    env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
-    // レポートコメントの投稿・回収は --debug のときだけ行う。
-    extraArgs: ["--cloud", "--debug"],
-  });
-  t.after(async () => {
-    await handle.cleanup();
-    stubs.cleanup();
-  });
+    });
+    const handle = await startWorker({
+      worker: "exec-issue",
+      workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      env: { CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL: slack.url },
+      // レポートコメントの投稿・回収は --debug のときだけ行う。
+      extraArgs: ["--cloud", "--debug"],
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
 
-  await handle.waitFor(
-    (records) =>
+    await handle.waitFor(
+      (records) =>
+        records.some(
+          (r) =>
+            r.command === "gh" &&
+            r.argv[0] === "issue" &&
+            r.argv[1] === "edit" &&
+            r.argv.includes("--remove-label") &&
+            r.argv.includes("cc-in-progress"),
+        ),
+      45_000,
+    );
+
+    const records = stubs.records();
+    assert.ok(
       records.some(
-        (r) =>
-          r.command === "gh" &&
-          r.argv[0] === "issue" &&
-          r.argv[1] === "edit" &&
-          r.argv.includes("--remove-label") &&
-          r.argv.includes("cc-in-progress"),
+        (r) => r.command === "gh" && r.argv[0] === "api" && /issues\/501\/comments\?since=/.test(r.argv[1] ?? ""),
       ),
-    45_000,
-  );
+      "レポートコメント取得（gh api .../comments?since=）の記録が見つからない",
+    );
 
-  const records = stubs.records();
-  assert.ok(
-    records.some(
-      (r) => r.command === "gh" && r.argv[0] === "api" && /issues\/501\/comments\?since=/.test(r.argv[1] ?? ""),
-    ),
-    "レポートコメント取得（gh api .../comments?since=）の記録が見つからない",
-  );
+    const removeCloudDone = records.filter(
+      (r) =>
+        r.command === "gh" &&
+        r.argv[0] === "issue" &&
+        r.argv[1] === "edit" &&
+        r.argv.includes("--remove-label") &&
+        r.argv.includes("cc-cloud-done"),
+    );
+    assert.ok(removeCloudDone.length >= 2, `--remove-label cc-cloud-done が2回以上ない: ${removeCloudDone.length}件`);
 
-  const removeCloudDone = records.filter(
-    (r) =>
-      r.command === "gh" &&
-      r.argv[0] === "issue" &&
-      r.argv[1] === "edit" &&
-      r.argv.includes("--remove-label") &&
-      r.argv.includes("cc-cloud-done"),
-  );
-  assert.ok(removeCloudDone.length >= 2, `--remove-label cc-cloud-done が2回以上ない: ${removeCloudDone.length}件`);
-
-  await handle.waitFor(() => slack.texts().some((text) => text.includes("[stub] 最終報告本文")), 20_000);
-});
+    await handle.waitFor(() => slack.texts().some((text) => text.includes("[stub] 最終報告本文")), 20_000);
+  },
+);
 
 // ============================================================
 // H. CLOUD_TASK_TIMEOUT_MS 超過で cc-need-human-check 付与＋失敗通知

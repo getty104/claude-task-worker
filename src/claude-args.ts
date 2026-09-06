@@ -402,12 +402,7 @@ export function buildCloudToolRestriction(): string {
 // スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
 // 連結すると本来先頭にあるべきスラッシュコマンドが本文中ほどへずれ、リテラル
 // 文字列として扱われて SKILL.md がロードされなくなる。
-export function buildCloudPrompt(
-  prompt: string,
-  model: string,
-  target?: CloudPromptTarget,
-  debug = false,
-): string {
+export function buildCloudPrompt(prompt: string, model: string, target?: CloudPromptTarget, debug = false): string {
   const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}`;
   const withPrinciples = `${prompt}\n\n${principles}`;
   return target ? appendCloudDoneInstruction(withPrinciples, target, debug) : withPrinciples;
