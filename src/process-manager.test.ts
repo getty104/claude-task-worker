@@ -2,13 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as ProcessManagerModule from "./process-manager";
 import type * as CliStubModule from "./test-support/cli-stub";
+import type * as DispatchArgsModule from "./dispatch-args";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { makeLogFeeder, logLines, waitForCloudTask, CLOUD_TASK_TIMEOUT_MS } =
+const { makeLogFeeder, logLines, waitForCloudTask, CLOUD_TASK_TIMEOUT_MS, onCompleteWithDebugReport } =
   (await import("./process-manager")) as typeof ProcessManagerModule;
 const { installCliStubs } = (await import("./test-support/cli-stub.ts")) as typeof CliStubModule;
+const { resetDebugFlagCache } = (await import("./dispatch-args.ts")) as typeof DispatchArgsModule;
 
 test("makeLogFeeder: 1バイトずつfeedしてもマルチバイト文字が文字化けしない", () => {
   const startLength = logLines.length;
@@ -76,6 +78,63 @@ test("waitForCloudTask: cc-cloud-done が付かないまま期限を過ぎると
   try {
     const outcome = await promise;
     assert.equal(outcome, "timeout");
+  } finally {
+    stubs.cleanup();
+  }
+});
+
+// --debug のローカル実行: 最終報告を対象 Issue/PR へコメントし、元の onComplete も呼ぶ。
+test("onCompleteWithDebugReport posts the report only when --debug and a target are given", async (t) => {
+  const argv = process.argv;
+  t.after(() => {
+    process.argv = argv;
+    resetDebugFlagCache();
+  });
+
+  // --debug 無し・対象なしはラップせず元の関数をそのまま返す（既定の挙動を変えない）。
+  const noop = async () => {};
+  process.argv = [...argv.slice(0, 2), "exec-issue"];
+  resetDebugFlagCache();
+  assert.equal(onCompleteWithDebugReport(noop, { type: "issue", number: 1 }), noop);
+  process.argv = [...argv.slice(0, 2), "exec-issue", "--debug"];
+  resetDebugFlagCache();
+  assert.equal(onCompleteWithDebugReport(noop, undefined), noop);
+
+  const stubs = installCliStubs({ gh: {} });
+  try {
+    let called = false;
+    const wrapped = onCompleteWithDebugReport(
+      async () => {
+        called = true;
+      },
+      { type: "issue", number: 4242 },
+    );
+    await wrapped?.("completed", "[stub] 最終報告本文");
+    assert.ok(called, "元の onComplete が呼ばれていない");
+    const comment = stubs.records().find((r) => r.command === "gh" && r.argv[0] === "issue" && r.argv[1] === "comment");
+    assert.ok(comment, "gh issue comment の記録が見つからない");
+    assert.equal(comment.argv[2], "4242");
+    assert.match(comment.argv[comment.argv.length - 1], /最終報告本文/);
+  } finally {
+    stubs.cleanup();
+  }
+});
+
+// 報告が空のときは投稿しない（空コメントで Issue を汚さない）。
+test("onCompleteWithDebugReport skips the comment for an empty report", async (t) => {
+  const argv = process.argv;
+  t.after(() => {
+    process.argv = argv;
+    resetDebugFlagCache();
+  });
+  process.argv = [...argv.slice(0, 2), "exec-issue", "--debug"];
+  resetDebugFlagCache();
+
+  const stubs = installCliStubs({ gh: {} });
+  try {
+    const wrapped = onCompleteWithDebugReport(async () => {}, { type: "pr", number: 4243 });
+    await wrapped?.("failed", "   \n  ");
+    assert.equal(stubs.records().filter((r) => r.command === "gh" && r.argv[1] === "comment").length, 0);
   } finally {
     stubs.cleanup();
   }

@@ -178,6 +178,25 @@ async function finishTask(id: number, result: TaskResult, onComplete?: OnComplet
   renderTable();
 }
 
+// ローカル実行（default / herdr）の `--debug` 用に、最終報告を対象 Issue/PR へ
+// コメントとして残す onComplete ラッパー。クラウド実行はセッション自身が同じ見出しで
+// 投稿する（`appendCloudDoneInstruction()`）ので、この経路は通さない（二重投稿になる）。
+// `--debug` 無し・対象不明・報告が空のときは元の onComplete をそのまま返す。
+export function onCompleteWithDebugReport(onComplete?: OnComplete, target?: CloudTarget): OnComplete | undefined {
+  if (!target || !hasDebugFlag()) return onComplete;
+  return async (status, output, cloudSessionId) => {
+    const body = output.trim();
+    if (body !== "") {
+      const comment = target.type === "issue" ? commentOnIssue : commentOnPR;
+      // 投稿の失敗でラベル操作・worktree 削除（onComplete 本体）を落とさない。
+      await comment(target.number, `${CLOUD_REPORT_HEADING}\n\n${body}`).catch((err: unknown) =>
+        console.error(`[worker] failed to post the debug report to ${target.type} #${target.number}: ${err}`),
+      );
+    }
+    await onComplete?.(status, output, cloudSessionId);
+  };
+}
+
 // herdr モードのタスクタブに使うプロジェクト名。ディスパッチャーが注入する
 // CTW_PROJECT_NAME を最優先し、次に config.json の projects をカレントディレクトリで
 // 逆引きし、どちらも無ければディレクトリ名（＝通常はリポジトリ名）にフォールバックする。
@@ -586,7 +605,8 @@ export function run(
   // pty は script(1) が割り当てるため herdr のペインは不要で、default/herdr で
   // 同一の経路を通る。
   cloud?: boolean,
-  // クラウド実行時に cc-cloud-done を探す対象（種別・番号・--on-branch の有無）。
+  // 対象の Issue/PR（種別・番号・--on-branch の有無）。クラウド実行では cc-cloud-done を
+  // 探す対象、ローカル実行では --debug の最終報告コメントの投稿先になる。
   cloudTarget?: CloudTarget,
   // クラウド実行時のプロンプト本文組み立て（buildCloudPrompt）に使う `--model` の値。
   // default/herdr（非cloud）では未使用。
@@ -616,10 +636,15 @@ export function run(
     return;
   }
 
+  // ローカル実行（default / herdr）の --debug。クラウドと違いワーカーが最終報告そのもの
+  // （stdout / transcript）を持っているので、セッションへ投稿を指示せずワーカー側で出す。
+  // 分岐をここに置くのは、default/herdr のどちらもこの下の1経路へ合流するため。
+  const onCompleteWithReport = onCompleteWithDebugReport(onComplete, cloudTarget);
+
   if (getRunMode() === "herdr") {
     // herdr モードは agent start の `--kind` が実行ファイル（claude）を供給するため、
     // command は渡さず claude のフラグ（args）とプロンプトを渡す。
-    void runViaHerdr(args, prompt ?? "", id, onComplete, cwd, env);
+    void runViaHerdr(args, prompt ?? "", id, onCompleteWithReport, cwd, env);
     return;
   }
 
@@ -664,13 +689,13 @@ export function run(
     );
     // 台帳からの削除は onComplete（ラベル操作・worktree 削除）の完了後に行う。
     // 先に削除すると waitForAllProcesses() が後片付けの途中でプロセスの終了を許してしまう。
-    await finishTask(id, result, onComplete);
+    await finishTask(id, result, onCompleteWithReport);
     childProcesses.delete(id);
   });
 
   child.on("error", async (err) => {
     console.error(`[worker] failed to spawn process for #${id}: ${err.message}`);
-    await finishTask(id, { status: "failed", output: err.message }, onComplete);
+    await finishTask(id, { status: "failed", output: err.message }, onCompleteWithReport);
     childProcesses.delete(id);
   });
 }

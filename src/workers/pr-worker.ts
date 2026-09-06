@@ -189,7 +189,9 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
               buildClaudeEnv(mode, isCloud),
               execution.prompt,
               isCloud,
-              isCloud ? { type: "pr" as const, number: pr.number, onBranch: true } : undefined,
+              // クラウドでは cc-cloud-done の探索先、ローカルでは --debug の報告コメントの
+              // 投稿先。onBranch は `--on-branch` を渡したか（＝クラウドのみ）を表す。
+              { type: "pr" as const, number: pr.number, onBranch: isCloud },
               model,
             );
           } catch (err) {

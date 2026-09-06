@@ -433,6 +433,17 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 上記1の検査は `--cloud` が指定されていなければ **I/O ごと行わない**（`--cloud` を使わない既存の実行の挙動を完全に不変に保つため）。
 
+### `--debug`（最終報告の Issue/PR コメント）
+
+`claude-task-worker <command> --debug`（`hasDebugFlag()`、`src/dispatch-args.ts`）で、各タスクの最終報告を対象 Issue/PR へコメントとして残す。`--cloud` と同じくプロセス単位のフラグで、既定は無効（報告は Slack 通知にのみ載る。毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため）。
+
+**投稿の担当は実行形態で分かれる**。ワーカーが報告そのものを持っているかどうかが違うため:
+
+- **ローカル（default / herdr）**: ワーカーが投稿する。`onCompleteWithDebugReport()`（`src/process-manager.ts`）が `onComplete` をラップし、`CLOUD_REPORT_HEADING` を見出しとするコメントを `commentOnIssue` / `commentOnPR` で出してから元の `onComplete`（ラベル操作・worktree 削除）へ進む。投稿の失敗はログのみで握り潰す（報告コメントのために後片付けを落とさない）。報告が空文字なら投稿しない
+- **クラウド（`--cloud`）**: セッション自身が投稿する（`appendCloudDoneInstruction()` が指示を付ける）。ワーカーにはクラウド VM のターンが届かないため（前節参照）、ワーカー側から出せる報告が存在しない。`run()` はクラウド分岐で `runViaCloud()` へ抜けるので上記のラッパーを通らず、二重投稿にならない
+
+`run()` の `cloudTarget` 引数は**実行形態に関わらず常に渡す**（`issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts`）。クラウドでは `cc-cloud-done` の探索先、ローカルでは報告コメントの投稿先という違いだけで、対象の Issue/PR は同一のため。PR 系の `onBranch` は「`--on-branch` を渡したか」を表すので `isCloud` をそのまま入れる（ローカルでは false）。定期ワーカーの投稿先は Issue/PR 系と同じく実行記録PR（`publishLastRunPr()` の返り値）で、作れなかった場合は対象なし＝投稿もしない。
+
 ### `--project` ディスパッチ
 
 `src/index.ts` は起動時に `hasProjectFilter()` で `--project` フラグの有無を判定し、指定されている場合はワーカー起動の代わりにディスパッチャーを起動する（複数プロジェクトへ同一コマンドを一括転送する仕組み）。

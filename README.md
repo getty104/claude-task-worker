@@ -212,13 +212,16 @@ npx claude-task-worker cloud-setup
 
 ### `--debug`
 
-クラウドセッションの最終報告を対象 Issue/PR へコメントとして残す。`--cloud` と併用する（単体では効果なし）。
+各タスクの最終報告を対象 Issue/PR へコメントとして残す。ローカル実行（`default` / `herdr`）でもクラウド実行（`--cloud`）でも使える。
 
 ```bash
+claude-task-worker exec-issue --debug
 claude-task-worker exec-issue --cloud --debug
 ```
 
-既定（`--debug` なし）では最終報告は Slack 通知にのみ載り、Issue/PR にはコメントされない。毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。完了検知（`cc-cloud-done`）はフラグの有無に関わらず従来どおり動く。
+既定（`--debug` なし）では最終報告は Slack 通知にのみ載り、Issue/PR にはコメントされない。毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。
+
+投稿の担当は実行形態で違う。ローカルはワーカーが報告そのもの（`claude -p` の stdout / transcript）を持っているのでワーカーが投稿し、クラウドはワーカーに報告が届かないのでセッション自身に投稿させる（ワーカーはそれを回収して Slack へ載せる）。定期ワーカー（`update-*`）の投稿先は実行記録PR（`ctw-last-run-<ワーカー名>`）。クラウド実行の完了検知（`cc-cloud-done`）はフラグの有無に関わらず従来どおり動く。
 
 ### Pen CLI のログイン
 

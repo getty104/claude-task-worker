@@ -252,7 +252,9 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
               buildClaudeEnv(mode, cloud),
               execution.prompt,
               cloud,
-              cloud ? { type: "issue" as const, number: issue.number } : undefined,
+              // クラウドでは cc-cloud-done の探索先、ローカルでは --debug の報告コメントの
+              // 投稿先。どちらも対象は同じ Issue なので実行形態で出し分けない。
+              { type: "issue" as const, number: issue.number },
               model,
             );
           } catch (err) {
