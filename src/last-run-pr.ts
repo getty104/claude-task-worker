@@ -1,10 +1,15 @@
-import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
+import type * as ChildProcess from "node:child_process";
 import { promisify } from "node:util";
 import { writeLastRun } from "./config";
-import { createPullRequest, findOpenPrNumberByHeadRef, getCurrentUser } from "./gh";
+import { addAssignee, addLabel, createPullRequest, findOpenPrNumberByHeadRef, getCurrentUser } from "./gh";
 import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "./worktree";
 
-const execFileAsync = promisify(execFile);
+const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
+
+// promisify を呼び出しのたびに行うのは、テストが childProcess.execFile を差し替えられるようにするため
+// （モジュール読み込み時に束縛すると実コマンドが走る）。gh.ts の execGh と同じ理由。
+const execFileAsync = (command: string, args: string[]) => promisify(childProcess.execFile)(command, args);
 
 const CONFIG_FILE = "claude-task-worker.json";
 
@@ -71,21 +76,27 @@ export async function publishLastRunPr(workerName: string, defaultBranch: string
     // 前回のPRが（マージ前に次の実行が来たなどで）残っていれば、force-push でタイムスタンプを
     // 進めたそのPRをそのまま使う。記録PRが積み上がらない。
     const existing = await findOpenPrNumberByHeadRef(branch);
-    if (existing !== null) {
-      console.log(`[${workerName}] updated lastRun PR #${existing}`);
-      return existing;
-    }
+    const prNumber =
+      existing ??
+      (await createPullRequest(defaultBranch, branch, lastRunPrTitle(workerName), lastRunPrBody(workerName, at)));
+    console.log(`[${workerName}] ${existing !== null ? "updated" : "opened"} lastRun PR #${prNumber}`);
 
-    // マージは triage-pr ワーカーに任せる（cc-triage-scope + 自分自身をAssignee）。
-    // ワーカーが直接マージすると必須チェック・ブランチ保護をすり抜けるため。
-    const prNumber = await createPullRequest(
-      defaultBranch,
-      branch,
-      lastRunPrTitle(workerName),
-      lastRunPrBody(workerName, at),
-      { labels: [LABEL_TRIAGE_SCOPE], assignee: await getCurrentUser() },
+    // マージは triage-pr ワーカーに任せる。ワーカーが直接マージすると必須チェック・ブランチ
+    // 保護をすり抜けるため。同ワーカーは cc-triage-scope と Assignee の**両方**で候補を絞るので、
+    // どちらが欠けても記録PRは永久に拾われない。
+    //
+    // 付与を `gh pr create --label/--assignee` に任せず毎回付け直すのは、固定ブランチのPRでは
+    // 一度欠けると自力で復旧できないため。gh はラベル・Assignee をPR作成後の別ミューテーションで
+    // 付けるため、そこが落ちると非0終了なのにメタデータ無しのPRだけが残る（実測: 記録PR2件が
+    // ラベルもAssigneeも無い状態で作られ、うち1件は誰にも拾われず未マージのままクローズされた）。
+    // 以降の実行は existing 経路（PR再利用）に入り create を通らないので、二度と付かない。
+    // addLabel / addAssignee はどちらも冪等なので、毎回叩けば壊れたPRも次の実行で復旧する。
+    await addLabel("pr", prNumber, LABEL_TRIAGE_SCOPE).catch((err) =>
+      console.error(`[${workerName}] addLabel ${LABEL_TRIAGE_SCOPE} failed for PR #${prNumber}: ${err}`),
     );
-    console.log(`[${workerName}] opened lastRun PR #${prNumber}`);
+    await addAssignee("pr", prNumber, await getCurrentUser()).catch((err) =>
+      console.error(`[${workerName}] addAssignee failed for PR #${prNumber}: ${err}`),
+    );
     return prNumber;
   } finally {
     await removeWorktree(branch).catch((err) => console.error(`[${workerName}] removeWorktree failed: ${err}`));

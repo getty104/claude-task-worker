@@ -463,6 +463,13 @@ export async function addLabel(type: "issue" | "pr", number: number, label: stri
   });
 }
 
+// 既にアサイン済みのユーザーを再指定しても gh はエラーにしない（no-op）ため冪等。
+export async function addAssignee(type: "issue" | "pr", number: number, login: string): Promise<void> {
+  await withRetry(async () => {
+    await execGh([type, "edit", String(number), "--add-assignee", login]);
+  });
+}
+
 export async function hasLabel(type: "issue" | "pr", number: number, label: string): Promise<boolean> {
   return withRetry(async () => {
     const output = await execGh([type, "view", String(number), "--json", "labels"]);
@@ -562,16 +569,11 @@ export async function commentOnIssue(issueNumber: number, body: string): Promise
 }
 
 // PRを作成して番号を返す。`gh pr create` は作成したPRのURLを標準出力に返す。
-export async function createPullRequest(
-  base: string,
-  head: string,
-  title: string,
-  body: string,
-  options?: { labels?: string[]; assignee?: string },
-): Promise<number> {
+// ラベル・Assignee は受け取らない。gh pr create はそれらをPR作成後の別ミューテーションで
+// 付けるため、そこが落ちると「非0終了なのにメタデータ無しのPRだけが残る」状態になる。
+// 付与は作成後に addLabel / addAssignee（どちらも冪等・リトライ付き）で行う。
+export async function createPullRequest(base: string, head: string, title: string, body: string): Promise<number> {
   const args = ["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body];
-  for (const label of options?.labels ?? []) args.push("--label", label);
-  if (options?.assignee) args.push("--assignee", options.assignee);
   const url = await execGh(args);
   const matched = url.match(/\/pull\/(\d+)/);
   if (!matched) throw new Error(`gh pr create returned an unexpected output: ${url}`);
