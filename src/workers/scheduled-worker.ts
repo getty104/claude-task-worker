@@ -150,7 +150,9 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
           buildClaudeEnv(mode, cloud),
           execution.prompt,
           cloud,
-          cloud && lastRunPr !== null ? { type: "pr" as const, number: lastRunPr } : undefined,
+          // 定期ワーカーは Issue/PR を起点に走らないため、クラウドの cc-cloud-done も
+          // ローカル --debug の報告コメントも実行記録PRを置き先にする。
+          lastRunPr !== null ? { type: "pr" as const, number: lastRunPr } : undefined,
           model,
         );
       } catch (err) {

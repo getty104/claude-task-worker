@@ -369,7 +369,7 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 - 2026-08-29 の smoke test で両者の実際の挙動を確認した。**`--on-branch <PR の head ブランチ>`** はそのブランチ上で**直接**作業し、push すると**その PR がそのまま更新される**（新しいブランチは切られない）。**`--ref <branch>`** は指定ブランチを起点に `claude/<description 由来>-<6文字>` 形式の**新規**作業ブランチを作る。作業ブランチ名は `--cloud` に渡す description に依存するため、ローカルからは事前に取得・予測できない。この確認により、`--ref` 系ワーカー（Issue 系）で「作業ブランチ名を取得する手段が無い」という前節の結論、および `selectOwnedClosingPr()` による所有権判定が必要という結論は変わらない
 - **プロンプトは作成コマンドの `--cloud` の値として渡す**（`buildCloudCreateArgs(commonArgs, description)` の `description`）。実測（claude 2.1.250）により `--cloud <description>` の `description` は表示名ではなく**初期プロンプトとして即実行される**ことが判明したため、これがクラウドセッションの新規作成に `-p` を付けられない制約下でプロンプトを渡す唯一の経路になる。herdr の `agent prompt`（上記「mode（タスクの実行形態）」の「プロンプトを起動引数で渡してはいけない」）はローカル herdr 実行専用の投入経路であり、クラウド実行では使わない — クラウドの作成コマンドは `script(1)` 経由で直接 spawn され、投入されるプロンプトは`agent prompt`ではなく`--cloud`の値そのもの
 - `buildClaudeEnv(mode, cloud)` は `cloud` のときのみ `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を注入する。GitHub App 連携済みのリポジトリでも `--ref` / `--on-branch` が `the GitHub App is not set up for this repository` として誤って拒否される Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)、2026-08-29時点 OPEN）の回避策。`createCloudSession()` の `spawn()` に渡す env へ直接設定するため、作成コマンドの起動プロセスに自動的に効く
-- **最終レポートはドライバ経路には乗らないため、Issue/PR コメント経由で回収する**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8、Issue #285）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。そこで `appendCloudDoneInstruction()`（`src/claude-args.ts`）は `cc-cloud-done` を付ける直前に、固定見出し `CLOUD_REPORT_HEADING`（生成側・取得側で共有する定数）を持つコメントへ最終報告を投稿させ、ワーカーは完了検知（次節）後に1回だけ `findCommentSince()`（`src/gh.ts`）でその本文を取得して `TaskResult.output` にする。取得できない・例外の場合は従来どおりの定型文へフォールバックし、通知自体は落とさない。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
+- **最終レポートはドライバ経路には乗らないため、Issue/PR コメント経由で回収する**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8、Issue #285）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。そこで **`--debug` フラグ指定時のみ**、`appendCloudDoneInstruction()`（`src/claude-args.ts`）が `cc-cloud-done` を付ける直前に、固定見出し `CLOUD_REPORT_HEADING`（生成側・取得側で共有する定数）を持つコメントへ最終報告を投稿させ、ワーカーは完了検知（次節）後に1回だけ `findCommentSince()`（`src/gh.ts`）でその本文を取得して `TaskResult.output` にする。取得できない・例外の場合は従来どおりの定型文へフォールバックし、通知自体は落とさない。**`--debug`（`hasDebugFlag()`、`src/dispatch-args.ts`）が無い既定ではコメントを投稿させず、回収もしない** — 通常運用の最終報告は Slack 通知で足りる一方、毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。投稿指示だけを落とし、完了検知の `cc-cloud-done` 付与指示は常に付ける（落とすとタイムアウトまで完了を検知できない）。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
 
 #### 完了検知（`cc-cloud-done` ラベルのポーリング）
 
@@ -432,6 +432,17 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 - **4（`allow_remote_sessions` 組織ポリシー）**: CLI がポリシーを `policy-limits.json` にキャッシュする実装を持つが実測環境では生成されず、「未取得」と「拒否」を区別できないため静的検査しない
 
 上記1の検査は `--cloud` が指定されていなければ **I/O ごと行わない**（`--cloud` を使わない既存の実行の挙動を完全に不変に保つため）。
+
+### `--debug`（最終報告の Issue/PR コメント）
+
+`claude-task-worker <command> --debug`（`hasDebugFlag()`、`src/dispatch-args.ts`）で、各タスクの最終報告を対象 Issue/PR へコメントとして残す。`--cloud` と同じくプロセス単位のフラグで、既定は無効（報告は Slack 通知にのみ載る。毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため）。
+
+**投稿の担当は実行形態で分かれる**。ワーカーが報告そのものを持っているかどうかが違うため:
+
+- **ローカル（default / herdr）**: ワーカーが投稿する。`onCompleteWithDebugReport()`（`src/process-manager.ts`）が `onComplete` をラップし、`CLOUD_REPORT_HEADING` を見出しとするコメントを `commentOnIssue` / `commentOnPR` で出してから元の `onComplete`（ラベル操作・worktree 削除）へ進む。投稿の失敗はログのみで握り潰す（報告コメントのために後片付けを落とさない）。報告が空文字なら投稿しない
+- **クラウド（`--cloud`）**: セッション自身が投稿する（`appendCloudDoneInstruction()` が指示を付ける）。ワーカーにはクラウド VM のターンが届かないため（前節参照）、ワーカー側から出せる報告が存在しない。`run()` はクラウド分岐で `runViaCloud()` へ抜けるので上記のラッパーを通らず、二重投稿にならない
+
+`run()` の `cloudTarget` 引数は**実行形態に関わらず常に渡す**（`issue-worker.ts` / `pr-worker.ts` / `scheduled-worker.ts`）。クラウドでは `cc-cloud-done` の探索先、ローカルでは報告コメントの投稿先という違いだけで、対象の Issue/PR は同一のため。PR 系の `onBranch` は「`--on-branch` を渡したか」を表すので `isCloud` をそのまま入れる（ローカルでは false）。定期ワーカーの投稿先は Issue/PR 系と同じく実行記録PR（`publishLastRunPr()` の返り値）で、作れなかった場合は対象なし＝投稿もしない。
 
 ### `--project` ディスパッチ
 

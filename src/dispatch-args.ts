@@ -47,6 +47,23 @@ export function resetCloudFlagCache(): void {
   cachedCloudFlag = undefined;
 }
 
+// --debug はクラウド実行のデバッグ用フラグ。用途は「クラウドセッションの最終報告を
+// Issue/PR コメントとして残すか」で、既定では残さない（通常運用は Slack 通知で足りる一方、
+// Issue/PR がワーカーの実行ログで埋まるため）。--cloud と同じくプロセス起動時に確定させる。
+let cachedDebugFlag: boolean | undefined;
+
+export function hasDebugFlag(): boolean {
+  if (cachedDebugFlag === undefined) {
+    cachedDebugFlag = process.argv.includes("--debug");
+  }
+  return cachedDebugFlag;
+}
+
+// テスト用。キャッシュを未解決へ戻す。
+export function resetDebugFlagCache(): void {
+  cachedDebugFlag = undefined;
+}
+
 export function assertCloudCompatibleCommand(command: string): void {
   if (FLAG_INCOMPATIBLE_COMMANDS.includes(command)) {
     console.error(`[worker] --cloud cannot be used with the "${command}" command`);

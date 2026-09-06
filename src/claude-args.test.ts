@@ -422,9 +422,17 @@ test("appendCloudDoneInstruction keeps the original prompt and appends the label
   assert.ok(result.includes("Issue #123"));
 });
 
-test("appendCloudDoneInstruction includes the cloud report heading", () => {
+test("appendCloudDoneInstruction includes the cloud report heading only with debug", () => {
+  assert.ok(appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 }, true).includes(CLOUD_REPORT_HEADING));
+  assert.ok(!appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 }).includes(CLOUD_REPORT_HEADING));
+});
+
+// 報告コメントを出さない既定でも、完了検知のラベル付与指示は必ず残ること
+// （落ちるとワーカーがタイムアウトまで完了を検知できない）。
+test("appendCloudDoneInstruction keeps the label instruction without debug", () => {
   const result = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
-  assert.ok(result.includes(CLOUD_REPORT_HEADING));
+  assert.ok(result.includes("gh issue edit 1 --add-label cc-cloud-done"));
+  assert.ok(!result.includes("上記コメントの投稿後"));
 });
 
 test("appendCloudDoneInstruction switches wording between issue and pr targets", () => {
@@ -552,7 +560,7 @@ test("buildCloudPrompt includes the tool restriction text", () => {
 
 test("buildCloudPrompt keeps the cc-cloud-done instruction and task prompt when a target is given", () => {
   const prompt = "/claude-task-worker:exec-issue 123";
-  const result = buildCloudPrompt(prompt, "sonnet", { type: "issue", number: 123 });
+  const result = buildCloudPrompt(prompt, "sonnet", { type: "issue", number: 123 }, true);
   assert.ok(result.startsWith(prompt));
   assert.ok(result.includes(prompt));
   assert.ok(result.includes(CLOUD_REPORT_HEADING));
