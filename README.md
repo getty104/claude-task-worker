@@ -122,7 +122,7 @@ claude-task-worker init --force   # 強制上書き
 ## コマンド
 
 ```bash
-claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--project <name>]... [--cloud]
+claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--project <name>]... [--cloud] [--debug]
 ```
 
 | コマンド | 内容 |
@@ -209,6 +209,16 @@ npx claude-task-worker cloud-setup
 - `--cloud` は `mode`（`default` / `herdr`）に依存しない。クラウドセッションの作成は `script` コマンドの疑似 pty で完結し、herdr のペインを使わないため、どちらの `mode` でも同じ経路を通る
 
 詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
+
+### `--debug`
+
+クラウドセッションの最終報告を対象 Issue/PR へコメントとして残す。`--cloud` と併用する（単体では効果なし）。
+
+```bash
+claude-task-worker exec-issue --cloud --debug
+```
+
+既定（`--debug` なし）では最終報告は Slack 通知にのみ載り、Issue/PR にはコメントされない。毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。完了検知（`cc-cloud-done`）はフラグの有無に関わらず従来どおり動く。
 
 ### Pen CLI のログイン
 
