@@ -280,7 +280,9 @@ test("buildClaudeArgs omits -p <prompt> and --cloud itself when cloud is true", 
 
 test("buildClaudeArgs (cloud) contains only the create command's common flags", () => {
   const args = buildClaudeArgs({ mode: "herdr", prompt: "/skill 1", model: "opus", effort: "high", cloud: true });
-  assert.ok(args.includes("--permission-mode"));
+  // `--permission-mode` はクラウドでは VM へ反映されない一方、script(1) の疑似pty越しの
+  // 作成コマンドを対話起動扱いにして bypassPermissions の承認ダイアログを出させるため渡さない。
+  assert.ok(!args.includes("--permission-mode"));
   assert.ok(args.includes("--disallowedTools"));
   assert.ok(args.includes("--append-system-prompt-file"));
   assert.ok(args.includes("--model"));
@@ -397,7 +399,7 @@ test("buildClaudeArgs keeps the other flags unchanged for a cloud session", () =
     cloud: true,
     baseRef: "main",
   });
-  assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
+  assert.ok(!args.includes("--permission-mode"));
   assert.equal(args[args.indexOf("--disallowedTools") + 1], DISALLOWED_TOOLS_ARG);
   assert.equal(args[args.indexOf("--append-system-prompt-file") + 1], systemPromptFilePath("opus"));
   assert.equal(args[args.indexOf("--model") + 1], "opus");

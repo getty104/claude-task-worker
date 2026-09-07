@@ -230,7 +230,10 @@ async function runCloudHappyPath(
   assert.equal(argValue(create!.argv, "--ref"), "main");
   assert.ok(!create!.argv.includes("--on-branch"), "--on-branch が付いてはいけない");
   assert.ok(!create!.argv.includes("-p"), "-p が付いてはいけない（クラウド作成コマンドは常に非付与）");
-  assert.ok(create!.argv.includes("--permission-mode"), "実装は cloud でも --permission-mode を付ける");
+  assert.ok(
+    !create!.argv.includes("--permission-mode"),
+    "cloud では --permission-mode を付けない（pty 越しの作成コマンドが承認ダイアログで固まるため）",
+  );
   assert.ok(create!.argv.includes("--disallowedTools"), "実装は cloud でも --disallowedTools を付ける");
 
   // 1コマンド方式では --cloud の値がクラウドセッションの初期プロンプトそのもの
