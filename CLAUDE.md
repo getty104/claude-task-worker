@@ -362,7 +362,8 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 #### `--cloud` 付与時の起動引数の差分
 
-- `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` のみ**。逆にクラウド時のみ付くのは `--environment`（`remoteEnvId` 指定時、前節）と `--ref` / `--on-branch`。`--permission-mode bypassPermissions` / `--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
+- `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` と `--permission-mode` の2つ**。逆にクラウド時のみ付くのは `--environment`（`remoteEnvId` 指定時、前節）と `--ref` / `--on-branch`。`--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
+- **`--permission-mode` をクラウドで渡してはいけない**。クラウドセッションは同フラグを受理するが VM 側へ反映せず（Issue #307。VM の権限モードは `cloud-setup` が書く settings.json の `permissions.defaultMode` が決める）、一方でローカル側の作成コマンドは `script(1)` の疑似pty越しに起動するため **claude からは対話起動に見える**。この状態で `bypassPermissions` を渡すと、そのマシンで一度も承認していない場合に「WARNING: Claude Code running in Bypass Permissions mode … ❯ No, exit / Yes, I accept」の承認ダイアログが描画される（`~/.claude.json` の `bypassPermissionsModeAccepted` が承認済みフラグ。print モードでは出ないためローカル実行では気づけない）。作成コマンドの stdin は `"ignore"` で誰も応答できず、セッションIDが出力されないまま `timed out waiting for the cloud session id` で必ず失敗する
 - 実測（`docs/cloud-session-launch-flags.md` の T5 / T6 / T7、claude 2.1.247）でこれらのフラグはいずれも**受理された**。ただし「受理された＝クラウド VM 側で実際に反映される」ことまでは未確認（起動引数として拒否されないことのみを確認）
 - **「クラウドセッションが受理しないフラグを渡すと起動そのものが失敗する（黙って無視されない）」という原則は維持する**。実際にそれへ該当するのは2つだけ: (a) `-p` との併用（`Error: --cloud cannot be combined with --print.`）、(b) `--ref` と `--on-branch` の同時指定（`Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）
 - `--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**。実装は起動前に `buildClaudeArgs()` が例外で弾く（外部プロセスのエラーで気づく形にしないため）。Issue 系ワーカーはベースブランチを `--ref` へ、PR 系は PR の head ブランチを `--on-branch` へ渡す

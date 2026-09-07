@@ -245,8 +245,15 @@ export function buildClaudeArgs({
     // クラウド実行（`cloud: true`）も print モード非対応のため同様に省く
     // （実測 T2: `Error: --cloud cannot be combined with --print.`）。
     ...(mode === "herdr" || cloud === true ? [] : ["-p", prompt]),
-    "--permission-mode",
-    permission,
+    // クラウド実行では権限モードを渡さない。クラウドセッションは `--permission-mode` を
+    // 受理するが VM 側へ反映せず（Issue #307。VM の権限モードは cloud-setup が書く
+    // settings.json の `permissions.defaultMode` が決める）、一方でローカル側の作成
+    // コマンドは script(1) の疑似pty越し＝**対話起動**として扱われるため、
+    // `bypassPermissions` を渡すと claude が「WARNING: ... Bypass Permissions mode /
+    // No, exit / Yes, I accept」の承認ダイアログを出す（print モードでは出ない）。
+    // 作成コマンドの stdin は ignore で誰も応答できず、セッションIDが出力されないまま
+    // 必ず `timed out waiting for the cloud session id` で失敗する。
+    ...(cloud === true ? [] : ["--permission-mode", permission]),
     "--disallowedTools",
     DISALLOWED_TOOLS_ARG,
     "--append-system-prompt-file",
