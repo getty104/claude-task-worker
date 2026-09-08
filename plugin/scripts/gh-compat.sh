@@ -33,6 +33,8 @@ usage: gh-compat.sh <subcommand> [args...]
   add-sub-issue <parent> <child>...  <parent> のサブIssueとして追加する
   pr-mergeable <pr-number>           CONFLICTING / MERGEABLE / UNKNOWN を出力する
   pr-for-branch [branch]             カレント（または指定）ブランチの Open PR 番号を出力する
+  add-label <number> <label>...      Issue/PR にラベルを**追加**する（既存ラベルは維持）
+  remove-label <number> <label>      Issue/PR からラベルを1つ外す（他のラベルは維持）
 USAGE
   exit 64
 }
@@ -153,6 +155,35 @@ cmd_add_sub_issue() {
   return $rc
 }
 
+# ラベルの追加・削除。MCP の `issue_write` / `pull_request_write`（method: update）は
+# labels を**全置換**するため、「1つ足す」つもりの呼び出しで他のラベルが黙って消える
+# （実測: cc-cloud-done を付けたセッションが cc-triage-scope と cc-in-progress を巻き添えで
+# 落とし、記録PRが誰にも拾われないまま10時間放置された）。REST の labels エンドポイントは
+# 追加・単体削除の専用APIなので置換事故が起きない。`gh issue edit --add-label` は GraphQL
+# 経由でクラウドでは 403 になるため、フォールバックに留める。
+# Issue と PR は番号空間を共有するので、PR にもそのまま issues/<n>/labels が使える。
+cmd_add_label() {
+  local n="$1"; shift
+  local rc=0 l args=()
+  for l in "$@"; do args+=(-f "labels[]=${l}"); done
+  if gh api -X POST "repos/${OWNER_REPO}/issues/${n}/labels" \
+    -H "X-GitHub-Api-Version: 2022-11-28" "${args[@]}" >/dev/null 2>&1; then
+    return 0
+  fi
+  for l in "$@"; do gh issue edit "$n" --add-label "$l" >/dev/null 2>&1 || rc=1; done
+  return $rc
+}
+
+cmd_remove_label() {
+  local n="$1" l="$2"
+  # 付いていないラベルの削除は REST が 404 を返す。冪等にしたいので gh 側も試して終わる。
+  if gh api -X DELETE "repos/${OWNER_REPO}/issues/${n}/labels/${l}" \
+    -H "X-GitHub-Api-Version: 2022-11-28" >/dev/null 2>&1; then
+    return 0
+  fi
+  gh issue edit "$n" --remove-label "$l" >/dev/null 2>&1
+}
+
 cmd_pr_mergeable() {
   local n="$1" v
   # REST の mergeable は算出中に null を返す。GraphQL の UNKNOWN と同じ扱いにする。
@@ -207,6 +238,8 @@ case "$sub" in
       add-sub-issue)  [ $# -ge 2 ] || usage; cmd_add_sub_issue "$@" ;;
       pr-mergeable)   [ $# -eq 1 ] || usage; cmd_pr_mergeable "$1" ;;
       pr-for-branch)  [ $# -le 1 ] || usage; cmd_pr_for_branch "${1:-}" ;;
+      add-label)      [ $# -ge 2 ] || usage; cmd_add_label "$@" ;;
+      remove-label)   [ $# -eq 2 ] || usage; cmd_remove_label "$1" "$2" ;;
       *) usage ;;
     esac ;;
 esac

@@ -315,7 +315,7 @@ export function appendCloudDoneInstruction(prompt: string, target: CloudPromptTa
   const reportInstruction = debug
     ? `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`
     : "";
-  const labelInstruction = `${debug ? "上記コメントの投稿後、" : ""}このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。GitHub MCP（\`issue_write\` / method: \`update\`）を優先し、失敗した場合のみ \`gh ${target.type} edit ${target.number} --add-label ${CLOUD_DONE_LABEL}\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
+  const labelInstruction = `${debug ? "上記コメントの投稿後、" : ""}このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。付与は \`bash \${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label ${target.number} ${CLOUD_DONE_LABEL}\` で行い、失敗した場合のみ \`gh api -X POST repos/{owner}/{repo}/issues/${target.number}/labels -f "labels[]=${CLOUD_DONE_LABEL}"\` へフォールバックすること（フォールバックは1回まで）。**GitHub MCP の \`issue_write\` / \`pull_request_write\`（method: \`update\`）は使わないこと** — 同ツールの \`labels\` は全置換で、\`${CLOUD_DONE_LABEL}\` を足すつもりの呼び出しが既存ラベル（\`cc-triage-scope\` / \`cc-in-progress\` 等）を巻き添えで消し、その Issue/PR がワーカーのポーリング対象から外れる。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
   return [prompt, checkoutInstruction, worktreeInstruction, reportInstruction, labelInstruction]
     .filter((part) => part !== "")
     .join("\n\n");

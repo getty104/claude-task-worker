@@ -433,7 +433,7 @@ test("appendCloudDoneInstruction includes the cloud report heading only with deb
 // （落ちるとワーカーがタイムアウトまで完了を検知できない）。
 test("appendCloudDoneInstruction keeps the label instruction without debug", () => {
   const result = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
-  assert.ok(result.includes("gh issue edit 1 --add-label cc-cloud-done"));
+  assert.ok(result.includes("gh-compat.sh add-label 1 cc-cloud-done"));
   assert.ok(!result.includes("上記コメントの投稿後"));
 });
 
@@ -441,9 +441,21 @@ test("appendCloudDoneInstruction switches wording between issue and pr targets",
   const issueResult = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 1 });
   const prResult = appendCloudDoneInstruction("/skill 1", { type: "pr", number: 1 });
   assert.ok(issueResult.includes("Issue #1"));
-  assert.ok(issueResult.includes("gh issue edit 1 --add-label cc-cloud-done"));
   assert.ok(prResult.includes("PR #1"));
-  assert.ok(prResult.includes("gh pr edit 1 --add-label cc-cloud-done"));
+  // ラベル付与の経路は Issue / PR で同一（REST の labels は番号空間を共有する）。
+  for (const result of [issueResult, prResult]) {
+    assert.ok(result.includes("gh-compat.sh add-label 1 cc-cloud-done"));
+  }
+});
+
+// MCP の update は labels を全置換するため、cc-cloud-done を足す1回の呼び出しで
+// cc-triage-scope / cc-in-progress が巻き添えで消え、その Issue/PR がワーカーの
+// ポーリング対象から外れる（実測: 記録PRが10時間放置された）。禁止を明文で残す。
+test("appendCloudDoneInstruction forbids the label-replacing MCP write", () => {
+  const result = appendCloudDoneInstruction("/skill 1", { type: "pr", number: 1 });
+  assert.ok(result.includes("issue_write"));
+  assert.ok(result.includes("使わないこと"));
+  assert.ok(!/`issue_write`（method: `update`）を優先/.test(result));
 });
 
 test("buildCloudToolRestriction lists every DISALLOWED_TOOLS entry", () => {
