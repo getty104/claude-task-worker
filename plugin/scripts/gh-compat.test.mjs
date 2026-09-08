@@ -240,3 +240,38 @@ test("issue-deps は30件超のページングを取りこぼさないよう --p
   assert.match(calls, /--paginate --slurp repos\/acme\/widget\/issues\/12\/dependencies\/blocked_by/);
   assert.match(calls, /--paginate --slurp repos\/acme\/widget\/issues\/12\/dependencies\/blocking/);
 });
+
+test("add-label は追加専用の REST を使い、全置換になる gh issue edit を呼ばない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "issues/6056/labels": "[]" });
+  run(["add-label", "6056", "cc-cloud-done"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /POST repos\/acme\/widget\/issues\/6056\/labels/);
+  assert.match(calls, /labels\[\]=cc-cloud-done/);
+  assert.doesNotMatch(calls, /issue edit/);
+});
+
+test("add-label は REST が失敗したら gh issue edit --add-label へフォールバックする", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "--add-label": "" });
+  run(["add-label", "12", "cc-triage-scope"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /issue edit 12 --add-label cc-triage-scope/);
+});
+
+test("remove-label は単体削除の REST を使う（他のラベルを巻き添えにしない）", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "labels/cc-cloud-done": "[]" });
+  run(["remove-label", "6056", "cc-cloud-done"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /DELETE repos\/acme\/widget\/issues\/6056\/labels\/cc-cloud-done/);
+});

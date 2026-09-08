@@ -70,7 +70,8 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh issue view <n> --json subIssuesSummary` | `issue_read`（method: `get_sub_issues`） |
 | `gh issue list --search ...` | `list_issues` / `search_issues` |
 | `gh issue create` | `issue_write`（method: `create`） |
-| `gh issue edit --add-label` / `--remove-label` / `--body` | `issue_write`（method: `update`） |
+| `gh issue edit --body` | `issue_write`（method: `update`） |
+| `gh issue edit --add-label` / `--remove-label` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <番号> <ラベル>...` / `remove-label <番号> <ラベル>`（後述） |
 | `gh issue close [--reason]` | `issue_write`（method: `update`、state を closed へ） |
 | `gh issue comment` | `add_issue_comment` |
 
@@ -87,7 +88,8 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる） |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | `create_pull_request` |
-| `gh pr edit` | `pull_request_write`（method: `update`） |
+| `gh pr edit`（ラベル以外） | `pull_request_write`（method: `update`） |
+| `gh pr edit --add-label` / `--remove-label` | **MCP を使わない**。`gh-compat.sh add-label` / `remove-label`（Issue と同じ。番号空間を共有する） |
 | `gh pr merge` | `pull_request_write`（method: `merge`） |
 | `gh pr comment` | `add_issue_comment`（PR は Issue 番号空間を共有する） |
 
@@ -108,7 +110,7 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 
 ## `gh-compat.sh`（MCP に無く、`gh` ではクラウドで落ちる操作）
 
-MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 403 になる操作は、`${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh` に寄せてある。**REST / git のローカル導出を第一手段にし、失敗時のみ従来の `gh` へフォールバックする**ので、ローカル実行の挙動は変わらない。スキル本文からは `gh` を直接呼ばず、必ずこのヘルパーを経由する。
+MCP に同等ツールが無い（または**あっても意味論が違って壊れる**）うえ、`gh` の経路が GraphQL ゲートで 403 になる操作は、`${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh` に寄せてある。**REST / git のローカル導出を第一手段にし、失敗時のみ従来の `gh` へフォールバックする**ので、ローカル実行の挙動は変わらない。スキル本文からは `gh` を直接呼ばず、必ずこのヘルパーを経由する。
 
 | サブコマンド | 置き換えた `gh` | 第一手段 |
 | --- | --- | --- |
@@ -121,6 +123,10 @@ MCP に同等ツールが無く、かつ `gh` の経路が GraphQL ゲートで 
 | `add-sub-issue <parent> <child>...` | `gh issue edit --add-sub-issue` | `POST .../sub_issues`（body は `sub_issue_id`） |
 | `pr-mergeable <n>` | `gh pr view --json mergeable` / `gh pr status` | `GET repos/{o}/{r}/pulls/{n}` の `mergeable`（`null` は `UNKNOWN` へ写す） |
 | `pr-for-branch [branch]` | `gh pr view --json number`（カレントブランチのPR導出） | `GET repos/{o}/{r}/pulls?state=open&head={owner}:{branch}` |
+| `add-label <n> <ラベル>...` | `gh issue edit --add-label` / `gh pr edit --add-label` | `POST repos/{o}/{r}/issues/{n}/labels`（追加専用API） |
+| `remove-label <n> <ラベル>` | `gh issue edit --remove-label` / `gh pr edit --remove-label` | `DELETE repos/{o}/{r}/issues/{n}/labels/{label}`（単体削除API） |
+
+**ラベル操作で MCP（`issue_write` / `pull_request_write` の method: `update`）を使ってはいけない。** 同ツールの `labels` は指定した配列で**全置換**するため、「ラベルを1つ足す」つもりの呼び出しが他のラベルを黙って落とす。実測では、クラウドセッションが `cc-cloud-done` を付けた1回の update で `cc-triage-scope` と `cc-in-progress` が同時に消え、そのPRが `triage-pr` のポーリング条件（ラベル＋Assignee）から外れて10時間放置された。REST の labels エンドポイントは追加・単体削除の専用APIなので、この事故が構造的に起きない。
 
 2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。
 
