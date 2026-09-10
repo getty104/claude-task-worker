@@ -35,6 +35,7 @@ usage: gh-compat.sh <subcommand> [args...]
   pr-for-branch [branch]             カレント（または指定）ブランチの Open PR 番号を出力する
   add-label <number> <label>...      Issue/PR にラベルを**追加**する（既存ラベルは維持）
   remove-label <number> <label>      Issue/PR からラベルを1つ外す（他のラベルは維持）
+  close-issue <number> [reason]      Issue をクローズする（reason は completed / not_planned。既定 completed）
 USAGE
   exit 64
 }
@@ -184,6 +185,30 @@ cmd_remove_label() {
   gh issue edit "$n" --remove-label "$l" >/dev/null 2>&1
 }
 
+# Issue のクローズ。`gh issue close` は GraphQL の closeIssue mutation を叩くため
+# （gh 2.98.0 で `GH_DEBUG=api` により確認）、クラウドセッションのゲートに掛かりうる。
+# Epic フローではサブIssueを閉じる経路がこのコマンドしか無く（base が非デフォルトブランチの
+# PR は GitHub が自動クローズしない）、ここが落ちると Issue が open のまま取り残される。
+# REST の issues エンドポイントは state / state_reason をそのまま受けるので置き換えられる。
+# 既にクローズ済みの Issue に対しても 200 を返すため冪等。
+cmd_close_issue() {
+  local n="$1" reason="${2:-completed}"
+  case "$reason" in
+    completed|not_planned) : ;;
+    *) echo "gh-compat: close-issue: reason must be completed or not_planned" >&2; return 64 ;;
+  esac
+  if gh api -X PATCH "repos/${OWNER_REPO}/issues/${n}" \
+    -H "X-GitHub-Api-Version: 2022-11-28" -f state=closed -f "state_reason=${reason}" >/dev/null 2>&1; then
+    return 0
+  fi
+  # gh 側の --reason はハイフン区切り（not planned は "not planned"）
+  if [ "$reason" = "not_planned" ]; then
+    gh issue close "$n" --reason "not planned" >/dev/null 2>&1
+  else
+    gh issue close "$n" --reason completed >/dev/null 2>&1
+  fi
+}
+
 cmd_pr_mergeable() {
   local n="$1" v
   # REST の mergeable は算出中に null を返す。GraphQL の UNKNOWN と同じ扱いにする。
@@ -240,6 +265,7 @@ case "$sub" in
       pr-for-branch)  [ $# -le 1 ] || usage; cmd_pr_for_branch "${1:-}" ;;
       add-label)      [ $# -ge 2 ] || usage; cmd_add_label "$@" ;;
       remove-label)   [ $# -eq 2 ] || usage; cmd_remove_label "$1" "$2" ;;
+      close-issue)    [ $# -ge 1 ] && [ $# -le 2 ] || usage; cmd_close_issue "$1" "${2:-completed}" ;;
       *) usage ;;
     esac ;;
 esac

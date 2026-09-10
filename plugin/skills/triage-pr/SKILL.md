@@ -294,10 +294,10 @@ gh pr merge $ARGUMENTS --merge --delete-branch
    gh pr view $ARGUMENTS --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'
    ```
 
-   3-2. 抽出したIssue番号それぞれに対して、完了クローズを実行する（複数ある場合は全て）。実装がEpicブランチに取り込まれた完了クローズのため、マージせずクローズする場合の`--reason "not planned"`とは異なり`--reason completed`を用いる。
+   3-2. 抽出したIssue番号それぞれに対して、完了クローズを実行する（複数ある場合は全て）。実装がEpicブランチに取り込まれた完了クローズのため、マージせずクローズする場合の`not_planned`とは異なり`completed`を用いる。`gh issue close` は GraphQL 経由でクラウドセッションのゲートに掛かるため使わない（REST へ寄せた `gh-compat.sh close-issue` を使う）。
 
    ```bash
-   gh issue close <issue番号> --reason completed
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> completed
    ```
 
    関連Issueが抽出できない場合は、その旨を報告に含めること。
@@ -331,7 +331,7 @@ gh pr close $ARGUMENTS --delete-branch
 3. 取得したIssue番号それぞれに対してCloseを実行する（複数ある場合は全て）。
 
 ```
-gh issue close <issue番号> --reason "not planned"
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> not_planned
 ```
 
 関連Issueが取得できない場合は、その旨を報告に含めること。

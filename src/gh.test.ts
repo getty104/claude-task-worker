@@ -6,7 +6,7 @@ import type * as GhModule from "./gh";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { hasLabel, hasOpenBlockers, findPrNumberClosingIssue, findCommentSince } =
+const { hasLabel, hasOpenBlockers, findPrNumberClosingIssue, findCommentSince, parseClosingIssueNumbers } =
   (await import("./gh")) as typeof GhModule;
 
 const REPO_INFO_STDOUT = JSON.stringify({
@@ -215,4 +215,13 @@ test("findCommentSince returns the latest matching comment when there are multip
 test("findCommentSince returns null when no comment matches the heading", async (t) => {
   mockExecFile(t, JSON.stringify([{ body: "unrelated comment" }]));
   assert.equal(await findCommentSince(42, new Date("2026-08-28T00:00:00.000Z"), "## heading"), null);
+});
+
+test("parseClosingIssueNumbers picks up every closing keyword form and de-duplicates", () => {
+  const body = ["## Target Issue", "", "Closes #6090", "Fixes: #12", "resolved #12", "See also #999"].join("\n");
+  assert.deepEqual(parseClosingIssueNumbers(body), [6090, 12]);
+});
+
+test("parseClosingIssueNumbers returns an empty list when no closing keyword is present", () => {
+  assert.deepEqual(parseClosingIssueNumbers("## What\n関連 #123 に触れるだけで closing keyword は無い"), []);
 });

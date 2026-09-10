@@ -270,6 +270,38 @@ async function fetchPrRef(
   }
 }
 
+// PR の詳細（state / base / head / body）を REST で取得する。GraphQL を経由しない。
+export async function getPrDetail(prNumber: number): Promise<(ClosingPrRef & { body: string }) | null> {
+  const { owner, name } = await getRepoInfo();
+  return fetchPrRef(owner, name, prNumber);
+}
+
+// Issue をクローズする。`gh issue close` は GraphQL の closeIssue mutation を叩くため、REST へ寄せる
+// （plugin/scripts/gh-compat.sh の close-issue と同じ理由・同じエンドポイント）。
+// 既にクローズ済みの Issue に対しても 200 を返すので冪等。
+export async function closeIssue(
+  issueNumber: number,
+  reason: "completed" | "not_planned" = "completed",
+): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  await execGh([
+    "api",
+    "-X",
+    "PATCH",
+    `repos/${owner}/${name}/issues/${issueNumber}`,
+    "-f",
+    "state=closed",
+    "-f",
+    `state_reason=${reason}`,
+  ]);
+}
+
+// PR body が closing keyword で指している Issue 番号を列挙する（bodyClosesIssue と同じ解釈）。
+export function parseClosingIssueNumbers(body: string): number[] {
+  const pattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(\d+)\b(?!\d)/gi;
+  return [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];
+}
+
 // PR body が対象Issueを closing keyword（Closes/Fixes/Resolves 等）で指しているかを判定する（GitHubの解釈に合わせる）。
 export function bodyClosesIssue(body: string, issueNumber: number): boolean {
   const pattern = new RegExp(`\\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s*#${issueNumber}\\b(?!\\d)`, "i");
