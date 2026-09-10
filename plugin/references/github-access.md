@@ -72,7 +72,7 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh issue create` | `issue_write`（method: `create`） |
 | `gh issue edit --body` | `issue_write`（method: `update`） |
 | `gh issue edit --add-label` / `--remove-label` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <番号> <ラベル>...` / `remove-label <番号> <ラベル>`（後述） |
-| `gh issue close [--reason]` | `issue_write`（method: `update`、state を closed へ） |
+| `gh issue close [--reason]` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <番号> [completed\|not_planned]`（後述）。`issue_write`（method: `update`）は `labels` を全置換するため、state だけ変えるつもりの呼び出しでラベルが消えうる |
 | `gh issue comment` | `add_issue_comment` |
 
 ### Pull Request
@@ -125,10 +125,13 @@ MCP に同等ツールが無い（または**あっても意味論が違って�
 | `pr-for-branch [branch]` | `gh pr view --json number`（カレントブランチのPR導出） | `GET repos/{o}/{r}/pulls?state=open&head={owner}:{branch}` |
 | `add-label <n> <ラベル>...` | `gh issue edit --add-label` / `gh pr edit --add-label` | `POST repos/{o}/{r}/issues/{n}/labels`（追加専用API） |
 | `remove-label <n> <ラベル>` | `gh issue edit --remove-label` / `gh pr edit --remove-label` | `DELETE repos/{o}/{r}/issues/{n}/labels/{label}`（単体削除API） |
+| `close-issue <n> [reason]` | `gh issue close [--reason]` | `PATCH repos/{o}/{r}/issues/{n}` の `state=closed` / `state_reason`（reason は `completed`（既定）/ `not_planned`。クローズ済みでも200なので冪等） |
 
 **ラベル操作で MCP（`issue_write` / `pull_request_write` の method: `update`）を使ってはいけない。** 同ツールの `labels` は指定した配列で**全置換**するため、「ラベルを1つ足す」つもりの呼び出しが他のラベルを黙って落とす。実測では、クラウドセッションが `cc-cloud-done` を付けた1回の update で `cc-triage-scope` と `cc-in-progress` が同時に消え、そのPRが `triage-pr` のポーリング条件（ラベル＋Assignee）から外れて10時間放置された。REST の labels エンドポイントは追加・単体削除の専用APIなので、この事故が構造的に起きない。
 
-2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。
+**Issue のクローズも `gh` を直接使ってはいけない。** `gh issue close` は GraphQL の `closeIssue` mutation を叩く（`GH_DEBUG=api` で確認）。Epic フローではサブIssueを閉じる経路がこのコマンドしか無く（base が非デフォルトブランチの PR は GitHub が自動クローズしない）、ここが落ちると実装がマージ済みのまま Issue が open で取り残される。
+
+2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable`、`gh issue close` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。
 
 ## `gh` のまま残す操作
 

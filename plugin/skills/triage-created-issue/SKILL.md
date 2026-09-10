@@ -155,7 +155,7 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
    ```bash
    gh issue create --title "<後回しにした不具合のタイトル>" --label "cc-triage-scope" --body "<不具合の内容。分離元Issue #$0 を参照する旨を明記>"
    ```
-3. `gh issue create`直後・分離元Issueへのコメント投稿前に、もう一度同じ固定マーカーで分離元Issueのコメント履歴を走査する（並行実行で他プロセスが同じ起票を行っていないかの再確認）。既存の後続Issue番号がすでに記録されていた場合、直前に自分が作成した後続Issueは重複とみなし`gh issue close --reason "not planned"`でクローズしたうえで、既存番号を採用してステップ4に進む。
+3. `gh issue create`直後・分離元Issueへのコメント投稿前に、もう一度同じ固定マーカーで分離元Issueのコメント履歴を走査する（並行実行で他プロセスが同じ起票を行っていないかの再確認）。既存の後続Issue番号がすでに記録されていた場合、直前に自分が作成した後続Issueは重複とみなし`gh-compat.sh close-issue <番号> not_planned`でクローズしたうえで、既存番号を採用してステップ4に進む。
 4. 分離元Issue・後続Issueそれぞれの本文（description）に相手のIssue番号を明記して相互参照する。本文更新とマーカーコメント投稿の2段階で行う：
    - 後続Issue側はステップ2の`--body`で参照済み
    - 分離元Issue側は既存descriptionを保持したまま末尾に参照を追記する。`exec-issue`など後続処理はdescriptionのみを読むため、コメントだけでは本文に参照が残らない
@@ -255,9 +255,9 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
    gh issue comment $0 --body "<クローズ理由の説明>"
    ```
 
-2. Issueをcloseする
+2. Issueをcloseする（`gh issue close` は GraphQL 経由でクラウドセッションのゲートに掛かるため使わない）
    ```bash
-   gh issue close $0
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue $0 not_planned
    ```
 
 #### パターンC: 確認事項への回答が必要な場合

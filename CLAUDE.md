@@ -514,6 +514,16 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 `cc-epic-issue` の付いたPRをデフォルトブランチへマージする＝リリースなので、**PRをマージしうるスキルはすべて Epic PR 判定を持ち、マージの代わりに `cc-release-ready` を付けて終える**。対象は `triage-pr`（ステップ3）と `fix-review-point`（フェーズ1の「修正点がない場合」）の2箇所。`fix-review-point` 側にゲートが無かったため、`cc-fix-onetime` を経由した Epic PR が人の判断を挟まずマージされていた。判定に使うラベル一覧はステップ0の `gh pr view --json ...,labels` で取得したものを使い回す。
 
+### サブIssueのクローズはワーカーが担保する（`triage-pr` の `onCompleted`）
+
+**base が非デフォルトブランチ（`cc-epic-<N>`）の PR がマージされても、GitHub は closing reference のある Issue を閉じない。** Epic PR 本文もサブIssueを closing keyword で参照しない（`create-epic-pr` はサブIssueを平文で列挙し `Closes` は Epic Issue にだけ付ける）ため、Epic 配下のサブIssueは**どのタイミングでも GitHub 側からは閉じられない**。
+
+閉じる経路はもともと `triage-pr` スキルのステップ3-2（マージ成功後に PR 本文の `Closes #N` を抽出してクローズ）だけだったが、これは**マージという不可逆操作の後に置かれた、LLM が実行する最後の1ステップ**であり、落ちても誰も気づけなかった: `triagePrWorker` に検証が無く、マージ済みPRは `listPullRequestsWithChecks()` の `--state open` で二度と拾われないため自己修復もしない。実測では、実装PRがマージされたのにサブIssueが open のまま84分放置され、人が手動でクローズした（セッションはマージの61分後に完了マーカーだけ付けて終了しており、close ステップだけが抜けていた）。
+
+そこで `triagePrWorker` に `onCompleted` を置き、**タスク完了後にワーカー側（ローカル・ゲートを受けない）で決定論的に閉じ直す**（`shouldCloseLinkedIssues()` が「PR がマージ済み ∧ base ≠ デフォルトブランチ」を判定 → `parseClosingIssueNumbers()` で本文から抽出 → `closeIssue()`）。スキルが既に閉じていれば REST の `PATCH` は 200 を返すだけなので二重実行の害は無く、セッションの外でマージされた PR も同じ経路で拾える。**スキル側のステップ3-2 は残す**（クラウドセッションが自分でマージした直後に閉じたほうが Issue の見え方が早く整うため）。ワーカー側は最後の砦。
+
+あわせて、クローズの実体を `gh issue close` から **`gh-compat.sh close-issue`（REST の `PATCH .../issues/{n}` に `state=closed` / `state_reason`）** へ寄せた。`gh issue close` は GraphQL の `closeIssue` mutation を叩くためクラウドセッションのゲートに掛かりうる一方、この操作には MCP の安全な代替が無い（`issue_write` の method: `update` は `labels` を全置換するので state だけ変えるつもりの呼び出しでラベルが消える）。対象は `triage-pr` / `fix-review-point` / `triage-created-issue` / `exec-issue` の各スキル。
+
 ### `cc-need-human-check`（PR側）と解けないコンフリクトのループ遮断
 
 PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリング候補から除外する（`src/workers/triage-pr.ts` の `excludeLabels`）。同ラベルが付く経路は2つ:

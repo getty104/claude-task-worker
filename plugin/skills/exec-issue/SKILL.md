@@ -346,7 +346,7 @@ git diff "origin/${BASE_BRANCH}..HEAD" --stat
      ## 確認したファイル / 参考情報
      - <パスやリンクを列挙。なければ「該当なし」>
      ```
-  2. コメント投稿の成功を確認した上で `gh issue close $0 --reason "not planned"` を実行する。コメントに失敗した場合はクローズせず、失敗ログを最終報告に含めて終了する（説明なしでクローズしない）
+  2. コメント投稿の成功を確認した上で `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue $0 not_planned` を実行する（`gh issue close` は GraphQL 経由でクラウドセッションのゲートに掛かるため使わない）。コメントに失敗した場合はクローズせず、失敗ログを最終報告に含めて終了する（説明なしでクローズしない）
   3. 最終報告に「PR未作成・Issueクローズ済み」と判断理由を明記して処理終了
 - **コード変更がある場合**: フェーズ7へ
 

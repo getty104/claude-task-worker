@@ -265,6 +265,42 @@ test("add-label は REST が失敗したら gh issue edit --add-label へフォ�
   assert.match(calls, /issue edit 12 --add-label cc-triage-scope/);
 });
 
+test("close-issue は REST の issues エンドポイントを使い、GraphQL の gh issue close を呼ばない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "PATCH repos/acme/widget/issues/6090": "{}" });
+  run(["close-issue", "6090"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /PATCH repos\/acme\/widget\/issues\/6090/);
+  assert.match(calls, /state=closed/);
+  assert.match(calls, /state_reason=completed/);
+  assert.doesNotMatch(calls, /issue close/);
+});
+
+test("close-issue は REST が失敗したら gh issue close へフォールバックする（reason も引き継ぐ）", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "issue close": "" });
+  run(["close-issue", "12", "not_planned"], {
+    env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+  });
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /issue close 12 --reason not planned/);
+});
+
+test("close-issue は未知の reason を拒否する（誤った state_reason を送らない）", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, {});
+  assert.throws(() =>
+    run(["close-issue", "12", "duplicate"], {
+      env: { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" },
+    }),
+  );
+});
+
 test("remove-label は単体削除の REST を使う（他のラベルを巻き添えにしない）", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
   const log = path.join(dir, "log");

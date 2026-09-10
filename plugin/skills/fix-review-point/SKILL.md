@@ -142,13 +142,13 @@ BASE_BRANCH=$(gh pr view $0 --json baseRefName -q .baseRefName)
 DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
 ```
 
-マージ成功後、`BASE_BRANCH` が `DEFAULT_BRANCH` と一致する場合はGitHubが自動でクローズするためスキップする。一致しない場合はPR本文から関連Issue番号を抽出し、抽出できたすべての番号を `--reason completed`（実装がEpicブランチへ取り込まれた完了クローズ。マージせずクローズする場合の `--reason "not planned"` とは異なる）でクローズする。
+マージ成功後、`BASE_BRANCH` が `DEFAULT_BRANCH` と一致する場合はGitHubが自動でクローズするためスキップする。一致しない場合はPR本文から関連Issue番号を抽出し、抽出できたすべての番号を `completed`（実装がEpicブランチへ取り込まれた完了クローズ。マージせずクローズする場合の `not_planned` とは異なる）でクローズする。クローズは `gh issue close`（GraphQL 経由でクラウドセッションのゲートに掛かる）ではなく `gh-compat.sh close-issue` を使う。
 
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr view $0 --json body --jq '.body' | grep -ioE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+'
-gh issue close <issue番号> --reason completed
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> completed
 ```
 
 関連Issueが抽出できない場合は、その旨を最終報告に含めること。
@@ -298,7 +298,7 @@ gh issue close <issue番号> --reason completed
    ### 今後の扱い
    <代替PR/Issueがあればリンク。再着手が必要な場合はその旨と新規Issue番号>
    EOF
-   gh issue close <n> --reason "not planned"
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <n> not_planned
    ```
 5. 最終報告に「PR #$0 とリンクされたIssue #<n> をクローズした理由・代替手段」を必ず明記する
 
