@@ -2,8 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as UiDesignModule from "./ui-design";
 
-const { designBranchName, hasDesignReference, extractDesignFilePath, classifyDesignPr } =
-  (await import("./ui-design.ts")) as typeof UiDesignModule;
+const {
+  designBranchName,
+  hasDesignReference,
+  extractDesignFilePath,
+  classifyDesignPr,
+  designReferenceMissingComment,
+  designFileMissingComment,
+  shouldVerifyDesignFileExists,
+} = (await import("./ui-design.ts")) as typeof UiDesignModule;
 
 test("designBranchName uses the fixed cc-ui-design-<N> naming", () => {
   assert.equal(designBranchName(123), "cc-ui-design-123");
@@ -125,4 +132,26 @@ test("extractDesignFilePath returns null for an unreplaced placeholder path", ()
 test("extractDesignFilePath and hasDesignReference agree on validity", () => {
   const body = ["## UIデザイン", "", "- デザインファイル: `designs/12-login-form.pen`"].join("\n");
   assert.equal(extractDesignFilePath(body) !== null, hasDesignReference(body));
+});
+
+test("shouldVerifyDesignFileExists skips the worktree check under cloud execution", () => {
+  // クラウド実行では worktree が存在しないため、実在チェックをすると書き戻し成功時も
+  // 必ず「パスが実在しない」に落ちてしまう。
+  assert.equal(shouldVerifyDesignFileExists(true), false);
+});
+
+test("shouldVerifyDesignFileExists keeps the worktree check under local execution", () => {
+  assert.equal(shouldVerifyDesignFileExists(false), true);
+});
+
+test("the two apply-ui-design failure comments are distinguishable", () => {
+  // 同じ文面だと、Issueコメントから「書き戻されなかった」のか
+  // 「書き戻したパスが実在しない」のかを切り分けられない。
+  const missing = designReferenceMissingComment(42);
+  const badPath = designFileMissingComment(42, "designs/gone.pen");
+  assert.notEqual(missing.split("\n")[0], badPath.split("\n")[0]);
+  assert.ok(badPath.includes("designs/gone.pen"));
+  // 復旧手順は共通なので、どちらの文面にも残っていること。
+  assert.ok(missing.includes("cc-ui-design-pr-created"));
+  assert.ok(badPath.includes("cc-ui-design-pr-created"));
 });

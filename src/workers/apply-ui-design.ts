@@ -7,9 +7,11 @@ import { createIssuePollingWorker } from "./issue-worker";
 import {
   classifyDesignPr,
   designBranchName,
+  designFileMissingComment,
   designPrMissingComment,
   designReferenceMissingComment,
   extractDesignFilePath,
+  shouldVerifyDesignFileExists,
 } from "./ui-design";
 
 // description に記載された `.pen` パスが、実装ゲート時点で worktree 上に実在するか。
@@ -19,12 +21,12 @@ function designFileExistsInWorktree(worktreeId: string, designFilePath: string):
   return existsSync(join(getWorktreePath(worktreeId), designFilePath));
 }
 
-async function markDesignReferenceMissing(issueNumber: number, logMessage: string): Promise<void> {
+async function markDesignReferenceMissing(issueNumber: number, logMessage: string, comment: string): Promise<void> {
   console.error(logMessage);
   await addLabel("issue", issueNumber, "cc-need-human-check").catch((err) =>
     console.error(`[apply-ui-design] addLabel cc-need-human-check failed for #${issueNumber}: ${err}`),
   );
-  await commentOnIssue(issueNumber, designReferenceMissingComment(issueNumber)).catch((err) =>
+  await commentOnIssue(issueNumber, comment).catch((err) =>
     console.error(`[apply-ui-design] commentOnIssue failed for #${issueNumber}: ${err}`),
   );
 }
@@ -71,7 +73,7 @@ export const applyUiDesignWorker = async (
       }
       return "skip";
     },
-    onCompleted: async (issueNumber, worktreeId) => {
+    onCompleted: async (issueNumber, worktreeId, _output, ctx) => {
       // exit 0 は description の書き戻し完了を保証しない。参照が本当に載っており、かつ
       // そのパスが実際にworktree上に存在する場合のみ実装フェーズ（cc-exec-issue）へ進める。
       let body: string;
@@ -86,13 +88,15 @@ export const applyUiDesignWorker = async (
         await markDesignReferenceMissing(
           issueNumber,
           `[apply-ui-design] #${issueNumber}: session exited without a design reference section; marking cc-need-human-check`,
+          designReferenceMissingComment(issueNumber),
         );
         return false;
       }
-      if (!designFileExistsInWorktree(worktreeId, designFilePath)) {
+      if (shouldVerifyDesignFileExists(ctx.cloud) && !designFileExistsInWorktree(worktreeId, designFilePath)) {
         await markDesignReferenceMissing(
           issueNumber,
           `[apply-ui-design] #${issueNumber}: design reference points to ${designFilePath}, which does not exist in worktree ${worktreeId}; marking cc-need-human-check`,
+          designFileMissingComment(issueNumber, designFilePath),
         );
         return false;
       }

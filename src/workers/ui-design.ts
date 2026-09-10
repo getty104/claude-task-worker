@@ -47,6 +47,12 @@ export function hasDesignReference(body: string): boolean {
   return extractDesignFilePath(body) !== null;
 }
 
+// クラウド実行では worktree が存在しない（issue-worker.ts が createWorktreeFromBranch を
+// スキップし cwd をリポジトリルートにする）ため、worktree上の実在チェックは意味を持たない。
+export function shouldVerifyDesignFileExists(cloud: boolean): boolean {
+  return !cloud;
+}
+
 export type DesignPrDisposition = "proceed" | "wait" | "needs-human";
 
 // デザインPRの状態から apply-ui-design の preflight 判定を導く。
@@ -89,10 +95,12 @@ export function designPrNotCreatedComment(issueNumber: number): string {
   ].join("\n");
 }
 
-export function designReferenceMissingComment(issueNumber: number): string {
+// 復旧手順は「参照が書かれていない」「参照のパスが実在しない」で共通なので、
+// 見出しと原因の説明だけを差し替えて末尾を共有する。
+function designReferenceFailureComment(heading: string, cause: string): string {
   return [
-    "## デザイン参照の書き戻しを確認できません（要人手確認）",
-    `apply-ui-design のセッションは正常終了（exit 0）しましたが、Issue #${issueNumber} の description に \`${DESIGN_REFERENCE_HEADING}\` セクション（\`.pen\` のパスを含む）が見つかりませんでした。`,
+    heading,
+    cause,
     "",
     "## なぜ止めているか",
     "- デザイン参照が description に無いと、`exec-issue` はデザインを入力にできず、合意済みのデザインと無関係な実装になります",
@@ -101,4 +109,20 @@ export function designReferenceMissingComment(issueNumber: number): string {
     "- 自動実行をやり直す場合: `cc-need-human-check` ラベルを外し、`cc-ui-design-pr-created` ラベルを付け直してください",
     "- 手動で description に参照を追記した場合: `cc-need-human-check` ラベルを外し、`cc-ui-design-ready` と `cc-exec-issue` ラベルを付けてください",
   ].join("\n");
+}
+
+export function designReferenceMissingComment(issueNumber: number): string {
+  return designReferenceFailureComment(
+    "## デザイン参照の書き戻しを確認できません（要人手確認）",
+    `apply-ui-design のセッションは正常終了（exit 0）しましたが、Issue #${issueNumber} の description に \`${DESIGN_REFERENCE_HEADING}\` セクション（\`.pen\` のパスを含む）が見つかりませんでした。セッションが書き戻し前に中断したか、書き戻しに失敗した可能性があります。`,
+  );
+}
+
+// 参照セクション自体はあるが、指しているパスが作業ツリーに存在しないケース。
+// 「書き戻されなかった」のとは原因も調査先も違うため、文面を分けて切り分け可能にする。
+export function designFileMissingComment(issueNumber: number, designFilePath: string): string {
+  return designReferenceFailureComment(
+    "## デザイン参照のパスが実在しません（要人手確認）",
+    `apply-ui-design は Issue #${issueNumber} の description に \`${DESIGN_REFERENCE_HEADING}\` セクションを書き戻しましたが、そこが指す \`${designFilePath}\` がベースブランチの作業ツリーに存在しませんでした。デザインPRのマージ先と本Issueのベースブランチが食い違っているか、パスの綴りが誤っている可能性があります。`,
+  );
 }

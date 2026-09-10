@@ -40,13 +40,17 @@ hooks:
 
 ### 1-1. デザインPRの特定
 
-> GitHub MCP が使える場合は `list_pull_requests` を使う。以下は MCP 利用不可時のフォールバック。
+> GitHub MCP が使える場合は `list_pull_requests` を使う（`state` は `all`、`head` は後述のとおり `owner:branch` 形式で渡す）。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 gh pr list --head "cc-ui-design-$0" --state all --json number,url,state,mergedAt
 ```
 
-`--limit 1` は付けない。同一headブランチに未マージPRとMERGED PRが混在しうるため、全件取得したうえで `state == "MERGED"` のものだけを選別する。
+`--limit 1` は付けない。同一headブランチに未マージPRとマージ済みPRが混在しうるため、全件取得したうえで**マージ済みのもの**だけを選別する。
+
+**マージ済みの判定は経路によって値の形が違う**。`gh`（GraphQL）は `state` に `MERGED` を返すが、**GitHub MCP / `gh api repos/...`（REST）はマージ済みでも `state` が `"closed"` で、マージの有無は `merged_at`（非null）または `merged`（true）にしか現れない**。`state == "MERGED"` だけで絞ると REST 経路では必ず0件になり、マージ済みなのに中断する。したがって判定は「`state` が `MERGED`（大文字小文字を問わない）」**または**「`mergedAt` / `merged_at` が非null」**または**「`merged` が true」のいずれかを満たすこと、とする。
+
+**REST 経路の `head` は `owner:branch` 形式が必須**（`<リポジトリのオーナー名>:cc-ui-design-$0`。オーナー名は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh owner-repo` の `owner/repo` から取る）。ブランチ名だけを渡すとフィルタが**エラーにならず黙って無視され**、リポジトリの全PRが返って「複数件」の中断条件へ誤って落ちる。`gh pr list --head` はこの変換を自前で行うため、フォールバック側ではブランチ名のみでよい。
 
 - 選別結果が **0件** または **複数件** の場合は **中断** する（0件はマージ待ちや head 不一致、複数件はブランチの再利用・運用ミスの疑いがあり、いずれも自動判断すべきでない）。理由を出力し、ワーカー側での `cc-need-human-check` 付与を促す旨を最終報告に含めて終了する
 - 1件のみの場合に限り、その `number` と `url` を最終報告と description に使うため保持する
@@ -96,7 +100,9 @@ gh pr diff <デザインPR番号> --name-only
 
 固定パスは同一Issueへの並行実行で衝突しうるため `mktemp` で一意な一時ファイルを確保する。さらに、本文の取得（`view`）と書き戻し（`edit`）の間に人間または別プロセスが本文を更新している可能性があるため、`edit` 直前に本文を再取得して差分を検証する。
 
-> GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+> GitHub MCP が使える場合は、本文取得に `issue_read`（method: `get`）、**本文の書き戻しに `issue_write`（method: `update`）** を使う。`gh issue edit` は GraphQL ミューテーションなので、クラウド実行では 403 になり**この書き戻しだけが落ちる**（読み取りは MCP で通るため、PR特定まで成功したのに description が更新されない失敗の原因になる）。`issue_write` には **`body` だけを渡し、`labels` は渡さない** — 同ツールの `labels` は指定配列で全置換するため、渡すと既存ラベル（`cc-in-progress` 等）を巻き添えで消す。
+>
+> 以下の bash は MCP 利用不可時のフォールバック。ロスト・アップデート対策の手順（取得 → 組み立て → `edit` 直前に再取得して差分検証 → 変化していれば最新本文を起点に組み立て直して再試行、最大2回）は **MCP 経路でも同じ**で、`gh issue view` を `issue_read`、`gh issue edit` を `issue_write` に読み替えて実施する。
 
 ```bash
 BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"
@@ -131,7 +137,7 @@ else
 fi
 ```
 
-外部変更を検知した場合は、**上書きせず**最新本文を起点に `BODY_FILE` を再構築してから `gh issue edit` を再試行する（最大2回まで）。2回目も `LATEST_BODY` が再取得のたびに変化し続ける等で収束しない場合は、更新を諦め、その旨と理由を最終報告に明記して**失敗として終了**する（ワーカー側の `onCompleted` が検出して `cc-need-human-check` に落とす前提）。
+外部変更を検知した場合は、**上書きせず**最新本文を起点に本文を再構築してから書き戻しを再試行する（最大2回まで）。2回目も `LATEST_BODY` が再取得のたびに変化し続ける等で収束しない場合は、更新を諦め、その旨と理由を最終報告に明記して**失敗として終了**する（ワーカー側の `onCompleted` が検出して `cc-need-human-check` に落とす前提）。
 
 ### 2-3. 更新の検証
 
@@ -161,7 +167,7 @@ gh issue view $0 --json body --jq .body | grep -F '.pen'
 
 - 引数が空、または Issue 番号として解釈できない
 - `gh issue view` でIssueが見つからない、または `CLOSED`
-- `cc-ui-design-$0` を head とするPRのうち `MERGED` なものが0件、または複数件
+- `cc-ui-design-$0` を head とするPRのうち**マージ済み**（1-1 の判定基準による）なものが0件、または複数件
 - デザインPRの差分に `.pen` が含まれていない
 - デザインPRの差分に `snapshots/` 配下の `.png` が含まれていない
 - 本文書き戻しの外部変更競合が再試行2回以内に収束しない
