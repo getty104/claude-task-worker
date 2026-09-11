@@ -83,10 +83,7 @@ test("withCloudDefaults refuses to rewrite a non-object permissions", () => {
 });
 
 test("withCloudDefaults refuses to rewrite a non-array permissions.allow", () => {
-  assert.throws(
-    () => withCloudDefaults(JSON.stringify({ permissions: { allow: "x" } }), false),
-    /permissions\.allow/,
-  );
+  assert.throws(() => withCloudDefaults(JSON.stringify({ permissions: { allow: "x" } }), false), /permissions\.allow/);
 });
 
 test("withCloudDefaults refuses to rewrite a non-object env", () => {
