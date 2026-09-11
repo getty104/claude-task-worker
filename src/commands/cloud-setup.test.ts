@@ -10,12 +10,13 @@ const {
   withCloudDefaults,
   claudeSettingsPath,
   CLOUD_DEFAULT_PERMISSION_MODE,
+  CLOUD_PERMISSION_ALLOW,
   CLOUD_SETTINGS_DEFAULTS,
   CLOUD_SETTINGS_ENV,
 } = (await import("./cloud-setup.ts")) as typeof CloudSettingsModule;
 
 const allDefaults = {
-  permissions: { defaultMode: CLOUD_DEFAULT_PERMISSION_MODE },
+  permissions: { defaultMode: CLOUD_DEFAULT_PERMISSION_MODE, allow: [...CLOUD_PERMISSION_ALLOW] },
   ...CLOUD_SETTINGS_DEFAULTS,
   env: { ...CLOUD_SETTINGS_ENV },
 };
@@ -32,7 +33,10 @@ test("withCloudDefaults keeps unrelated settings and the rest of permissions", (
   });
   assert.deepEqual(JSON.parse(withCloudDefaults(existing, false) ?? ""), {
     hooks: { SessionStart: [{ matcher: "*" }] },
-    permissions: { allow: ["Bash(git *)"], defaultMode: CLOUD_DEFAULT_PERMISSION_MODE },
+    permissions: {
+      allow: ["Bash(git *)", ...CLOUD_PERMISSION_ALLOW],
+      defaultMode: CLOUD_DEFAULT_PERMISSION_MODE,
+    },
     ...CLOUD_SETTINGS_DEFAULTS,
     env: { MY_VAR: "keep", ...CLOUD_SETTINGS_ENV },
   });
@@ -40,7 +44,7 @@ test("withCloudDefaults keeps unrelated settings and the rest of permissions", (
 
 test("withCloudDefaults leaves existing values alone without force", () => {
   const existing = JSON.stringify({
-    permissions: { defaultMode: "plan" },
+    permissions: { defaultMode: "plan", allow: [...CLOUD_PERMISSION_ALLOW] },
     outputStyle: "Explanatory",
     language: "English",
     env: { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "0" },
@@ -76,6 +80,10 @@ test("withCloudDefaults refuses to rewrite a file it cannot parse", () => {
 
 test("withCloudDefaults refuses to rewrite a non-object permissions", () => {
   assert.throws(() => withCloudDefaults(JSON.stringify({ permissions: [] }), false), /permissions/);
+});
+
+test("withCloudDefaults refuses to rewrite a non-array permissions.allow", () => {
+  assert.throws(() => withCloudDefaults(JSON.stringify({ permissions: { allow: "x" } }), false), /permissions\.allow/);
 });
 
 test("withCloudDefaults refuses to rewrite a non-object env", () => {
