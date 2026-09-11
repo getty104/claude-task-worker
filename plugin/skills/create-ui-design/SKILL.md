@@ -272,16 +272,15 @@ if [ -n "${PARENT}" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-
 else
   BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
 fi
-ME=$(gh api user --jq '.login')
 ```
 
-PR本文は `--body-file -` + heredoc（`<<'EOF'` クォート版）で渡す。プレースホルダは heredoc に渡す前に実値へ置換しておくこと。
+PR の作成は `gh-compat.sh create-pr` だけで行う（`gh pr create` は GraphQL 経由でクラウドでは 403 になり、GitHub MCP の `create_pull_request` は assignees の引数を持たない）。PR本文は `--body-file -` + heredoc（`<<'EOF'` クォート版）で渡す。プレースホルダは heredoc に渡す前に実値へ置換しておくこと。
 
 ```bash
-gh pr create \
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-pr \
   --title "design: <Issueタイトル>" \
   --base "${BASE_BRANCH}" \
-  --assignee "${ME}" \
+  --assignee "@me" \
   --body-file - <<'EOF'
 ## 概要
 Issue #$0「<Issueタイトル>」のUIデザインです。実装は含まず、`.pen` とスナップショットPNGのみを変更しています。

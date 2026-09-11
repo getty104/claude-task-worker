@@ -1,5 +1,5 @@
 import { getUiDesignConfig } from "../config";
-import { addLabel, commentOnIssue, findPrNumberByHeadRef, hasLabel } from "../gh";
+import { addAssignee, addLabel, commentOnIssue, findPrNumberByHeadRef, getCurrentUser, hasLabel } from "../gh";
 import { createIssuePollingWorker } from "./issue-worker";
 import { designBranchName, designPrNotCreatedComment } from "./ui-design";
 
@@ -91,6 +91,13 @@ export const createUiDesignWorker = async (
           );
         }
         await addLabel("issue", issueNumber, "cc-ui-design-pr-created");
+        // triage-pr は Assignee でも絞るため付け直す（クラウドの MCP 作成経路では欠落しうる。冪等）。
+        // 付け漏れても人のレビュー経路は止まらないので、人手確認には倒さない。
+        await getCurrentUser()
+          .then((user) => addAssignee("pr", prNumber, user))
+          .catch((assignErr) =>
+            console.error(`[create-ui-design] addAssignee failed for PR #${prNumber}: ${assignErr}`),
+          );
       } catch (err) {
         // 本ワークフロー追加時のラベルが init 未実行で存在しない場合、addLabel は
         // リトライの末に throw する。付け漏れたまま完了扱いにすると孤児デザインPRが

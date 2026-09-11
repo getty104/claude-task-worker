@@ -36,6 +36,11 @@ usage: gh-compat.sh <subcommand> [args...]
   add-label <number> <label>...      Issue/PR にラベルを**追加**する（既存ラベルは維持）
   remove-label <number> <label>      Issue/PR からラベルを1つ外す（他のラベルは維持）
   close-issue <number> [reason]      Issue をクローズする（reason は completed / not_planned。既定 completed）
+  add-assignee <number> <login>...   Issue/PR に Assignee を**追加**する（@me はログインユーザー）
+  create-issue --title T --body-file F [--label L]... [--assignee A]...
+                                     Issue を作成し URL を出力する（ラベル・Assignee も同じ1回のREST呼び出しで付く）
+  create-pr --title T --body-file F --base B [--head H] [--draft] [--label L]... [--assignee A]...
+                                     PR を作成し URL を出力する（続けてラベル・Assignee を付ける）
 USAGE
   exit 64
 }
@@ -209,6 +214,114 @@ cmd_close_issue() {
   fi
 }
 
+# @me → ログインユーザー名。REST の assignees はログイン名しか受け付けない。
+resolve_login() {
+  if [ "$1" = "@me" ]; then gh api user --jq .login 2>/dev/null; else printf '%s\n' "$1"; fi
+}
+
+# Assignee の追加。`gh issue edit --add-assignee` は GraphQL 経由でクラウドでは 403 になり、
+# MCP にも追加専用の手段が無い（`issue_write` の update は assignees を全置換する）。
+cmd_add_assignee() {
+  local n="$1"; shift
+  local rc=0 a login args=()
+  for a in "$@"; do
+    login=$(resolve_login "$a")
+    if [ -n "$login" ]; then args+=(-f "assignees[]=${login}"); else rc=1; fi
+  done
+  if [ ${#args[@]} -gt 0 ] && gh api -X POST "repos/${OWNER_REPO}/issues/${n}/assignees" \
+    -H "X-GitHub-Api-Version: 2022-11-28" "${args[@]}" >/dev/null 2>&1; then
+    return $rc
+  fi
+  rc=0
+  for a in "$@"; do gh issue edit "$n" --add-assignee "$a" >/dev/null 2>&1 || rc=1; done
+  return $rc
+}
+
+# 引数を JSON の文字列配列にする。bash 3.2（macOS 既定）は set -u 下で空配列の "${a[@]}" を
+# unbound 扱いするため、呼び出し側は ${a[@]+"${a[@]}"} で展開して渡す。
+json_array() { jq -cn '$ARGS.positional' --args "$@"; }
+
+# create-issue / create-pr の引数。gh issue create / gh pr create と同じ綴りにして、
+# スキル本文の置き換えを機械的にする。
+parse_create_opts() {
+  TITLE="" BODY_FILE="" BASE="" HEAD="" DRAFT=false LABELS=() ASSIGNEES=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --draft) DRAFT=true; shift; continue ;;
+      --title|--body-file|--base|--head|--label|--assignee) [ $# -ge 2 ] || return 64 ;;
+      *) echo "gh-compat: unknown option: $1" >&2; return 64 ;;
+    esac
+    case "$1" in
+      --title) TITLE="$2" ;;
+      --body-file) BODY_FILE="$2" ;;
+      --base) BASE="$2" ;;
+      --head) HEAD="$2" ;;
+      --label) LABELS+=("$2") ;;
+      --assignee) ASSIGNEES+=("$2") ;;
+    esac
+    shift 2
+  done
+  [ -n "$TITLE" ] && [ -n "$BODY_FILE" ] || { echo "gh-compat: --title and --body-file are required" >&2; return 64; }
+  [ "$BODY_FILE" = "-" ] && BODY_FILE=/dev/stdin
+  return 0
+}
+
+# Issue の作成。`gh issue create` は GraphQL の createIssue mutation でクラウドでは 403 になり、
+# 代わりに使われていた MCP の `issue_write`（create）は labels / assignees を渡し忘れると
+# 黙って欠落する（cc-triage-scope と Assignee の無い Issue はワーカーに拾われない）。
+# REST の POST issues は labels / assignees を同じ呼び出しで受けるので、作成と付与が分かれない。
+# 作成は gh へフォールバックしない: 応答喪失時に二重起票しうるうえ、REST が通らない環境では
+# gh（GraphQL）も通らない。
+# Assignee の解決失敗は cmd_create_pr と同じ契約（ベストエフォート作成＋非0終了）に揃える:
+# 解決できた login だけで作成を進め、1件でも解決に失敗していれば URL を出力したうえで非0で返す
+# （Issue を1件も作らない方が「@me 解決の一時失敗で起票が止まる」事故として重いため）。
+cmd_create_issue() {
+  parse_create_opts "$@" || return 64
+  local a login logins=() rc=0 url
+  for a in ${ASSIGNEES[@]+"${ASSIGNEES[@]}"}; do
+    login=$(resolve_login "$a")
+    if [ -n "$login" ]; then logins+=("$login"); else rc=1; fi
+  done
+  url=$(jq -cn --arg title "$TITLE" --rawfile body "$BODY_FILE" \
+    --argjson labels "$(json_array ${LABELS[@]+"${LABELS[@]}"})" \
+    --argjson assignees "$(json_array ${logins[@]+"${logins[@]}"})" \
+    '{title: $title, body: $body, labels: $labels, assignees: $assignees}' |
+    gh api -X POST "repos/${OWNER_REPO}/issues" -H "X-GitHub-Api-Version: 2022-11-28" --input - --jq .html_url) ||
+    { echo "gh-compat: create-issue: failed to create the issue" >&2; return 1; }
+  printf '%s\n' "$url"
+  if [ "$rc" -ne 0 ]; then
+    echo "gh-compat: create-issue: ${url} was created but resolving assignees failed" >&2
+  fi
+  return $rc
+}
+
+# PR の作成。`gh pr create` は GraphQL 経由でクラウドでは 403 になり、MCP の
+# `create_pull_request` は labels / assignees の引数自体を持たない（付与が別手順になり欠落する）。
+# REST の POST pulls も labels / assignees を受けないため、作成直後に同じスクリプト内で付ける。
+# 付与に失敗しても PR は作成済みなので、URL を出力したうえで非0で終える（呼び出し元は
+# 作り直さず add-label / add-assignee だけを再実行する）。
+cmd_create_pr() {
+  parse_create_opts "$@" || return 64
+  local out url n rc=0
+  [ -n "$HEAD" ] || HEAD=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  [ -n "$BASE" ] || BASE=$(resolve_default_branch)
+  [ -n "$HEAD" ] && [ "$HEAD" != "HEAD" ] && [ -n "$BASE" ] ||
+    { echo "gh-compat: create-pr: failed to resolve --head / --base" >&2; return 1; }
+  out=$(jq -cn --arg title "$TITLE" --rawfile body "$BODY_FILE" --arg head "$HEAD" --arg base "$BASE" \
+    --argjson draft "$DRAFT" '{title: $title, body: $body, head: $head, base: $base, draft: $draft}' |
+    gh api -X POST "repos/${OWNER_REPO}/pulls" -H "X-GitHub-Api-Version: 2022-11-28" --input - \
+      --jq '"\(.html_url) \(.number)"') || { echo "gh-compat: create-pr: failed to create the pull request" >&2; return 1; }
+  url="${out% *}" n="${out##* }"
+  printf '%s\n' "$url"
+  if [ ${#LABELS[@]} -gt 0 ] && ! cmd_add_label "$n" "${LABELS[@]}"; then
+    echo "gh-compat: create-pr: ${url} was created but adding labels failed" >&2; rc=1
+  fi
+  if [ ${#ASSIGNEES[@]} -gt 0 ] && ! cmd_add_assignee "$n" "${ASSIGNEES[@]}"; then
+    echo "gh-compat: create-pr: ${url} was created but adding assignees failed" >&2; rc=1
+  fi
+  return $rc
+}
+
 cmd_pr_mergeable() {
   local n="$1" v
   # REST の mergeable は算出中に null を返す。GraphQL の UNKNOWN と同じ扱いにする。
@@ -266,6 +379,9 @@ case "$sub" in
       add-label)      [ $# -ge 2 ] || usage; cmd_add_label "$@" ;;
       remove-label)   [ $# -eq 2 ] || usage; cmd_remove_label "$1" "$2" ;;
       close-issue)    [ $# -ge 1 ] && [ $# -le 2 ] || usage; cmd_close_issue "$1" "${2:-completed}" ;;
+      add-assignee)   [ $# -ge 2 ] || usage; cmd_add_assignee "$@" ;;
+      create-issue)   cmd_create_issue "$@" ;;
+      create-pr)      cmd_create_pr "$@" ;;
       *) usage ;;
     esac ;;
 esac

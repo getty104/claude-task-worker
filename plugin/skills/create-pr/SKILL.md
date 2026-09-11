@@ -41,10 +41,10 @@ ISSUE_NUMBER=$(printf '%s' "$ARGUMENTS" | grep -oE '[0-9]+' | head -1)
 - PRのdescriptionのテンプレートは`.github/PULL_REQUEST_TEMPLATE.md`を参照し、それに従うこと
 - テンプレート内でコメントアウトされている箇所は必ず削除すること
 - PRのdescriptionには`Closes #${ISSUE_NUMBER}`と記載すること（`ISSUE_NUMBER` が空の場合は `Closes` 行を書かない）
-- GitHub MCP が使える場合は `get_me` を使う。以下は MCP 利用不可時のフォールバック。
-  `gh api user --jq '.login'`で取得したユーザーをAssigneesに追加すること
+- 実行中のユーザー（`@me`）をAssigneesに追加すること
 - PRのベースブランチは「ベースブランチの決定」の手順で決定したブランチにすること
 - PRに`cc-triage-scope`ラベルを付与すること
+- **PRの作成は「Command Examples」の `gh-compat.sh create-pr` だけで行う**（ローカル・クラウドとも）。`gh pr create` と GitHub MCP の `create_pull_request` は使わない。`gh pr create` は GraphQL 経由でクラウドでは 403 になり、`create_pull_request` には labels / assignees の引数自体が無いため、Assignee と `cc-triage-scope` が欠落する（`triage-pr` はこの2つで PR を拾うので、欠けた PR は放置される）
 
 ## ベースブランチの決定
 
@@ -131,13 +131,19 @@ fi
 
 ## Command Examples
 
-> `gh api user --jq '.login'` は GitHub MCP が使える場合 `get_me` に置き換える。以下は MCP 利用不可時のフォールバック。
+`gh-compat.sh create-pr` は REST で PR を作成し、続けてラベルと Assignee を付けて PR の URL を出力する（head は現在のブランチ）。本文は `--body-file -` + heredoc（`<<'EOF'` でシェル展開を抑止）で渡すので、`${ISSUE_NUMBER}` などは heredoc に渡す前に実値へ置換しておくこと。
 
 ```bash
-gh pr create \
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-pr \
   --title "PRタイトル" \
-  --body "$(printf 'Closes #%s\n\nPRの本文' "${ISSUE_NUMBER}")" \
   --base "${BASE_BRANCH}" \
-  --assignee "$(gh api user --jq '.login')" \
-  --label "cc-triage-scope"
+  --label "cc-triage-scope" \
+  --assignee "@me" \
+  --body-file - <<'EOF'
+Closes #<ISSUE_NUMBER>
+
+PRの本文
+EOF
 ```
+
+非0で終わっても URL が出力されていれば PR は作成済み（ラベルか Assignee の付与だけが失敗している）。**PR を作り直さず**、`gh-compat.sh add-label <PR番号> cc-triage-scope` / `gh-compat.sh add-assignee <PR番号> @me` を1回ずつ再実行する。

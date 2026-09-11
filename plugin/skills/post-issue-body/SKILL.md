@@ -11,7 +11,7 @@ argument-hint: "<YAML input — see SKILL.md>"
 
 1. 「実装準備用Issue」の正規フォーマットに整形
 2. 投稿前チェックの実施
-3. `gh issue create` または `gh issue edit` の実行
+3. `gh-compat.sh create-issue` または `gh issue edit` の実行
 4. 確認事項が渡されていればコメントとして投稿
 
 親スキル内のステップから Skill tool 経由で起動される想定。直接ユーザーから呼ばれ、入力 YAML が args に無い場合は、親スキル（create-issue 等）の使用を促して終了する。
@@ -70,7 +70,7 @@ blocked_by: [<Issue番号>, ...]   # 省略可。この新Issueをブロック�
 blocking: [<Issue番号>, ...]     # 省略可。この新Issueがブロックする（後続で待たせる）Open な既存Issue番号。--blocking で貼る
 ```
 
-assignee は呼び出し元から指定不要。本スキルが `gh api user --jq '.login'` で取得した「呼び出し時の gh ログインユーザー」を `mode=create` で自動的に `--assignee` として紐づける（`mode=edit` では assignee を変更しない）。
+assignee は呼び出し元から指定不要。本スキルが「呼び出し時の gh ログインユーザー」（`--assignee @me`）を `mode=create` で自動的に紐づける（`mode=edit` では assignee を変更しない）。
 
 args に渡す YAML は上記の通り**トップレベルから直接書く**（ラッパキーなし）。
 
@@ -248,23 +248,21 @@ gh issue view <issue_number> --json body
 
 #### mode=create
 
-YAML 入力に `labels` があれば、各ラベルを `--label <ラベル名>` として `EXTRA_FLAGS` 配列に追加する。値が無ければフラグごと省略する（空文字を渡すと `gh` が引数エラーで落ちる）。`--label` は同じ値を複数回渡す形式で複数指定する。
+**作成は `gh-compat.sh create-issue` だけで行う**（ローカル・クラウドとも）。`gh issue create` は GraphQL 経由でクラウドでは 403 になり、GitHub MCP の `issue_write`（method: `create`）は `labels` / `assignees` を渡し忘れると黙って欠落する（`cc-triage-scope` と Assignee の無い Issue はワーカーに拾われない）。同スクリプトは REST の1回の呼び出しでラベルと Assignee まで付け、Issue の URL を出力する。
 
-GitHub MCP が使える場合はログインユーザー取得に `get_me` を使う。以下は MCP 利用不可時のフォールバック。
+YAML 入力に `labels` があれば、各ラベルを `--label <ラベル名>` として `EXTRA_FLAGS` 配列に追加する。値が無ければフラグごと省略する（空文字のラベルを渡さない）。`--label` は同じ値を複数回渡す形式で複数指定する。
 
 ```bash
-ME=$(gh api user --jq '.login')
-
 # YAML の labels を --label の連続フラグに展開する。
 # 例: labels=[cc-triage-scope, type-feature] のとき EXTRA_FLAGS=(--label cc-triage-scope --label type-feature)
 # labels が空 / 未指定なら何も push しない。
 EXTRA_FLAGS=()
 # for L in "${LABELS[@]}"; do EXTRA_FLAGS+=(--label "$L"); done
 
-# blocked_by / blocking は `gh issue create` のフラグでは渡さない（後述）。
-gh issue create \
+# blocked_by / blocking は作成時には渡さない（後述）。
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue \
   --title "<タイトル>" \
-  --assignee "$ME" \
+  --assignee "@me" \
   "${EXTRA_FLAGS[@]}" \
   --body-file - <<'EOF'
 ## 概要
@@ -305,7 +303,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocked-by <作成したIssu
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocking <作成したIssue番号> <番号> <番号> ...
 ```
 
-`gh issue create --blocked-by` / `--blocking` を使わないのは、依存登録が GraphQL 経由でクラウドセッションでは 403 になるため（gh 2.98.0 で `GH_DEBUG=api` により確認）。**`gh issue create` はそもそもフラグの有無に関わらず GraphQL の `createIssue` mutation を使う**ので、クラウドでは MCP の `issue_write`（method: `create`）が実質唯一の作成経路になる。なお `--blocked-by` に不正な番号を渡した場合でも **Issue の作成自体は先に完了する**（同実測。以前「relationship が貼れないなら Issue も作らない」と記述していたが、現行 gh ではそうならない）ため、フラグに依存しても2フェーズであることは変わらない。作成と依存登録が2フェーズに分かれるので、**その間はブロック済みの Issue が非ブロック状態に見える**が、`issue-worker.ts` が候補ループ内で `hasOpenBlockers()`（検索インデックスを経由しない実体判定）を実行するため、この窓で拾われたIssueは起動直前にスキップされる。
+`gh issue create --blocked-by` / `--blocking` を使わないのは、依存登録が GraphQL 経由でクラウドセッションでは 403 になるため（gh 2.98.0 で `GH_DEBUG=api` により確認）。**`gh issue create` はそもそもフラグの有無に関わらず GraphQL の `createIssue` mutation を使う**ので、作成は REST（`gh-compat.sh create-issue`）で行う。なお `--blocked-by` に不正な番号を渡した場合でも **Issue の作成自体は先に完了する**（同実測。以前「relationship が貼れないなら Issue も作らない」と記述していたが、現行 gh ではそうならない）ため、フラグに依存しても2フェーズであることは変わらない。作成と依存登録が2フェーズに分かれるので、**その間はブロック済みの Issue が非ブロック状態に見える**が、`issue-worker.ts` が候補ループ内で `hasOpenBlockers()`（検索インデックスを経由しない実体判定）を実行するため、この窓で拾われたIssueは起動直前にスキップされる。
 
 付与に失敗しても Issue の作成自体は完了しているのでロールバックせず、失敗した番号と理由を呼び出し元への報告に1行残す。
 

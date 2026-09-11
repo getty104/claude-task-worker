@@ -151,11 +151,17 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
 トリガーラベルはAND条件であり競合しない: 後続Issueには`cc-triage-scope`のみを付与し`cc-issue-created`は付けない。`triage-created-issue`ワーカーは両ラベルが揃って初めてマッチする（`src/workers/triage-created-issue.ts`、`--label`複数指定のAND一致）ため、`cc-issue-created`が無い間は後続Issueが同ワーカーに拾われず、`create-issue`ワーカー（トリガーラベル`cc-triage-scope`単独）との競合は起きない。
 
 1. 起票前に、分離元Issueのコメント履歴を固定マーカー `## 後続Issue起票済み（carve-out）` で走査する。ヒットした場合は起票をスキップし、記載されている既存の後続Issue番号を再利用する。
-2. ヒットしない場合、`gh issue create` で起票する。初期ラベルは`cc-triage-scope`のみ（`cc-issue-created`を付けると`create-issue`ワーカーの分析フェーズをスキップし、実装プランのない素のdescriptionのまま`triage-created-issue`→`exec-issue`に流れてしまう）。`blockedBy`関係は付与しない（`-is:blocked`によりワーカーの検索クエリから除外され、分離元Issueがクローズするまで放置されるため）。
+2. ヒットしない場合、`gh-compat.sh create-issue` で起票する（`gh issue create` と GitHub MCP の `issue_write` は使わない。前者は GraphQL 経由でクラウドでは 403 になり、後者は labels / assignees の渡し忘れで黙って欠落する）。初期ラベルは`cc-triage-scope`のみ（`cc-issue-created`を付けると`create-issue`ワーカーの分析フェーズをスキップし、実装プランのない素のdescriptionのまま`triage-created-issue`→`exec-issue`に流れてしまう）。Assignee には実行中のユーザー（`@me`）を付ける（ワーカーはラベルと Assignee の両方で Issue を拾うため、欠けると後続Issueが放置される）。`blockedBy`関係は付与しない（`-is:blocked`によりワーカーの検索クエリから除外され、分離元Issueがクローズするまで放置されるため）。
    ```bash
-   gh issue create --title "<後回しにした不具合のタイトル>" --label "cc-triage-scope" --body "<不具合の内容。分離元Issue #$0 を参照する旨を明記>"
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue \
+     --title "<後回しにした不具合のタイトル>" \
+     --label "cc-triage-scope" \
+     --assignee "@me" \
+     --body-file - <<'EOF'
+   <不具合の内容。分離元Issue #$0 を参照する旨を明記>
+   EOF
    ```
-3. `gh issue create`直後・分離元Issueへのコメント投稿前に、もう一度同じ固定マーカーで分離元Issueのコメント履歴を走査する（並行実行で他プロセスが同じ起票を行っていないかの再確認）。既存の後続Issue番号がすでに記録されていた場合、直前に自分が作成した後続Issueは重複とみなし`gh-compat.sh close-issue <番号> not_planned`でクローズしたうえで、既存番号を採用してステップ4に進む。
+3. 起票直後・分離元Issueへのコメント投稿前に、もう一度同じ固定マーカーで分離元Issueのコメント履歴を走査する（並行実行で他プロセスが同じ起票を行っていないかの再確認）。既存の後続Issue番号がすでに記録されていた場合、直前に自分が作成した後続Issueは重複とみなし`gh-compat.sh close-issue <番号> not_planned`でクローズしたうえで、既存番号を採用してステップ4に進む。
 4. 分離元Issue・後続Issueそれぞれの本文（description）に相手のIssue番号を明記して相互参照する。本文更新とマーカーコメント投稿の2段階で行う：
    - 後続Issue側はステップ2の`--body`で参照済み
    - 分離元Issue側は既存descriptionを保持したまま末尾に参照を追記する。`exec-issue`など後続処理はdescriptionのみを読むため、コメントだけでは本文に参照が残らない

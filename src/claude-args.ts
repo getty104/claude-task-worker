@@ -385,7 +385,7 @@ export function buildCloudCheckoutInstruction(target: CloudPromptTarget): string
 // 初期プロンプト本文で伝える（`.claude/requirements/worker-skill-contract.md` の
 // 「実行形態で届かない制御は、その形態で届く経路へ内容ごと移す」）。
 export function buildCloudGitHubAccessInstruction(): string {
-  return "このセッションはクラウド実行のため、GitHub の参照/更新は **GitHub MCP を第一手段**にすること（スキル本文と `references/github-access.md` の既定である `gh` 優先を、このセッションに限り逆転させる）。クラウドの GitHub プロキシは `gh issue view --json` / `gh pr view --json` などの GraphQL 経由の操作をフィールドを問わず 403 にするため、`gh` を第一手段にすると Issue/PR 本文を取得できない。MCP に該当ツールが無い操作は `gh api repos/...`（REST）または `plugin/scripts/gh-compat.sh` を使うこと（REST はクラウドでも成功する）。フォールバックは1操作につき1回まで。";
+  return "このセッションはクラウド実行のため、GitHub の参照/更新は **GitHub MCP を第一手段**にすること（スキル本文と `references/github-access.md` の既定である `gh` 優先を、このセッションに限り逆転させる）。クラウドの GitHub プロキシは `gh issue view --json` / `gh pr view --json` などの GraphQL 経由の操作をフィールドを問わず 403 にするため、`gh` を第一手段にすると Issue/PR 本文を取得できない。MCP に該当ツールが無い操作は `gh api repos/...`（REST）または `plugin/scripts/gh-compat.sh` を使うこと（REST はクラウドでも成功する）。フォールバックは1操作につき1回まで。ただし次の3つは MCP を使わないこと: (1) Issue / PR の作成は `gh-compat.sh create-issue` / `create-pr`（MCP の `create_pull_request` は labels / assignees を受け付けず、`issue_write` の create も渡し忘れで欠落し、Assignee と `cc-triage-scope` の無い Issue/PR がワーカーに拾われなくなる）、(2) ラベル・Assignee の追加は `gh-compat.sh add-label` / `add-assignee`（MCP の update は全置換で既存のものを消す）、(3) コミットは `git commit` と `git push` だけで行い、`push_files` / `create_or_update_file` / `delete_file` / `create_branch` は使わない（MCP 経由のコミットでは CI が起動しない場面がある。`git push` が失敗しても MCP へフォールバックせず、失敗として報告する）。";
 }
 
 // `--disallowedTools` の文面（cloud プロンプト用）。DISALLOWED_TOOLS と二重管理しないよう

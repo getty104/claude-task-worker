@@ -1,7 +1,9 @@
 import {
+  addAssignee,
   addLabel,
   commentOnIssue,
   findPrNumberByHeadRef,
+  getCurrentUser,
   getIssueState,
   hasLabel,
   linkClosingPr,
@@ -74,6 +76,18 @@ function prMissingComment(worktreeId: string, output: string, cloud: boolean): s
   ].join("\n");
 }
 
+// triage-pr は「cc-triage-scope ＋ 自分の Assignee」で PR を拾う。create-pr スキルが両方を付ける
+// 規約だが、クラウドでは MCP の create_pull_request が labels / assignees を持たず欠落しうるため、
+// ワーカー側（ローカルの gh）で付け直す。どちらも冪等。失敗しても PR は実在するので完了扱いは崩さない。
+async function ensurePrTriageMetadata(prNumber: number): Promise<void> {
+  await addLabel("pr", prNumber, "cc-triage-scope").catch((err) =>
+    console.error(`[exec-issue] addLabel cc-triage-scope failed for PR #${prNumber}: ${err}`),
+  );
+  await getCurrentUser()
+    .then((user) => addAssignee("pr", prNumber, user))
+    .catch((err) => console.error(`[exec-issue] addAssignee failed for PR #${prNumber}: ${err}`));
+}
+
 export async function verifyPrCreated(
   issueNumber: number,
   worktreeId: string,
@@ -130,6 +144,7 @@ export async function verifyPrCreated(
   }
   if (prNumber !== null) {
     await addLabel("issue", issueNumber, "cc-pr-created");
+    await ensurePrTriageMetadata(prNumber);
     return;
   }
   console.error(

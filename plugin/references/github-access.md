@@ -69,7 +69,7 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh issue view <n> --json comments` | `issue_read`（method: `get_comments`） |
 | `gh issue view <n> --json subIssuesSummary` | `issue_read`（method: `get_sub_issues`） |
 | `gh issue list --search ...` | `list_issues` / `search_issues` |
-| `gh issue create` | `issue_write`（method: `create`） |
+| `gh issue create` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue --title ... --body-file - --label ... --assignee @me`（後述）。`issue_write`（method: `create`）は `labels` / `assignees` を渡し忘れると黙って欠落する |
 | `gh issue edit --body` | `issue_write`（method: `update`） |
 | `gh issue edit --add-label` / `--remove-label` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <番号> <ラベル>...` / `remove-label <番号> <ラベル>`（後述） |
 | `gh issue close [--reason]` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <番号> [completed\|not_planned]`（後述）。`issue_write`（method: `update`）は `labels` を全置換するため、state だけ変えるつもりの呼び出しでラベルが消えうる |
@@ -87,7 +87,8 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等） |
 | `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる） |
 | `gh pr list --search ...` | `search_pull_requests` |
-| `gh pr create` | `create_pull_request` |
+| `gh pr create` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-pr --title ... --body-file - --base ... --label ... --assignee @me`（後述）。`create_pull_request` には labels / assignees の引数自体が無く、Assignee と `cc-triage-scope` が欠落する |
+| `gh pr edit --add-assignee` / `gh issue edit --add-assignee` | **MCP を使わない**。`gh-compat.sh add-assignee <番号> <login\|@me>...`（`issue_write` の update は assignees を全置換する） |
 | `gh pr edit`（ラベル以外） | `pull_request_write`（method: `update`） |
 | `gh pr edit --add-label` / `--remove-label` | **MCP を使わない**。`gh-compat.sh add-label` / `remove-label`（Issue と同じ。番号空間を共有する） |
 | `gh pr merge` | `pull_request_write`（method: `merge`） |
@@ -126,12 +127,25 @@ MCP に同等ツールが無い（または**あっても意味論が違って�
 | `add-label <n> <ラベル>...` | `gh issue edit --add-label` / `gh pr edit --add-label` | `POST repos/{o}/{r}/issues/{n}/labels`（追加専用API） |
 | `remove-label <n> <ラベル>` | `gh issue edit --remove-label` / `gh pr edit --remove-label` | `DELETE repos/{o}/{r}/issues/{n}/labels/{label}`（単体削除API） |
 | `close-issue <n> [reason]` | `gh issue close [--reason]` | `PATCH repos/{o}/{r}/issues/{n}` の `state=closed` / `state_reason`（reason は `completed`（既定）/ `not_planned`。クローズ済みでも200なので冪等） |
+| `add-assignee <n> <login>...` | `gh issue edit --add-assignee` / `gh pr edit --add-assignee` | `POST repos/{o}/{r}/issues/{n}/assignees`（追加専用API。`@me` はログインユーザーへ解決） |
+| `create-issue --title --body-file [--label]... [--assignee]...` | `gh issue create` | `POST repos/{o}/{r}/issues`（labels / assignees を同じ呼び出しで渡す。URL を出力）。二重起票を避けるため `gh` へはフォールバックしない |
+| `create-pr --title --body-file --base [--head] [--draft] [--label]... [--assignee]...` | `gh pr create` | `POST repos/{o}/{r}/pulls` → `add-label` → `add-assignee`。URL を出力する。作成後の付与が失敗したら URL を出したうえで非0（作り直さず `add-label` / `add-assignee` を再実行する） |
+
+**Issue / PR の作成を MCP で行ってはいけない。** `create_pull_request` は labels / assignees の引数を持たず、`issue_write`（method: `create`）はモデルが渡し忘れると黙って欠落する。どちらも作成は成功するのでエラーにならず、ワーカーのポーリング条件（ラベル＋Assignee）から外れた Issue / PR が誰にも拾われないまま残る（実測: クラウド実行で作成された Issue / PR に Assignee と `cc-triage-scope` が付いていなかった）。`gh issue create` / `gh pr create` は GraphQL 経由でクラウドでは 403 になるため、作成と付与を1スクリプトに閉じた REST 経路が唯一の道になる。
 
 **ラベル操作で MCP（`issue_write` / `pull_request_write` の method: `update`）を使ってはいけない。** 同ツールの `labels` は指定した配列で**全置換**するため、「ラベルを1つ足す」つもりの呼び出しが他のラベルを黙って落とす。実測では、クラウドセッションが `cc-cloud-done` を付けた1回の update で `cc-triage-scope` と `cc-in-progress` が同時に消え、そのPRが `triage-pr` のポーリング条件（ラベル＋Assignee）から外れて10時間放置された。REST の labels エンドポイントは追加・単体削除の専用APIなので、この事故が構造的に起きない。
 
 **Issue のクローズも `gh` を直接使ってはいけない。** `gh issue close` は GraphQL の `closeIssue` mutation を叩く（`GH_DEBUG=api` で確認）。Epic フローではサブIssueを閉じる経路がこのコマンドしか無く（base が非デフォルトブランチの PR は GitHub が自動クローズしない）、ここが落ちると実装がマージ済みのまま Issue が open で取り残される。
 
 2026-08-29 の実測（gh 2.98.0）: `gh issue view --json parent` / `blockedBy`、`gh issue edit --add-blocked-by` / `--add-blocking` / `--add-sub-issue`、`gh issue create`（`--blocked-by` の有無に関わらず）、`gh pr view --json mergeable`、`gh issue close` は **いずれも GraphQL 経由**であることを `GH_DEBUG=api` で確認した。gh を新しくしてもクラウドの GraphQL ゲートは越えられないため、REST が唯一の道になる。
+
+## コミット・push は `git` だけで行う（MCP でコミットしない）
+
+**GitHub MCP のコミット系ツール（`push_files` / `create_or_update_file` / `delete_file` / `create_branch`）は使わない。** ローカル・クラウドとも、コミットは作業ツリーで `git commit` し、`git push` で送る（`commit-push` スキル）。
+
+- MCP で作ったコミットでは CI が起動しない場面がある（実測）。CI が走らない PR は `triage-pr` がチェック未完了のまま待ち続ける
+- MCP のコミットはリモートにだけ作られ、作業ツリーの `git` の履歴と分岐する。後続の `git push --force-with-lease` がそれを上書きしたり、差分確認が実態とずれたりする
+- `git push` が失敗しても MCP へフォールバックしない（「判定手順」のフォールバックの対象外）。失敗内容を最終報告に残して終了する
 
 ## `gh` のまま残す操作
 
