@@ -65,7 +65,22 @@ CLI・MCP・ライブラリの呼び出し手順をドキュメントやスキ�
 それ以外の失敗は非0・例外として返す。複数の取得を合成して1つの結果にする場合は、全ての取得が
 成功したときだけ出力する。
 
-参考: [PR#324 `issue-parent` の取得失敗を「親なし」として扱わない](https://github.com/getty104/claude-task-worker/pull/324#discussion_r3886722290), [PR#364 読み取り失敗を「ファイルなし」として扱わない](https://github.com/getty104/claude-task-worker/pull/364#discussion_r3888616539)
+主目的が成功しても、付随する処理（Assignee の解決、ラベルの付与）が失敗したなら非0で終える。
+成果物の識別子は出力したうえで失敗を返し、呼び出し元が不足分だけを再実行できるようにする。
+同じ操作を担う兄弟コマンド同士で失敗の返し方を揃え、片方だけが黙って成功を返す状態を作らない。
+
+参考: [PR#364 読み取り失敗を「ファイルなし」として扱わない](https://github.com/getty104/claude-task-worker/pull/364#discussion_r3888616539), [PR#406 Assignee 解決失敗を黙って除外しない](https://github.com/getty104/claude-task-worker/pull/406#discussion_r3989124860)
+
+### 失敗を無視する `catch` は無視したい処理全体を覆う
+
+`f(await g()).catch(...)` の `.catch()` は `f()` の失敗しか捕捉しない。引数の `await g()` は
+`.catch()` が付く前に評価されるため、その失敗は捕捉されず呼び出し元へ伝播する。付随処理の失敗を
+無視するつもりで書いた `catch` が、本体は成功しているのにタスク失敗通知や人手確認ラベルを招く。
+
+補助的な値の取得（ユーザー情報・メタデータ）は本処理と分けて `try`/`catch` で囲み、値を取得できた
+場合だけ本処理を実行して、取得失敗はログに留めて完了処理を続行する。
+
+参考: [PR#406 `getCurrentUser()` の失敗が `.catch()` を素通りする](https://github.com/getty104/claude-task-worker/pull/406#discussion_r3989124809), [PR#406 3箇所すべてで個別に処理する](https://github.com/getty104/claude-task-worker/pull/406#discussion_r3989106626)
 
 ### 実行の前提は起動時に検証し、崩れていれば即座に失敗させる
 
