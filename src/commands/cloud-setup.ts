@@ -14,6 +14,11 @@ const LOG_PREFIX = "cloud-setup";
 // フラグが settings に勝つため、ここでの設定はクラウドにしか効かない。
 export const CLOUD_DEFAULT_PERMISSION_MODE = "auto";
 
+// 同ファイルの `permissions.allow` へ追記するルール。auto モードでも `gh` の実行で
+// 確認が挟まると、応答するユーザーが常駐しないクラウドセッションはそこで止まる。
+// 既存の allow は残し、欠けているルールだけを足す（配列の和集合なので force の対象外）。
+export const CLOUD_PERMISSION_ALLOW = ["Bash(gh *)"] as const;
+
 // 同ファイルへ書き出すトップレベル設定。タスクセッションは応答するユーザーが常駐しない
 // 自律実行なので、確認を挟まず進む Proactive を既定にする。language は成果物
 // （Issueコメント・PR本文・最終報告）の言語を揃えるため。
@@ -50,7 +55,8 @@ export function claudeSettingsPath(): string {
   return join(dir && dir.length > 0 ? dir : join(homedir(), ".claude"), "settings.json");
 }
 
-// settings ファイルへ `permissions.defaultMode` / CLOUD_SETTINGS_DEFAULTS / `env` の
+// settings ファイルへ `permissions.defaultMode` / `permissions.allow` の CLOUD_PERMISSION_ALLOW /
+// CLOUD_SETTINGS_DEFAULTS / `env` の
 // CLOUD_SETTINGS_ENV を差し込んだ内容を返す。変更不要（すべて指定済みで force なし）なら null。
 //
 // 既存ファイルを丸ごと上書きしないのは、書き込み先に hooks・enabledPlugins・
@@ -83,6 +89,13 @@ export function withCloudDefaults(existing: string | null, force: boolean): stri
     changed = true;
   };
   set(permissions, "defaultMode", CLOUD_DEFAULT_PERMISSION_MODE);
+  const allow = permissions["allow"] ?? [];
+  if (!Array.isArray(allow)) throw new Error("`permissions.allow` is not an array");
+  const missing = CLOUD_PERMISSION_ALLOW.filter((rule) => !allow.includes(rule));
+  if (missing.length > 0) {
+    permissions["allow"] = [...allow, ...missing];
+    changed = true;
+  }
   for (const [key, value] of Object.entries(CLOUD_SETTINGS_DEFAULTS)) set(settings, key, value);
   for (const [key, value] of Object.entries(CLOUD_SETTINGS_ENV)) set(env, key, value);
   if (!changed) return null;
