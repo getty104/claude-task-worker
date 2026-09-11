@@ -394,10 +394,9 @@ test("create-pr はラベル付与に失敗しても URL を出力し、非0で�
   let stdout = "";
   let status = 0;
   try {
-    run(
-      ["create-pr", "--title", "T", "--body-file", "/dev/null", "--base", "main", "--head", "feat", "--label", "x"],
-      { env: stubEnv(dir, log) },
-    );
+    run(["create-pr", "--title", "T", "--body-file", "/dev/null", "--base", "main", "--head", "feat", "--label", "x"], {
+      env: stubEnv(dir, log),
+    });
   } catch (err) {
     stdout = err.stdout;
     status = err.status;
@@ -417,8 +416,14 @@ test("create-issue / create-pr はラベル・Assignee 無しでも /bin/bash（
     "repos/acme/widget/issues -H": "https://github.com/acme/widget/issues/6\n",
   });
   const exec = (args) =>
-    execFileSync("/bin/bash", [scriptPath, ...args], { encoding: "utf8", env: { ...process.env, ...stubEnv(dir, log) } }).trim();
-  assert.equal(exec(["create-issue", "--title", "T", "--body-file", "/dev/null"]), "https://github.com/acme/widget/issues/6");
+    execFileSync("/bin/bash", [scriptPath, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...stubEnv(dir, log) },
+    }).trim();
+  assert.equal(
+    exec(["create-issue", "--title", "T", "--body-file", "/dev/null"]),
+    "https://github.com/acme/widget/issues/6",
+  );
   assert.equal(
     exec(["create-pr", "--title", "T", "--body-file", "/dev/null", "--base", "main", "--head", "f"]),
     "https://github.com/acme/widget/pull/5",
