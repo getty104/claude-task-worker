@@ -17,6 +17,7 @@ const {
   buildCloudCreateArgs,
   buildCloudPrompt,
   buildCloudToolRestriction,
+  buildCloudGitHubAccessInstruction,
   appendCloudDoneInstruction,
   buildCloudCheckoutInstruction,
   buildCloudWorktreeInstruction,
@@ -456,6 +457,19 @@ test("appendCloudDoneInstruction forbids the label-replacing MCP write", () => {
   assert.ok(result.includes("issue_write"));
   assert.ok(result.includes("使わないこと"));
   assert.ok(!/`issue_write`（method: `update`）を優先/.test(result));
+});
+
+// MCP の create_pull_request は labels / assignees を持たず、MCP のコミットでは CI が起動しない
+// 場面がある。「GitHub 更新は MCP 優先」の例外として作成・付与・コミットを明文で外す。
+test("buildCloudGitHubAccessInstruction routes creation and commits away from GitHub MCP", () => {
+  const result = buildCloudGitHubAccessInstruction();
+  assert.ok(result.includes("gh-compat.sh create-issue"));
+  assert.ok(result.includes("create-pr"));
+  assert.ok(result.includes("add-assignee"));
+  for (const tool of ["push_files", "create_or_update_file", "delete_file", "create_branch"]) {
+    assert.ok(result.includes(tool), `expected the instruction to forbid ${tool}`);
+  }
+  assert.ok(result.includes("git push"));
 });
 
 test("buildCloudToolRestriction lists every DISALLOWED_TOOLS entry", () => {

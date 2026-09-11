@@ -142,25 +142,18 @@ Closes #$0
 
 ---
 
-## フェーズ4: PR の作成（`gh pr create` 実行）
+## フェーズ4: PR の作成（`gh-compat.sh create-pr` 実行）
 
-### 4-1. assignee の取得
+PR の作成は `gh-compat.sh create-pr` だけで行う（ローカル・クラウドとも）。`gh pr create` は GraphQL 経由でクラウドでは 403 になり、GitHub MCP の `create_pull_request` は assignees の引数を持たないため Assignee が欠落する。
 
-GitHub MCP が使える場合はログインユーザー取得に `get_me` を使う。以下は MCP 利用不可時のフォールバック。
-
-```bash
-ME=$(gh api user --jq '.login')
-```
-
-### 4-2. `gh pr create` の実行
-
-本文渡しは `--body-file -` + heredoc（`<<'EOF'` クォート版）を使う。`--body "..."` 形式は本文中のバッククォート・`$`・改行でエスケープが壊れやすいため使わない。heredoc は `<<'EOF'` でシェル展開を抑止するため、本文中の `$0` などのプレースホルダは heredoc に渡す前に実値へ置換しておくこと。
+本文渡しは `--body-file -` + heredoc（`<<'EOF'` クォート版）を使う。`--body "..."` 形式は本文中のバッククォート・`$`・改行でエスケープが壊れやすいため使わない。heredoc は `<<'EOF'` でシェル展開を抑止するため、本文中の `$0` などのプレースホルダは heredoc に渡す前に実値へ置換しておくこと。head は現在のブランチ（`cc-epic-$0`）になる。
 
 ```bash
-gh pr create \
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-pr \
   --title "Epic: <Epic Issueタイトル>" \
   --base "<BASE>" \
-  --assignee "${ME}" \
+  --head "cc-epic-$0" \
+  --assignee "@me" \
   --body-file - <<'EOF'
 ## 概要
 Epic Issue #$0「<Epic Issueタイトル>」に紐づくサブタスクをまとめた集約PRです。
@@ -183,7 +176,7 @@ EOF
 
 ラベルは付与しない（`--label` フラグを使わない）。
 
-`gh pr create` が失敗した場合は失敗ログを最終報告に含めて終了する。再試行は1回まで。
+URL が出力されずに失敗した場合は失敗ログを最終報告に含めて終了する。再試行は1回まで。URL が出力されたうえで非0の場合は PR 作成済みで Assignee の付与だけが失敗しているので、PR を作り直さず `gh-compat.sh add-assignee <PR番号> @me` を1回だけ再実行する。
 
 ---
 

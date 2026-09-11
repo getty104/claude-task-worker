@@ -42,6 +42,7 @@ GitHub アクセスは **3つの独立したゲート**で塞がれており、`
 | `gh issue view <n> --json parent` / `blockedBy` | GraphQL |
 | `gh issue edit <n> --add-blocked-by` / `--add-blocking` / `--add-sub-issue` | GraphQL |
 | `gh issue create`（`--blocked-by` 等の有無に関わらず） | GraphQL（`createIssue` mutation） |
+| `gh pr create` | GraphQL（2026-09-11 に `--dry-run` で確認） |
 | `gh pr view <n> --json mergeable` | GraphQL（`PullRequestByNumber`） |
 
 つまりフィールド・フラグの有無ではなく**転送経路**の問題であり、**gh を新しくしても GraphQL ゲートは越えられない**。REST（`gh api repos/{o}/{r}/...`）へ寄せる以外に手が無く、その実装が `plugin/scripts/gh-compat.sh` である。
@@ -121,7 +122,7 @@ D4–D7 は「存在しないオブジェクトID宛て」で投げた副作用�
 | `update-requirement-rules` | 3 | あり | — |
 | `update-design-md` | 2 | あり | 1 |
 
-補助スキル・スクリプトでは `resolve-pr-comments.sh`（`reviewThreads` + `resolveReviewThread`）と `create-review-fix-plan`（`reviewThreads`）が GraphQL に直接依存する。`create-pr` / `commit-push` は `--json` も `graphql` も使わない。
+補助スキル・スクリプトでは `resolve-pr-comments.sh`（`reviewThreads` + `resolveReviewThread`）と `create-review-fix-plan`（`reviewThreads`）が GraphQL に直接依存する。`commit-push` は `--json` も `graphql` も使わない。`create-pr` は `--json` を使わないが、`gh pr create` 自体が GraphQL 経由なのでクラウドでは 403 になる（`gh-compat.sh create-pr` の REST 経路へ移行済み）。
 
 ## ワーカー別適合性（PRD 5章 適合性表の差し替え用）
 

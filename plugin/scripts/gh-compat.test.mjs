@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,8 @@ function makeGhStub(dir, responses) {
     .join("\n");
   writeFileSync(
     ghPath,
-    `#!/usr/bin/env bash\necho "$@" >> "$STUB_LOG"\ncase "$*" in\n${cases}\n  *) exit 1 ;;\nesac\n`,
+    // `--input -` で渡される JSON 本文も検証できるよう、ログへ追記する
+    `#!/usr/bin/env bash\necho "$@" >> "$STUB_LOG"\ncase "$*" in *"--input -"*) cat >> "$STUB_LOG"; echo >> "$STUB_LOG" ;; esac\ncase "$*" in\n${cases}\n  *) exit 1 ;;\nesac\n`,
   );
   chmodSync(ghPath, 0o755);
   return ghPath;
@@ -310,4 +311,127 @@ test("remove-label は単体削除の REST を使う（他のラベルを巻き�
   });
   const calls = execFileSync("cat", [log], { encoding: "utf8" });
   assert.match(calls, /DELETE repos\/acme\/widget\/issues\/6056\/labels\/cc-cloud-done/);
+});
+
+// 作成系: MCP の create_pull_request は labels / assignees を持たず、issue_write（create）も
+// 渡し忘れると黙って欠落する。REST で作成と付与を1スクリプトに閉じ込めたことを固定する。
+function stubEnv(dir, log) {
+  return { PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, GH_COMPAT_OWNER_REPO: "acme/widget" };
+}
+
+test("create-issue は REST 1回でラベルと Assignee（@me 解決済み）を渡し、gh issue create を呼ばない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  const body = path.join(dir, "body.md");
+  writeFileSync(body, "本文 `code` $HOME\n");
+  makeGhStub(dir, {
+    "api user --jq .login": "alice\n",
+    "repos/acme/widget/issues -H": "https://github.com/acme/widget/issues/42\n",
+  });
+  const out = run(
+    [
+      "create-issue",
+      "--title",
+      "T",
+      "--body-file",
+      body,
+      "--label",
+      "cc-triage-scope",
+      "--label",
+      "cc-issue-created",
+      "--assignee",
+      "@me",
+    ],
+    { env: stubEnv(dir, log) },
+  );
+  assert.equal(out, "https://github.com/acme/widget/issues/42");
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /"labels":\["cc-triage-scope","cc-issue-created"\]/);
+  assert.match(calls, /"assignees":\["alice"\]/);
+  assert.match(calls, /"body":"本文 `code` \$HOME\\n"/);
+  assert.doesNotMatch(calls, /issue create/);
+});
+
+test("create-pr は REST で作成したあとラベルと Assignee を付け、gh pr create を呼ばない", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, {
+    "api user --jq .login": "alice\n",
+    "repos/acme/widget/pulls -H": "https://github.com/acme/widget/pull/43 43\n",
+    "issues/43/labels": "",
+    "issues/43/assignees": "",
+  });
+  const out = run(
+    [
+      "create-pr",
+      "--title",
+      "T",
+      "--body-file",
+      "/dev/null",
+      "--base",
+      "main",
+      "--head",
+      "feat",
+      "--label",
+      "cc-triage-scope",
+      "--assignee",
+      "@me",
+    ],
+    { env: stubEnv(dir, log) },
+  );
+  assert.equal(out, "https://github.com/acme/widget/pull/43");
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /"head":"feat","base":"main","draft":false/);
+  assert.match(calls, /-X POST repos\/acme\/widget\/issues\/43\/labels .*-f labels\[\]=cc-triage-scope/);
+  assert.match(calls, /-X POST repos\/acme\/widget\/issues\/43\/assignees .*-f assignees\[\]=alice/);
+  assert.doesNotMatch(calls, /pr create/);
+});
+
+test("create-pr はラベル付与に失敗しても URL を出力し、非0で終える（作り直させない）", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "repos/acme/widget/pulls -H": "https://github.com/acme/widget/pull/43 43\n" });
+  let stdout = "";
+  let status = 0;
+  try {
+    run(
+      ["create-pr", "--title", "T", "--body-file", "/dev/null", "--base", "main", "--head", "feat", "--label", "x"],
+      { env: stubEnv(dir, log) },
+    );
+  } catch (err) {
+    stdout = err.stdout;
+    status = err.status;
+  }
+  assert.equal(stdout.trim(), "https://github.com/acme/widget/pull/43");
+  assert.equal(status, 1);
+});
+
+// macOS 既定の bash 3.2 は set -u 下で空配列の展開を unbound 扱いする。ラベル・Assignee 無しの
+// 作成で落ちないことを、実際の /bin/bash で確かめる（無い環境ではスキップ）。
+test("create-issue / create-pr はラベル・Assignee 無しでも /bin/bash（3.2 含む）で動く", (t) => {
+  if (!existsSync("/bin/bash")) return t.skip("/bin/bash not found");
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, {
+    "repos/acme/widget/pulls -H": "https://github.com/acme/widget/pull/5 5\n",
+    "repos/acme/widget/issues -H": "https://github.com/acme/widget/issues/6\n",
+  });
+  const exec = (args) =>
+    execFileSync("/bin/bash", [scriptPath, ...args], { encoding: "utf8", env: { ...process.env, ...stubEnv(dir, log) } }).trim();
+  assert.equal(exec(["create-issue", "--title", "T", "--body-file", "/dev/null"]), "https://github.com/acme/widget/issues/6");
+  assert.equal(
+    exec(["create-pr", "--title", "T", "--body-file", "/dev/null", "--base", "main", "--head", "f"]),
+    "https://github.com/acme/widget/pull/5",
+  );
+  assert.match(execFileSync("cat", [log], { encoding: "utf8" }), /"labels":\[\],"assignees":\[\]/);
+});
+
+test("add-assignee は追加専用の REST を使う（@me はログイン名へ解決する）", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, { "api user --jq .login": "alice\n", "issues/9/assignees": "" });
+  run(["add-assignee", "9", "@me"], { env: stubEnv(dir, log) });
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /-X POST repos\/acme\/widget\/issues\/9\/assignees .*-f assignees\[\]=alice/);
+  assert.doesNotMatch(calls, /issue edit/);
 });

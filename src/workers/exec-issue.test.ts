@@ -163,6 +163,10 @@ test("verifyPrCreated (local): adopts a PR whose head matches the worktree branc
 
   assert.equal(result, undefined);
   assert.equal(addLabelArgv(stubs.records(), "issue"), true);
+  // create-pr が付け損ねても triage-pr に拾われるよう、PR 側にもラベルと Assignee を付け直す
+  const prEdits = stubs.records().filter((r) => r.command === "gh" && r.argv[0] === "pr" && r.argv[1] === "edit");
+  assert.ok(prEdits.some((r) => r.argv[2] === "7" && r.argv.includes("cc-triage-scope")));
+  assert.ok(prEdits.some((r) => r.argv[2] === "7" && r.argv.includes("--add-assignee")));
 });
 
 test("verifyPrCreated (cloud): adopts a closing PR by base + createdAt ownership, without calling `gh pr list`", async (t) => {
