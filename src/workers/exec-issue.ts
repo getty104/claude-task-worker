@@ -83,9 +83,9 @@ async function ensurePrTriageMetadata(prNumber: number): Promise<void> {
   await addLabel("pr", prNumber, "cc-triage-scope").catch((err) =>
     console.error(`[exec-issue] addLabel cc-triage-scope failed for PR #${prNumber}: ${err}`),
   );
-  await addAssignee("pr", prNumber, await getCurrentUser()).catch((err) =>
-    console.error(`[exec-issue] addAssignee failed for PR #${prNumber}: ${err}`),
-  );
+  await getCurrentUser()
+    .then((user) => addAssignee("pr", prNumber, user))
+    .catch((err) => console.error(`[exec-issue] addAssignee failed for PR #${prNumber}: ${err}`));
 }
 
 export async function verifyPrCreated(

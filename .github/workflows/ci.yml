@@ -31,3 +31,22 @@ jobs:
 
       - name: Test
         run: npm test
+
+  bash32-compat:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify bash 3.2 is in use
+        run: /bin/bash --version
+
+      - name: Test gh-compat (bash 3.2)
+        run: node --experimental-strip-types --import ./scripts/test-resolver.mjs --test plugin/scripts/gh-compat.test.mjs

@@ -272,18 +272,27 @@ parse_create_opts() {
 # REST の POST issues は labels / assignees を同じ呼び出しで受けるので、作成と付与が分かれない。
 # 作成は gh へフォールバックしない: 応答喪失時に二重起票しうるうえ、REST が通らない環境では
 # gh（GraphQL）も通らない。
+# Assignee の解決失敗は cmd_create_pr と同じ契約（ベストエフォート作成＋非0終了）に揃える:
+# 解決できた login だけで作成を進め、1件でも解決に失敗していれば URL を出力したうえで非0で返す
+# （Issue を1件も作らない方が「@me 解決の一時失敗で起票が止まる」事故として重いため）。
 cmd_create_issue() {
   parse_create_opts "$@" || return 64
-  local a login logins=()
+  local a login logins=() rc=0 url
   for a in ${ASSIGNEES[@]+"${ASSIGNEES[@]}"}; do
     login=$(resolve_login "$a")
-    [ -n "$login" ] && logins+=("$login")
+    if [ -n "$login" ]; then logins+=("$login"); else rc=1; fi
   done
-  jq -cn --arg title "$TITLE" --rawfile body "$BODY_FILE" \
+  url=$(jq -cn --arg title "$TITLE" --rawfile body "$BODY_FILE" \
     --argjson labels "$(json_array ${LABELS[@]+"${LABELS[@]}"})" \
     --argjson assignees "$(json_array ${logins[@]+"${logins[@]}"})" \
     '{title: $title, body: $body, labels: $labels, assignees: $assignees}' |
-    gh api -X POST "repos/${OWNER_REPO}/issues" -H "X-GitHub-Api-Version: 2022-11-28" --input - --jq .html_url
+    gh api -X POST "repos/${OWNER_REPO}/issues" -H "X-GitHub-Api-Version: 2022-11-28" --input - --jq .html_url) ||
+    { echo "gh-compat: create-issue: failed to create the issue" >&2; return 1; }
+  printf '%s\n' "$url"
+  if [ "$rc" -ne 0 ]; then
+    echo "gh-compat: create-issue: ${url} was created but resolving assignees failed" >&2
+  fi
+  return $rc
 }
 
 # PR の作成。`gh pr create` は GraphQL 経由でクラウドでは 403 になり、MCP の

@@ -55,8 +55,8 @@ export const epicIssueWorker = (opts: { epicFilters?: number[]; labelFilters?: s
       await addLabel("pr", prNumber, "cc-epic-issue");
       await addLabel("pr", prNumber, "cc-triage-scope");
       // triage-pr は Assignee でも絞るため付け直す（クラウドの MCP 作成経路では欠落しうる。冪等）。
-      await addAssignee("pr", prNumber, await getCurrentUser()).catch((err) =>
-        console.error(`[epic-issue] addAssignee failed for PR #${prNumber}: ${err}`),
-      );
+      await getCurrentUser()
+        .then((user) => addAssignee("pr", prNumber, user))
+        .catch((err) => console.error(`[epic-issue] addAssignee failed for PR #${prNumber}: ${err}`));
     },
   })();

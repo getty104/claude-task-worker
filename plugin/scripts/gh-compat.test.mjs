@@ -352,6 +352,27 @@ test("create-issue は REST 1回でラベルと Assignee（@me 解決済み）�
   assert.doesNotMatch(calls, /issue create/);
 });
 
+test("create-issue は Assignee 解決に失敗しても Issue は作成し、URL を出力したうえで非0で終える", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  makeGhStub(dir, {
+    "api user --jq .login": "",
+    "repos/acme/widget/issues -H": "https://github.com/acme/widget/issues/44\n",
+  });
+  let stdout = "";
+  let status = 0;
+  try {
+    run(["create-issue", "--title", "T", "--body-file", "/dev/null", "--assignee", "@me"], {
+      env: stubEnv(dir, log),
+    });
+  } catch (err) {
+    stdout = err.stdout;
+    status = err.status;
+  }
+  assert.equal(stdout.trim(), "https://github.com/acme/widget/issues/44");
+  assert.equal(status, 1);
+});
+
 test("create-pr は REST で作成したあとラベルと Assignee を付け、gh pr create を呼ばない", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
   const log = path.join(dir, "log");
