@@ -14,10 +14,11 @@ const LOG_PREFIX = "cloud-setup";
 // フラグが settings に勝つため、ここでの設定はクラウドにしか効かない。
 export const CLOUD_DEFAULT_PERMISSION_MODE = "auto";
 
-// 同ファイルの `permissions.allow` へ追記するルール。auto モードでも `gh` の実行で
-// 確認が挟まると、応答するユーザーが常駐しないクラウドセッションはそこで止まる。
+// 同ファイルの `permissions.allow` へ追記するルール。auto モードでも `gh` / `git` の実行で
+// 確認が挟まると、応答するユーザーが常駐しないクラウドセッションはそこで止まる
+// （`git push` が止まると MCP のコミット系ツールへ逃げる余地も生まれる）。
 // 既存の allow は残し、欠けているルールだけを足す（配列の和集合なので force の対象外）。
-export const CLOUD_PERMISSION_ALLOW = ["Bash(gh *)"] as const;
+export const CLOUD_PERMISSION_ALLOW = ["Bash(gh *)", "Bash(git *)"] as const;
 
 // 同ファイルへ書き出すトップレベル設定。タスクセッションは応答するユーザーが常駐しない
 // 自律実行なので、確認を挟まず進む Proactive を既定にする。language は成果物

@@ -28,13 +28,13 @@ test("withCloudDefaults creates the file content when settings.json is absent", 
 test("withCloudDefaults keeps unrelated settings and the rest of permissions", () => {
   const existing = JSON.stringify({
     hooks: { SessionStart: [{ matcher: "*" }] },
-    permissions: { allow: ["Bash(git *)"] },
+    permissions: { allow: ["Bash(npm *)"] },
     env: { MY_VAR: "keep" },
   });
   assert.deepEqual(JSON.parse(withCloudDefaults(existing, false) ?? ""), {
     hooks: { SessionStart: [{ matcher: "*" }] },
     permissions: {
-      allow: ["Bash(git *)", ...CLOUD_PERMISSION_ALLOW],
+      allow: ["Bash(npm *)", ...CLOUD_PERMISSION_ALLOW],
       defaultMode: CLOUD_DEFAULT_PERMISSION_MODE,
     },
     ...CLOUD_SETTINGS_DEFAULTS,
