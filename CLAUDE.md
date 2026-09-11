@@ -111,6 +111,16 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 ワーカー起動スキル15個（`exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue-from-issue-number` / `update-issue` / `triage-created-issue` / `triage-pr` / `resolve-pr-conflict` / `check-dependabot` / `create-epic-pr` / `create-ui-design` / `apply-ui-design` / `update-coding-guidelines` / `update-requirement-rules` / `update-design-md`）の本文の「実行モードの制約」セクションには、スキル固有のリスク（どのラベル遷移が壊れるか）のみを記述する（自律実行原則は上記 3 の CLI 注入に一元化されており、スキル本文には複製しない）。
 
+### `exec-issue` は PR の CI を待たない
+
+`exec-issue` の完了は「PR を作成した」時点で、PR の CI（Actions の成否・CI が PR に投稿するコメント）は完了条件にしない（スキル本文の「CI を待たない」節）。CI の確認は `triage-pr`、CI 失敗の修正は `cc-fix-onetime` → `fix-review-point` の担当。
+
+きっかけは、description の完了条件と実装プランが CI の出力を前提にしていたIssue（「一時定義を push して CI が PR に投稿する出力から実測値を採る」「CI の出力が差分なしであること」）。クラウド実行ではその値をローカルで得る手段が無く、セッションは push → CI 待ち → 反映を繰り返してワーカーのタスクを張り付かせた。システムプロンプトの「全ステップを完遂してから終了する」が、CI 待ちも省けないステップとして扱わせる。
+
+- **CI の出力に依存する作業も待たずに修正ループへ渡す**。ローカルで得られる情報で最終形を書き、CI との差分は `fix-review-point` が寄せる
+- **途中段階の PR を残さない**。CI の出力を採るための一時ファイルだけの PR は CI が通ってしまい、`triage-pr` がそのままマージする。値が確定できない箇所は推定値で書き、誤っていれば CI が落ちる側に倒す
+- **Issue を書く側でも防ぐ**。`post-issue-body` の投稿前チェックが、`## 要件` / `## 実装プラン` に CI の結果を完了条件・作業の前提にした記述が無いことを確認する（`create-issue` / `create-issue-from-issue-number` / `update-issue` の3経路すべてが同スキルを通る）
+
 ### 実装のサブエージェント委譲（`exec-issue` / `fix-review-point`）
 
 両スキルはタスクをサブエージェントへ委譲する設計だが、委譲の是非は**モデル世代で逆方向に振れる**。かつては選定基準（フェーズ2）とブリーフィング（フェーズ3）を書くだけでは**メインエージェントが自分で実装してしまう**（委譲のオーバーヘッドを避ける方向に倒れる）ため、`exec-issue` は「フェーズ3の実装タスク本体は規模を問わず全件委譲」という無条件ルールで押し切っていた。Opus 5 は逆に**以前のモデルより積極的に委譲する**（[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)）ため、全件委譲を強制すると小粒タスクでコストと時間が倍になるだけになる。この無条件ルールは撤去した。
