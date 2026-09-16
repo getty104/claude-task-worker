@@ -48,7 +48,9 @@ gh pr list --head "cc-ui-design-$0" --state all --json number,url,state,mergedAt
 
 `--limit 1` は付けない。同一headブランチに未マージPRとマージ済みPRが混在しうるため、全件取得したうえで**マージ済みのもの**だけを選別する。
 
-**マージ済みの判定は経路によって値の形が違う**。`gh`（GraphQL）は `state` に `MERGED` を返すが、**GitHub MCP / `gh api repos/...`（REST）はマージ済みでも `state` が `"closed"` で、マージの有無は `merged_at`（非null）または `merged`（true）にしか現れない**。`state == "MERGED"` だけで絞ると REST 経路では必ず0件になり、マージ済みなのに中断する。したがって判定は「`state` が `MERGED`（大文字小文字を問わない）」**または**「`mergedAt` / `merged_at` が非null」**または**「`merged` が true」のいずれかを満たすこと、とする。
+**マージ済みの判定は経路によって値の形が違う**。`gh`（GraphQL）は `state` に `MERGED` を返すが、**GitHub MCP / `gh api repos/...`（REST）はマージ済みでも `state` が `"closed"` で、マージの有無は `merged_at`（非null）にしか現れない**。`state == "MERGED"` だけで絞ると REST 経路では必ず0件になり、マージ済みなのに中断する。したがって判定は「`state` が `MERGED`（大文字小文字を問わない）」**または**「`mergedAt` / `merged_at` が非null」のいずれかを満たすこと、とする。
+
+**`list_pull_requests` の `merged` は判定に使わない**。REST の一覧APIは `merged` を返さないため、MCP はマージ済みのPRにも `merged: false` を明示して返す（`merged: false` は「未マージ」を意味しない）。フィールドを絞って取得する場合も `merged_at` は必ず含める。候補が closed で `merged_at` が null に見える場合は、未マージと結論づける前に `pull_request_read`（method: `get`）で単体取得し、その `merged` / `merged_at` で確定する（単体取得の `merged` は正しい値を返す）。
 
 **REST 経路の `head` は `owner:branch` 形式が必須**（`<リポジトリのオーナー名>:cc-ui-design-$0`。オーナー名は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh owner-repo` の `owner/repo` から取る）。ブランチ名だけを渡すとフィルタが**エラーにならず黙って無視され**、リポジトリの全PRが返って「複数件」の中断条件へ誤って落ちる。`gh pr list --head` はこの変換を自前で行うため、フォールバック側ではブランチ名のみでよい。
 

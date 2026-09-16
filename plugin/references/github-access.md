@@ -85,7 +85,7 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh pr checks` | `pull_request_read`（method: `get_status` / `get_check_runs`） |
 | `gh api graphql`（`reviewThreads`） | `pull_request_read`（method: `get_review_comments`）。スレッドの node ID（`PRRT_...`）と `isResolved` を返す。カーソル方式（`perPage` 最大100 / `after` に前ページの `endCursor`）でページングを取得しきる |
 | `gh api graphql`（`resolveReviewThread` mutation） | `pull_request_review_write`（method: `resolve_thread`、`threadId: <node ID>`）。既に解決済みのスレッドへの呼び出しは **no-op**（冪等） |
-| `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる） |
+| `gh pr list --head` / `--base` / `--state` | `list_pull_requests`（MCP 不可時の REST は `gh api "repos/{o}/{r}/pulls?state=open&head={owner}:{branch}"`。`gh pr list` は GraphQL 経由で 403 になる）。**マージ済みでも `state` は `closed`、`merged` は常に `false`**（一覧APIが `merged` を返さない）なので、マージ判定は `merged_at` の非nullで行う |
 | `gh pr list --search ...` | `search_pull_requests` |
 | `gh pr create` | **MCP を使わない**。`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-pr --title ... --body-file - --base ... --label ... --assignee @me`（後述）。`create_pull_request` には labels / assignees の引数自体が無く、Assignee と `cc-triage-scope` が欠落する |
 | `gh pr edit --add-assignee` / `gh issue edit --add-assignee` | **MCP を使わない**。`gh-compat.sh add-assignee <番号> <login\|@me>...`（`issue_write` の update は assignees を全置換する） |
