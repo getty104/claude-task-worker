@@ -179,7 +179,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
 
-**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。
+**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。カスタムワーカーの定義 TS を対話で生成する `build-custom-worker` も同じ理由で fork を持たない（要件を `AskUserQuestion` で全項目確定させてから `claude-task-worker/lib` のみを import する定義を書き出し、`list-workers` でロード検証する。ワーカーからは自動起動しない）。
 
 **`context: fork` へ Skill ツール経由の args は届く**。かつて Claude Code のバグ（anthropics/claude-code#34164）で届かず argsファイルの二重チャネルで回避していたが、上流で修正済み。実運用のPRで `create-pr` に渡した Issue 番号が `Closes #<N>` とベースブランチ（`cc-epic-<N>`）の両方に正しく反映されていることを確認している。
 
