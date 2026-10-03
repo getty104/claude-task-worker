@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { PRESET_WORKERS } from "./workers/registry";
-import type { WorkerDefinition } from "./workers/worker-definition";
+import type { WorkerDefinition, WorkerStartOptions } from "./workers/worker-definition";
 import {
   shutdown,
   waitForAllProcesses,
@@ -26,7 +26,14 @@ import {
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
-import { checkCloudConfig, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import {
+  checkCloudConfig,
+  CLOUD_DONE_LABEL,
+  disabledWorkerMessage,
+  isWorkerEnabled,
+  partitionEnabledWorkers,
+  type CloudAuthStatus,
+} from "./config";
 import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
@@ -257,6 +264,19 @@ async function assertCloudAvailable(): Promise<void> {
   }
 }
 
+// all / yolo の候補から workers.<name>.enabled: false を除いて起動する。除外があれば1行で示す。
+function startEnabledWorkers(
+  entries: readonly (typeof PRESET_WORKERS)[number][],
+  filters: WorkerStartOptions,
+): Promise<void>[] {
+  const { enabled, disabled } = partitionEnabledWorkers(
+    entries.map((e) => e.definition.name),
+    isWorkerEnabled,
+  );
+  if (disabled.length > 0) console.log(`[worker] skipped disabled workers: ${disabled.join(", ")}`);
+  return enabled.map((name) => WORKERS[name].start(filters));
+}
+
 // 起動前の前提チェックをまとめて実行する。
 async function assertRunPrerequisites(): Promise<void> {
   // 毎秒のテーブル再描画（画面クリア）でエラーログが一瞬しか見えないため、
@@ -391,7 +411,10 @@ if (hasProjectFilter()) {
     // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
     await removeStaleWorktrees();
     await Promise.all(
-      PRESET_WORKERS.filter((e) => e.inAll).map((e) => e.definition.start({ epicFilters, labelFilters })),
+      startEnabledWorkers(
+        PRESET_WORKERS.filter((e) => e.inAll),
+        { epicFilters, labelFilters },
+      ),
     );
   })();
 } else if (workerType === "yolo") {
@@ -401,13 +424,21 @@ if (hasProjectFilter()) {
     await assertRunPrerequisites();
     await removeStaleWorktrees();
     await Promise.all(
-      PRESET_WORKERS.filter((e) => e.inYolo).map((e) => e.definition.start({ epicFilters, labelFilters })),
+      startEnabledWorkers(
+        PRESET_WORKERS.filter((e) => e.inYolo),
+        { epicFilters, labelFilters },
+      ),
     );
   })();
 } else {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
+    // assertRunPrerequisites() の console キャプチャより前に判定する（ログテーブルでは有効化方法が切り詰められるため）。
+    if (!isWorkerEnabled(workerType)) {
+      console.error(`[worker] ${disabledWorkerMessage(workerType)}`);
+      process.exit(1);
+    }
     await assertRunPrerequisites();
     await removeStaleWorktrees();
     await WORKERS[workerType].start({ epicFilters, labelFilters });
