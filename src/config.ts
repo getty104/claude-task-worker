@@ -58,6 +58,7 @@ interface Config {
   // anthropic_cloud 環境）に任せる。個人ごとに違う値になりやすいので
   // claude-task-worker.local.json 側で指定する想定。
   remoteEnvId: string | null;
+  labels: string[];
   uiDesign: UiDesignConfig;
   lastRun: LastRunLog;
   workers: Record<string, WorkerRuntimeConfig>;
@@ -312,6 +313,7 @@ export function checkCloudConfig(input: {
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   remoteEnvId: null,
+  labels: [],
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
   lastRun: {},
   workers: {},
@@ -463,6 +465,22 @@ export function parseLastRunEntry(val: unknown): LastRunLog {
   return result;
 }
 
+export function parseLabelsEntry(val: unknown): string[] {
+  if (!Array.isArray(val)) {
+    console.warn(`[config] invalid labels: expected array of strings, ignoring`);
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of val) {
+    if (typeof item === "string" && item.trim().length > 0) {
+      result.push(item.trim());
+    } else {
+      console.warn(`[config] invalid labels entry: ${String(item)}, ignoring`);
+    }
+  }
+  return result;
+}
+
 function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
@@ -498,7 +516,7 @@ function readRawConfig(path: string): Record<string, unknown> {
 export function loadConfig(): Config {
   const raw = mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
 
-  const result: Config = { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
+  const result: Config = { ...DEFAULT_CONFIG, labels: [], uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
 
   if ("remoteEnvId" in raw) {
     const val = raw["remoteEnvId"];
@@ -509,6 +527,10 @@ export function loadConfig(): Config {
     } else {
       console.warn(`[config] invalid remoteEnvId: ${String(val)}, using default null`);
     }
+  }
+
+  if ("labels" in raw) {
+    result.labels = parseLabelsEntry(raw["labels"]);
   }
 
   if ("lastRun" in raw) {
