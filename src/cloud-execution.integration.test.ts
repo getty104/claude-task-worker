@@ -161,10 +161,21 @@ const ISSUE_GH_SCENARIO = {
 // 期待値になる。両者が同じ assert を通ることをヘルパーの共有で構造的に担保する。
 async function runCloudHappyPath(
   t: TestContext,
-  options: { mode: "default" | "herdr"; cloudOutput: string },
+  options: {
+    mode: "default" | "herdr";
+    cloudOutput: string;
+    worker?: string;
+    triggerLabel?: string;
+    skill?: string;
+    workerConfig?: Record<string, unknown>;
+    files?: Record<string, string>;
+  },
 ): Promise<void> {
+  const worker = options.worker ?? "exec-issue";
   const stubs = installCliStubs({
-    gh: ISSUE_GH_SCENARIO,
+    gh: options.triggerLabel
+      ? { ...ISSUE_GH_SCENARIO, issues: [{ ...BASE_ISSUE, labels: [{ name: options.triggerLabel }] }] }
+      : ISSUE_GH_SCENARIO,
     // 作成コマンドの stdout からセッションIDを取得するため、実測の出力形状（`View:` の URL）を
     // 含めておく。含めないと作成フェーズが失敗する。あわせて claude スタブが cc-cloud-done を
     // 付与する（実際のクラウドセッションが最後の操作として行う付与の模倣）。
@@ -175,11 +186,12 @@ async function runCloudHappyPath(
     },
   });
   const handle = await startWorker({
-    worker: "exec-issue",
-    workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
+    worker,
+    workerConfig: options.workerConfig ?? { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
     userConfig: { mode: options.mode },
     records: stubs.records,
     extraArgs: ["--cloud"],
+    files: options.files,
   });
   t.after(async () => {
     await handle.cleanup();
@@ -248,7 +260,7 @@ async function runCloudHappyPath(
   // default モードでもプロンプトが空にならないこと（`-p` を落とす代わりに `--cloud` の値へ
   // 載せる経路が両モードで働いていること）。
   assert.ok(
-    description.includes("exec-issue"),
+    description.includes(options.skill ?? "exec-issue"),
     "作成コマンドの初期プロンプトにスキル呼び出しが含まれていない（プロンプトが渡っていない）",
   );
 
@@ -307,6 +319,36 @@ test(
       cloudOutput:
         "\u001b[?25lCreated cloud session: ctw:demo:#501\r\n" +
         "View: https://claude.ai/\u001b[0mcode/session_stubO?from=cli&m=0\u001b[?25h\r\n",
+    });
+  },
+);
+
+const CUSTOM_ISSUE_WORKER_SOURCE = `import { createIssuePollingWorker } from "claude-task-worker/lib";
+export const myCustom: unknown = createIssuePollingWorker({
+  name: "my-custom",
+  triggerLabels: ["cc-my-custom"],
+  command: "my-skill",
+});
+`;
+const CUSTOM_ISSUE_FILES = { "workers/my-custom.ts": CUSTOM_ISSUE_WORKER_SOURCE };
+const CUSTOM_ISSUE_CONFIG = {
+  workerFiles: ["workers/my-custom.ts"],
+  workers: { "my-custom": { pollingIntervalSeconds: 3600 } },
+};
+
+// カスタムワーカーもファクトリ共通の経路を通るため、プリセット（A/N）と同じ観点で固定する。
+test(
+  "P: カスタム Issue 型ワーカーのクラウド実行が --ref を付け、-p/--permission-mode を付けない",
+  { timeout: 75_000 },
+  async (t) => {
+    await runCloudHappyPath(t, {
+      mode: "default",
+      cloudOutput: CLEAN_CLOUD_OUTPUT,
+      worker: "my-custom",
+      triggerLabel: "cc-my-custom",
+      skill: "my-skill",
+      workerConfig: CUSTOM_ISSUE_CONFIG,
+      files: CUSTOM_ISSUE_FILES,
     });
   },
 );
@@ -635,6 +677,113 @@ test("F: exec-issue のローカル実行は --cloud/--ref/-p を付けず workt
     "--cloud 未指定なのに CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC が --env に含まれている",
   );
 });
+
+test(
+  "Q: カスタム Issue 型ワーカーの herdr ローカル実行は -p を付けず agent prompt で投入する",
+  { timeout: 60_000 },
+  async (t) => {
+    const stubs = installCliStubs({
+      gh: { ...ISSUE_GH_SCENARIO, issues: [{ ...BASE_ISSUE, labels: [{ name: "cc-my-custom" }] }] },
+      herdr: { agentStatuses: ["working", "done"], paneOutput: "[stub] my-custom local report" },
+    });
+    const handle = await startWorker({
+      worker: "my-custom",
+      workerConfig: CUSTOM_ISSUE_CONFIG,
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      files: CUSTOM_ISSUE_FILES,
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    await handle.waitFor((records) => findRecord(records, "herdr", "agent", "prompt") !== undefined);
+
+    const records = stubs.records();
+    const claudeArgs = extractAgentStartArgs(findRecord(records, "herdr", "agent", "start")!);
+    assert.ok(!claudeArgs.includes("-p"), "-p が付いてはいけない（herdr モード）");
+    assert.ok(!claudeArgs.includes("--cloud"));
+    assert.ok(!claudeArgs.includes("--ref"));
+    assert.ok(!claudeArgs.some((a) => a.includes("my-skill")), "プロンプトを起動引数で渡してはいけない");
+    const prompt = findRecord(records, "herdr", "agent", "prompt")!;
+    assert.ok(
+      prompt.argv.some((a) => a.includes("my-skill") && a.includes("501")),
+      "agent prompt にスキル呼び出しが無い",
+    );
+  },
+);
+
+const CUSTOM_SCHEDULED_SOURCE = `import { createScheduledWorker } from "claude-task-worker/lib";
+export const myScheduled: unknown = createScheduledWorker({ name: "my-scheduled", command: "my-scheduled-skill" });
+`;
+
+test(
+  "R: カスタム定期型ワーカーが初回ポーリングでスキルを起動し、実行記録PRを作って cc-triage-scope を付ける",
+  { timeout: 60_000 },
+  async (t) => {
+    const stubs = installCliStubs({
+      gh: { login: "octocat", repo: { owner: "acme", name: "demo", defaultBranch: "main" } },
+      herdr: { agentStatuses: ["working", "done"] },
+    });
+    const handle = await startWorker({
+      worker: "my-scheduled",
+      workerConfig: { workerFiles: ["workers/my-scheduled.ts"] },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      files: { "workers/my-scheduled.ts": CUSTOM_SCHEDULED_SOURCE },
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    await handle.waitFor(
+      (records) =>
+        findRecord(records, "herdr", "agent", "prompt") !== undefined &&
+        records.some(
+          (r) => r.command === "gh" && r.argv[0] === "pr" && r.argv[1] === "edit" && r.argv.includes("cc-triage-scope"),
+        ),
+      40_000,
+    );
+
+    const records = stubs.records();
+    const prCreate = records.find((r) => r.command === "gh" && r.argv[0] === "pr" && r.argv[1] === "create")!;
+    assert.ok(prCreate, "gh pr create が呼ばれていない");
+    assert.equal(argValue(prCreate.argv, "--head"), "ctw-last-run-my-scheduled");
+    assert.equal(argValue(prCreate.argv, "--base"), "main");
+    const prompt = findRecord(records, "herdr", "agent", "prompt")!;
+    assert.ok(
+      prompt.argv.some((a) => a.includes("my-scheduled-skill")),
+      "スキルが起動されていない",
+    );
+  },
+);
+
+// ============================================================
+// S. --project 指定時はカスタム名を Unknown command として弾かない
+// ============================================================
+test(
+  "S: --project 付きのカスタムワーカー名は Unknown command で終了せずディスパッチへ進む",
+  { timeout: 30_000 },
+  async (t) => {
+    const stubs = installCliStubs({ gh: ISSUE_GH_SCENARIO });
+    const handle = await startWorker({
+      worker: "my-custom",
+      workerConfig: {},
+      userConfig: { mode: "herdr", projects: { demo: process.cwd() } },
+      records: stubs.records,
+      extraArgs: ["--project", "demo"],
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    await handle.waitFor((records) => records.some((r) => r.command === "herdr"), 20_000);
+    assert.ok(!(handle.stdout() + handle.stderr()).includes("Unknown command"));
+  },
+);
 
 // ============================================================
 // G. cc-cloud-done 検知 → ラベル除去 → レポートコメント取得 → Slack 通知本文への反映

@@ -37,6 +37,11 @@ test("buildForwardedCommand forwards --cloud (only --project and its value are s
   assert.equal(buildForwardedCommand(argv), "claude-task-worker 'exec-issue' '--cloud'");
 });
 
+test("buildForwardedCommand forwards a custom worker name unchanged", () => {
+  const argv = ["my-custom", "--project", "foo", "--cloud"];
+  assert.equal(buildForwardedCommand(argv), "claude-task-worker 'my-custom' '--cloud'");
+});
+
 test("hasCloudFlag reflects whether --cloud is present in process.argv, cached until reset", (t) => {
   const originalArgv = process.argv;
   t.after(() => {
