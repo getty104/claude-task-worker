@@ -17,6 +17,7 @@ const OBSERVATION_TO_WORKER: Record<string, string> = {
   "issue:cc-answer-issue-questions": "answer-issue-questions",
   "issue:cc-issue-created+cc-triage-scope": "triage-created-issue",
   "issue:cc-epic-issue": "epic-issue",
+  "issue:cc-my-custom": "my-custom",
   "issue:cc-create-ui-design": "create-ui-design",
   "issue:cc-ui-design-pr-created": "apply-ui-design",
   "pr:cc-fix-onetime": "fix-review-point",
@@ -93,9 +94,10 @@ async function observeStartup(
   workerConfig: Record<string, unknown>,
   expected: string[],
   recordsOnly: string[] = [],
+  files?: Record<string, string>,
 ): Promise<string[]> {
   const stubs = installCliStubs({ gh: GH_SCENARIO });
-  const handle = await startWorker({ worker, workerConfig, userConfig: {}, records: stubs.records });
+  const handle = await startWorker({ worker, workerConfig, userConfig: {}, records: stubs.records, files });
   t.after(async () => {
     await handle.cleanup();
     stubs.cleanup();
@@ -192,4 +194,91 @@ test("starting a disabled worker alone exits 1 without polling", async (t) => {
   assert.equal(await handle.waitForExit(15_000), 1);
   assert.deepEqual(observeStartedWorkers(stubs.records()), []);
   assert.match(handle.stdout() + handle.stderr(), /set workers\.exec-issue\.enabled to true or remove the key/);
+});
+
+const CUSTOM_WORKER_SOURCE = `import { createIssuePollingWorker } from "claude-task-worker/lib";
+export const myCustom: unknown = createIssuePollingWorker({
+  name: "my-custom",
+  triggerLabels: ["cc-my-custom"],
+  command: "my-skill",
+});
+`;
+
+const CUSTOM_FILES = { "workers/my-custom.ts": CUSTOM_WORKER_SOURCE };
+const CUSTOM_CONFIG = { workerFiles: ["workers/my-custom.ts"] };
+
+test("a custom worker file listed in workerFiles starts alone and is added to all", async (t) => {
+  const alone = await observeStartup(t, "my-custom", CUSTOM_CONFIG, ["my-custom"], [], CUSTOM_FILES);
+  assert.deepEqual(alone, ["my-custom"]);
+  const expected = [...ALL_WORKERS.filter((w) => !UI_DESIGN_WORKERS.includes(w)), "my-custom"].sort();
+  const all = await observeStartup(t, "all", CUSTOM_CONFIG, expected, ["update-design-md"], CUSTOM_FILES);
+  assert.deepEqual(all, expected);
+});
+
+test("workerFiles errors exit 1 before any gh call and name the file", async (t) => {
+  const cases: [string, Record<string, string>, string[], RegExp][] = [
+    ["missing.ts", {}, ["missing.ts"], /missing\.ts does not exist/],
+    ["bad.ts", { "bad.ts": "export const = ;\n" }, ["bad.ts"], /failed to load .*bad\.ts/],
+    ["empty.ts", { "empty.ts": "export const x = 1;\n" }, ["empty.ts"], /empty\.ts exports no worker definition/],
+    [
+      "preset.ts",
+      { "preset.ts": CUSTOM_WORKER_SOURCE.replace("my-custom", "exec-issue") },
+      ["preset.ts"],
+      /preset\.ts.*"exec-issue".*preset/,
+    ],
+    [
+      "dup",
+      { "a.ts": CUSTOM_WORKER_SOURCE, "b.ts": CUSTOM_WORKER_SOURCE },
+      ["a.ts", "b.ts"],
+      /b\.ts.*"my-custom".*a\.ts/,
+    ],
+  ];
+  for (const [label, files, workerFiles, pattern] of cases) {
+    const stubs = installCliStubs({ gh: GH_SCENARIO });
+    const handle = await startWorker({
+      worker: "exec-issue",
+      workerConfig: { workerFiles },
+      userConfig: {},
+      records: stubs.records,
+      files,
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+    assert.equal(await handle.waitForExit(15_000), 1, label);
+    assert.deepEqual(
+      stubs.records().filter((r) => r.command === "gh"),
+      [],
+      label,
+    );
+    assert.match(handle.stdout() + handle.stderr(), pattern, label);
+  }
+});
+
+test("list-workers prints preset and custom workers and exits 0; load failures exit 1", async (t) => {
+  const stubs = installCliStubs({ gh: GH_SCENARIO });
+  const ok = await startWorker({
+    worker: "list-workers",
+    workerConfig: { ...CUSTOM_CONFIG, workers: { "my-custom": { enabled: false } } },
+    userConfig: {},
+    records: stubs.records,
+    files: CUSTOM_FILES,
+  });
+  const bad = await startWorker({
+    worker: "list-workers",
+    workerConfig: { workerFiles: ["missing.ts"] },
+    userConfig: {},
+    records: stubs.records,
+  });
+  t.after(async () => {
+    await ok.cleanup();
+    await bad.cleanup();
+    stubs.cleanup();
+  });
+  assert.equal(await ok.waitForExit(15_000), 0);
+  assert.match(ok.stdout(), /exec-issue\s+preset\s+enabled\s+preset/);
+  assert.match(ok.stdout(), /my-custom\s+custom\s+disabled\s+\S*workers\/my-custom\.ts/);
+  assert.equal(await bad.waitForExit(15_000), 1);
+  assert.match(bad.stdout() + bad.stderr(), /missing\.ts does not exist/);
 });

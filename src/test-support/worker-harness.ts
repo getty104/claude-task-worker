@@ -58,6 +58,8 @@ export interface StartWorkerOptions {
   defaultTimeoutMs?: number;
   /** 既定の env（XDG_CONFIG_HOME 等）の後ろへマージして上書きできる追加 env。 */
   env?: Record<string, string>;
+  /** repoDir 相対パス→内容。設定ファイルと一緒にコミット前へ書き出す（カスタムワーカーファイル等）。 */
+  files?: Record<string, string>;
   /** ワーカー名の後ろへ渡す追加 argv（例: `["--cloud"]`）。 */
   extraArgs?: string[];
 }
@@ -90,6 +92,11 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
   const { originDir, repoDir } = await initTempRepo(root);
 
   writeFileSync(join(repoDir, "claude-task-worker.json"), JSON.stringify(options.workerConfig, null, 2));
+
+  for (const [rel, content] of Object.entries(options.files ?? {})) {
+    mkdirSync(dirname(join(repoDir, rel)), { recursive: true });
+    writeFileSync(join(repoDir, rel), content);
+  }
 
   // これらの設定ファイルは origin へコミット・push しておく。src/git.ts の
   // syncDefaultBranch() は各ワーカーの tick 冒頭で `git reset --hard origin/<branch>` を
