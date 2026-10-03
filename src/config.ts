@@ -525,7 +525,13 @@ function readRawConfig(path: string): Record<string, unknown> {
 export function loadConfig(): Config {
   const raw = mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
 
-  const result: Config = { ...DEFAULT_CONFIG, labels: [], uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
+  const result: Config = {
+    ...DEFAULT_CONFIG,
+    labels: [],
+    uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
+    lastRun: {},
+    workers: {},
+  };
 
   if ("remoteEnvId" in raw) {
     const val = raw["remoteEnvId"];
