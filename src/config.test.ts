@@ -11,6 +11,8 @@ import type * as DispatchArgsModule from "./dispatch-args";
 const {
   parseLastRunEntry,
   parseLabelsEntry,
+  parseWorkerFilesEntry,
+  resolveWorkerFilePath,
   parseUiDesignEntry,
   parseWorkerEntry,
   writeLastRun,
@@ -147,6 +149,42 @@ test("parseLabelsEntry treats unspecified and non-array values as empty", (t) =>
 test("parseLabelsEntry keeps only non-empty string entries", (t) => {
   silenceWarn(t);
   assert.deepEqual(parseLabelsEntry(["cc-a", 1, null, "", " cc-b "]), ["cc-a", "cc-b"]);
+});
+
+test("parseWorkerFilesEntry keeps only non-empty string entries and ignores non-arrays", (t) => {
+  silenceWarn(t);
+  assert.deepEqual(parseWorkerFilesEntry(["a.ts", 1, "", " b.ts "]), ["a.ts", "b.ts"]);
+  assert.deepEqual(parseWorkerFilesEntry("a.ts"), []);
+  assert.deepEqual(parseWorkerFilesEntry(undefined), []);
+});
+
+test("resolveWorkerFilePath resolves absolute, home-relative and config-relative entries", () => {
+  assert.equal(resolveWorkerFilePath("/abs/w.ts", "/cfg", "/home/u"), "/abs/w.ts");
+  assert.equal(resolveWorkerFilePath("~/w/a.ts", "/cfg", "/home/u"), "/home/u/w/a.ts");
+  assert.equal(resolveWorkerFilePath("~", "/cfg", "/home/u"), "/home/u");
+  assert.equal(resolveWorkerFilePath("workers/a.ts", "/cfg", "/home/u"), "/cfg/workers/a.ts");
+  assert.equal(resolveWorkerFilePath("../a.ts", "/cfg/sub", "/home/u"), "/cfg/a.ts");
+});
+
+test("loadConfig reads workerFiles, with the local file replacing the array", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ctw-workerfiles-"));
+  writeFileSync(join(dir, "claude-task-worker.json"), JSON.stringify({ workerFiles: ["a.ts", "b.ts"] }));
+  writeFileSync(join(dir, "claude-task-worker.local.json"), JSON.stringify({ workerFiles: ["c.ts"] }));
+  const configUrl = pathToFileURL(resolve("src/config.ts")).href;
+  const script = `const m = await import(${JSON.stringify(configUrl)}); console.log(JSON.stringify(m.loadConfig().workerFiles));`;
+  const out = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      script,
+    ],
+    { cwd: dir, encoding: "utf-8" },
+  );
+  assert.deepEqual(JSON.parse(out.trim().split("\n").at(-1) as string), ["c.ts"]);
 });
 
 test("mergeConfigRaw lets a local labels array replace the base one wholesale", () => {

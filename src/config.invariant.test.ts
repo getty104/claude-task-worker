@@ -47,6 +47,7 @@ const EXPECTED_DEFAULT_CONFIG = {
   fixReviewPointCallbackCommentMessage: "",
   remoteEnvId: null,
   labels: [],
+  workerFiles: [],
   uiDesign: { enabled: false, designDir: "designs", yolo: false },
   lastRun: {},
   workers: {},

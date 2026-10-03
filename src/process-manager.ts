@@ -129,7 +129,7 @@ export function isWorkerAtCapacity(workerName: string): boolean {
   return count >= getWorkerConfig(workerName).maxConcurrentTasks;
 }
 
-function renderTable(): void {
+export function renderTable(): void {
   const taskLines = buildTaskTableLines(selectRecentTasks([...tasks.values()]));
   const logTableLines = buildLogTableLines(logLines);
   if (taskLines.length === 0 && logTableLines.length === 0) return;
