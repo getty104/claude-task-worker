@@ -153,7 +153,9 @@ if (
   workerType !== "cloud-setup" &&
   workerType !== "usage" &&
   workerType !== "list-workers" &&
-  !WORKERS[workerType]
+  !WORKERS[workerType] &&
+  // --project ではカスタムワーカーをロードしないため、名前の検証は転送先プロセスに委ねる
+  !hasProjectFilter()
 ) {
   console.error(`Unknown command: ${workerType}`);
   printUsage();
