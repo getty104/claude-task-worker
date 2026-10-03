@@ -131,7 +131,17 @@ export function getWorktreePath(worktreeId: string): string {
   return `${WORKTREES_DIR}/${worktreeId}`;
 }
 
-export async function createWorktreeFromBranch(worktreeId: string, baseBranch: string): Promise<void> {
+// `--track` は .git/config へ upstream を書き込むため、`all` で複数ワーカーが同時に
+// 作成すると `could not lock config file` で片方が落ちる。プロセス内で直列化する。
+let worktreeAddQueue: Promise<unknown> = Promise.resolve();
+
+export function createWorktreeFromBranch(worktreeId: string, baseBranch: string): Promise<void> {
+  const result = worktreeAddQueue.then(() => addWorktree(worktreeId, baseBranch));
+  worktreeAddQueue = result.catch(() => {});
+  return result;
+}
+
+async function addWorktree(worktreeId: string, baseBranch: string): Promise<void> {
   const worktreePath = getWorktreePath(worktreeId);
   // detached HEAD だと後段の commit-push スキルの `git push origin HEAD` が
   // refspec を解決できず失敗するため、worktreeId と同名のブランチを切って checkout する。
