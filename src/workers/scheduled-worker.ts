@@ -7,6 +7,8 @@ import { isRunning, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyError, notifyTaskCompleted, notifyTaskFailed } from "../slack";
 import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
+import { defineWorker } from "./worker-definition";
+import type { WorkerDefinition } from "./worker-definition";
 import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "../worktree";
 
 // 定期ワーカーの実行間隔。スキルへ渡す収集期間（日数）もここから導出するため、
@@ -14,6 +16,10 @@ import { createWorktreeFromBranch, getWorktreePath, removeWorktree } from "../wo
 export const SCHEDULE_INTERVAL_HOURS = 24;
 const SCHEDULE_INTERVAL_MS = SCHEDULE_INTERVAL_HOURS * 60 * 60 * 1000;
 const SCOPE_DAYS = SCHEDULE_INTERVAL_HOURS / 24;
+
+// process-manager の台帳・ステータステーブルのキー。Issue / PR 番号（正数）と衝突しないよう
+// 負値を割り当てる。プリセットとカスタムで同じカウンタを共有し、定義ごとに一意になる。
+let nextTaskId = -1;
 
 // 実行記録PRをクラウドタスクの完了検知に使う間、同PRを PR 系ワーカー（triage-pr）から
 // 隠すためのラベル。pr-worker.ts と同じ値で、同ワーカーの excludeLabels に入っている。
@@ -24,9 +30,6 @@ const LABEL_IN_PROGRESS = "cc-in-progress";
 export interface ScheduledWorkerConfig {
   name: string;
   command: string;
-  // process-manager の台帳・ステータステーブルのキー。Issue / PR 番号（正数）と
-  // 衝突しないよう負値を割り当てる。
-  taskId: number;
   // false を返す間はスキルを起動しない（設定でオプトアウトされたワーカー用）。
   enabled?: () => boolean;
 }
@@ -39,8 +42,9 @@ export interface ScheduledWorkerConfig {
 // 記録が恒久化するのはそのPRがマージされた時点で、それまでは下記の起動時刻（プロセス内）が
 // 二重実行を止める。設定ファイルへ寄せているのは、実行間隔をリポジトリの状態として
 // 追跡・レビューできるようにするため。
-export function createScheduledWorker(config: ScheduledWorkerConfig): () => Promise<void> {
-  return async () => {
+export function createScheduledWorker(config: ScheduledWorkerConfig): WorkerDefinition {
+  const taskId = nextTaskId--;
+  const start = async () => {
     const { owner, name: repoName, defaultBranch } = await getRepoInfo();
     const { pollingIntervalSeconds } = getWorkerConfig(config.name);
     console.log(
@@ -54,7 +58,7 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
     const tick = async () => {
       if (isShuttingDown()) return;
       if (config.enabled && !config.enabled()) return;
-      if (isRunning(config.taskId)) return;
+      if (isRunning(taskId)) return;
 
       const now = Date.now();
       const lastRunAt = Math.max(getLastRunAt(config.name) ?? 0, startedAt);
@@ -118,16 +122,16 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
         run(
           execution.command,
           execution.args,
-          config.taskId,
+          taskId,
           config.name,
           config.name,
           cloud ? undefined : worktreeId,
           async (status, output) => {
             try {
               if (status === "completed") {
-                await notifyTaskCompleted(config.name, repoName, config.taskId, config.name, repoUrl, output);
+                await notifyTaskCompleted(config.name, repoName, taskId, config.name, repoUrl, output);
               } else {
-                await notifyTaskFailed(config.name, repoName, config.taskId, config.name, repoUrl, output);
+                await notifyTaskFailed(config.name, repoName, taskId, config.name, repoUrl, output);
               }
             } catch (err) {
               console.error(`[${config.name}] post-task error: ${err}`);
@@ -167,4 +171,5 @@ export function createScheduledWorker(config: ScheduledWorkerConfig): () => Prom
     await tick();
     setInterval(tick, pollingIntervalSeconds * 1000);
   };
+  return defineWorker({ name: config.name, kind: "scheduled", start });
 }
