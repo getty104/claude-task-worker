@@ -8,6 +8,7 @@ import type * as DispatchArgsModule from "./dispatch-args";
 
 const {
   parseLastRunEntry,
+  parseLabelsEntry,
   parseUiDesignEntry,
   parseWorkerEntry,
   writeLastRun,
@@ -130,6 +131,22 @@ test("parseLastRunEntry keeps only parseable timestamps", (t) => {
     "update-design-md": "2026-08-17T00:00:00.000Z",
   });
   assert.deepEqual(parseLastRunEntry("2026-08-17"), {});
+});
+
+test("parseLabelsEntry treats unspecified and non-array values as empty", (t) => {
+  silenceWarn(t);
+  assert.deepEqual(parseLabelsEntry(undefined), []);
+  assert.deepEqual(parseLabelsEntry("cc-a"), []);
+  assert.deepEqual(parseLabelsEntry({ a: 1 }), []);
+});
+
+test("parseLabelsEntry keeps only non-empty string entries", (t) => {
+  silenceWarn(t);
+  assert.deepEqual(parseLabelsEntry(["cc-a", 1, null, "", " cc-b "]), ["cc-a", "cc-b"]);
+});
+
+test("mergeConfigRaw lets a local labels array replace the base one wholesale", () => {
+  assert.deepEqual(mergeConfigRaw({ labels: ["a", "b"] }, { labels: ["c"] }), { labels: ["c"] });
 });
 
 test("writeLastRun records the timestamp without dropping other settings", () => {

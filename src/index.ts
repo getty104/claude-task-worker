@@ -24,7 +24,7 @@ import {
 } from "./process-manager";
 import { captureConsole } from "./table";
 import { removeStaleWorktrees } from "./worktree";
-import { init } from "./commands/init";
+import { init, applyLabels } from "./commands/init";
 import { install } from "./commands/install";
 import { cloudSetup } from "./commands/cloud-setup";
 import { update } from "./commands/update";
@@ -77,6 +77,7 @@ function printUsage(): void {
 
 Commands:
   init [--force]  Create required GitHub labels and config file (use --force to overwrite existing files)
+  apply-labels      Create the preset labels and the custom labels declared in claude-task-worker.json (labels)
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   cloud-setup [--force]  Prepare a cloud session VM (writes permission mode, output style, and language into ~/.claude/settings.json). Meant for a cloud environment setup script
@@ -142,6 +143,7 @@ if (
   workerType !== "all" &&
   workerType !== "yolo" &&
   workerType !== "init" &&
+  workerType !== "apply-labels" &&
   workerType !== "install" &&
   workerType !== "update" &&
   workerType !== "cloud-setup" &&
@@ -393,6 +395,8 @@ if (hasProjectFilter()) {
   const initArgs = process.argv.slice(3);
   const force = initArgs.includes("--force");
   init({ force });
+} else if (workerType === "apply-labels") {
+  applyLabels();
 } else if (workerType === "install") {
   (async () => {
     await install();
