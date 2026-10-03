@@ -11,7 +11,16 @@ const { WORKER_DEFAULTS, DEFAULT_WORKER_CONFIG, parseWorkerEntry } = (await impo
 
 // 本番定数を参照せず複製したリテラルで固定する。本番値が変わったらここが落ちる。
 function preset(skill: string, model: string, effort: string, pollingIntervalSeconds: number) {
-  return { skill, model, advisorModel: "", effort, pollingIntervalSeconds, cooldownSeconds: 0, maxConcurrentTasks: 1 };
+  return {
+    skill,
+    model,
+    advisorModel: "",
+    effort,
+    pollingIntervalSeconds,
+    cooldownSeconds: 0,
+    maxConcurrentTasks: 1,
+    enabled: true,
+  };
 }
 
 const EXPECTED_WORKER_DEFAULTS = {
@@ -74,7 +83,11 @@ test("parseWorkerEntry output is pinned for every preset", (t: TestContext) => {
     assert.deepEqual(parseWorkerEntry(name, {}), expected, `${name} {}`);
     assert.deepEqual(parseWorkerEntry(name, { model: "x" }), { ...expected, model: "x" }, `${name} model`);
     assert.deepEqual(parseWorkerEntry(name, { enabled: true }), expected, `${name} enabled:true`);
-    assert.deepEqual(parseWorkerEntry(name, { enabled: false }), expected, `${name} enabled:false`);
+    assert.deepEqual(
+      parseWorkerEntry(name, { enabled: false }),
+      { ...expected, enabled: false },
+      `${name} enabled:false`,
+    );
   }
   assert.equal(warn.mock.callCount(), 0);
 });

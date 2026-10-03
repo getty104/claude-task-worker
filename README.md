@@ -309,6 +309,7 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 | `pollingIntervalSeconds` | ポーリング間隔（秒） |
 | `cooldownSeconds` | タスク完了後にポーリングを止める時間（秒）。既定 `0` |
 | `maxConcurrentTasks` | 同時実行できるタスクの最大数。既定 `1` |
+| `enabled` | `false` で無効化する。`all` / `yolo` では起動せず除外したワーカー名を1行ログに出し、個別起動（`claude-task-worker <name>`）ではタスクを起動せず exit 1。既定 `true`（`claude-task-worker.local.json` でも上書きできる） |
 
 既定値:
 

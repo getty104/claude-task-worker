@@ -128,6 +128,13 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
         // assertCloudAvailable() の checkCloudAuth() 判定がホスト環境依存になる
         // （クラウド起動拒否テストが実行環境によって結果を変えてしまう）ため空にする。
         ANTHROPIC_BASE_URL: "",
+        // 定期ワーカーの publishLastRunPr() は git commit する。identity の無い環境（CI）では
+        // 失敗のたびに十数行の stderr がログテーブル（直近20行）へ流れ込み、観測に使う起動ログを
+        // 描画前に押し出す。gitAsUser() と同じくグローバル設定に依存させない。
+        GIT_AUTHOR_NAME: "Test Worker",
+        GIT_AUTHOR_EMAIL: "test-worker@example.com",
+        GIT_COMMITTER_NAME: "Test Worker",
+        GIT_COMMITTER_EMAIL: "test-worker@example.com",
         ...options.env,
       },
       stdio: ["ignore", "pipe", "pipe"],

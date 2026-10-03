@@ -149,3 +149,47 @@ test("exec-issue alone keeps running and polls cc-exec-issue", async (t) => {
   assert.equal(handle.child.exitCode, null);
   assert.deepEqual(observeStartedWorkers(stubs.records()), ["exec-issue"]);
 });
+
+test("all and yolo skip workers disabled by workers.<name>.enabled and log them in one line", async (t) => {
+  for (const [worker, list] of [
+    ["all", ALL_WORKERS],
+    ["yolo", YOLO_WORKERS],
+  ] as const) {
+    const expected = list.filter((w) => w !== "exec-issue" && w !== "update-issue");
+    const stubs = installCliStubs({ gh: GH_SCENARIO });
+    const handle = await startWorker({
+      worker,
+      workerConfig: {
+        uiDesign: { enabled: true },
+        workers: { "exec-issue": { enabled: false }, "update-issue": { enabled: false } },
+      },
+      userConfig: {},
+      records: stubs.records,
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+    const observe = (records: StubRecord[]) => observeStartedWorkers(records, handle.stdout());
+    await handle.waitFor((records) => expected.every((w) => observe(records).includes(w)), 30_000);
+    assert.deepEqual(observe(stubs.records()), expected, `${worker} started set`);
+    assert.match(handle.stdout(), /\[worker\] skipped disabled workers: exec-issue, update-issue/, `${worker} log`);
+  }
+});
+
+test("starting a disabled worker alone exits 1 without polling", async (t) => {
+  const stubs = installCliStubs({ gh: GH_SCENARIO });
+  const handle = await startWorker({
+    worker: "exec-issue",
+    workerConfig: { workers: { "exec-issue": { enabled: false } } },
+    userConfig: {},
+    records: stubs.records,
+  });
+  t.after(async () => {
+    await handle.cleanup();
+    stubs.cleanup();
+  });
+  assert.equal(await handle.waitForExit(15_000), 1);
+  assert.deepEqual(observeStartedWorkers(stubs.records()), []);
+  assert.match(handle.stdout() + handle.stderr(), /set workers\.exec-issue\.enabled to true or remove the key/);
+});
