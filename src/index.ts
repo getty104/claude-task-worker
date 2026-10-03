@@ -8,6 +8,7 @@ import {
   setShuttingDown,
   isShuttingDown,
   ensureRenderInterval,
+  renderTable,
 } from "./process-manager";
 import { captureConsole } from "./table";
 import { removeStaleWorktrees } from "./worktree";
@@ -304,7 +305,11 @@ async function assertCloudAvailable(): Promise<void> {
 // all / yolo の候補から workers.<name>.enabled: false を除いて起動する。除外があれば1行で示す。
 function startEnabledWorkers(names: readonly string[], filters: WorkerStartOptions): Promise<void>[] {
   const { enabled, disabled } = partitionEnabledWorkers(names, isWorkerEnabled);
-  if (disabled.length > 0) console.log(`[worker] skipped disabled workers: ${disabled.join(", ")}`);
+  if (disabled.length > 0) {
+    console.log(`[worker] skipped disabled workers: ${disabled.join(", ")}`);
+    // 直後の起動ログ（ワーカー数ぶん）でローリングバッファから押し出される前に一度描画する
+    renderTable();
+  }
   return enabled.map((name) => WORKERS[name].start(filters));
 }
 
