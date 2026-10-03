@@ -12,6 +12,8 @@ import { syncDefaultBranch } from "../git";
 import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-manager";
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
+import { defineWorker } from "./worker-definition";
+import type { WorkerDefinition } from "./worker-definition";
 import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
 import {
   createWorktreeFromBranch,
@@ -25,7 +27,7 @@ import {
 const LABEL_IN_PROGRESS = "cc-in-progress";
 const LABEL_TRIAGE_SCOPE = "cc-triage-scope";
 
-interface PrWorkerConfig {
+export interface PrWorkerConfig {
   name: string;
   command: string;
   triggerLabel: string;
@@ -41,8 +43,8 @@ interface PrWorkerConfig {
   onFinally?: (pr: PullRequestWithChecks) => Promise<void>;
 }
 
-export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<void> {
-  return async () => {
+export function createPrPollingWorker(config: PrWorkerConfig): WorkerDefinition {
+  const start = async () => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
     const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
@@ -212,4 +214,5 @@ export function createPrPollingWorker(config: PrWorkerConfig): () => Promise<voi
     await tick();
     setInterval(tick, pollingIntervalMs);
   };
+  return defineWorker({ name: config.name, kind: "pr", start });
 }
