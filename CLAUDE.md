@@ -245,6 +245,15 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 
 Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` から取得）で、**クラウド実行でも成立する**。`resolveReviewThread` は REST 代替が無く `gh` 経路では GraphQL 直叩きになるため、クラウドセッションのプロキシで 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、MCP はそのゲートを迂回する。したがってワーカープロセス側から Resolve スクリプトを実行する必要はない（`src/workers/fix-review-point.ts` の `onCompleted` はコールバックコメント投稿のみで、レビュースレッドには触らない）。`gh` フォールバック（`plugin/scripts/resolve-pr-comments.sh`）はローカル実行向けに残してあり、失敗時は非0で終了して「0件」と区別できるようにしてある。
 
+### `workers.<name>.enabled`（ワーカー単位の有効/無効）
+
+`claude-task-worker.json`（および `claude-task-worker.local.json`。既存の `mergeConfigRaw()` の規則でローカル側が勝つ）の `workers.<name>.enabled`（boolean、既定はプリセット・カスタムとも `true`）でワーカーを無効化できる。非 boolean は警告して既定へ倒す（`parseWorkerEntry()`）。既定 `true` なので、未指定のリポジトリの起動集合・挙動は導入前と同一。
+
+- **`all` / `yolo`**: `inAll` / `inYolo` で絞った候補から `enabled: false` を除外して起動し、除外が1件以上なら `[worker] skipped disabled workers: a, b` を1行出す。振り分けは純粋関数 `partitionEnabledWorkers(names, isEnabled)`（`src/config.ts`）で、ワーカー名の一覧を受け取るのでカスタムワーカーも同じ判定を通せる
+- **個別起動**: 無効なら有効化方法（`workers.<name>.enabled` を `true` にする／キーを消す）を含むメッセージを出して exit 1。タスクを1件も起動しないよう `removeStaleWorktrees()` / `start()` より前、さらに **`assertRunPrerequisites()`（console キャプチャ）より前**で判定する。キャプチャ後に出すとログテーブルの列幅でメッセージが切り詰められ、肝心の有効化方法が読めなくなるため
+- 設定ファイルが読めない場合は `isWorkerEnabled()` が有効側へ倒す（変更前と同じ起動集合を保つ）
+- **`--project`** ではディスパッチャー側で設定を読まない。転送先プロセスが各プロジェクトのディレクトリで通常の起動経路を通るため、プロジェクトごとの `claude-task-worker.json` で判定される
+
 ### `advisor`（アドバイザーモデル）
 
 `config.json` のトップレベル `advisor`（boolean、既定 `false`）で、タスク起動時に claude CLI へ `--advisor <model>` を渡すかを切り替える。`mode` と同じくトップレベル一括（プロジェクト単位・ワーカー単位のオン/オフはできない）で、`isAdvisorEnabled()` がプロセス起動時に一度だけ解決してキャッシュするため、実行中に設定ファイルが書き換わってもワーカー間・タスク間で `--advisor` の有無が揺れない。

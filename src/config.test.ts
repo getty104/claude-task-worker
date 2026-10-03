@@ -2,7 +2,9 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type * as ConfigModule from "./config";
 import type * as DispatchArgsModule from "./dispatch-args";
 
@@ -20,6 +22,8 @@ const {
   checkCloudAuth,
   isCloudWorker,
   mergeConfigRaw,
+  partitionEnabledWorkers,
+  disabledWorkerMessage,
 } = (await import("./config")) as typeof ConfigModule;
 const { resetCloudFlagCache } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
@@ -353,4 +357,65 @@ test("mergeConfigRaw replaces arrays and scalars wholesale and leaves the base u
   const merged = mergeConfigRaw(base, { tags: ["c"], uiDesign: false });
   assert.deepEqual(merged, { tags: ["c"], uiDesign: false });
   assert.deepEqual(base, { tags: ["a", "b"], uiDesign: { enabled: true } });
+});
+
+test("parseWorkerEntry reads enabled and falls back to true on a non-boolean", (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  assert.equal(parseWorkerEntry("exec-issue", {})?.enabled, true);
+  assert.equal(parseWorkerEntry("exec-issue", { enabled: false })?.enabled, false);
+  assert.equal(parseWorkerEntry("my-custom", { enabled: false })?.enabled, false);
+  assert.equal(parseWorkerEntry("exec-issue", { enabled: "false" })?.enabled, true);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(
+    String(warn.mock.calls[0].arguments[0]),
+    /invalid workers\.exec-issue\.enabled: false, using default true/,
+  );
+});
+
+test("partitionEnabledWorkers splits names by the predicate and keeps their order", () => {
+  assert.deepEqual(
+    partitionEnabledWorkers(["a", "b", "c", "d"], (n) => n !== "b" && n !== "d"),
+    { enabled: ["a", "c"], disabled: ["b", "d"] },
+  );
+  assert.deepEqual(
+    partitionEnabledWorkers(["a"], () => true),
+    { enabled: ["a"], disabled: [] },
+  );
+});
+
+test("disabledWorkerMessage tells how to re-enable the worker", () => {
+  const msg = disabledWorkerMessage("exec-issue");
+  assert.match(msg, /workers\.exec-issue\.enabled/);
+  assert.match(msg, /set workers\.exec-issue\.enabled to true or remove the key/);
+});
+
+test("claude-task-worker.local.json can toggle workers.<name>.enabled over the base file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ctw-config-enabled-"));
+  writeFileSync(
+    join(dir, "claude-task-worker.json"),
+    JSON.stringify({ workers: { "exec-issue": { model: "sonnet" }, "triage-pr": { enabled: false } } }),
+  );
+  writeFileSync(
+    join(dir, "claude-task-worker.local.json"),
+    JSON.stringify({ workers: { "exec-issue": { enabled: false }, "triage-pr": { enabled: true } } }),
+  );
+  const configUrl = pathToFileURL(resolve("src/config.ts")).href;
+  const script = `const m = await import(${JSON.stringify(configUrl)}); console.log(JSON.stringify({ exec: m.getWorkerConfig("exec-issue"), triage: m.isWorkerEnabled("triage-pr"), other: m.isWorkerEnabled("fix-review-point") }));`;
+  const out = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      script,
+    ],
+    { cwd: dir, encoding: "utf-8" },
+  );
+  const { exec, triage, other } = JSON.parse(out.trim().split("\n").at(-1) as string);
+  assert.equal(exec.enabled, false);
+  assert.equal(exec.model, "sonnet");
+  assert.equal(triage, true);
+  assert.equal(other, true);
 });
