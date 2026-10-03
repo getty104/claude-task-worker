@@ -110,18 +110,33 @@ export const SYSTEM_PROMPT_BASE = `このセッションは \`claude-task-worker
 //
 // Opus 5 は既定で「冗長に書く・スコープを広げる・積極的に委譲する・指示されなくても自己検証する」
 // 方向へ倒れるため、その4点を抑える指示を入れる
-// （https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5）。
+// （https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5）。
+// Opus 5.5 でもこの4点はそのまま有効な出発点とされている一方、同モデルには2つの新しい既定挙動がある
+// （https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5）:
+//
+// - **進捗報告でターンを終える**（`end_turn`）。長いタスクでは途中経過をユーザーへ伝えるために、
+//   ツール呼び出しを含まないメッセージでターンを閉じることがある。`claude -p` にも herdr の
+//   タスクタブにも続きを促す人はいないため、そこで処理が打ち切られる（＝同期実行ガードが
+//   防ごうとしている「未完のまま exit 0」そのもの）。同ガイドは「避けてほしい早期終了の種類を
+//   具体的に名指しする」指示に反応が良いとしているため、4種類を列挙した節を置く
+// - **素早く着手する**。緩く指定されたタスクでは、依頼が明示していない情報源（過去のコメント・
+//   関連ドキュメント）を見ずに動き始めがちなので、変更に入る前に関連ソースを見る1行を置く
+//
+// 「よく考えてから答える」類の指示はどこにも置かない（思考量は effort が決め、プロンプトで
+// 促しても遅くなるだけ、と同ガイド）。推論過程をそのまま書き出させる指示も置かない
+// （`reasoning_extraction` で拒否されうる。報告に要るのは判断の要約だけでよい）。
+//
 // 同じ調整は opus 実行のスキル/エージェント本文にも入れてあるが、そちらはスキルごとの局所的な
 // 規定であり、(1) サブエージェント（`general-purpose-assistant` 等、モデル指定を持つもの）や
 // (2) スキルを跨いだセッション全体には届かないため、セッション単位の原則としてここにも置く。
 //
-// sonnet には足さない。これらは Opus 5 の既定挙動への逆張りであり、sonnet では逆に
-// 「検証を促す」「委譲を促す」方向の指示が要るケースがあるため、既存の基底プロンプトのまま
-// 挙動を変えない（＝本追補の導入で sonnet ワーカーの振る舞いは一切変わらない）。
+// この追補は sonnet には足さない。これらは Opus の既定挙動への逆張りであり、
+// sonnet には逆方向の指示が要るため、別途 SONNET_SYSTEM_PROMPT_ADDENDUM を用意している。
 export const OPUS_SYSTEM_PROMPT_ADDENDUM = `成果物の分量とスコープについては以下に従うこと。
 
 - 依頼されたスコープだけを成果物にする。周辺のリファクタ・命名整理・気づいた別の改善を勝手に足さない。気づいた点は実装せず、最終報告に1行で挙げるだけにする
 - 依頼の前提が誤っていると考える場合も、指摘を1-2行添えたうえで**依頼どおりのスコープで**完遂する（黙って縮小・拡大・別物への置き換えをしない）
+- 変更に入る前に、依頼が明示していなくても結論を左右しうる情報源（Issue/PR のコメント・関連 Issue/PR・\`docs/\`・\`.claude/requirements/\`・\`CODING_GUIDELINES.md\`・リンク先の仕様）を見てから着手する。見つけた内容は使う
 - Issueコメント・PRの本文・description・レポート等の書き物は、必要な実質だけを書く。同じ内容の言い換え・埋め草セクション・「該当なし」を並べるだけの節を足さない
 - 最終報告は結論から書く。1文目で「何をしたか / どこで止まったか」を述べ、詳細をその後に置く
 
@@ -130,19 +145,65 @@ export const OPUS_SYSTEM_PROMPT_ADDENDUM = `成果物の分量とスコープに
 - 自分で数回のツール呼び出しで終わる作業は委譲しない（ブリーフィング作成と委譲先の再探索でコストと時間が倍になる）
 - 委譲するのは、独立して並列実行できる作業・探索範囲の広い調査・専門エージェントの前提知識が要る作業に限る
 - 1タスクに1エージェント。1体で完結する作業に複数体を重ねて起動しない
-- **自分の作業の確認・再チェックを目的にサブエージェントを起動しない**。成果物の検証は \`git diff\` やテスト・Lintの実行で自分で行う`;
+- **自分の作業の確認・再チェックを目的にサブエージェントを起動しない**。成果物の検証は \`git diff\` やテスト・Lintの実行で自分で行う
+
+ターンの終え方は以下に従うこと。ツール呼び出しを含まないメッセージでターンが終わると、このセッションでは処理がそこで打ち切られ、続きを指示する人はいない。
+
+- 次の4種類の終え方をしない: (1) 実施内容の要約を書き「次は〜する」と告げるだけで次に進まない、(2) 「〜してよいか」「他に希望がなければ続ける」と確認して止まる、(3) 自分で決められる選択肢をユーザー向けに列挙して止まる、(4) 区切りが良い・長く作業したという理由で中間報告だけを出して止まる
+- 状況メモや推奨案は、次のツール呼び出しと同じメッセージに書いて作業を続ける。ユーザーの回答に依存しない作業は止めずに進める
+- ターンを終えてよいのは、スキルの全ステップを完遂したとき、またはスキルに定義された中断条件に該当したときだけ。破壊的・不可逆な操作で判断に迷う場合は、確認を求めて止まるのではなく実行しない側を選び、その旨を最終報告に書いて残りの作業を進める`;
+
+// sonnet 実行時のみ基底プロンプトの末尾に足す追補。
+//
+// Sonnet 5.5 のガイド（https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5）
+// が挙げる同モデルの既定挙動のうち、無人のワーカー実行で成果物を壊す2つへの対処:
+//
+// - **`low` / `medium` では途中で確認のために止まる**（計画の確認・自分で答えられる質問・多段
+//   タスクの一部を終えた時点での「続けるか」）。sonnet ワーカーの既定を `medium` へ下げたため
+//   この経路が開く。ガイドの "Keep working until everything the user asked for is done" 相当を置く
+// - **`low` では変更の検証を省く**（依存が入っていないからテストを飛ばす、構文チェックだけで
+//   完了にする）。ガイドの "Verification on coding tasks" 段落相当を置く。`low` 固有の症状だが、
+//   ワーカー起動時のモデルだけでは委譲先の effort を知れないため sonnet 全体に付ける
+//
+// あわせてガイドの「依頼されていないテスト・ドキュメント・補助ファイルを足す（全 effort で起き、
+// 高いほど増える）」への対処として、スコープ外の追加を名指しで禁じる1行を置く。Sonnet は指示を
+// 文字どおりに読むため、「周辺の改善をしない」より具体的に種類を挙げる。
+//
+// opus 追補と違い「委譲しすぎ・検証しすぎ」を抑える方向の文言は入れない（Sonnet 5.5 はその
+// 方向には倒れず、`xhigh` / `max` でのみ自発的なレビュー往復が出るとされるが、sonnet 実行で
+// その effort は使っていない）。思考を促す文言も入れない（効かず、effort が決めるもの）。
+export const SONNET_SYSTEM_PROMPT_ADDENDUM = `作業の進め方は以下に従うこと。
+
+- 依頼された作業がすべて終わるまで続ける。計画の確認・自分で答えられる質問・多段タスクの一部を終えた時点での「続けるか」の確認のために止まらない。止まってよいのは、スキルに定義された中断条件に該当したときだけ
+- 依頼された作業が終わり検証も済んだら、そこで終えて報告する。依頼されていないテスト・ドキュメント・補助ファイル・リファクタを足さない。あった方がよいと考えるものは最終報告に1行で挙げる
+- 実行・ビルド・型チェックできるコードを変更したら、完了と報告する前に**その変更を実際に通す検証**（プロジェクトのテスト・型チェック・ビルド、または変更したコマンド自体）を実行する。構文チェックだけ、または起動に失敗したチェックコマンドは検証に数えない。足りないのがプロジェクトの宣言済み依存だけなら、そのプロジェクトのパッケージマネージャとロックファイルで入れる（\`sudo\` やシステムのパッケージマネージャは使わない）。どの検証も実行できない場合に限り、完了ではなく「どの検証を実行しなかったか・なぜか」を報告する`;
 
 // モデルに応じて注入するシステムプロンプト本文を返す。
+// opus / sonnet にはそれぞれの追補を足し、どちらでもない値（haiku・未知のID）は基底のみ。
 export function systemPromptFor(model: string): string {
-  return isOpusModel(model) ? `${SYSTEM_PROMPT_BASE}\n\n${OPUS_SYSTEM_PROMPT_ADDENDUM}` : SYSTEM_PROMPT_BASE;
+  if (isOpusModel(model)) return `${SYSTEM_PROMPT_BASE}\n\n${OPUS_SYSTEM_PROMPT_ADDENDUM}`;
+  if (isSonnetModel(model)) return `${SYSTEM_PROMPT_BASE}\n\n${SONNET_SYSTEM_PROMPT_ADDENDUM}`;
+  return SYSTEM_PROMPT_BASE;
+}
+
+// システムプロンプトのバリアント名（書き出しファイル名に使う）。
+export function systemPromptVariant(model: string): "opus" | "sonnet" | "default" {
+  if (isOpusModel(model)) return "opus";
+  if (isSonnetModel(model)) return "sonnet";
+  return "default";
 }
 
 // `--model` に渡す値が opus 系かを判定する。
 // 判定を部分一致にしているのは、`claude-task-worker.json` の `workers.<name>.model` が
 // エイリアス（`opus`）でもフルID（`claude-opus-5`）でも指定できるため。未知の値は
-// 「opus ではない」＝追補なしの基底プロンプトへ倒す（sonnet 側が従来の挙動）。
+// 「opus ではない」として次の判定（sonnet → 基底のみ）へ倒す。
 export function isOpusModel(model: string): boolean {
   return model.toLowerCase().includes("opus");
+}
+
+// `--model` に渡す値が sonnet 系かを判定する（`isOpusModel` と同じく小文字化した部分一致）。
+export function isSonnetModel(model: string): boolean {
+  return model.toLowerCase().includes("sonnet");
 }
 
 export interface ClaudeInvocation {
@@ -174,7 +235,7 @@ export interface ClaudeInvocation {
 
 export const CLAUDE_COMMAND = "claude";
 
-// バリアント（`opus` / `default`）ごとの書き出し済みファイルパス。
+// バリアント（`opus` / `sonnet` / `default`）ごとの書き出し済みファイルパス。
 const cachedSystemPromptFilePaths = new Map<string, string>();
 
 // システムプロンプト本文を絶対パスのファイルへ書き出し、その絶対パスを返す
@@ -197,7 +258,7 @@ const cachedSystemPromptFilePaths = new Map<string, string>();
 // （`all` / `--project` 実行）ため。同一パスを共有すると、後から起動したワーカーの書き込みが
 // 先のワーカー向けの内容を上書きしてしまう。
 export function systemPromptFilePath(model: string): string {
-  const variant = isOpusModel(model) ? "opus" : "default";
+  const variant = systemPromptVariant(model);
   const cached = cachedSystemPromptFilePaths.get(variant);
   if (cached) return cached;
   const dir = path.join(os.tmpdir(), "claude-task-worker");

@@ -13,6 +13,8 @@ argument-hint: "[task-description | issue-number]"
 - **自然言語のタスク説明**: その内容を分解し、親Issueを新規作成する
 - **既存のIssue番号**（数値のみ・`#`付き数値・Issue URL）: そのIssueの description を分解対象とし、**そのIssue自身を親（Epic）にする**（`/create-prd` が作った PRD Issue を分解する経路）
 
+**モデル**: 要件定義・TODO分解・各TODOの本文素材の生成は、すべて `requirement-todo-organizer` エージェント（`model: fable`）が行う。メインセッションは質問（`AskUserQuestion`）・Issue 作成・番号の受け渡しだけを担い、**分解結果の文章を自分で書き足したり書き換えたりしない**。`create-prd` と同じく**スキル本体に `model:` は書けない**（`model:` は `context: fork` が無いと効かず、fork すると `AskUserQuestion` でユーザーへ質問できなくなる）ため、モデル指定が意味を持つ生成工程をエージェントへ切り出している。`fable` が利用できない環境では同エージェントが既定モデルで走るだけで、フローは変わらない。
+
 # Instructions
 
 ## GitHub アクセス
@@ -50,9 +52,9 @@ requirement-todo-organizer サブエージェントを使用して、確定し�
 
 ### 3. タスクの不明点のブラッシュアップ
 
-ステップ2で分解した要件・TODOに不明点や曖昧な点があれば、`AskUserQuestion`ツールでユーザーに質問する。
+ステップ2で分解した要件・TODOに不明点や曖昧な点（出力の「仮定事項（要確認）」を含む）があれば、`AskUserQuestion`ツールでユーザーに質問する。
 
-- 回答を受けて要件・TODOを更新し、不明点がなくなるまで繰り返す
+- 回答を受けたら、メインで要件・TODOを書き換えるのではなく、**ステップ2の入力＋前回の分解結果＋ユーザーの回答（逐語）** を渡して `requirement-todo-organizer` へ再分解を委譲する。不明点がなくなるまで繰り返す
 - 不明点がない場合はスキップする
 
 ### 4. 親（Epic）Issue の確定
@@ -123,17 +125,16 @@ EPIC_ISSUE_NUMBER=$(basename "$EPIC_ISSUE_URL")
 
 #### 各TODOごとの呼び出し
 
-TODO 1件ごとに、以下の YAML ブロックを**そのまま args として** Skill tool で `post-scope-issue-body` を起動する（`post-scope-issue-body` は args を YAML として機械的にパースする規約）。
+TODO 1件ごとに、以下の YAML ブロックを**そのまま args として** Skill tool で `post-scope-issue-body` を起動する（`post-scope-issue-body` は args を YAML として機械的にパースする規約）。`概要` / `要件` / `参照情報` / `優先度` / `見積もり規模` は `requirement-todo-organizer` の出力（TODOリストの「説明」「要件」「参照情報」「優先度」「規模」列）をそのまま転記し、メインで文章を書き直さない。
 
 ```yaml
 mode: create
 title: <TODOのタスク名をそのまま>
 sections:
   概要: |
-    （1-3行）
+    （TODOの「説明」をそのまま）
   要件: |
-    - ...
-    （無ければ "なし"）
+    - （TODOの「要件」をそのまま。無ければ "なし"）
   参照情報: |
     - ドキュメント: `<path>` — <説明>
     （無ければ "なし"）

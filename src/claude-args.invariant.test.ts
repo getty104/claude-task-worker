@@ -65,7 +65,7 @@ test("buildClaudeArgs is pinned for default mode + sonnet", () => {
 
   const promptFile = args[args.indexOf("--append-system-prompt-file") + 1];
   assert.ok(path.isAbsolute(promptFile));
-  assert.equal(path.basename(promptFile), `append-system-prompt-${process.pid}-default.txt`);
+  assert.equal(path.basename(promptFile), `append-system-prompt-${process.pid}-sonnet.txt`);
 });
 
 test("buildClaudeArgs is pinned for herdr mode + opus", () => {
@@ -105,7 +105,7 @@ test("buildClaudeArgs is pinned for herdr mode + sonnet", () => {
 
   const promptFile = args[args.indexOf("--append-system-prompt-file") + 1];
   assert.ok(path.isAbsolute(promptFile));
-  assert.equal(path.basename(promptFile), `append-system-prompt-${process.pid}-default.txt`);
+  assert.equal(path.basename(promptFile), `append-system-prompt-${process.pid}-sonnet.txt`);
 });
 
 test("buildClaudeEnv is pinned for default and herdr modes", () => {
