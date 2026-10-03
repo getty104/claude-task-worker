@@ -175,13 +175,19 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
 
-**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。
+**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。`create-prd` も同じ。
+
+この2スキルは**成果物の文章を fable で生成する**。スキル本体にモデルを書けないため、生成工程だけをモデル指定の効く経路へ切り出す: `create-prd` は PRD 本文の起草を `Agent`（`model: "fable"`）へ委譲し、`breakdown-issues` は要件定義・TODO分解・各TODOの本文素材（説明・要件・参照情報・優先度・規模）を `requirement-todo-organizer`（`model: fable`）に生成させ、ユーザー回答を受けた更新も同エージェントへ再委譲する。メインセッションは質問・Issue 作成・番号の受け渡しだけを担い、分解結果の文章を自分で書き足さない（書き足した時点でその部分は呼び出し元のモデルの成果物になる）。
 
 **`context: fork` へ Skill ツール経由の args は届く**。かつて Claude Code のバグ（anthropics/claude-code#34164）で届かず argsファイルの二重チャネルで回避していたが、上流で修正済み。実運用のPRで `create-pr` に渡した Issue 番号が `Closes #<N>` とベースブランチ（`cc-epic-<N>`）の両方に正しく反映されていることを確認している。
 
 ### Opus 実行スキル/エージェントのプロンプト方針
 
-`WORKER_DEFAULTS`（`src/config.ts`）の **`model: opus` のワーカー**（`exec-issue` / `fix-review-point` / `triage-pr` / `create-issue` / `answer-issue-questions` / `create-ui-design` / `resolve-conflict`。`DEFAULT_WORKER_CONFIG` の既定も `opus`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)に合わせて以下を本文に持たせる。いずれも Opus 5 が既定で強く出る挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）を抑える方向の指示で、**モデルが元からやることを繰り返し指示しない**（自己修正・再検証の指示は入れない）方針も含む。
+`WORKER_DEFAULTS`（`src/config.ts`）の **`model: opus` のワーカー**（`exec-issue` / `fix-review-point` / `triage-pr` / `create-issue` / `answer-issue-questions` / `create-ui-design` / 定期ワーカー3つ。`DEFAULT_WORKER_CONFIG` の既定も `opus`）と、`model: opus` のエージェント（`frontend-implementer` / `pencil-design-updater`）・スキル（`resolve-pencil-conflict`）は、[Opus 5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5)と[Opus 5.5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5)に合わせて以下を持たせる。Opus 5.5 ガイドは「Opus 5 向けのプロンプトはそのまま妥当な出発点」としているため、Opus 5 向けの調整（冗長化・スコープ拡大・過剰委譲・過剰検証を抑える、**モデルが元からやることを繰り返し指示しない**＝自己修正・再検証の指示を入れない）は維持したまま、5.5 固有の項目（effort・ターンの終え方・着手前の探索）を足している。
+
+- **effort は `medium`**（opus のワーカー・エージェント・スキルの既定）。Opus 5.5 の既定は `medium` で、Anthropic の実測ではコーディング・ナレッジワーク評価で Opus 5 の `high` と同等以上、かつ少ないステップ・トークンで終わる。同じレベル名でもターンあたりの思考量は Opus 5 より増える（特に `xhigh` / `max`）ため、Opus 5 時代の `high` を持ち越すとターンが長くコストも増えるだけになる。これに合わせて `frontend-implementer` を `high` → `medium`、`pencil-design-updater` を `xhigh` → `high`、`resolve-pencil-conflict` を `high` → `medium` へ1段ずつ下げた。`xhigh` / `max` は品質向上を実測できた作業にだけ使う（同ガイド）。思考量を増やしたい場合はプロンプトで「よく考えて」と書くのではなく `claude-task-worker.json` の `workers.<name>.effort` を上げる（プロンプトの指示より確実、と同ガイド）。`src/config.test.ts` の「opus workers default to medium effort, sonnet workers to high」で固定してある
+- **ターンの終え方**: Opus 5.5 は長いタスクで途中経過を報告するためにツール呼び出しを含まないメッセージでターンを閉じることがある（`end_turn`）。`claude -p` / herdr のタスクタブには続きを促す人がいないため、そこで処理が打ち切られる（同期実行ガードが防ごうとしている「未完のまま exit 0」そのもの）。同ガイドは「避けてほしい早期終了の種類を名指しする」指示に反応が良いとしているため、`OPUS_SYSTEM_PROMPT_ADDENDUM` に4種類（次の一手を告げるだけの要約・続行の確認・自分で決められる選択肢の列挙・区切りが良いからという中間報告）を列挙し、状況メモは次のツール呼び出しと同じメッセージに書いて続けること、ターンを終えてよいのは全ステップ完遂か定義済みの中断条件だけであること、破壊的操作で迷ったら確認を求めて止まるのではなく実行しない側を選んで残りを進めることを規定している。基底プロンプトの「全ステップを完遂してから終了する」の具体化であり、原則の追加ではない
+- **着手前の探索**: Opus 5.5 は素早く着手するため、緩く指定されたタスクでは依頼が明示していない情報源を見ずに動き始めがち。同追補に「変更に入る前に、結論を左右しうる情報源（Issue/PR コメント・関連 Issue/PR・`docs/`・`.claude/requirements/`・`CODING_GUIDELINES.md`・リンク先の仕様）を見てから着手する」の1行を置く（分析系スキルの「外部リンクの参照」節のセッション単位版）
 
 - **スコープの規律**: 依頼された範囲だけを実装/回答/分解し、気づいた別の改善は成果物に混ぜず報告へ1行で挙げる。依頼が誤っていると考える場合も、指摘を1-2行添えたうえで依頼どおりのスコープで完遂する（黙って縮小・拡大・別物への置き換えをしない）。Issue description・TODOリスト・`.pen` は後段の実装スコープそのものになるため、ここが膨らむと実装まで膨らむ
 - **成果物の分量**: Issueコメント・PR body・description・最終報告は「必要な実質だけ」。同じ内容の言い換え・埋め草セクション・該当なしの節を書かない。最終報告は結論（何をしたか／どこで止まったか）から書く。Opus 5 はディスクに書くドキュメントも会話も既定で長いため、明示的な分量指示が必要
@@ -189,17 +195,17 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 - **反復の上限**: ビジュアル一致の詰め（`frontend-implementer` の最大10往復、`pencil-design-updater` の最大5往復／再実行最大3回）に上限を設け、残差分は理由付きで報告して完了させる。「完全に一致するまで」だけを指示すると収束しないケースで無限に詰め続ける
 - **サブエージェントは人に質問できない**: `frontend-implementer` / `pencil-design-updater` は自動起動セッションから呼ばれるため、旧文面の「ユーザーに質問する／案内する／確認を求める」を「自力で既定値を選び根拠を報告する」「事実と残課題を報告して終了する」へ置き換えてある（応答するユーザーが常駐しないため、質問して止まると呼び出し元が空の成果を受け取る）
 
-これらのうち「スコープ」「成果物の分量」「委譲の量」「過剰検証の抑止」は、スキル/エージェント本文に加えて **`src/claude-args.ts` の `OPUS_SYSTEM_PROMPT_ADDENDUM`（opus 実行時のみ注入）にも置いてある**（下記「モデル別システムプロンプト」参照）。スキル本文はそのスキルの局所的な規定であり、セッションを跨いだ挙動やサブエージェントには届かないため。
+これらのうち「スコープ」「成果物の分量」「委譲の量」「過剰検証の抑止」「ターンの終え方」「着手前の探索」は、スキル/エージェント本文に加えて（または本文には置かず） **`src/claude-args.ts` の `OPUS_SYSTEM_PROMPT_ADDENDUM`（opus 実行時のみ注入）に置いてある**（下記「モデル別システムプロンプト」参照）。スキル本文はそのスキルの局所的な規定であり、セッションを跨いだ挙動やサブエージェントには届かないため。「よく考えてから答える」類の思考指示と、推論過程をそのまま書き出させる指示はどこにも置かない（前者は effort が決めるもので遅くなるだけ、後者は `reasoning_extraction` で拒否されうる。報告に要るのは判断の要約だけ）。
 
 #### モデル別システムプロンプト（`systemPromptFor()`）
 
 `--append-system-prompt-file` で注入する本文は「全モデル共通の基底 ＋ opus のみの追補」の2段構成（`src/claude-args.ts`）。
 
 - **`SYSTEM_PROMPT_BASE`**: 従来の `SYSTEM_PROMPT`（自律実行原則・サブエージェント原則・CodeGraph 優先）。全モデルに注入する
-- **`OPUS_SYSTEM_PROMPT_ADDENDUM`**: opus のときだけ基底の末尾に連結する。内容は Opus 5 の既定挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）への逆張り 4 点
+- **`OPUS_SYSTEM_PROMPT_ADDENDUM`**: opus のときだけ基底の末尾に連結する。内容は Opus 5 の既定挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）への逆張り 4 点に、Opus 5.5 向けの「ターンの終え方（4種類の早期終了の名指し）」「着手前の探索」を足した3節構成（前節参照）
 - **`systemPromptFor(model)`**: 上記の組み立て。`isOpusModel(model)` は `model` を小文字化した**部分一致**で判定する（`claude-task-worker.json` の `workers.<name>.model` はエイリアス `opus` でもフルID `claude-opus-5` でも指定できるため）。未知の値は「opus ではない」＝基底のみへ倒す
 
-**sonnet 側に追補を持たせていない**のは、追補が Opus 5 固有の既定挙動への調整であり、sonnet では逆に検証や委譲を促す指示が要るケースがあるため。基底のみ＝本機構の導入前と完全に同一の挙動になる（sonnet ワーカーに対する挙動変更はゼロ）。sonnet 向けの調整が必要になった場合は `systemPromptFor()` に sonnet 用の追補を足す形で拡張する。
+**sonnet 側に追補を持たせていない**のは、追補が Opus 固有の既定挙動への調整であり、sonnet では逆に検証や委譲を促す指示が要るケースがあるため。基底のみ＝本機構の導入前と完全に同一の挙動になる（sonnet ワーカーに対する挙動変更はゼロ）。sonnet 向けの調整が必要になった場合は `systemPromptFor()` に sonnet 用の追補を足す形で拡張する。
 
 書き出しファイルは `append-system-prompt-<pid>-<variant>.txt`（`variant` は `opus` / `default`）。**バリアントをファイル名に含めるのは必須**で、共有パスにすると `all` / `--project` 実行で opus と sonnet のワーカーが同一プロセス内で並走した際、後から起動した側の書き込みが先の内容を上書きしてしまう（claude はプロセス起動時にこのファイルを読むため、取り違えた原則が注入される）。
 
@@ -217,7 +223,7 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 上記のうち `triage-pr` のスキル本文の調整は、**同ワーカーを opus に据え置いた後もそのまま残してある**（`triage-created-issue` は sonnet のまま）。「主観語で判定を分けない」「例示リストに判定基準を併記する」はモデルに依らず判定を安定させる書き方であり、`model` を `sonnet` へ下げ直した場合にも効き続ける必要があるため。
 
-effort は大半のワーカーで `high`（Sonnet 5 の既定）。手順が一意な `epic-issue` / `apply-ui-design` のみ `medium`。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
+sonnet ワーカーの effort は大半で `high`（Sonnet 5 の既定）。手順が一意な `epic-issue` / `apply-ui-design` のみ `medium`（opus ワーカーの `medium` は Opus 5.5 の既定であり、意味が違う。前節参照）。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
 
 ### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
 

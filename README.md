@@ -300,7 +300,7 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 | `skill` | Claude CLI の `-p` に渡すスラッシュコマンド（`"<skill> <番号>"` の形で起動） |
 | `model` | `--model` の値（`sonnet` / `opus` / `haiku`） |
 | `advisorModel` | `--advisor` の値。空文字なら advisor なし。`config.json` の `advisor: true` のときだけ参照される |
-| `effort` | `--effort` の値（`high` / `medium` / `low`） |
+| `effort` | `--effort` の値（`low` / `medium` / `high` / `xhigh` / `max`）。opus ワーカーの既定は `medium`（Opus 5.5 の既定。`medium` で Opus 5 の `high` 相当）、sonnet ワーカーの既定は `high` |
 | `pollingIntervalSeconds` | ポーリング間隔（秒） |
 | `cooldownSeconds` | タスク完了後にポーリングを止める時間（秒）。既定 `0` |
 | `maxConcurrentTasks` | 同時実行できるタスクの最大数。既定 `1` |
@@ -309,12 +309,12 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 
 | ワーカー | `model` | `effort` | `pollingIntervalSeconds` |
 |---|---|---|---|
-| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design` / `triage-pr` | `opus` | `high` | 60 |
+| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design` / `triage-pr` | `opus` | `medium` | 60 |
 | `update-issue` / `triage-created-issue` / `resolve-conflict` | `sonnet` | `high` | 60 |
 | `epic-issue` / `apply-ui-design` | `sonnet` | `medium` | 300 |
 | `check-dependabot` | `sonnet` | `high` | 3600 |
-| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | `opus` | `high` | 3600 |
-| （未知のワーカー名） | `opus` | `high` | 60 |
+| `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | `opus` | `medium` | 3600 |
+| （未知のワーカー名） | `opus` | `medium` | 60 |
 
 `advisorModel` の既定は全ワーカー空文字（advisor なし）。
 

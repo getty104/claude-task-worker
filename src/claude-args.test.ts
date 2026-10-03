@@ -98,12 +98,23 @@ test("SYSTEM_PROMPT_BASE does not assume a specific run mode", () => {
   assert.ok(!SYSTEM_PROMPT_BASE.includes("print"));
 });
 
-test("OPUS_SYSTEM_PROMPT_ADDENDUM curbs the Opus 5 default behaviours", () => {
-  // Verbosity, scope creep, over-delegation and over-verification.
+test("OPUS_SYSTEM_PROMPT_ADDENDUM curbs the Opus default behaviours", () => {
+  // Opus 5: verbosity, scope creep, over-delegation and over-verification.
   assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("依頼されたスコープだけ"));
   assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("埋め草セクション"));
   assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("自分で数回のツール呼び出しで終わる作業は委譲しない"));
   assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("再チェックを目的にサブエージェントを起動しない"));
+  // Opus 5.5: ending the turn with a progress report (end_turn) kills an unattended
+  // `claude -p` / herdr session, so the four early-stop shapes are named explicitly.
+  assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("ターンの終え方"));
+  assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("次の4種類の終え方をしない"));
+  assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("次のツール呼び出しと同じメッセージに書いて作業を続ける"));
+  // Opus 5.5 starts quickly; look at the sources the request didn't point to first.
+  assert.ok(OPUS_SYSTEM_PROMPT_ADDENDUM.includes("変更に入る前に"));
+  // Thinking depth is effort's job; never prompt for it (and never ask for raw reasoning).
+  for (const banned of ["よく考え", "慎重に考え", "思考過程"]) {
+    assert.ok(!OPUS_SYSTEM_PROMPT_ADDENDUM.includes(banned), `addendum must not contain "${banned}"`);
+  }
 });
 
 test("isOpusModel matches aliases and full model IDs, case-insensitively", () => {

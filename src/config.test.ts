@@ -101,6 +101,20 @@ test("every worker defaults to a known model without an advisor", () => {
   }
 });
 
+test("opus workers default to medium effort, sonnet workers to high", () => {
+  // Opus 5.5 の既定は medium で、medium が Opus 5 の high と同等以上。同じレベル名でも
+  // ターンあたりの思考量が増えるため、Opus 5 時代の high を持ち越すと長く高くなるだけ。
+  // sonnet 側は Sonnet 5 の既定（high）のまま（epic-issue / apply-ui-design の medium は手順が一意なため）。
+  assert.equal(DEFAULT_WORKER_CONFIG.effort, "medium");
+  for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
+    if (config.model === "opus") {
+      assert.equal(config.effort, "medium", `WORKER_DEFAULTS.${name}.effort`);
+    } else {
+      assert.ok(["high", "medium"].includes(config.effort), `WORKER_DEFAULTS.${name}.effort=${config.effort}`);
+    }
+  }
+});
+
 test("workers on the delivery critical path stay on opus", () => {
   // セッションログの実測（sonnet期 vs opus期）で、opus は手戻り（fix-review-point/exec-issue）が
   // 1.16 → 0.72、PR再トリアージが 5.48 → 3.23 に減った。単セッションのコストが高くても
