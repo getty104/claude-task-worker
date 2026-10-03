@@ -4,6 +4,30 @@ import type * as InitModule from "./init";
 
 const init = (await import("./init")) as typeof InitModule;
 
+test("labelColorFor is deterministic and returns a 6-digit lowercase hex", () => {
+  for (const name of ["cc-a", "my-label", "日本語", ""]) {
+    const color = init.labelColorFor(name);
+    assert.match(color, /^[0-9a-f]{6}$/);
+    assert.equal(color, init.labelColorFor(name));
+  }
+  assert.notEqual(init.labelColorFor("cc-a"), init.labelColorFor("cc-b"));
+});
+
+test("buildLabelSpecs returns only the presets when no custom labels are declared", () => {
+  assert.deepEqual(init.buildLabelSpecs([]), init.LABELS);
+});
+
+test("buildLabelSpecs keeps the preset color for a preset name and dedupes custom labels", () => {
+  const preset = init.LABELS[0];
+  const specs = init.buildLabelSpecs(["my-a", preset.name, "my-b", "my-a"]);
+  assert.equal(specs.length, init.LABELS.length + 2);
+  assert.deepEqual(specs.slice(0, init.LABELS.length), init.LABELS);
+  assert.deepEqual(specs.slice(init.LABELS.length), [
+    { name: "my-a", color: init.labelColorFor("my-a") },
+    { name: "my-b", color: init.labelColorFor("my-b") },
+  ]);
+});
+
 // 「キュー合流（cc-triage-scope）」と「依頼者の紐付け（cc-issue-request）」を同じラベルへ
 // 戻すと、ワーカーや外部パイプラインの自動起票にも assign が発火し、その bot アカウントが
 // 全 Issue の assignee になる。役割の再統合を機械的に止める。
