@@ -73,7 +73,11 @@ export const DEFAULT_UI_DESIGN_CONFIG: UiDesignConfig = {
 // 同等以上（コーディング・ナレッジワーク評価、Anthropic 実測）かつ同じレベル名でもターンあたりの
 // 思考量が増えるため、Opus 5 時代の `high` をそのまま持ち越すとターンが長くコストも増えるだけになる
 // （https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#calibrate-effort）。
-// sonnet ワーカーの `high` は Sonnet 5 の既定で、こちらは据え置き。
+// sonnet ワーカーは Sonnet 5.5 ガイドの「エージェント的なツール使用は、仕様が確定したタスクは
+// `medium` から、難しい・長いタスクは `high`」に従い、手順が本文に書き切ってある
+// `update-issue` / `triage-created-issue` / `epic-issue` / `apply-ui-design` を `medium`、
+// コード変更の判断を伴う `resolve-conflict` / `check-dependabot` を `high` にする
+// （https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#calibrate-effort）。
 export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   skill: "",
   model: "opus",
@@ -107,7 +111,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     skill: "/claude-task-worker:update-issue",
     model: "sonnet",
     advisorModel: "",
-    effort: "high",
+    effort: "medium",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
@@ -134,7 +138,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     skill: "/claude-task-worker:triage-created-issue",
     model: "sonnet",
     advisorModel: "",
-    effort: "high",
+    effort: "medium",
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,

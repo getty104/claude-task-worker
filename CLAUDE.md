@@ -199,19 +199,25 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 #### モデル別システムプロンプト（`systemPromptFor()`）
 
-`--append-system-prompt-file` で注入する本文は「全モデル共通の基底 ＋ opus のみの追補」の2段構成（`src/claude-args.ts`）。
+`--append-system-prompt-file` で注入する本文は「全モデル共通の基底 ＋ モデル系統別の追補（opus / sonnet）」の2段構成（`src/claude-args.ts`）。
 
 - **`SYSTEM_PROMPT_BASE`**: 従来の `SYSTEM_PROMPT`（自律実行原則・サブエージェント原則・CodeGraph 優先）。全モデルに注入する
 - **`OPUS_SYSTEM_PROMPT_ADDENDUM`**: opus のときだけ基底の末尾に連結する。内容は Opus 5 の既定挙動（冗長化・スコープ拡大・過剰委譲・過剰検証）への逆張り 4 点に、Opus 5.5 向けの「ターンの終え方（4種類の早期終了の名指し）」「着手前の探索」を足した3節構成（前節参照）
-- **`systemPromptFor(model)`**: 上記の組み立て。`isOpusModel(model)` は `model` を小文字化した**部分一致**で判定する（`claude-task-worker.json` の `workers.<name>.model` はエイリアス `opus` でもフルID `claude-opus-5` でも指定できるため）。未知の値は「opus ではない」＝基底のみへ倒す
+- **`SONNET_SYSTEM_PROMPT_ADDENDUM`**: sonnet のときだけ基底の末尾に連結する。内容は Sonnet 5.5 の `low` / `medium` で出る「途中確認のために止まる」「変更の検証を省く」への対処と、「依頼されていないテスト・ドキュメント・補助ファイルを足す」の名指し禁止の3点（次節参照）。opus 追補とは**方向が逆**で、委譲や検証を抑える文言は入れない
+- **`systemPromptFor(model)`**: 上記の組み立て。`isOpusModel(model)` / `isSonnetModel(model)` は `model` を小文字化した**部分一致**で判定する（`claude-task-worker.json` の `workers.<name>.model` はエイリアス `opus` でもフルID `claude-opus-5` でも指定できるため）。opus を先に判定し、どちらでもない値（haiku・未知のID）は基底のみへ倒す。`systemPromptVariant(model)` がファイル名用に `opus` / `sonnet` / `default` を返す
 
-**sonnet 側に追補を持たせていない**のは、追補が Opus 固有の既定挙動への調整であり、sonnet では逆に検証や委譲を促す指示が要るケースがあるため。基底のみ＝本機構の導入前と完全に同一の挙動になる（sonnet ワーカーに対する挙動変更はゼロ）。sonnet 向けの調整が必要になった場合は `systemPromptFor()` に sonnet 用の追補を足す形で拡張する。
+かつては sonnet 側に追補を持たせていなかった（opus 追補が Opus 固有の挙動への逆張りで、sonnet には逆方向の指示が要るため）。Sonnet 5.5 のガイドで逆方向の指示が具体化され、かつ sonnet ワーカーの effort を `medium` へ下げてその症状（途中確認で止まる）が出る条件に入ったため、sonnet 用の追補を足した。
 
-書き出しファイルは `append-system-prompt-<pid>-<variant>.txt`（`variant` は `opus` / `default`）。**バリアントをファイル名に含めるのは必須**で、共有パスにすると `all` / `--project` 実行で opus と sonnet のワーカーが同一プロセス内で並走した際、後から起動した側の書き込みが先の内容を上書きしてしまう（claude はプロセス起動時にこのファイルを読むため、取り違えた原則が注入される）。
+書き出しファイルは `append-system-prompt-<pid>-<variant>.txt`（`variant` は `opus` / `sonnet` / `default`）。**バリアントをファイル名に含めるのは必須**で、共有パスにすると `all` / `--project` 実行で opus と sonnet のワーカーが同一プロセス内で並走した際、後から起動した側の書き込みが先の内容を上書きしてしまう（claude はプロセス起動時にこのファイルを読むため、取り違えた原則が注入される）。
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `claude-task-worker.json` で `model` を `sonnet` へ下げたワーカーは、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet 5 は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。
+`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `model: sonnet` のワーカー（`update-issue` / `triage-created-issue` / `resolve-conflict` / `check-dependabot` / `epic-issue` / `apply-ui-design`）は、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)と[Sonnet 5.5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。Sonnet 5.5 ガイドも「Sonnet 5 向けのプロンプトはそのまま妥当な出発点」としているため、Sonnet 5 向けの項目は維持し、5.5 固有の項目（effort・途中確認・検証・スコープ外の追加）を足している。
+
+- **effort は難易度で二分する**（Sonnet 5.5 ガイドの「エージェント的なツール使用は、仕様が確定したタスクは `medium` から、難しい・長いタスクは `high`」）。手順が本文に書き切ってあるワーカー（`update-issue` / `triage-created-issue` / `epic-issue` / `apply-ui-design`）は `medium`、コード変更の判断を伴うワーカー（`resolve-conflict` / `check-dependabot`）と `create-review-fix-plan`（判定の質が `fix-review-point` の修正範囲を決める）は `high`。`general-purpose-assistant`（`medium`）・`commit-push` / `create-pr`（`medium`）・`explore-agent` / `lightweight-assistant` / `check-library` / `resolve-pr-comments`（`low`）は据え置き。Sonnet 5.5 はレベルが再較正されていて Sonnet 5 の同名レベルと思考量が一致しないため、観測に基づかずに `xhigh` / `max` へ上げない（同レベルでは自発的なレビュー往復・サブエージェント起動が増える、と同ガイド）。`src/config.test.ts` の「opus workers default to medium effort; sonnet workers split by task difficulty」で固定してある
+- **途中確認で止まらせない**: Sonnet 5.5 は `low` / `medium` の長いエージェント的タスクで、計画の確認・自分で答えられる質問・多段タスクの一部を終えた時点での「続けるか」のために止まることがある。無人のワーカー実行ではそこで処理が打ち切られるため、`SONNET_SYSTEM_PROMPT_ADDENDUM` と `general-purpose-assistant` / `lightweight-assistant` の本文に「完了条件を満たすまで続ける。止まるのは中断条件／差し戻し基準に該当したときだけ」を置く（ガイドの "Keep working until everything the user asked for is done" 相当）
+- **変更の検証を省かせない**: Sonnet 5.5 は `low` で「依存が入っていないからテストを飛ばす」「構文チェックだけで完了にする」ことがある。同追補と両エージェントの品質チェック項目に、ガイドの "Verification on coding tasks" 段落相当（変更を実際に通す検証を実行する・構文チェックや起動に失敗したチェックは数えない・足りないのが宣言済み依存だけならロックファイルで入れる・どの検証も実行できないときだけその旨を報告する）を置く
+- **スコープ外の追加を名指しで禁じる**: Sonnet 5.5 は依頼されていないテスト・ドキュメント・補助ファイルを全 effort で足す（高いほど増える）。指示を文字どおりに読むモデルなので「周辺の改善をしない」では足りず、同追補と両エージェントの本文で種類を名指しする。`create-review-fix-plan` には「プランを返して終える（修正・コミット・返信はしない）」を置き、開かれた依頼で作り始める挙動（ガイドの "Open-ended requests"）を塞ぐ
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
@@ -223,7 +229,7 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 上記のうち `triage-pr` のスキル本文の調整は、**同ワーカーを opus に据え置いた後もそのまま残してある**（`triage-created-issue` は sonnet のまま）。「主観語で判定を分けない」「例示リストに判定基準を併記する」はモデルに依らず判定を安定させる書き方であり、`model` を `sonnet` へ下げ直した場合にも効き続ける必要があるため。
 
-sonnet ワーカーの effort は大半で `high`（Sonnet 5 の既定）。手順が一意な `epic-issue` / `apply-ui-design` のみ `medium`（opus ワーカーの `medium` は Opus 5.5 の既定であり、意味が違う。前節参照）。同ガイドは「最も難しいコーディング/エージェント的タスクには `xhigh`」を推奨しているが、浅い推論が観測された場合の対処であり、観測なしで上げるとコストだけ増えるため据え置いてある。上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する（プロンプト側で深く考えさせようとするより効果的、というのが同ガイドの指針）。
+effort を上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する。プロンプト側で深く考えさせようとしても効かない（Sonnet 5.5 ガイド: 思考量はプロンプトでは確実に減らせず、effort が主な制御）ため、「よく考えて」類の文言はどこにも置かない。
 
 ### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
 

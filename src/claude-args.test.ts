@@ -10,6 +10,7 @@ const {
   CLAUDE_SPAWN_ENV,
   SYSTEM_PROMPT_BASE,
   OPUS_SYSTEM_PROMPT_ADDENDUM,
+  SONNET_SYSTEM_PROMPT_ADDENDUM,
   CLAUDE_COMMAND,
   buildClaudeArgs,
   buildClaudeEnv,
@@ -25,6 +26,7 @@ const {
   shellQuote,
   buildScriptCommand,
   isOpusModel,
+  isSonnetModel,
   systemPromptFilePath,
   systemPromptFor,
 } = (await import("./claude-args")) as typeof ClaudeArgsModule;
@@ -126,21 +128,52 @@ test("isOpusModel matches aliases and full model IDs, case-insensitively", () =>
   }
 });
 
-test("systemPromptFor appends the addendum for opus only", () => {
-  assert.equal(systemPromptFor("sonnet"), SYSTEM_PROMPT_BASE);
+test("SONNET_SYSTEM_PROMPT_ADDENDUM counters the Sonnet 5.5 low/medium-effort behaviours", () => {
+  // Checking in before the work is done, skipping verification, and unrequested additions.
+  assert.ok(SONNET_SYSTEM_PROMPT_ADDENDUM.includes("依頼された作業がすべて終わるまで続ける"));
+  assert.ok(SONNET_SYSTEM_PROMPT_ADDENDUM.includes("その変更を実際に通す検証"));
+  assert.ok(SONNET_SYSTEM_PROMPT_ADDENDUM.includes("構文チェックだけ"));
+  assert.ok(
+    SONNET_SYSTEM_PROMPT_ADDENDUM.includes("依頼されていないテスト・ドキュメント・補助ファイル・リファクタを足さない"),
+  );
+  // Never prompt for thinking depth (effort's job) and never curb delegation here (opus-only).
+  for (const banned of ["よく考え", "慎重に考え", "思考過程", "委譲しない"]) {
+    assert.ok(!SONNET_SYSTEM_PROMPT_ADDENDUM.includes(banned), `addendum must not contain "${banned}"`);
+  }
+});
+
+test("isSonnetModel matches aliases and full model IDs, case-insensitively", () => {
+  for (const model of ["sonnet", "Sonnet", "claude-sonnet-5", "claude-sonnet-5-5"]) {
+    assert.equal(isSonnetModel(model), true, `${model} must be treated as sonnet`);
+  }
+  for (const model of ["opus", "claude-opus-5", "haiku", ""]) {
+    assert.equal(isSonnetModel(model), false, `${model} must not be treated as sonnet`);
+  }
+});
+
+test("systemPromptFor appends the matching addendum per model family", () => {
   assert.equal(systemPromptFor("opus"), `${SYSTEM_PROMPT_BASE}\n\n${OPUS_SYSTEM_PROMPT_ADDENDUM}`);
-  // The opus variant is strictly additive: the base principles still apply.
+  assert.equal(systemPromptFor("sonnet"), `${SYSTEM_PROMPT_BASE}\n\n${SONNET_SYSTEM_PROMPT_ADDENDUM}`);
+  // Anything else (haiku, unknown IDs) gets the base principles only.
+  assert.equal(systemPromptFor("haiku"), SYSTEM_PROMPT_BASE);
+  // Both variants are strictly additive: the base principles still apply.
   assert.ok(systemPromptFor("claude-opus-5").startsWith(SYSTEM_PROMPT_BASE));
+  assert.ok(systemPromptFor("claude-sonnet-5-5").startsWith(SYSTEM_PROMPT_BASE));
+  assert.ok(!systemPromptFor("sonnet").includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
+  assert.ok(!systemPromptFor("opus").includes(SONNET_SYSTEM_PROMPT_ADDENDUM));
 });
 
 test("systemPromptFilePath writes one file per variant so concurrent workers can't clobber it", () => {
   const opusPath = systemPromptFilePath("opus");
   const sonnetPath = systemPromptFilePath("sonnet");
-  assert.notEqual(opusPath, sonnetPath);
+  const defaultPath = systemPromptFilePath("haiku");
+  assert.equal(new Set([opusPath, sonnetPath, defaultPath]).size, 3);
   assert.equal(readFileSync(opusPath, "utf8"), systemPromptFor("opus"));
-  assert.equal(readFileSync(sonnetPath, "utf8"), SYSTEM_PROMPT_BASE);
+  assert.equal(readFileSync(sonnetPath, "utf8"), systemPromptFor("sonnet"));
+  assert.equal(readFileSync(defaultPath, "utf8"), SYSTEM_PROMPT_BASE);
   // Same variant resolves to the same cached path regardless of the model spelling.
   assert.equal(systemPromptFilePath("claude-opus-5"), opusPath);
+  assert.equal(systemPromptFilePath("claude-sonnet-5-5"), sonnetPath);
 });
 
 // herdr mode must NOT pass the prompt on the command line: claude would start working
@@ -583,11 +616,13 @@ test("buildCloudPrompt includes the base system prompt body", () => {
   assert.ok(result.includes(SYSTEM_PROMPT_BASE));
 });
 
-test("buildCloudPrompt appends the opus addendum only for opus models", () => {
+test("buildCloudPrompt appends the addendum matching the model family", () => {
   const opusResult = buildCloudPrompt("/skill 1", "opus");
   const sonnetResult = buildCloudPrompt("/skill 1", "sonnet");
   assert.ok(opusResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
   assert.ok(!sonnetResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
+  assert.ok(sonnetResult.includes(SONNET_SYSTEM_PROMPT_ADDENDUM));
+  assert.ok(!opusResult.includes(SONNET_SYSTEM_PROMPT_ADDENDUM));
 });
 
 test("buildCloudPrompt includes the tool restriction text", () => {

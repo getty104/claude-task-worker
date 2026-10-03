@@ -101,16 +101,18 @@ test("every worker defaults to a known model without an advisor", () => {
   }
 });
 
-test("opus workers default to medium effort, sonnet workers to high", () => {
+test("opus workers default to medium effort; sonnet workers split by task difficulty", () => {
   // Opus 5.5 の既定は medium で、medium が Opus 5 の high と同等以上。同じレベル名でも
   // ターンあたりの思考量が増えるため、Opus 5 時代の high を持ち越すと長く高くなるだけ。
-  // sonnet 側は Sonnet 5 の既定（high）のまま（epic-issue / apply-ui-design の medium は手順が一意なため）。
+  // Sonnet 5.5 は「仕様が確定したエージェント的タスクは medium から、難しい・長いものは high」。
+  // 手順が本文に書き切ってあるワーカーは medium、コード変更の判断を伴うワーカーは high。
   assert.equal(DEFAULT_WORKER_CONFIG.effort, "medium");
+  const sonnetHigh = new Set(["resolve-conflict", "check-dependabot"]);
   for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
     if (config.model === "opus") {
       assert.equal(config.effort, "medium", `WORKER_DEFAULTS.${name}.effort`);
     } else {
-      assert.ok(["high", "medium"].includes(config.effort), `WORKER_DEFAULTS.${name}.effort=${config.effort}`);
+      assert.equal(config.effort, sonnetHigh.has(name) ? "high" : "medium", `WORKER_DEFAULTS.${name}.effort`);
     }
   }
 });
