@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, normalize, sep as SEP } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep as SEP } from "node:path";
 import { hasCloudFlag } from "./dispatch-args";
 
 export type WorkerName =
@@ -61,6 +61,7 @@ interface Config {
   // claude-task-worker.local.json 側で指定する想定。
   remoteEnvId: string | null;
   labels: string[];
+  workerFiles: string[];
   uiDesign: UiDesignConfig;
   lastRun: LastRunLog;
   workers: Record<string, WorkerRuntimeConfig>;
@@ -341,6 +342,7 @@ export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   remoteEnvId: null,
   labels: [],
+  workerFiles: [],
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
   lastRun: {},
   workers: {},
@@ -515,6 +517,29 @@ export function parseLabelsEntry(val: unknown): string[] {
   return result;
 }
 
+export function parseWorkerFilesEntry(val: unknown): string[] {
+  if (!Array.isArray(val)) {
+    console.warn(`[config] invalid workerFiles: expected array of strings, ignoring`);
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of val) {
+    if (typeof item === "string" && item.trim().length > 0) {
+      result.push(item.trim());
+    } else {
+      console.warn(`[config] invalid workerFiles entry: ${String(item)}, ignoring`);
+    }
+  }
+  return result;
+}
+
+// 絶対パスはそのまま、~ は home 展開、それ以外は設定ファイルのあるディレクトリ基準で解決する。
+export function resolveWorkerFilePath(entry: string, configDir: string, home: string): string {
+  if (entry === "~") return home;
+  if (entry.startsWith("~/")) return resolve(home, entry.slice(2));
+  return resolve(configDir, entry);
+}
+
 function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
@@ -553,6 +578,7 @@ export function loadConfig(): Config {
   const result: Config = {
     ...DEFAULT_CONFIG,
     labels: [],
+    workerFiles: [],
     uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
     lastRun: {},
     workers: {},
@@ -571,6 +597,10 @@ export function loadConfig(): Config {
 
   if ("labels" in raw) {
     result.labels = parseLabelsEntry(raw["labels"]);
+  }
+
+  if ("workerFiles" in raw) {
+    result.workerFiles = parseWorkerFilesEntry(raw["workerFiles"]);
   }
 
   if ("lastRun" in raw) {

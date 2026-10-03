@@ -63,7 +63,7 @@ test("assertCloudCompatibleCommand exits 1 for --cloud-incompatible commands", (
     return undefined as never;
   }) as typeof process.exit);
 
-  for (const command of ["init", "apply-labels", "install", "update", "usage", "version"]) {
+  for (const command of ["init", "apply-labels", "install", "update", "usage", "version", "list-workers"]) {
     exitCodes.length = 0;
     assertCloudCompatibleCommand(command);
     assert.deepEqual(exitCodes, [1], `assertCloudCompatibleCommand(${command})`);

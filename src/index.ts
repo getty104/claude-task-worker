@@ -26,7 +26,11 @@ import {
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
 import {
+  CONFIG_PATH,
+  loadConfig,
+  resolveWorkerFilePath,
   checkCloudConfig,
   CLOUD_DONE_LABEL,
   disabledWorkerMessage,
@@ -37,6 +41,8 @@ import {
 import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -48,9 +54,27 @@ import type * as DispatcherModule from "./dispatcher";
 import type { SessionRegistry, MonitorHandle } from "./dispatcher";
 import type * as HerdrModule from "./herdr";
 
-const WORKERS: Record<string, WorkerDefinition> = Object.fromEntries(
-  PRESET_WORKERS.map((e) => [e.definition.name, e.definition]),
-);
+const NON_WORKER_COMMANDS = ["init", "apply-labels", "install", "update", "cloud-setup", "usage"];
+
+// workerFiles のロードはワーカーを起動し得るコマンドだけで行う（init / install 等と --project では不要）。
+async function loadCustomWorkersOrExit(): Promise<CustomWorker[]> {
+  let files: string[];
+  try {
+    files = loadConfig().workerFiles.map((f) => resolveWorkerFilePath(f, dirname(CONFIG_PATH), homedir()));
+  } catch (err) {
+    console.warn(`[config] failed to load workerFiles, ignoring: ${err}`);
+    return [];
+  }
+  const { workers, errors } = await loadCustomWorkers(
+    files,
+    PRESET_WORKERS.map((e) => e.definition.name),
+  );
+  if (errors.length > 0) {
+    for (const message of errors) console.error(`[worker] ${message}`);
+    process.exit(1);
+  }
+  return workers;
+}
 
 function printUsage(): void {
   console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
@@ -62,11 +86,14 @@ Commands:
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   cloud-setup [--force]  Prepare a cloud session VM (writes permission mode, output style, and language into ~/.claude/settings.json). Meant for a cloud environment setup script
   usage             Notify current usage to Slack
+  list-workers      List preset and custom workers (name, kind, enabled, source)
   version           Print the installed claude-task-worker CLI version (aliases: --version, -v)
 
 Workers:
 ${PRESET_WORKERS.map((e) => `  ${e.definition.name.padEnd(17)}${e.definition.name.length > 17 ? "  " : " "}${e.description}`).join("\n")}
-  all               Poll all workers except ${PRESET_WORKERS.filter((e) => !e.inAll)
+${customWorkers.map((c) => `  ${c.definition.name.padEnd(17)}${c.definition.name.length > 17 ? "  " : " "}Custom worker (${c.source})`).join("\n")}${customWorkers.length > 0 ? "\n" : ""}  all               Poll all workers except ${PRESET_WORKERS.filter(
+    (e) => !e.inAll,
+  )
     .map((e) => e.definition.name)
     .join(", ")}
   yolo              Poll all workers including ${PRESET_WORKERS.filter((e) => !e.inAll)
@@ -104,6 +131,13 @@ if (workerType === "version" || workerType === "--version" || workerType === "-v
 // 待たずに投げっぱなしにする（起動を数秒遅らせないため）。
 void notifyIfOutdated();
 
+const customWorkers: CustomWorker[] =
+  workerType && !NON_WORKER_COMMANDS.includes(workerType) && !hasProjectFilter() ? await loadCustomWorkersOrExit() : [];
+
+const WORKERS: Record<string, WorkerDefinition> = Object.fromEntries(
+  [...PRESET_WORKERS.map((e) => e.definition), ...customWorkers.map((c) => c.definition)].map((d) => [d.name, d]),
+);
+
 if (!workerType) {
   printUsage();
   process.exit(1);
@@ -118,6 +152,7 @@ if (
   workerType !== "update" &&
   workerType !== "cloud-setup" &&
   workerType !== "usage" &&
+  workerType !== "list-workers" &&
   !WORKERS[workerType]
 ) {
   console.error(`Unknown command: ${workerType}`);
@@ -265,16 +300,22 @@ async function assertCloudAvailable(): Promise<void> {
 }
 
 // all / yolo の候補から workers.<name>.enabled: false を除いて起動する。除外があれば1行で示す。
-function startEnabledWorkers(
-  entries: readonly (typeof PRESET_WORKERS)[number][],
-  filters: WorkerStartOptions,
-): Promise<void>[] {
-  const { enabled, disabled } = partitionEnabledWorkers(
-    entries.map((e) => e.definition.name),
-    isWorkerEnabled,
-  );
+function startEnabledWorkers(names: readonly string[], filters: WorkerStartOptions): Promise<void>[] {
+  const { enabled, disabled } = partitionEnabledWorkers(names, isWorkerEnabled);
   if (disabled.length > 0) console.log(`[worker] skipped disabled workers: ${disabled.join(", ")}`);
   return enabled.map((name) => WORKERS[name].start(filters));
+}
+
+// カスタムワーカーは all / yolo の両方に含める。
+function candidateNames(include: (e: (typeof PRESET_WORKERS)[number]) => boolean): string[] {
+  return [
+    ...PRESET_WORKERS.filter(include).map((e) => e.definition.name),
+    ...customWorkers.map((c) => c.definition.name),
+  ];
+}
+
+function printWorkerRow(name: string, type: string, source: string): void {
+  console.log(`${name.padEnd(28)}${type.padEnd(8)}${isWorkerEnabled(name) ? "enabled " : "disabled"}  ${source}`);
 }
 
 // 起動前の前提チェックをまとめて実行する。
@@ -403,6 +444,9 @@ if (hasProjectFilter()) {
     console.log(text.trim());
     await send({ text: `📊 Usage${text}` });
   })();
+} else if (workerType === "list-workers") {
+  for (const e of PRESET_WORKERS) printWorkerRow(e.definition.name, "preset", "preset");
+  for (const c of customWorkers) printWorkerRow(c.definition.name, "custom", c.source);
 } else if (workerType === "all") {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
@@ -412,7 +456,7 @@ if (hasProjectFilter()) {
     await removeStaleWorktrees();
     await Promise.all(
       startEnabledWorkers(
-        PRESET_WORKERS.filter((e) => e.inAll),
+        candidateNames((e) => e.inAll),
         { epicFilters, labelFilters },
       ),
     );
@@ -425,7 +469,7 @@ if (hasProjectFilter()) {
     await removeStaleWorktrees();
     await Promise.all(
       startEnabledWorkers(
-        PRESET_WORKERS.filter((e) => e.inYolo),
+        candidateNames((e) => e.inYolo),
         { epicFilters, labelFilters },
       ),
     );
