@@ -179,7 +179,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
 
-**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。`create-prd` も同じ。
+**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。`create-prd` も同じ。カスタムワーカーの定義 TS を対話で生成する `build-custom-worker` も同じ理由で fork を持たない（要件を `AskUserQuestion` で全項目確定させてから `claude-task-worker/lib` のみを import する定義を書き出し、`list-workers` でロード検証する。ワーカーからは自動起動しない）。
 
 この2スキルは**成果物の文章を fable で生成する**。スキル本体にモデルを書けないため、生成工程だけをモデル指定の効く経路へ切り出す: `create-prd` は PRD 本文の起草を `Agent`（`model: "fable"`）へ委譲し、`breakdown-issues` は要件定義・TODO分解・各TODOの本文素材（説明・要件・参照情報・優先度・規模）を `requirement-todo-organizer`（`model: fable`）に生成させ、ユーザー回答を受けた更新も同エージェントへ再委譲する。メインセッションは質問・Issue 作成・番号の受け渡しだけを担い、分解結果の文章を自分で書き足さない（書き足した時点でその部分は呼び出し元のモデルの成果物になる）。
 
