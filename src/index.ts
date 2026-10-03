@@ -1,20 +1,7 @@
 #!/usr/bin/env node
 
-import { execIssueWorker } from "./workers/exec-issue";
-import { fixReviewPointWorker } from "./workers/fix-review-point";
-import { createIssueWorker } from "./workers/create-issue";
-import { updateIssueWorker } from "./workers/update-issue";
-import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
-import { triageCreatedIssueWorker } from "./workers/triage-created-issue";
-import { triagePrWorker } from "./workers/triage-pr";
-import { resolveConflictWorker } from "./workers/resolve-conflict";
-import { checkDependabotWorker } from "./workers/check-dependabot";
-import { epicIssueWorker } from "./workers/epic-issue";
-import { createUiDesignWorker } from "./workers/create-ui-design";
-import { applyUiDesignWorker } from "./workers/apply-ui-design";
-import { updateCodingGuidelinesWorker } from "./workers/update-coding-guidelines";
-import { updateRequirementRulesWorker } from "./workers/update-requirement-rules";
-import { updateDesignMdWorker } from "./workers/update-design-md";
+import { PRESET_WORKERS } from "./workers/registry";
+import type { WorkerDefinition } from "./workers/worker-definition";
 import {
   shutdown,
   waitForAllProcesses,
@@ -54,23 +41,9 @@ import type * as DispatcherModule from "./dispatcher";
 import type { SessionRegistry, MonitorHandle } from "./dispatcher";
 import type * as HerdrModule from "./herdr";
 
-const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: string[] }) => Promise<void>> = {
-  "exec-issue": execIssueWorker,
-  "fix-review-point": fixReviewPointWorker,
-  "create-issue": createIssueWorker,
-  "update-issue": updateIssueWorker,
-  "answer-issue-questions": answerIssueQuestionsWorker,
-  "triage-created-issue": triageCreatedIssueWorker,
-  "triage-pr": triagePrWorker,
-  "resolve-conflict": resolveConflictWorker,
-  "check-dependabot": checkDependabotWorker,
-  "epic-issue": epicIssueWorker,
-  "create-ui-design": createUiDesignWorker,
-  "apply-ui-design": applyUiDesignWorker,
-  "update-coding-guidelines": updateCodingGuidelinesWorker,
-  "update-requirement-rules": updateRequirementRulesWorker,
-  "update-design-md": updateDesignMdWorker,
-};
+const WORKERS: Record<string, WorkerDefinition> = Object.fromEntries(
+  PRESET_WORKERS.map((e) => [e.definition.name, e.definition]),
+);
 
 function printUsage(): void {
   console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
@@ -85,23 +58,13 @@ Commands:
   version           Print the installed claude-task-worker CLI version (aliases: --version, -v)
 
 Workers:
-  exec-issue        Poll issues and run /exec-issue
-  fix-review-point  Poll PRs and run /fix-review-point
-  create-issue      Poll issues and run /create-issue
-  update-issue      Poll issues and run update command
-  answer-issue-questions  Poll issues and run /answer-issue-questions
-  triage-created-issue  Poll cc-issue-created + cc-triage-scope issues and run /triage-created-issue
-  triage-pr         Poll and triage PRs every 5 minutes
-  resolve-conflict  Poll cc-resolve-conflict PRs and run /resolve-conflict
-  check-dependabot  Poll dependabot PRs every 1 hour
-  epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
-  create-ui-design  Poll cc-create-ui-design issues and create a Pencil design PR (requires uiDesign.enabled)
-  apply-ui-design   Poll cc-ui-design-pr-created issues and write the design reference back once the design PR is merged (requires uiDesign.enabled)
-  update-coding-guidelines  Run /update-coding-guidelines once every 24 hours over the last 24 hours
-  update-requirement-rules  Run /update-requirement-rules once every 24 hours over the last 24 hours
-  update-design-md  Run /update-design-md once every 24 hours over the last 24 hours (requires uiDesign.enabled)
-  all               Poll all workers except triage-created-issue, triage-pr, check-dependabot
-  yolo              Poll all workers including triage-created-issue, triage-pr, check-dependabot
+${PRESET_WORKERS.map((e) => `  ${e.definition.name.padEnd(17)}${e.definition.name.length > 17 ? "  " : " "}${e.description}`).join("\n")}
+  all               Poll all workers except ${PRESET_WORKERS.filter((e) => !e.inAll)
+    .map((e) => e.definition.name)
+    .join(", ")}
+  yolo              Poll all workers including ${PRESET_WORKERS.filter((e) => !e.inAll)
+    .map((e) => e.definition.name)
+    .join(", ")}
 
 Options:
   --project <name>  Dispatch to project(s) via herdr instead of running the worker locally. Accepts a project name, a project group name, or "all". Repeatable.
@@ -427,22 +390,9 @@ if (hasProjectFilter()) {
     await assertRunPrerequisites();
     // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
     await removeStaleWorktrees();
-    await Promise.all([
-      execIssueWorker({ epicFilters, labelFilters }),
-      fixReviewPointWorker(),
-      createIssueWorker({ epicFilters, labelFilters }),
-      updateIssueWorker({ epicFilters, labelFilters }),
-      answerIssueQuestionsWorker({ epicFilters, labelFilters }),
-      resolveConflictWorker(),
-      epicIssueWorker({ epicFilters, labelFilters }),
-      createUiDesignWorker({ epicFilters, labelFilters }),
-      applyUiDesignWorker({ epicFilters, labelFilters }),
-      // 24時間おきの定期ワーカー。update-design-md は uiDesign.enabled が false のとき
-      // 自身で no-op になる（create-ui-design / apply-ui-design と同じ扱い）。
-      updateCodingGuidelinesWorker(),
-      updateRequirementRulesWorker(),
-      updateDesignMdWorker(),
-    ]);
+    await Promise.all(
+      PRESET_WORKERS.filter((e) => e.inAll).map((e) => e.definition.start({ epicFilters, labelFilters })),
+    );
   })();
 } else if (workerType === "yolo") {
   const epicFilters = parseEpicFilters();
@@ -450,23 +400,9 @@ if (hasProjectFilter()) {
   (async () => {
     await assertRunPrerequisites();
     await removeStaleWorktrees();
-    await Promise.all([
-      execIssueWorker({ epicFilters, labelFilters }),
-      fixReviewPointWorker(),
-      createIssueWorker({ epicFilters, labelFilters }),
-      updateIssueWorker({ epicFilters, labelFilters }),
-      answerIssueQuestionsWorker({ epicFilters, labelFilters }),
-      triageCreatedIssueWorker({ epicFilters, labelFilters }),
-      checkDependabotWorker(),
-      triagePrWorker(),
-      resolveConflictWorker(),
-      epicIssueWorker({ epicFilters, labelFilters }),
-      createUiDesignWorker({ epicFilters, labelFilters }),
-      applyUiDesignWorker({ epicFilters, labelFilters }),
-      updateCodingGuidelinesWorker(),
-      updateRequirementRulesWorker(),
-      updateDesignMdWorker(),
-    ]);
+    await Promise.all(
+      PRESET_WORKERS.filter((e) => e.inYolo).map((e) => e.definition.start({ epicFilters, labelFilters })),
+    );
   })();
 } else {
   const epicFilters = parseEpicFilters();
@@ -474,6 +410,6 @@ if (hasProjectFilter()) {
   (async () => {
     await assertRunPrerequisites();
     await removeStaleWorktrees();
-    await WORKERS[workerType]({ epicFilters, labelFilters });
+    await WORKERS[workerType].start({ epicFilters, labelFilters });
   })();
 }
