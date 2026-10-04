@@ -241,7 +241,7 @@ claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ�
 
 - 未指定時は従来どおり cwd 直下の `claude-task-worker.json` / `claude-task-worker.local.json` だけを読む
 - 値自体の相対パスは起動時の cwd 基準。ファイル内の相対パス（`workerFiles` / `uiDesign.designDir`）は**そのファイルの所在ディレクトリ基準**で解決する
-- cwd 側の空配列（`"labels": []` / `"workerFiles": []` など）は土台の値を上書きせず無視する。要素が1つ以上ある配列は従来どおり丸ごと置き換える
+- 配列（`labels` / `workerFiles` など）は置き換えではなく、cwd 側の値を土台の後ろへ追記する（重複は除く）。cwd の `claude-task-worker.json` と `claude-task-worker.local.json` 同士は従来どおり local が丸ごと置き換え、その結果を土台へ追記する
 - `claude-task-worker.local.json` は常に cwd 直下のものを読む（指定ファイルと同じディレクトリのものは読まない）。cwd 直下の `claude-task-worker.json` は無くてもよい
 - 指定ファイルが存在しなければエラー終了する（既定ファイルへは倒さない）。`--project` では絶対パスにして各プロジェクトへ転送する
 - 定期ワーカーの `lastRun` は指定に関わらずリポジトリ直下の `claude-task-worker.json` で読み書きする。リポジトリ直下に同ファイルが無ければ `lastRun` だけを持つファイルが作られる（他のキーを持たないので土台の設定とは衝突しない）。`init` を `--inherit-config` 付きで実行した場合も、未記録のワーカーの `lastRun` はリポジトリ直下へ記録する（セットアップ直後に定期ワーカーが一斉に走らないようにするため）

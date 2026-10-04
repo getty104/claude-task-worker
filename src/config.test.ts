@@ -414,12 +414,12 @@ test("mergeConfigRaw replaces arrays and scalars wholesale and leaves the base u
   assert.deepEqual(base, { tags: ["a", "b"], uiDesign: { enabled: true } });
 });
 
-test("mergeConfigRaw with ignoreEmptyArrays keeps the base array when the override is empty", () => {
+test("mergeConfigRaw with appendArrays appends override arrays to the base without duplicates", () => {
   const base = { labels: ["cc-a"], workerFiles: ["/pack/w.ts"] };
-  assert.deepEqual(mergeConfigRaw(base, { labels: [], workerFiles: ["w2.ts"], extra: [] }, true), {
+  assert.deepEqual(mergeConfigRaw(base, { labels: [], workerFiles: ["w2.ts", "/pack/w.ts"], extra: ["x"] }, true), {
     labels: ["cc-a"],
-    workerFiles: ["w2.ts"],
-    extra: [],
+    workerFiles: ["/pack/w.ts", "w2.ts"],
+    extra: ["x"],
   });
   assert.deepEqual(mergeConfigRaw(base, { labels: [] }), { labels: [], workerFiles: ["/pack/w.ts"] });
 });
@@ -532,7 +532,8 @@ test("loadConfig layers --inherit-config < cwd claude-task-worker.json < cwd loc
     "(c => [c.remoteEnvId, c.labels, c.fixReviewPointCallbackCommentMessage])(m.loadConfig())",
     ["--inherit-config", join(base, "shared.json")],
   );
-  assert.deepEqual(out, ["env_cwd", ["local"], "base"]);
+  // 配列は cwd 側（local が cwd を置き換えた結果）を土台の後ろへ追記する。
+  assert.deepEqual(out, ["env_cwd", ["base", "local"], "base"]);
 });
 
 test("loadConfig works from --inherit-config alone when the cwd has no config file", () => {
