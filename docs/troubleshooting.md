@@ -38,7 +38,7 @@ Issue/PR に理由のコメントが残っている。よくある原因:
 
 `claude-task-worker list-workers` を実行し、エラーメッセージに従う（[3章 Step 3](./custom-worker.md#step-3-設定ファイルに登録する)）。
 
-`--inherit-config` を使っているのにパックのワーカーが出ない場合は、リポジトリ直下の `claude-task-worker.json` に `"workerFiles": []` が残っていないか確認する（空配列がパックの値を上書きする。[4章 Step 7](./config-package.md#init-済みのリポジトリの場合)）。
+`--inherit-config` を使っているのにパックのワーカーが出ない場合は、リポジトリ直下の `claude-task-worker.json`（または `claude-task-worker.local.json`）に要素のある `workerFiles` が書かれていないか確認する。空でない配列はパックの値を丸ごと置き換える（[4章 Step 8](./config-package.md#step-8-リポジトリごとの差分を書く)）。
 
 ## スキルが見つからない（`Unknown slash command` など）
 

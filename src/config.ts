@@ -547,11 +547,18 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
 // claude-task-worker.local.json を claude-task-worker.json へ重ねる。同じキーは local が勝つ。
 // プレーンオブジェクト同士だけ再帰的にマージするので、`workers.<name>.model` のような深い
 // キーだけをローカルで差し替えられる（配列・スカラー・型違いは local の値で丸ごと置き換え）。
-export function mergeConfigRaw(base: Record<string, unknown>, local: Record<string, unknown>): Record<string, unknown> {
+// ignoreEmptyArrays は --inherit-config の土台へ重ねるとき用。init が生成していた `labels: []` /
+// `workerFiles: []` のような空配列が土台（共通パック）の値を黙って消さないよう、空配列は上書きしない。
+export function mergeConfigRaw(
+  base: Record<string, unknown>,
+  local: Record<string, unknown>,
+  ignoreEmptyArrays = false,
+): Record<string, unknown> {
   const result: Record<string, unknown> = { ...base };
   for (const [key, val] of Object.entries(local)) {
     const current = result[key];
-    result[key] = isPlainObject(current) && isPlainObject(val) ? mergeConfigRaw(current, val) : val;
+    if (ignoreEmptyArrays && Array.isArray(val) && val.length === 0 && key in result) continue;
+    result[key] = isPlainObject(current) && isPlainObject(val) ? mergeConfigRaw(current, val, ignoreEmptyArrays) : val;
   }
   return result;
 }
@@ -619,7 +626,7 @@ function readCwdRawConfig(): Record<string, unknown> {
 export function loadConfig(): Config {
   const inheritPath = getInheritConfigPath();
   const cwdRaw = readCwdRawConfig();
-  const raw = inheritPath ? mergeConfigRaw(readInheritedRawConfig(inheritPath, process.cwd()), cwdRaw) : cwdRaw;
+  const raw = inheritPath ? mergeConfigRaw(readInheritedRawConfig(inheritPath, process.cwd()), cwdRaw, true) : cwdRaw;
 
   const result: Config = {
     ...DEFAULT_CONFIG,

@@ -189,7 +189,7 @@ gh label list --search cc-summarize
 
 ### 注意
 
-- リポジトリ直下の `claude-task-worker.json` に `labels` があると、パックの `labels` は**丸ごと置き換わる**（Step 8）。リポジトリ固有のラベルを足す場合は、パックのラベルも含めて列挙する
+- リポジトリ直下の `claude-task-worker.json` に要素のある `labels` があると、パックの `labels` は**丸ごと置き換わる**（Step 8。空配列 `[]` は無視される）。リポジトリ固有のラベルを足す場合は、パックのラベルも含めて列挙する
 - パックからラベルを消しても GitHub 上のラベルは削除されない。不要になったら `gh label delete <name>` で消す
 
 ## Step 6. プラグインをインストールする
@@ -220,7 +220,9 @@ claude-task-worker init --inherit-config ~/src/ctw-pack/shared.json
 
 ### `init` 済みのリポジトリの場合
 
-**リポジトリ直下の `claude-task-worker.json` から、パックに任せたいキーを削除する**。`init` が生成するファイルには `"labels": []` と `"workerFiles": []` が入っており、これが残っているとパックの値を空配列で上書きしてしまう（配列はマージされず丸ごと置き換わる）。
+既存の `claude-task-worker.json` はそのままパックと組み合わせられる。古いバージョンの `init` が書いていた `"labels": []` / `"workerFiles": []` のような空配列は、`--inherit-config` 使用時は無視されパックの値が使われる。
+
+ただし自分で書いたキーはパックより優先される。パックに任せたいキー（`workers.<name>` の設定など）は削除する。
 
 ```json
 {
@@ -269,7 +271,7 @@ ctw exec-issue --epic 120
 
 `effort: "low"` はパックの値が残る。
 
-配列（`labels` / `workerFiles`）は**丸ごと置き換え**になる。リポジトリ固有のワーカーを足したい場合は、パックのファイルも含めて列挙する。
+配列（`labels` / `workerFiles`）は、要素が1つ以上あれば**丸ごと置き換え**になる（空配列 `[]` はパックの値を消さず無視される）。リポジトリ固有のワーカーを足したい場合は、パックのファイルも含めて列挙する。
 
 ```json
 {

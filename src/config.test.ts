@@ -414,6 +414,16 @@ test("mergeConfigRaw replaces arrays and scalars wholesale and leaves the base u
   assert.deepEqual(base, { tags: ["a", "b"], uiDesign: { enabled: true } });
 });
 
+test("mergeConfigRaw with ignoreEmptyArrays keeps the base array when the override is empty", () => {
+  const base = { labels: ["cc-a"], workerFiles: ["/pack/w.ts"] };
+  assert.deepEqual(mergeConfigRaw(base, { labels: [], workerFiles: ["w2.ts"], extra: [] }, true), {
+    labels: ["cc-a"],
+    workerFiles: ["w2.ts"],
+    extra: [],
+  });
+  assert.deepEqual(mergeConfigRaw(base, { labels: [] }), { labels: [], workerFiles: ["/pack/w.ts"] });
+});
+
 test("parseWorkerEntry reads enabled and falls back to true on a non-boolean", (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   assert.equal(parseWorkerEntry("exec-issue", {})?.enabled, true);

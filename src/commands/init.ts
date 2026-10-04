@@ -175,14 +175,21 @@ function logWriteResult(result: "created" | "overwritten" | "skipped", path: str
 // 変わっても古い値に固定され続けるだけで害になる。上書きしたいワーカーだけを人が追記する。
 // lastRun は init 実行時刻で埋める。空だと初回ポーリングで3つの定期ワーカーが一斉に走り、
 // セットアップ直後の（材料がまだ無い）リポジトリで空振りのセッションを3本焼くため。
-async function createConfig(force: boolean): Promise<void> {
-  const now = new Date().toISOString();
-  const initialConfig = {
-    ...DEFAULT_CONFIG,
+// labels / workerFiles は書き出さない。配列は --inherit-config の土台とマージされず丸ごと
+// 置き換わるため、空配列を書くと土台（共通パック）のラベル・カスタムワーカーを消してしまう。
+export function buildInitialConfig(now: string): Record<string, unknown> {
+  const { labels: _labels, workerFiles: _workerFiles, ...rest } = DEFAULT_CONFIG;
+  return {
+    ...rest,
     uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
     lastRun: Object.fromEntries(SCHEDULED_WORKER_NAMES.map((name) => [name, now])),
     workers: {},
   };
+}
+
+async function createConfig(force: boolean): Promise<void> {
+  const now = new Date().toISOString();
+  const initialConfig = buildInitialConfig(now);
   // --inherit-config 指定時は土台にするファイルとしてそのパスへ生成する。
   const inheritPath = getInheritConfigPath();
   const path = inheritPath ?? CONFIG_PATH;
