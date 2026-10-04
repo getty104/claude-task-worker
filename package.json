@@ -4,11 +4,22 @@
   "description": "CLI tool that polls GitHub Issues/PRs and delegates work to Claude CLI",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "claude-task-worker": "dist/index.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./lib": {
+      "types": "./dist/lib.d.ts",
+      "default": "./dist/lib.js"
+    }
+  },
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js",
+    "build": "tsc --noEmit && rm -rf dist && esbuild src/index.ts src/lib.ts --bundle --splitting --platform=node --format=esm --outdir=dist && tsc -p tsconfig.build.json",
     "dev": "tsc --noEmit --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -41,7 +52,7 @@
   "author": "getty104",
   "license": "MIT",
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=22.13.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

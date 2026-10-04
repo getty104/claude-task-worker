@@ -58,6 +58,8 @@ export interface StartWorkerOptions {
   defaultTimeoutMs?: number;
   /** 既定の env（XDG_CONFIG_HOME 等）の後ろへマージして上書きできる追加 env。 */
   env?: Record<string, string>;
+  /** repoDir 相対パス→内容。設定ファイルと一緒にコミット前へ書き出す（カスタムワーカーファイル等）。 */
+  files?: Record<string, string>;
   /** ワーカー名の後ろへ渡す追加 argv（例: `["--cloud"]`）。 */
   extraArgs?: string[];
 }
@@ -90,6 +92,11 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
   const { originDir, repoDir } = await initTempRepo(root);
 
   writeFileSync(join(repoDir, "claude-task-worker.json"), JSON.stringify(options.workerConfig, null, 2));
+
+  for (const [rel, content] of Object.entries(options.files ?? {})) {
+    mkdirSync(dirname(join(repoDir, rel)), { recursive: true });
+    writeFileSync(join(repoDir, rel), content);
+  }
 
   // これらの設定ファイルは origin へコミット・push しておく。src/git.ts の
   // syncDefaultBranch() は各ワーカーの tick 冒頭で `git reset --hard origin/<branch>` を
@@ -128,6 +135,13 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
         // assertCloudAvailable() の checkCloudAuth() 判定がホスト環境依存になる
         // （クラウド起動拒否テストが実行環境によって結果を変えてしまう）ため空にする。
         ANTHROPIC_BASE_URL: "",
+        // 定期ワーカーの publishLastRunPr() は git commit する。identity の無い環境（CI）では
+        // 失敗のたびに十数行の stderr がログテーブル（直近20行）へ流れ込み、観測に使う起動ログを
+        // 描画前に押し出す。gitAsUser() と同じくグローバル設定に依存させない。
+        GIT_AUTHOR_NAME: "Test Worker",
+        GIT_AUTHOR_EMAIL: "test-worker@example.com",
+        GIT_COMMITTER_NAME: "Test Worker",
+        GIT_COMMITTER_EMAIL: "test-worker@example.com",
         ...options.env,
       },
       stdio: ["ignore", "pipe", "pipe"],

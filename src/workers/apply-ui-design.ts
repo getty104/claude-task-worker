@@ -4,6 +4,7 @@ import { getUiDesignConfig } from "../config";
 import { addLabel, commentOnIssue, findPrStateByHeadRef, getIssueBody } from "../gh";
 import { getWorktreePath } from "../worktree";
 import { createIssuePollingWorker } from "./issue-worker";
+import { defineWorker } from "./worker-definition";
 import {
   classifyDesignPr,
   designBranchName,
@@ -31,85 +32,85 @@ async function markDesignReferenceMissing(issueNumber: number, logMessage: strin
   );
 }
 
-export const applyUiDesignWorker = async (
-  opts: { epicFilters?: number[]; labelFilters?: string[] } = {},
-): Promise<void> => {
-  if (!getUiDesignConfig().enabled) {
-    console.log("[apply-ui-design] uiDesign.enabled is false, skipping");
-    return;
-  }
-  await createIssuePollingWorker({
-    name: "apply-ui-design",
-    command: "/claude-task-worker:apply-ui-design",
-    triggerLabels: ["cc-ui-design-pr-created"],
-    excludeLabels: ["cc-ui-design-ready", "cc-exec-issue"],
-    epicFilters: opts.epicFilters,
-    labelFilters: opts.labelFilters,
-    preflight: async (issue) => {
-      const branch = designBranchName(issue.number);
-      let pr: Awaited<ReturnType<typeof findPrStateByHeadRef>>;
-      try {
-        pr = await findPrStateByHeadRef(branch);
-      } catch (err) {
-        console.error(`[apply-ui-design] #${issue.number}: findPrStateByHeadRef failed for ${branch}: ${err}`);
+export const applyUiDesignWorker = defineWorker({
+  name: "apply-ui-design",
+  kind: "issue",
+  start: async (opts) => {
+    if (!getUiDesignConfig().enabled) {
+      console.log("[apply-ui-design] uiDesign.enabled is false, skipping");
+      return;
+    }
+    await createIssuePollingWorker({
+      name: "apply-ui-design",
+      command: "/claude-task-worker:apply-ui-design",
+      triggerLabels: ["cc-ui-design-pr-created"],
+      excludeLabels: ["cc-ui-design-ready", "cc-exec-issue"],
+      preflight: async (issue) => {
+        const branch = designBranchName(issue.number);
+        let pr: Awaited<ReturnType<typeof findPrStateByHeadRef>>;
+        try {
+          pr = await findPrStateByHeadRef(branch);
+        } catch (err) {
+          console.error(`[apply-ui-design] #${issue.number}: findPrStateByHeadRef failed for ${branch}: ${err}`);
+          return "skip";
+        }
+        const disposition = classifyDesignPr(pr);
+        if (disposition === "proceed") return "proceed";
+        if (disposition === "wait") {
+          console.log(`[apply-ui-design] #${issue.number}: design PR #${pr?.number} is still open, waiting for merge`);
+          return "skip";
+        }
+        // PR不在・未マージクローズは自動では回復できない。cc-need-human-check は
+        // issue-worker.ts の共通除外ラベルなので、付与後は候補に上がらず再試行しない。
+        console.error(`[apply-ui-design] #${issue.number}: design PR for ${branch} is missing or closed unmerged`);
+        try {
+          await addLabel("issue", issue.number, "cc-need-human-check");
+          await commentOnIssue(issue.number, designPrMissingComment(issue.number)).catch((err) =>
+            console.error(`[apply-ui-design] commentOnIssue failed for #${issue.number}: ${err}`),
+          );
+        } catch (err) {
+          console.error(`[apply-ui-design] addLabel cc-need-human-check failed for #${issue.number}: ${err}`);
+        }
         return "skip";
-      }
-      const disposition = classifyDesignPr(pr);
-      if (disposition === "proceed") return "proceed";
-      if (disposition === "wait") {
-        console.log(`[apply-ui-design] #${issue.number}: design PR #${pr?.number} is still open, waiting for merge`);
-        return "skip";
-      }
-      // PR不在・未マージクローズは自動では回復できない。cc-need-human-check は
-      // issue-worker.ts の共通除外ラベルなので、付与後は候補に上がらず再試行しない。
-      console.error(`[apply-ui-design] #${issue.number}: design PR for ${branch} is missing or closed unmerged`);
-      try {
-        await addLabel("issue", issue.number, "cc-need-human-check");
-        await commentOnIssue(issue.number, designPrMissingComment(issue.number)).catch((err) =>
-          console.error(`[apply-ui-design] commentOnIssue failed for #${issue.number}: ${err}`),
+      },
+      onCompleted: async (issueNumber, worktreeId, _output, ctx) => {
+        // exit 0 は description の書き戻し完了を保証しない。参照が本当に載っており、かつ
+        // そのパスが実際にworktree上に存在する場合のみ実装フェーズ（cc-exec-issue）へ進める。
+        let body: string;
+        try {
+          body = await getIssueBody(issueNumber);
+        } catch (err) {
+          console.error(`[apply-ui-design] #${issueNumber}: getIssueBody failed: ${err}`);
+          body = "";
+        }
+        const designFilePath = extractDesignFilePath(body);
+        if (designFilePath === null) {
+          await markDesignReferenceMissing(
+            issueNumber,
+            `[apply-ui-design] #${issueNumber}: session exited without a design reference section; marking cc-need-human-check`,
+            designReferenceMissingComment(issueNumber),
+          );
+          return false;
+        }
+        if (shouldVerifyDesignFileExists(ctx.cloud) && !designFileExistsInWorktree(worktreeId, designFilePath)) {
+          await markDesignReferenceMissing(
+            issueNumber,
+            `[apply-ui-design] #${issueNumber}: design reference points to ${designFilePath}, which does not exist in worktree ${worktreeId}; marking cc-need-human-check`,
+            designFileMissingComment(issueNumber, designFilePath),
+          );
+          return false;
+        }
+        // cc-exec-issue を先に付与する。片方だけ成功して打ち切られても、excludeLabels
+        // に含まれる cc-ui-design-ready がまだ付いていなければ次ポーリングで
+        // このワーカー自身の再試行対象に残る（先に cc-ui-design-ready が付くと
+        // excludeLabels でこのワーカーからは二度と拾えなくなり座礁する）。
+        await addLabel("issue", issueNumber, "cc-exec-issue").catch((err) =>
+          console.error(`[apply-ui-design] addLabel cc-exec-issue failed for #${issueNumber}: ${err}`),
         );
-      } catch (err) {
-        console.error(`[apply-ui-design] addLabel cc-need-human-check failed for #${issue.number}: ${err}`);
-      }
-      return "skip";
-    },
-    onCompleted: async (issueNumber, worktreeId, _output, ctx) => {
-      // exit 0 は description の書き戻し完了を保証しない。参照が本当に載っており、かつ
-      // そのパスが実際にworktree上に存在する場合のみ実装フェーズ（cc-exec-issue）へ進める。
-      let body: string;
-      try {
-        body = await getIssueBody(issueNumber);
-      } catch (err) {
-        console.error(`[apply-ui-design] #${issueNumber}: getIssueBody failed: ${err}`);
-        body = "";
-      }
-      const designFilePath = extractDesignFilePath(body);
-      if (designFilePath === null) {
-        await markDesignReferenceMissing(
-          issueNumber,
-          `[apply-ui-design] #${issueNumber}: session exited without a design reference section; marking cc-need-human-check`,
-          designReferenceMissingComment(issueNumber),
+        await addLabel("issue", issueNumber, "cc-ui-design-ready").catch((err) =>
+          console.error(`[apply-ui-design] addLabel cc-ui-design-ready failed for #${issueNumber}: ${err}`),
         );
-        return false;
-      }
-      if (shouldVerifyDesignFileExists(ctx.cloud) && !designFileExistsInWorktree(worktreeId, designFilePath)) {
-        await markDesignReferenceMissing(
-          issueNumber,
-          `[apply-ui-design] #${issueNumber}: design reference points to ${designFilePath}, which does not exist in worktree ${worktreeId}; marking cc-need-human-check`,
-          designFileMissingComment(issueNumber, designFilePath),
-        );
-        return false;
-      }
-      // cc-exec-issue を先に付与する。片方だけ成功して打ち切られても、excludeLabels
-      // に含まれる cc-ui-design-ready がまだ付いていなければ次ポーリングで
-      // このワーカー自身の再試行対象に残る（先に cc-ui-design-ready が付くと
-      // excludeLabels でこのワーカーからは二度と拾えなくなり座礁する）。
-      await addLabel("issue", issueNumber, "cc-exec-issue").catch((err) =>
-        console.error(`[apply-ui-design] addLabel cc-exec-issue failed for #${issueNumber}: ${err}`),
-      );
-      await addLabel("issue", issueNumber, "cc-ui-design-ready").catch((err) =>
-        console.error(`[apply-ui-design] addLabel cc-ui-design-ready failed for #${issueNumber}: ${err}`),
-      );
-    },
-  })();
-};
+      },
+    }).start(opts);
+  },
+});

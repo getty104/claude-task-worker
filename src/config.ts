@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, normalize, sep as SEP } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep as SEP } from "node:path";
 import { hasCloudFlag } from "./dispatch-args";
 
 export type WorkerName =
@@ -33,6 +33,8 @@ export interface WorkerRuntimeConfig {
   pollingIntervalSeconds: number;
   cooldownSeconds: number;
   maxConcurrentTasks: number;
+  // false のワーカーは all / yolo の起動集合から外れ、個別起動では起動時に拒否される。
+  enabled: boolean;
 }
 
 // Pencil デザイン先行ワークフロー（create-ui-design / apply-ui-design）の設定。
@@ -58,6 +60,8 @@ interface Config {
   // anthropic_cloud 環境）に任せる。個人ごとに違う値になりやすいので
   // claude-task-worker.local.json 側で指定する想定。
   remoteEnvId: string | null;
+  labels: string[];
+  workerFiles: string[];
   uiDesign: UiDesignConfig;
   lastRun: LastRunLog;
   workers: Record<string, WorkerRuntimeConfig>;
@@ -86,6 +90,7 @@ export const DEFAULT_WORKER_CONFIG: WorkerRuntimeConfig = {
   pollingIntervalSeconds: 60,
   cooldownSeconds: 0,
   maxConcurrentTasks: 1,
+  enabled: true,
 };
 
 export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
@@ -97,6 +102,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "create-issue": {
     skill: "/claude-task-worker:create-issue-from-issue-number",
@@ -106,6 +112,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "update-issue": {
     skill: "/claude-task-worker:update-issue",
@@ -115,6 +122,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "exec-issue": {
     skill: "/claude-task-worker:exec-issue",
@@ -124,6 +132,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "fix-review-point": {
     skill: "/claude-task-worker:fix-review-point",
@@ -133,6 +142,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "triage-created-issue": {
     skill: "/claude-task-worker:triage-created-issue",
@@ -142,6 +152,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "triage-pr": {
     skill: "/claude-task-worker:triage-pr",
@@ -151,6 +162,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "resolve-conflict": {
     skill: "/claude-task-worker:resolve-pr-conflict",
@@ -160,6 +172,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "check-dependabot": {
     skill: "/claude-task-worker:check-dependabot",
@@ -169,6 +182,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "epic-issue": {
     skill: "/claude-task-worker:create-epic-pr",
@@ -178,6 +192,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "create-ui-design": {
     skill: "/claude-task-worker:create-ui-design",
@@ -187,6 +202,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 60,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "apply-ui-design": {
     skill: "/claude-task-worker:apply-ui-design",
@@ -196,6 +212,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 300,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   // 以下3つは定期ワーカー（createScheduledWorker）。実行間隔そのものは
   // SCHEDULE_INTERVAL_HOURS（24時間）と実行ログで決まり、pollingIntervalSeconds は
@@ -210,6 +227,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "update-requirement-rules": {
     skill: "/claude-task-worker:update-requirement-rules",
@@ -219,6 +237,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
   "update-design-md": {
     skill: "/claude-task-worker:update-design-md",
@@ -228,6 +247,7 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     pollingIntervalSeconds: 3600,
     cooldownSeconds: 0,
     maxConcurrentTasks: 1,
+    enabled: true,
   },
 };
 
@@ -321,6 +341,8 @@ export function checkCloudConfig(input: {
 export const DEFAULT_CONFIG: Config = {
   fixReviewPointCallbackCommentMessage: "",
   remoteEnvId: null,
+  labels: [],
+  workerFiles: [],
   uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
   lastRun: {},
   workers: {},
@@ -405,6 +427,13 @@ export function parseWorkerEntry(name: string, val: unknown): WorkerRuntimeConfi
       );
     }
   }
+  if ("enabled" in entry) {
+    if (typeof entry.enabled === "boolean") {
+      result.enabled = entry.enabled;
+    } else {
+      console.warn(`[config] invalid workers.${name}.enabled: ${String(entry.enabled)}, using default ${base.enabled}`);
+    }
+  }
   if ("cloud" in entry) {
     console.warn(
       `[config] workers.${name}.cloud is removed; cloud execution now opts in via the --cloud flag at runtime. This setting is ignored.`,
@@ -472,6 +501,45 @@ export function parseLastRunEntry(val: unknown): LastRunLog {
   return result;
 }
 
+export function parseLabelsEntry(val: unknown): string[] {
+  if (!Array.isArray(val)) {
+    console.warn(`[config] invalid labels: expected array of strings, ignoring`);
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of val) {
+    if (typeof item === "string" && item.trim().length > 0) {
+      result.push(item.trim());
+    } else {
+      console.warn(`[config] invalid labels entry: ${String(item)}, ignoring`);
+    }
+  }
+  return result;
+}
+
+export function parseWorkerFilesEntry(val: unknown): string[] {
+  if (!Array.isArray(val)) {
+    console.warn(`[config] invalid workerFiles: expected array of strings, ignoring`);
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of val) {
+    if (typeof item === "string" && item.trim().length > 0) {
+      result.push(item.trim());
+    } else {
+      console.warn(`[config] invalid workerFiles entry: ${String(item)}, ignoring`);
+    }
+  }
+  return result;
+}
+
+// 絶対パスはそのまま、~ は home 展開、それ以外は設定ファイルのあるディレクトリ基準で解決する。
+export function resolveWorkerFilePath(entry: string, configDir: string, home: string): string {
+  if (entry === "~") return home;
+  if (entry.startsWith("~/")) return resolve(home, entry.slice(2));
+  return resolve(configDir, entry);
+}
+
 function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
@@ -507,7 +575,14 @@ function readRawConfig(path: string): Record<string, unknown> {
 export function loadConfig(): Config {
   const raw = mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
 
-  const result: Config = { ...DEFAULT_CONFIG, uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG }, lastRun: {}, workers: {} };
+  const result: Config = {
+    ...DEFAULT_CONFIG,
+    labels: [],
+    workerFiles: [],
+    uiDesign: { ...DEFAULT_UI_DESIGN_CONFIG },
+    lastRun: {},
+    workers: {},
+  };
 
   if ("remoteEnvId" in raw) {
     const val = raw["remoteEnvId"];
@@ -518,6 +593,14 @@ export function loadConfig(): Config {
     } else {
       console.warn(`[config] invalid remoteEnvId: ${String(val)}, using default null`);
     }
+  }
+
+  if ("labels" in raw) {
+    result.labels = parseLabelsEntry(raw["labels"]);
+  }
+
+  if ("workerFiles" in raw) {
+    result.workerFiles = parseWorkerFilesEntry(raw["workerFiles"]);
   }
 
   if ("lastRun" in raw) {
@@ -553,6 +636,32 @@ export function loadConfig(): Config {
 export function getWorkerConfig(workerName: string): WorkerRuntimeConfig {
   const config = loadConfig();
   return config.workers[workerName] ?? { ...defaultsFor(workerName) };
+}
+
+// workers.<name>.enabled。設定ファイルが読めない場合は既定（有効）へ倒し、変更前と同じ起動集合を保つ。
+export function isWorkerEnabled(workerName: string): boolean {
+  try {
+    return getWorkerConfig(workerName).enabled;
+  } catch (err) {
+    console.warn(`[config] failed to load workers.${workerName}.enabled, treating it as enabled: ${err}`);
+    return true;
+  }
+}
+
+// all / yolo の起動候補を有効/無効に振り分ける。順序は names のまま保つ。
+export function partitionEnabledWorkers(
+  names: readonly string[],
+  isEnabled: (name: string) => boolean,
+): { enabled: string[]; disabled: string[] } {
+  const enabled: string[] = [];
+  const disabled: string[] = [];
+  for (const name of names) (isEnabled(name) ? enabled : disabled).push(name);
+  return { enabled, disabled };
+}
+
+// 個別起動で無効なワーカーを指定したときのエラーメッセージ。
+export function disabledWorkerMessage(workerName: string): string {
+  return `${workerName} is disabled by workers.${workerName}.enabled: false in claude-task-worker.json (or claude-task-worker.local.json). To run it, set workers.${workerName}.enabled to true or remove the key.`;
 }
 
 // 定期ワーカーの最終実行時刻（epoch ms）。記録が無い・読めない場合は undefined＝実行可。

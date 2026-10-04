@@ -16,6 +16,8 @@ import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
 import { removeWorktree, createWorktreeFromBranch, getWorktreePath } from "../worktree";
+import { defineWorker } from "./worker-definition";
+import type { WorkerDefinition, WorkerStartOptions } from "./worker-definition";
 
 // Issue のライフサイクル状態を表すマーカーラベル。ワーカー実行で消費されるトリガーではなく、
 // トリアージ済み（cc-triage-scope）/ 分析済み（cc-issue-created）という事実を保持する。
@@ -34,14 +36,13 @@ const PREFLIGHT_SEARCH_LIMIT = 5;
 
 export type PreflightResult = "proceed" | "skip" | "mark-pr-created";
 
-interface IssueWorkerConfig {
+export interface IssueWorkerConfig {
   name: string;
   command: string;
   triggerLabels: string[];
   excludeLabels?: string[];
-  epicFilters?: number[];
-  ownNumberFilters?: number[];
-  labelFilters?: string[];
+  // "self" は epic-issue 用。起動時の epicFilters を親ではなく Issue 自身の番号として扱う。
+  epicFilterTarget?: "parent" | "self";
   preflight?: (issue: Issue) => Promise<PreflightResult>;
   // exit 0 でも期待成果物（PR等）を検証できなかった場合は false を返す。
   // その場合ワーカーは完了通知ではなく失敗通知を送る。void / true は完了扱い。
@@ -53,8 +54,11 @@ interface IssueWorkerConfig {
   ) => Promise<boolean | void>;
 }
 
-export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promise<void> {
-  return async () => {
+export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefinition {
+  const start = async (opts: WorkerStartOptions = {}) => {
+    const epicFilters = opts.epicFilters;
+    const ownNumberFilters = config.epicFilterTarget === "self" ? opts.epicFilters : undefined;
+    const labelFilters = opts.labelFilters;
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
     const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
@@ -72,18 +76,16 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
       try {
         const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
         const epicFilter =
-          config.epicFilters && config.epicFilters.length > 0
-            ? { owner, repo: name, numbers: config.epicFilters }
+          config.epicFilterTarget !== "self" && epicFilters && epicFilters.length > 0
+            ? { owner, repo: name, numbers: epicFilters }
             : undefined;
         const labels =
-          config.labelFilters && config.labelFilters.length > 0
-            ? [...config.triggerLabels, ...config.labelFilters]
-            : config.triggerLabels;
+          labelFilters && labelFilters.length > 0 ? [...config.triggerLabels, ...labelFilters] : config.triggerLabels;
         const { maxConcurrentTasks } = getWorkerConfig(config.name);
         const searchLimit = config.preflight ? PREFLIGHT_SEARCH_LIMIT : maxConcurrentTasks;
         const candidates =
-          config.ownNumberFilters && config.ownNumberFilters.length > 0
-            ? await listIssuesByNumbers(user, labels, excludeLabels, config.ownNumberFilters)
+          ownNumberFilters && ownNumberFilters.length > 0
+            ? await listIssuesByNumbers(user, labels, excludeLabels, ownNumberFilters)
             : await listIssuesByLabel(user, labels, excludeLabels, epicFilter, searchLimit);
 
         for (const issue of candidates) {
@@ -275,4 +277,5 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): () => Promi
     await tick();
     setInterval(tick, pollingIntervalMs);
   };
+  return defineWorker({ name: config.name, kind: "issue", start });
 }

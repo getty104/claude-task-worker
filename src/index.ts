@@ -1,30 +1,18 @@
 #!/usr/bin/env node
 
-import { execIssueWorker } from "./workers/exec-issue";
-import { fixReviewPointWorker } from "./workers/fix-review-point";
-import { createIssueWorker } from "./workers/create-issue";
-import { updateIssueWorker } from "./workers/update-issue";
-import { answerIssueQuestionsWorker } from "./workers/answer-issue-questions";
-import { triageCreatedIssueWorker } from "./workers/triage-created-issue";
-import { triagePrWorker } from "./workers/triage-pr";
-import { resolveConflictWorker } from "./workers/resolve-conflict";
-import { checkDependabotWorker } from "./workers/check-dependabot";
-import { epicIssueWorker } from "./workers/epic-issue";
-import { createUiDesignWorker } from "./workers/create-ui-design";
-import { applyUiDesignWorker } from "./workers/apply-ui-design";
-import { updateCodingGuidelinesWorker } from "./workers/update-coding-guidelines";
-import { updateRequirementRulesWorker } from "./workers/update-requirement-rules";
-import { updateDesignMdWorker } from "./workers/update-design-md";
+import { PRESET_WORKERS } from "./workers/registry";
+import type { WorkerDefinition, WorkerStartOptions } from "./workers/worker-definition";
 import {
   shutdown,
   waitForAllProcesses,
   setShuttingDown,
   isShuttingDown,
   ensureRenderInterval,
+  renderTable,
 } from "./process-manager";
 import { captureConsole } from "./table";
 import { removeStaleWorktrees } from "./worktree";
-import { init } from "./commands/init";
+import { init, applyLabels } from "./commands/init";
 import { install } from "./commands/install";
 import { cloudSetup } from "./commands/cloud-setup";
 import { update } from "./commands/update";
@@ -39,10 +27,23 @@ import {
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
-import { checkCloudConfig, CLOUD_DONE_LABEL, type CloudAuthStatus } from "./config";
+import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
+import {
+  CONFIG_PATH,
+  loadConfig,
+  resolveWorkerFilePath,
+  checkCloudConfig,
+  CLOUD_DONE_LABEL,
+  disabledWorkerMessage,
+  isWorkerEnabled,
+  partitionEnabledWorkers,
+  type CloudAuthStatus,
+} from "./config";
 import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -54,53 +55,51 @@ import type * as DispatcherModule from "./dispatcher";
 import type { SessionRegistry, MonitorHandle } from "./dispatcher";
 import type * as HerdrModule from "./herdr";
 
-const WORKERS: Record<string, (opts?: { epicFilters?: number[]; labelFilters?: string[] }) => Promise<void>> = {
-  "exec-issue": execIssueWorker,
-  "fix-review-point": fixReviewPointWorker,
-  "create-issue": createIssueWorker,
-  "update-issue": updateIssueWorker,
-  "answer-issue-questions": answerIssueQuestionsWorker,
-  "triage-created-issue": triageCreatedIssueWorker,
-  "triage-pr": triagePrWorker,
-  "resolve-conflict": resolveConflictWorker,
-  "check-dependabot": checkDependabotWorker,
-  "epic-issue": epicIssueWorker,
-  "create-ui-design": createUiDesignWorker,
-  "apply-ui-design": applyUiDesignWorker,
-  "update-coding-guidelines": updateCodingGuidelinesWorker,
-  "update-requirement-rules": updateRequirementRulesWorker,
-  "update-design-md": updateDesignMdWorker,
-};
+const NON_WORKER_COMMANDS = ["init", "apply-labels", "install", "update", "cloud-setup", "usage"];
+
+// workerFiles のロードはワーカーを起動し得るコマンドだけで行う（init / install 等と --project では不要）。
+async function loadCustomWorkersOrExit(): Promise<CustomWorker[]> {
+  let files: string[];
+  try {
+    files = loadConfig().workerFiles.map((f) => resolveWorkerFilePath(f, dirname(CONFIG_PATH), homedir()));
+  } catch (err) {
+    console.warn(`[config] failed to load workerFiles, ignoring: ${err}`);
+    return [];
+  }
+  const { workers, errors } = await loadCustomWorkers(
+    files,
+    PRESET_WORKERS.map((e) => e.definition.name),
+  );
+  if (errors.length > 0) {
+    for (const message of errors) console.error(`[worker] ${message}`);
+    process.exit(1);
+  }
+  return workers;
+}
 
 function printUsage(): void {
   console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
 
 Commands:
   init [--force]  Create required GitHub labels and config file (use --force to overwrite existing files)
+  apply-labels      Create the preset labels and the custom labels declared in claude-task-worker.json (labels)
   install           Add the claude-task-worker marketplace, install the plugin, and install/update the CLI
   update            Update the claude-task-worker plugin/marketplace and the CLI itself
   cloud-setup [--force]  Prepare a cloud session VM (writes permission mode, output style, and language into ~/.claude/settings.json). Meant for a cloud environment setup script
   usage             Notify current usage to Slack
+  list-workers      List preset and custom workers (name, kind, enabled, source)
   version           Print the installed claude-task-worker CLI version (aliases: --version, -v)
 
 Workers:
-  exec-issue        Poll issues and run /exec-issue
-  fix-review-point  Poll PRs and run /fix-review-point
-  create-issue      Poll issues and run /create-issue
-  update-issue      Poll issues and run update command
-  answer-issue-questions  Poll issues and run /answer-issue-questions
-  triage-created-issue  Poll cc-issue-created + cc-triage-scope issues and run /triage-created-issue
-  triage-pr         Poll and triage PRs every 5 minutes
-  resolve-conflict  Poll cc-resolve-conflict PRs and run /resolve-conflict
-  check-dependabot  Poll dependabot PRs every 1 hour
-  epic-issue        Poll cc-epic-issue issues and create epic PR when all sub-issues are closed
-  create-ui-design  Poll cc-create-ui-design issues and create a Pencil design PR (requires uiDesign.enabled)
-  apply-ui-design   Poll cc-ui-design-pr-created issues and write the design reference back once the design PR is merged (requires uiDesign.enabled)
-  update-coding-guidelines  Run /update-coding-guidelines once every 24 hours over the last 24 hours
-  update-requirement-rules  Run /update-requirement-rules once every 24 hours over the last 24 hours
-  update-design-md  Run /update-design-md once every 24 hours over the last 24 hours (requires uiDesign.enabled)
-  all               Poll all workers except triage-created-issue, triage-pr, check-dependabot
-  yolo              Poll all workers including triage-created-issue, triage-pr, check-dependabot
+${PRESET_WORKERS.map((e) => `  ${e.definition.name.padEnd(17)}${e.definition.name.length > 17 ? "  " : " "}${e.description}`).join("\n")}
+${customWorkers.map((c) => `  ${c.definition.name.padEnd(17)}${c.definition.name.length > 17 ? "  " : " "}Custom worker (${c.source})`).join("\n")}${customWorkers.length > 0 ? "\n" : ""}  all               Poll all workers except ${PRESET_WORKERS.filter(
+    (e) => !e.inAll,
+  )
+    .map((e) => e.definition.name)
+    .join(", ")}
+  yolo              Poll all workers including ${PRESET_WORKERS.filter((e) => !e.inAll)
+    .map((e) => e.definition.name)
+    .join(", ")}
 
 Options:
   --project <name>  Dispatch to project(s) via herdr instead of running the worker locally. Accepts a project name, a project group name, or "all". Repeatable.
@@ -133,6 +132,13 @@ if (workerType === "version" || workerType === "--version" || workerType === "-v
 // 待たずに投げっぱなしにする（起動を数秒遅らせないため）。
 void notifyIfOutdated();
 
+const customWorkers: CustomWorker[] =
+  workerType && !NON_WORKER_COMMANDS.includes(workerType) && !hasProjectFilter() ? await loadCustomWorkersOrExit() : [];
+
+const WORKERS: Record<string, WorkerDefinition> = Object.fromEntries(
+  [...PRESET_WORKERS.map((e) => e.definition), ...customWorkers.map((c) => c.definition)].map((d) => [d.name, d]),
+);
+
 if (!workerType) {
   printUsage();
   process.exit(1);
@@ -142,11 +148,15 @@ if (
   workerType !== "all" &&
   workerType !== "yolo" &&
   workerType !== "init" &&
+  workerType !== "apply-labels" &&
   workerType !== "install" &&
   workerType !== "update" &&
   workerType !== "cloud-setup" &&
   workerType !== "usage" &&
-  !WORKERS[workerType]
+  workerType !== "list-workers" &&
+  !WORKERS[workerType] &&
+  // --project ではカスタムワーカーをロードしないため、名前の検証は転送先プロセスに委ねる
+  !hasProjectFilter()
 ) {
   console.error(`Unknown command: ${workerType}`);
   printUsage();
@@ -292,6 +302,29 @@ async function assertCloudAvailable(): Promise<void> {
   }
 }
 
+// all / yolo の候補から workers.<name>.enabled: false を除いて起動する。除外があれば1行で示す。
+function startEnabledWorkers(names: readonly string[], filters: WorkerStartOptions): Promise<void>[] {
+  const { enabled, disabled } = partitionEnabledWorkers(names, isWorkerEnabled);
+  if (disabled.length > 0) {
+    console.log(`[worker] skipped disabled workers: ${disabled.join(", ")}`);
+    // 直後の起動ログ（ワーカー数ぶん）でローリングバッファから押し出される前に一度描画する
+    renderTable();
+  }
+  return enabled.map((name) => WORKERS[name].start(filters));
+}
+
+// カスタムワーカーは all / yolo の両方に含める。
+function candidateNames(include: (e: (typeof PRESET_WORKERS)[number]) => boolean): string[] {
+  return [
+    ...PRESET_WORKERS.filter(include).map((e) => e.definition.name),
+    ...customWorkers.map((c) => c.definition.name),
+  ];
+}
+
+function printWorkerRow(name: string, type: string, source: string): void {
+  console.log(`${name.padEnd(28)}${type.padEnd(8)}${isWorkerEnabled(name) ? "enabled " : "disabled"}  ${source}`);
+}
+
 // 起動前の前提チェックをまとめて実行する。
 async function assertRunPrerequisites(): Promise<void> {
   // 毎秒のテーブル再描画（画面クリア）でエラーログが一瞬しか見えないため、
@@ -393,6 +426,8 @@ if (hasProjectFilter()) {
   const initArgs = process.argv.slice(3);
   const force = initArgs.includes("--force");
   init({ force });
+} else if (workerType === "apply-labels") {
+  applyLabels();
 } else if (workerType === "install") {
   (async () => {
     await install();
@@ -416,6 +451,9 @@ if (hasProjectFilter()) {
     console.log(text.trim());
     await send({ text: `📊 Usage${text}` });
   })();
+} else if (workerType === "list-workers") {
+  for (const e of PRESET_WORKERS) printWorkerRow(e.definition.name, "preset", "preset");
+  for (const c of customWorkers) printWorkerRow(c.definition.name, "custom", c.source);
 } else if (workerType === "all") {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
@@ -423,22 +461,12 @@ if (hasProjectFilter()) {
     await assertRunPrerequisites();
     // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
     await removeStaleWorktrees();
-    await Promise.all([
-      execIssueWorker({ epicFilters, labelFilters }),
-      fixReviewPointWorker(),
-      createIssueWorker({ epicFilters, labelFilters }),
-      updateIssueWorker({ epicFilters, labelFilters }),
-      answerIssueQuestionsWorker({ epicFilters, labelFilters }),
-      resolveConflictWorker(),
-      epicIssueWorker({ epicFilters, labelFilters }),
-      createUiDesignWorker({ epicFilters, labelFilters }),
-      applyUiDesignWorker({ epicFilters, labelFilters }),
-      // 24時間おきの定期ワーカー。update-design-md は uiDesign.enabled が false のとき
-      // 自身で no-op になる（create-ui-design / apply-ui-design と同じ扱い）。
-      updateCodingGuidelinesWorker(),
-      updateRequirementRulesWorker(),
-      updateDesignMdWorker(),
-    ]);
+    await Promise.all(
+      startEnabledWorkers(
+        candidateNames((e) => e.inAll),
+        { epicFilters, labelFilters },
+      ),
+    );
   })();
 } else if (workerType === "yolo") {
   const epicFilters = parseEpicFilters();
@@ -446,30 +474,24 @@ if (hasProjectFilter()) {
   (async () => {
     await assertRunPrerequisites();
     await removeStaleWorktrees();
-    await Promise.all([
-      execIssueWorker({ epicFilters, labelFilters }),
-      fixReviewPointWorker(),
-      createIssueWorker({ epicFilters, labelFilters }),
-      updateIssueWorker({ epicFilters, labelFilters }),
-      answerIssueQuestionsWorker({ epicFilters, labelFilters }),
-      triageCreatedIssueWorker({ epicFilters, labelFilters }),
-      checkDependabotWorker(),
-      triagePrWorker(),
-      resolveConflictWorker(),
-      epicIssueWorker({ epicFilters, labelFilters }),
-      createUiDesignWorker({ epicFilters, labelFilters }),
-      applyUiDesignWorker({ epicFilters, labelFilters }),
-      updateCodingGuidelinesWorker(),
-      updateRequirementRulesWorker(),
-      updateDesignMdWorker(),
-    ]);
+    await Promise.all(
+      startEnabledWorkers(
+        candidateNames((e) => e.inYolo),
+        { epicFilters, labelFilters },
+      ),
+    );
   })();
 } else {
   const epicFilters = parseEpicFilters();
   const labelFilters = parseLabelFilters();
   (async () => {
+    // assertRunPrerequisites() の console キャプチャより前に判定する（ログテーブルでは有効化方法が切り詰められるため）。
+    if (!isWorkerEnabled(workerType)) {
+      console.error(`[worker] ${disabledWorkerMessage(workerType)}`);
+      process.exit(1);
+    }
     await assertRunPrerequisites();
     await removeStaleWorktrees();
-    await WORKERS[workerType]({ epicFilters, labelFilters });
+    await WORKERS[workerType].start({ epicFilters, labelFilters });
   })();
 }

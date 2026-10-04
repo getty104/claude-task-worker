@@ -37,6 +37,11 @@ test("buildForwardedCommand forwards --cloud (only --project and its value are s
   assert.equal(buildForwardedCommand(argv), "claude-task-worker 'exec-issue' '--cloud'");
 });
 
+test("buildForwardedCommand forwards a custom worker name unchanged", () => {
+  const argv = ["my-custom", "--project", "foo", "--cloud"];
+  assert.equal(buildForwardedCommand(argv), "claude-task-worker 'my-custom' '--cloud'");
+});
+
 test("hasCloudFlag reflects whether --cloud is present in process.argv, cached until reset", (t) => {
   const originalArgv = process.argv;
   t.after(() => {
@@ -63,7 +68,7 @@ test("assertCloudCompatibleCommand exits 1 for --cloud-incompatible commands", (
     return undefined as never;
   }) as typeof process.exit);
 
-  for (const command of ["init", "install", "update", "usage", "version"]) {
+  for (const command of ["init", "apply-labels", "install", "update", "usage", "version", "list-workers"]) {
     exitCodes.length = 0;
     assertCloudCompatibleCommand(command);
     assert.deepEqual(exitCodes, [1], `assertCloudCompatibleCommand(${command})`);

@@ -1,6 +1,15 @@
 // --project と --cloud のどちらも「ワーカー起動」を前提とするフラグのため、
 // 非互換コマンド集合は共有する。
-const FLAG_INCOMPATIBLE_COMMANDS = ["init", "install", "update", "cloud-setup", "usage", "version"];
+const FLAG_INCOMPATIBLE_COMMANDS = [
+  "init",
+  "apply-labels",
+  "install",
+  "update",
+  "cloud-setup",
+  "usage",
+  "version",
+  "list-workers",
+];
 
 function collectFlagValues(argv: string[], flag: string): string[] {
   const values: string[] = [];

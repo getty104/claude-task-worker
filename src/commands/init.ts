@@ -4,6 +4,7 @@ import { createLabel } from "../gh";
 import {
   DEFAULT_CONFIG,
   DEFAULT_UI_DESIGN_CONFIG,
+  loadConfig,
   CONFIG_PATH,
   LOCAL_CONFIG_PATH,
   SCHEDULED_WORKER_NAMES,
@@ -66,6 +67,39 @@ export const LABELS: { name: string; color: string }[] = [
   // 現れる短命なマーカー・L*78 と明度が倍近く違う）＝見分けたい相手ではない側に倒してある。
   { name: "cc-issue-request", color: "03656d" }, // vivid deep teal (H185 S95 L22 / L*39 C*24)
 ];
+
+export function labelColorFor(name: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) {
+    hash ^= name.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return (hash & 0xffffff).toString(16).padStart(6, "0");
+}
+
+export function buildLabelSpecs(custom: string[]): { name: string; color: string }[] {
+  const specs = [...LABELS];
+  const seen = new Set(specs.map((label) => label.name));
+  for (const name of custom) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    specs.push({ name, color: labelColorFor(name) });
+  }
+  return specs;
+}
+
+export async function applyLabels(): Promise<void> {
+  let custom: string[] = [];
+  try {
+    custom = loadConfig().labels;
+  } catch (err) {
+    console.warn(`[init] failed to load config, creating preset labels only: ${err}`);
+  }
+  for (const label of buildLabelSpecs(custom)) {
+    const ok = await createLabel(label.name, label.color, true);
+    console.log(ok ? `[init] Ensured label: ${label.name}` : `[init] Failed to create label: ${label.name}`);
+  }
+}
 
 export const ISSUE_TEMPLATE = `name: "[claude-task-worker] Issue作成依頼"
 description: claude-task-workerでGitHub Issueを作成する
@@ -211,14 +245,7 @@ export async function init(options: { force?: boolean } = {}): Promise<void> {
   const force = options.force ?? false;
   console.log(`[init] Creating labels...${force ? " (force mode)" : ""}`);
 
-  for (const label of LABELS) {
-    const ok = await createLabel(label.name, label.color, true);
-    if (ok) {
-      console.log(`[init] Ensured label: ${label.name}`);
-    } else {
-      console.log(`[init] Failed to create label: ${label.name}`);
-    }
-  }
+  await applyLabels();
 
   console.log("[init] Creating issue template...");
   await mkdir(".github/ISSUE_TEMPLATE", { recursive: true });

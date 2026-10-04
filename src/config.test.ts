@@ -2,12 +2,17 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type * as ConfigModule from "./config";
 import type * as DispatchArgsModule from "./dispatch-args";
 
 const {
   parseLastRunEntry,
+  parseLabelsEntry,
+  parseWorkerFilesEntry,
+  resolveWorkerFilePath,
   parseUiDesignEntry,
   parseWorkerEntry,
   writeLastRun,
@@ -19,6 +24,8 @@ const {
   checkCloudAuth,
   isCloudWorker,
   mergeConfigRaw,
+  partitionEnabledWorkers,
+  disabledWorkerMessage,
 } = (await import("./config")) as typeof ConfigModule;
 const { resetCloudFlagCache } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
@@ -146,6 +153,58 @@ test("parseLastRunEntry keeps only parseable timestamps", (t) => {
     "update-design-md": "2026-08-17T00:00:00.000Z",
   });
   assert.deepEqual(parseLastRunEntry("2026-08-17"), {});
+});
+
+test("parseLabelsEntry treats unspecified and non-array values as empty", (t) => {
+  silenceWarn(t);
+  assert.deepEqual(parseLabelsEntry(undefined), []);
+  assert.deepEqual(parseLabelsEntry("cc-a"), []);
+  assert.deepEqual(parseLabelsEntry({ a: 1 }), []);
+});
+
+test("parseLabelsEntry keeps only non-empty string entries", (t) => {
+  silenceWarn(t);
+  assert.deepEqual(parseLabelsEntry(["cc-a", 1, null, "", " cc-b "]), ["cc-a", "cc-b"]);
+});
+
+test("parseWorkerFilesEntry keeps only non-empty string entries and ignores non-arrays", (t) => {
+  silenceWarn(t);
+  assert.deepEqual(parseWorkerFilesEntry(["a.ts", 1, "", " b.ts "]), ["a.ts", "b.ts"]);
+  assert.deepEqual(parseWorkerFilesEntry("a.ts"), []);
+  assert.deepEqual(parseWorkerFilesEntry(undefined), []);
+});
+
+test("resolveWorkerFilePath resolves absolute, home-relative and config-relative entries", () => {
+  assert.equal(resolveWorkerFilePath("/abs/w.ts", "/cfg", "/home/u"), "/abs/w.ts");
+  assert.equal(resolveWorkerFilePath("~/w/a.ts", "/cfg", "/home/u"), "/home/u/w/a.ts");
+  assert.equal(resolveWorkerFilePath("~", "/cfg", "/home/u"), "/home/u");
+  assert.equal(resolveWorkerFilePath("workers/a.ts", "/cfg", "/home/u"), "/cfg/workers/a.ts");
+  assert.equal(resolveWorkerFilePath("../a.ts", "/cfg/sub", "/home/u"), "/cfg/a.ts");
+});
+
+test("loadConfig reads workerFiles, with the local file replacing the array", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ctw-workerfiles-"));
+  writeFileSync(join(dir, "claude-task-worker.json"), JSON.stringify({ workerFiles: ["a.ts", "b.ts"] }));
+  writeFileSync(join(dir, "claude-task-worker.local.json"), JSON.stringify({ workerFiles: ["c.ts"] }));
+  const configUrl = pathToFileURL(resolve("src/config.ts")).href;
+  const script = `const m = await import(${JSON.stringify(configUrl)}); console.log(JSON.stringify(m.loadConfig().workerFiles));`;
+  const out = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      script,
+    ],
+    { cwd: dir, encoding: "utf-8" },
+  );
+  assert.deepEqual(JSON.parse(out.trim().split("\n").at(-1) as string), ["c.ts"]);
+});
+
+test("mergeConfigRaw lets a local labels array replace the base one wholesale", () => {
+  assert.deepEqual(mergeConfigRaw({ labels: ["a", "b"] }, { labels: ["c"] }), { labels: ["c"] });
 });
 
 test("writeLastRun records the timestamp without dropping other settings", () => {
@@ -352,4 +411,65 @@ test("mergeConfigRaw replaces arrays and scalars wholesale and leaves the base u
   const merged = mergeConfigRaw(base, { tags: ["c"], uiDesign: false });
   assert.deepEqual(merged, { tags: ["c"], uiDesign: false });
   assert.deepEqual(base, { tags: ["a", "b"], uiDesign: { enabled: true } });
+});
+
+test("parseWorkerEntry reads enabled and falls back to true on a non-boolean", (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  assert.equal(parseWorkerEntry("exec-issue", {})?.enabled, true);
+  assert.equal(parseWorkerEntry("exec-issue", { enabled: false })?.enabled, false);
+  assert.equal(parseWorkerEntry("my-custom", { enabled: false })?.enabled, false);
+  assert.equal(parseWorkerEntry("exec-issue", { enabled: "false" })?.enabled, true);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(
+    String(warn.mock.calls[0].arguments[0]),
+    /invalid workers\.exec-issue\.enabled: false, using default true/,
+  );
+});
+
+test("partitionEnabledWorkers splits names by the predicate and keeps their order", () => {
+  assert.deepEqual(
+    partitionEnabledWorkers(["a", "b", "c", "d"], (n) => n !== "b" && n !== "d"),
+    { enabled: ["a", "c"], disabled: ["b", "d"] },
+  );
+  assert.deepEqual(
+    partitionEnabledWorkers(["a"], () => true),
+    { enabled: ["a"], disabled: [] },
+  );
+});
+
+test("disabledWorkerMessage tells how to re-enable the worker", () => {
+  const msg = disabledWorkerMessage("exec-issue");
+  assert.match(msg, /workers\.exec-issue\.enabled/);
+  assert.match(msg, /set workers\.exec-issue\.enabled to true or remove the key/);
+});
+
+test("claude-task-worker.local.json can toggle workers.<name>.enabled over the base file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ctw-config-enabled-"));
+  writeFileSync(
+    join(dir, "claude-task-worker.json"),
+    JSON.stringify({ workers: { "exec-issue": { model: "sonnet" }, "triage-pr": { enabled: false } } }),
+  );
+  writeFileSync(
+    join(dir, "claude-task-worker.local.json"),
+    JSON.stringify({ workers: { "exec-issue": { enabled: false }, "triage-pr": { enabled: true } } }),
+  );
+  const configUrl = pathToFileURL(resolve("src/config.ts")).href;
+  const script = `const m = await import(${JSON.stringify(configUrl)}); console.log(JSON.stringify({ exec: m.getWorkerConfig("exec-issue"), triage: m.isWorkerEnabled("triage-pr"), other: m.isWorkerEnabled("fix-review-point") }));`;
+  const out = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      script,
+    ],
+    { cwd: dir, encoding: "utf-8" },
+  );
+  const { exec, triage, other } = JSON.parse(out.trim().split("\n").at(-1) as string);
+  assert.equal(exec.enabled, false);
+  assert.equal(exec.model, "sonnet");
+  assert.equal(triage, true);
+  assert.equal(other, true);
 });

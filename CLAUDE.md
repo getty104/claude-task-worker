@@ -5,15 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run Commands
 
 ```bash
-npm run build          # TypeScript → dist/
+npm run build          # TypeScript → dist/（index.ts + lib.ts の分割ビルド ＋ .d.ts 出力）
 npm run dev            # Watch mode (auto-rebuild)
 npm link               # Make CLI globally available
 
 claude-task-worker init            # Create required GitHub labels
+claude-task-worker apply-labels    # Create the preset labels plus custom labels from claude-task-worker.json `labels`
 claude-task-worker exec-issue      # Poll dev-ready issues
 claude-task-worker fix-review-point # Poll PRs with review feedback
 claude-task-worker create-issue    # Poll cc-triage-scope issues whose blockedBy are all closed
 claude-task-worker update-issue    # Poll update-issue labeled issues
+claude-task-worker list-workers    # List preset and custom (workerFiles) workers
 claude-task-worker install         # Add marketplace, install plugin, install/update the CLI itself
 claude-task-worker update          # Update the claude-task-worker plugin/marketplace and the CLI itself
 claude-task-worker cloud-setup     # Prepare a cloud session VM (settings.json). Meant for a cloud environment setup script
@@ -31,9 +33,11 @@ claude-task-worker all             # Run all workers concurrently
 
 - **`src/index.ts`** - CLI エントリポイント。コマンドルーティング
 - **`src/gh.ts`** - GitHub CLI (`gh`) ラッパー。全GitHub操作を集約
+- **`src/lib.ts`** - `claude-task-worker/lib` の公開エントリ（3ファクトリ・ワーカー定義の型・プリセットが使う内部ヘルパーの名前付き re-export）。公開 export 名は `src/lib.test.ts` で固定（semver 対象）。`index.ts` は CLI を起動するため import しない。esbuild は `index.ts` + `lib.ts` の2エントリ＋`--splitting` でビルドし、`process-manager` の台帳・`worktree` の直列化・設定キャッシュを CLI とカスタムワーカーで同一チャンク（同一インスタンス）として共有する（同テストが `dist` のチャンク共有を検証）。型定義は `tsconfig.build.json`（`emitDeclarationOnly`）で `dist` へ出力する
+- **`src/custom-workers.ts`** - `claude-task-worker.json` の `workerFiles`（`resolveWorkerFilePath()` で絶対パス / `~` / 設定ファイル基準へ解決）に列挙した TS ファイルのロード・検証。`loadCustomWorkers()`（全件 import → `validateCustomWorkers()` で全件検証。不在・読み込み失敗・定義0件・プリセット名衝突・カスタム同士の名前衝突をエラー配列で返す）。TS は `node:module` の `register()` で load フック（`stripTypeScriptTypes`）と resolve フック（`claude-task-worker/lib` → 実行中 CLI の `lib.ts` / `lib.js`）を登録して読む。フックのソースは文字列＋data URL で登録する（esbuild バンドル後も別ファイル参照が壊れないため）。lib を CLI 自身のものへ解決するのは process-manager の台帳・worktree の直列化・設定キャッシュを共有するため。`index.ts` は init/install 等と `--project` を除くコマンドで、未知コマンド判定より前（`captureConsole()`・gh 呼び出しより前）にロードし、エラーなら全件出力して exit 1。`all` / `yolo` にはカスタムを両方とも含める。`engines.node` は `stripTypeScriptTypes` のため `>=22.13.0`
 - **`src/process-manager.ts`** - 子プロセス管理。リアルタイムステータステーブル表示、プロセスライフサイクル管理
 - **`src/table.ts`** - 端末テーブル描画のヘルパー。`getDisplayWidth()`/`truncateToWidth()`/`padToWidth()`（全角を幅2として扱う桁揃え）、`buildTaskTableLines()`（ステータステーブルの行組み立て）。`buildTaskTableLines()` は副作用を持たない純粋関数で、`process-manager.ts` の `renderTable()` が画面差し替え + 出力のみを担う。あわせてログのローリングバッファ（`logLines` / `pushLogLine()`）、画面差し替え（`writeScreen()`）、**console 出力のキャプチャ（`captureConsole()`）** を持つ。ワーカー/ディスパッチャーは毎秒テーブルを再描画（画面クリア）するため、`console.error` 等をそのまま端末へ出すと一瞬しか見えない。`captureConsole()` は `console.log/info/warn/error` を差し替えて `logLines` へ流し込み、Logs テーブルの一部として残す（`id` を持たない行として `-` 列で表示）。テーブル描画側はパッチ前の console を握った `writeScreen()` を使う（パッチ済み console を使うと描画結果がバッファへ流れ込んで自己増殖する）。描画前にプロセスが終了しても消えないよう、`process.on("exit")` で残ログを端末へ書き出す。呼び出しは `index.ts`（ワーカー系は `assertRunPrerequisites()`、`--project` はディスパッチャー分岐）で、`init`/`install`/`update`/`usage` のようなテーブルを描かない一発コマンドでは呼ばない（キャプチャすると出力が出なくなるため）。**実行中/完了のセクション振り分けは `TaskTableEntry.status` で行い、表示用の status 文字列では判定しない**。herdr モードの実行中行は `running:working` のように agentStatus を併記した装飾済み文字列になるため、表示値で `=== "running"` を見ると実行中タスクが完了セクション（区切り罫線の下）へ紛れ込む
-- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。あわせて Issue テンプレート・GitHub Actions ワークフロー・設定ファイル（`claude-task-worker.json`）の生成、CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）を行う
+- **`src/commands/init.ts`** - GitHub ラベル初期作成コマンド。ラベル作成は `applyLabels()`（プリセット `LABELS` ＋ `claude-task-worker.json` の `labels` を `buildLabelSpecs()` で重複排除し、色は `labelColorFor()` が名前のハッシュから決める。config 読み込み失敗時はプリセットのみ）に切り出してあり、`apply-labels` コマンドも同じ関数を呼ぶ。あわせて Issue テンプレート・GitHub Actions ワークフロー・設定ファイル（`claude-task-worker.json`）の生成、CodeGraph のセットアップ（グローバル gitignore への `.codegraph/` 登録 → `codegraph init` によるインデックス構築）を行う
   - **1ラベル1役割**: 生成する assign-creator ワークフロー（`.github/workflows/assign-creator-on-issue-request.yml`）の発火条件は `cc-issue-request`（人が Issue テンプレートから依頼した印）であって `cc-triage-scope`（ワーカーのキュー合流口）ではない。同一ラベルに「キュー合流」と「依頼者の紐付け」を載せると、ワーカーや外部パイプラインの自動起票にも assign が発火し、その bot アカウントが全 Issue の assignee になる。author の特例条件で除外せずラベルを分けるのは、起票経路が増えるたびに条件を足す形にしないため。Issue テンプレートは両方のラベルを付ける（人の依頼もワーカーのキューへ入る必要がある）
   - 分離前の2ファイル（`.github/ISSUE_TEMPLATE/cc-triage-scope.yml` と `.github/workflows/assign-creator-on-cc-triage-scope.yml`）は `--force` の有無に関わらず**セットで削除**する。ワークフローだけ残すと `cc-triage-scope` での誤発火が生き続け、テンプレートだけ残すと `cc-issue-request` が付かず assign が一切効かなくなる
 - **`src/commands/cloud-setup.ts`** - クラウド実行（`--cloud`）用の VM 側セットアップコマンド。claude.ai の環境設定のセットアップスクリプト欄から `npx claude-task-worker cloud-setup` として呼ぶ想定で、**VM 側でしか意味を持たない準備をここへ集約する**（settings ファイルの書き込み、グローバル gitignore への `.codegraph/` 登録）。`cloudSetup()`（各ステップの呼び出し）、`withCloudDefaults()` / `claudeSettingsPath()`（テスト可能な純粋関数）
@@ -65,7 +69,7 @@ claude-task-worker all             # Run all workers concurrently
 - **`src/transcript.ts`** - Claude Code のセッション transcript（`~/.claude/projects/*/<sessionId>.jsonl`）から最終レポートを取り出す。`findTranscriptPath()`（セッションIDでディレクトリを総なめ）、`extractFinalAssistantText()`（末尾から最初に見つかる非 sidechain のアシスタントテキスト。純粋関数）、`readFinalReport()`。herdr モードで `claude -p` の stdout の代わりに Slack 通知本文を作るために使う
 - **`src/herdr-runner.ts`** - herdrモードのタスク実行。`startHerdrTask()`（`tabCreate`（`--no-focus`）→ `waitForPaneReady`（シェルプロンプト描画待ち）→ `agentStart`（ルートペインで `herdr agent start --kind claude` を使って claude を起動し、検出＋入力待ちになるまで同期ブロック）。`agent start` が検出できなければ herdr がエラーを返し `agentStart` が throw するので、シェルだけのタブを残さないよう閉じてから失敗させる。→ `agentPrompt`（タスクのプロンプトを投入。失敗時も同様にタブを閉じて失敗させる）。ルートペインがそのまま claude のペインになるため余剰シェルペインの `paneClose` は不要。**渡す `args` は claude のフラグのみで、実行ファイル `claude`（`--kind` が供給）もプロンプト（`agentPrompt` が投入）も含めない**）、`waitForHerdrTask()`（agentステータスのポーリング。`done` または `working`→`idle` で完了、`pane_not_found`/`agent_not_found` で失敗、`blocked` は待機継続）、`buildHerdrTaskResult()`（ペイン出力が空なら空振りとして失敗扱い）、`stopHerdrTask()`（ctrl-c送信 → `waitForAgentGone` → タブクローズ）、`taskTabLabel()`（`ctw:<project>:#<n>`）
 - **`src/user-config.ts`** - `config.json`（`~/.config/claude-task-worker/config.json` または `$XDG_CONFIG_HOME` 配下）のロード・検証・対象プロジェクト解決。`UserConfig`（`mode`/`advisor`/`permission`/`projects`/`projectGroups`）、`loadUserConfig()`（読み込み・検証）、`resolveTargetProjects()`（プロジェクト名/グループ名/予約語 `all` の展開）、`getRunMode()`（`mode` の解決。設定ファイル不在・projects破損でも `"default"` を返し、プロセス内でキャッシュする）、`isAdvisorEnabled()`（`advisor` の解決。`getRunMode()` と同じく設定ファイル不在・破損でも既定＝無効を返し、プロセス内でキャッシュする。後述の「`advisor`（アドバイザーモデル）」参照）、`getPermissionMode()`（`permission` の解決。claude CLI の `--permission-mode` へそのまま渡す権限モード。値は同フラグの choices（`manual`/`auto`/`acceptEdits`/`dontAsk`/`plan`/`bypassPermissions`）と一致させる。既定 `"bypassPermissions"`。`mode`/`advisor` と同じくトップレベル一括・プロセス内キャッシュ。3つの読み出しは共通の `readTopLevel()` 経由）、`findProjectNameByPath()`（herdrモードのタブラベル用にパスからプロジェクト名を逆引き）。リポジトリ直下の `claude-task-worker.json` を扱う `src/config.ts` とは別物
-- **`src/dispatch-args.ts`** - `--project` ディスパッチ用CLI引数ヘルパー。`PROJECT_INCOMPATIBLE_COMMANDS`（`--project` と併用不可なコマンド一覧: `init`/`install`/`update`/`usage`/`version`）、`parseProjectFilters()`/`hasProjectFilter()`（`--project` の抽出・検出）、`buildForwardedCommand()`（`--project` とその値を除去し他プロジェクトへ転送するコマンド文字列を構築）
+- **`src/dispatch-args.ts`** - `--project` ディスパッチ用CLI引数ヘルパー。`PROJECT_INCOMPATIBLE_COMMANDS`（`--project` と併用不可なコマンド一覧: `init`/`apply-labels`/`install`/`update`/`usage`/`version`）、`parseProjectFilters()`/`hasProjectFilter()`（`--project` の抽出・検出）、`buildForwardedCommand()`（`--project` とその値を除去し他プロジェクトへ転送するコマンド文字列を構築）
 
 ### Worker共通ライフサイクル
 
@@ -175,7 +179,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` / `resolve-pr-comments` / `commit-push` / `resolve-pencil-conflict`。
 
-**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。`create-prd` も同じ。
+**`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。`create-prd` も同じ。カスタムワーカーの定義 TS を対話で生成する `build-custom-worker` も同じ理由で fork を持たない（要件を `AskUserQuestion` で全項目確定させてから `claude-task-worker/lib` のみを import する定義を書き出し、`list-workers` でロード検証する。ワーカーからは自動起動しない）。
 
 この2スキルは**成果物の文章を fable で生成する**。スキル本体にモデルを書けないため、生成工程だけをモデル指定の効く経路へ切り出す: `create-prd` は PRD 本文の起草を `Agent`（`model: "fable"`）へ委譲し、`breakdown-issues` は要件定義・TODO分解・各TODOの本文素材（説明・要件・参照情報・優先度・規模）を `requirement-todo-organizer`（`model: fable`）に生成させ、ユーザー回答を受けた更新も同エージェントへ再委譲する。メインセッションは質問・Issue 作成・番号の受け渡しだけを担い、分解結果の文章を自分で書き足さない（書き足した時点でその部分は呼び出し元のモデルの成果物になる）。
 
@@ -255,6 +259,15 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 レビュースレッドの一括 Resolve は `fix-review-point` のフェーズ6が `resolve-pr-comments` スキルを呼んで行う（`plugin/skills/resolve-pr-comments/SKILL.md`）。**`Stop` フックへ移してはいけない**。同フックはセッションの終わり方に関わらず必ず走るため、フェーズ0の安全ガード（worktree 外・デフォルトブランチ）や実装フェーズの失敗で中断した場合でも、**1件も修正していないのに未解決スレッドが全件 Resolve される**。`triage-pr` は Resolve 済みを「対応済み」とみなすため、指摘が消えたまま PR がマージされる。Resolve は「修正を push し終えた」ことを前提にした操作であり、その前提を判定できるのはスキル本文だけである。
 
 Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` から取得）で、**クラウド実行でも成立する**。`resolveReviewThread` は REST 代替が無く `gh` 経路では GraphQL 直叩きになるため、クラウドセッションのプロキシで 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、MCP はそのゲートを迂回する。したがってワーカープロセス側から Resolve スクリプトを実行する必要はない（`src/workers/fix-review-point.ts` の `onCompleted` はコールバックコメント投稿のみで、レビュースレッドには触らない）。`gh` フォールバック（`plugin/scripts/resolve-pr-comments.sh`）はローカル実行向けに残してあり、失敗時は非0で終了して「0件」と区別できるようにしてある。
+
+### `workers.<name>.enabled`（ワーカー単位の有効/無効）
+
+`claude-task-worker.json`（および `claude-task-worker.local.json`。既存の `mergeConfigRaw()` の規則でローカル側が勝つ）の `workers.<name>.enabled`（boolean、既定はプリセット・カスタムとも `true`）でワーカーを無効化できる。非 boolean は警告して既定へ倒す（`parseWorkerEntry()`）。既定 `true` なので、未指定のリポジトリの起動集合・挙動は導入前と同一。
+
+- **`all` / `yolo`**: `inAll` / `inYolo` で絞った候補から `enabled: false` を除外して起動し、除外が1件以上なら `[worker] skipped disabled workers: a, b` を1行出す。振り分けは純粋関数 `partitionEnabledWorkers(names, isEnabled)`（`src/config.ts`）で、ワーカー名の一覧を受け取るのでカスタムワーカーも同じ判定を通せる
+- **個別起動**: 無効なら有効化方法（`workers.<name>.enabled` を `true` にする／キーを消す）を含むメッセージを出して exit 1。タスクを1件も起動しないよう `removeStaleWorktrees()` / `start()` より前、さらに **`assertRunPrerequisites()`（console キャプチャ）より前**で判定する。キャプチャ後に出すとログテーブルの列幅でメッセージが切り詰められ、肝心の有効化方法が読めなくなるため
+- 設定ファイルが読めない場合は `isWorkerEnabled()` が有効側へ倒す（変更前と同じ起動集合を保つ）
+- **`--project`** ではディスパッチャー側で設定を読まない。転送先プロセスが各プロジェクトのディレクトリで通常の起動経路を通るため、プロジェクトごとの `claude-task-worker.json` で判定される
 
 ### `advisor`（アドバイザーモデル）
 
@@ -598,7 +611,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 - **記録PRのマージは `triage-pr` ワーカーに任せる**。`cc-triage-scope` ラベルと自分自身の Assignee を付け、以降のCIチェック・マージは既存のトリアージ経路に乗せる。**この2つは `gh pr create --label/--assignee` では渡さず、PR番号を得たあとに `addLabel` / `addAssignee` で毎回付け直す**（作成経路・再利用経路の両方で）。gh はラベル・Assignee をPR作成後の**別ミューテーション**で付けるため、そこが落ちると gh 自体は非0終了なのに**メタデータの無いPRだけが残る**。記録PRは固定ブランチを再利用する（＝以降は `gh pr create` を通らない）ので、一度欠けると二度と付かず、`triage-pr` はラベルと Assignee の両方で候補を絞るため、そのPRは誰にも拾われないまま放置される（実測: 記録PR2件がラベル・Assignee 無しで作成され、うち1件は未マージのままクローズ）。`addLabel` / `addAssignee` は冪等なので、毎回叩けば既に壊れているPRも次の実行で復旧する。ワーカーが `gh pr merge` で直接マージすると必須チェック待ち・ブランチ保護を握り潰す方向に倒れるため、マージ判断を一箇所（`triage-pr`）へ寄せている。未マージのPRが残っている間は force-push でタイムスタンプが進むだけで、`gh pr create` は呼ばない
 - `publishLastRunPr()` の失敗はスキル起動を止めない（catch してログのみ）。記録PRが作れなくてもその日の収集は走らせるべきで、記録は次回ポーリングで作り直せる
 - `pollingIntervalSeconds`（既定3600）は**実行間隔ではなく「24時間経過したかを確認する頻度」**。実行間隔は `SCHEDULE_INTERVAL_HOURS`（24）で固定
-- タスクIDは `-1` / `-2` / `-3`。`process-manager` の台帳は数値キーで Issue/PR 番号（正数）と共有するため、衝突しないよう負値を割り当てている
+- タスクIDは `createScheduledWorker()` が内部カウンタで `-1` から減らしながら自動採番する。`process-manager` の台帳は数値キーで Issue/PR 番号（正数）と共有するため、衝突しないよう負値にしている。カウンタは全定義で共有するので、プリセットとカスタムでも衝突しない
 - **`update-design-md` は `uiDesign.enabled` が `true` のときだけ起動する**。DESIGN.md の材料である `cc-ui-design` ラベル付きのマージ済みデザインPRを作るのはデザイン先行フローだけで、無効なリポジトリでは収集対象が原理的に存在しない（毎日空振りのセッションを焼くだけになる）。判定は `index.ts` ではなくワーカー側（`enabled` コールバック）に置き、`all` / `yolo` からの一括起動でも個別コマンドでも同じ経路を通す
 - 3スキルの引数インターフェースは統一してある（`[期間（日数、省略時は1）] [関連Issue番号（任意）]`）。既定を `1` に揃えたのは、ワーカーの実行間隔（24時間）とスキル単体実行時の対象期間を一致させるため。収集スクリプトの `DAYS="${1:-1}"` も同じ既定
 - 3スキルはワーカー起動スキルになったため、`model:` / `effort:` / `context: fork` を持たない（モデルは `claude-task-worker.json` の `workers.<name>.model` が決める）。`src/skill-frontmatter.test.ts` の entrySkills リストで固定してある

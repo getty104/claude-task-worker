@@ -99,7 +99,10 @@ claude-task-worker update
 ```bash
 claude-task-worker init           # 既存ファイルは保護
 claude-task-worker init --force   # 強制上書き
+claude-task-worker apply-labels   # ラベルだけを作成（冪等）
 ```
+
+`claude-task-worker.json` のトップレベル `labels`（文字列配列）にカスタムワーカー用のラベル名を書くと、`init` / `apply-labels` がプリセットのラベルに加えて作成する。色は名前から一意に決まり、プリセットと同名ならプリセットの色を使う。
 
 作成されるラベル:
 
@@ -131,8 +134,10 @@ claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--
 | `all` | 通常ワーカー9つ + 定期ワーカー3つ（`triage-created-issue` / `triage-pr` / `check-dependabot` を除く） |
 | `yolo` | 全ワーカーを同時にポーリング |
 | `init` | ラベル・テンプレート・設定ファイルの作成と CodeGraph セットアップ |
+| `apply-labels` | プリセットと `labels` 宣言のラベルだけを作成 |
 | `install` / `update` | 上記「セットアップ」を参照 |
 | `cloud-setup [--force]` | クラウド VM 側の準備（下記「`--cloud`」を参照） |
+| `list-workers` | プリセットとカスタムの全ワーカーを名前・種別・有効/無効・ロード元で表示（`workerFiles` のロード失敗時は exit 1） |
 | `usage` | Claude API 使用状況（5時間/7日間の利用率とリセット時刻）を表示し、Slack にも通知 |
 | `version` | CLI のバージョンを表示（`--version` / `-v` も可） |
 
@@ -165,7 +170,7 @@ claude-task-worker exec-issue --project app-a --epic 100
 
 プロジェクト名・グループ名は `config.json` で定義する（下記「設定ファイル」）。`all` は全プロジェクトを指す予約語。
 
-`--project` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
+`--project` と併用できないコマンド: `init` / `apply-labels` / `install` / `update` / `cloud-setup` / `usage` / `version` / `list-workers`
 
 ### `--cloud`
 
@@ -205,7 +210,7 @@ npx claude-task-worker cloud-setup
 - クラウド実行のタスクは worktree を作らない（VM が自前でリポジトリを持つため）
 - 完了は `cc-cloud-done` ラベルで検知する。4時間で応答がなければ打ち切り、`cc-need-human-check` を付けて失敗通知する
 - `--project` と併用した場合、`--cloud` は各プロジェクトへそのまま転送される
-- `--cloud` と併用できないコマンド: `init` / `install` / `update` / `usage` / `version`
+- `--cloud` と併用できないコマンド: `init` / `apply-labels` / `install` / `update` / `cloud-setup` / `usage` / `version` / `list-workers`
 - `--cloud` は `mode`（`default` / `herdr`）に依存しない。クラウドセッションの作成は `script` コマンドの疑似 pty で完結し、herdr のペインを使わないため、どちらの `mode` でも同じ経路を通る
 
 詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
@@ -273,6 +278,8 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 |---|---|---|---|
 | `fixReviewPointCallbackCommentMessage` | string | - | `fix-review-point` 完了時に PR へ投稿するコメント（未設定なら投稿しない） |
 | `remoteEnvId` | string \| null | `null` | クラウド実行（`--cloud`）時に `--environment` へ渡すクラウド環境ID。`null` なら渡さず claude 側の既定解決に任せる（下記） |
+| `labels` | string[] | `[]` | カスタムワーカー用の GitHub ラベル名。`init` / `apply-labels` が作成する（ローカル上書きでは配列ごと置き換え） |
+| `workerFiles` | string[] | `[]` | カスタムワーカーを定義した TS ファイルのパス（下記「カスタムワーカー」。ローカル上書きでは配列ごと置き換え） |
 | `uiDesign` | object | `{ "enabled": false, "designDir": "designs", "yolo": false }` | UIデザイン先行ワークフロー（下記） |
 | `workers` | object | `{}` | ワーカーごとの上書き設定（下記） |
 | `lastRun` | object | `{}` | 定期ワーカーの最終実行時刻。ワーカーが自動更新するため手で編集しない |
@@ -304,6 +311,7 @@ CI やクラウド VM など対話ログインできない環境では、環境�
 | `pollingIntervalSeconds` | ポーリング間隔（秒） |
 | `cooldownSeconds` | タスク完了後にポーリングを止める時間（秒）。既定 `0` |
 | `maxConcurrentTasks` | 同時実行できるタスクの最大数。既定 `1` |
+| `enabled` | `false` で無効化する。`all` / `yolo` では起動せず除外したワーカー名を1行ログに出し、個別起動（`claude-task-worker <name>`）ではタスクを起動せず exit 1。既定 `true`（`claude-task-worker.local.json` でも上書きできる） |
 
 既定値:
 
@@ -330,6 +338,27 @@ CI やクラウド VM など対話ログインできない環境では、環境�
   }
 }
 ```
+
+### カスタムワーカー
+
+`workerFiles` に TS ファイルを列挙すると、起動時にロードしてプリセットと同じ扱いで起動できる（個別コマンド・`all`・`yolo`。`enabled` などの `workers.<name>` 設定も効く）。`--project` 指定時は読み込まない。
+
+- パスは絶対パス、`~` / `~/...`（home 展開）、または設定ファイルのあるディレクトリからの相対パス
+- TS は型を除去して読み込む（Node 22.13 以上。tsconfig・ビルド不要）。ファイル内の相対 import は拡張子付き（`./helper.ts`）で書く
+- `claude-task-worker/lib` は実行中の CLI 自身の `lib` に解決される
+- 1ファイルから複数の定義を export でき、`defineWorker` / `createIssuePollingWorker` / `createPrPollingWorker` / `createScheduledWorker` の戻り値だけが対象（それ以外の export は無視）
+
+```ts
+import { createIssuePollingWorker } from "claude-task-worker/lib";
+
+export const myWorker = createIssuePollingWorker({
+  name: "my-worker",
+  command: "my-skill",
+  triggerLabels: ["cc-my-worker"],
+});
+```
+
+起動時に全件を検証し、次のいずれかがあればタスクを1件も起動せず exit 1 する（メッセージにファイルパスと直し方を含む）: ファイルが存在しない／読み込み・トランスパイルに失敗／定義が1つも export されていない／`name` がプリセットと衝突／`name` がカスタム同士で衝突。`claude-task-worker list-workers` でロード結果を確認できる。
 
 ## ワークフロー
 
