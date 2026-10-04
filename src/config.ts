@@ -1,6 +1,6 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, normalize, resolve, sep as SEP } from "node:path";
-import { hasCloudFlag } from "./dispatch-args";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep as SEP } from "node:path";
+import { getInheritConfigPath, hasCloudFlag, INHERIT_CONFIG_FLAG } from "./dispatch-args";
 
 export type WorkerName =
   | "exec-issue"
@@ -572,8 +572,54 @@ function readRawConfig(path: string): Record<string, unknown> {
   return parsed;
 }
 
+// --inherit-config のファイル内の相対パスを、そのファイルの所在ディレクトリ基準で解決し直す。
+// 重ねる前にファイル単位で行うのは、定義元ファイルの基準を保つため（マージ後は出所が分からない）。
+// cwd 直下の2ファイルは所在ディレクトリ＝cwd なので対象外（既存の解決結果をそのまま保つ）。
+// - uiDesign.designDir: 下流の契約（リポジトリルート相対）に合わせ、絶対化した後 repoRoot 相対へ戻す。
+//   リポジトリ外を指せば parseUiDesignEntry の既存検証が警告して既定値へ倒す
+// - workerFiles: 絶対パスへ置き換える（~ 始まりはそのまま。resolveWorkerFilePath が home 展開する）
+export function resolveInheritedRelativePaths(
+  raw: Record<string, unknown>,
+  configDir: string,
+  repoRoot: string,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...raw };
+  const uiDesign = raw["uiDesign"];
+  if (isPlainObject(uiDesign) && typeof uiDesign.designDir === "string" && uiDesign.designDir.length > 0) {
+    result["uiDesign"] = {
+      ...uiDesign,
+      designDir: relative(repoRoot, resolve(configDir, uiDesign.designDir)) || ".",
+    };
+  }
+  const workerFiles = raw["workerFiles"];
+  if (Array.isArray(workerFiles)) {
+    result["workerFiles"] = workerFiles.map((entry) =>
+      typeof entry === "string" && entry.trim().length > 0 && !entry.trim().startsWith("~")
+        ? resolve(configDir, entry.trim())
+        : entry,
+    );
+  }
+  return result;
+}
+
+// 指定された土台ファイルの不在は、サイレントに既定へ倒さず拒否する（cwd 直下ファイルの不在とは違う）。
+function readInheritedRawConfig(path: string, repoRoot: string): Record<string, unknown> {
+  if (!existsSync(path)) {
+    throw new Error(`${INHERIT_CONFIG_FLAG} ${path} does not exist`);
+  }
+  return resolveInheritedRelativePaths(readRawConfig(path), dirname(path), repoRoot);
+}
+
+// cwd 直下の claude-task-worker.json に claude-task-worker.local.json を重ねた生JSON。
+function readCwdRawConfig(): Record<string, unknown> {
+  return mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
+}
+
+// 重ね順（後が勝つ）: --inherit-config < cwd の claude-task-worker.json < cwd の claude-task-worker.local.json。
 export function loadConfig(): Config {
-  const raw = mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
+  const inheritPath = getInheritConfigPath();
+  const cwdRaw = readCwdRawConfig();
+  const raw = inheritPath ? mergeConfigRaw(readInheritedRawConfig(inheritPath, process.cwd()), cwdRaw) : cwdRaw;
 
   const result: Config = {
     ...DEFAULT_CONFIG,
@@ -665,10 +711,12 @@ export function disabledWorkerMessage(workerName: string): string {
 }
 
 // 定期ワーカーの最終実行時刻（epoch ms）。記録が無い・読めない場合は undefined＝実行可。
+// 書き込み先（writeLastRun / publishLastRunPr）と揃えるため、--inherit-config に関わらず cwd 直下から読む。
 export function getLastRunAt(workerName: string): number | undefined {
   let at: string | undefined;
   try {
-    at = loadConfig().lastRun[workerName];
+    const raw = readCwdRawConfig();
+    at = "lastRun" in raw ? parseLastRunEntry(raw["lastRun"])[workerName] : undefined;
   } catch (err) {
     console.warn(`[config] failed to load lastRun, treating ${workerName} as never run: ${err}`);
     return undefined;

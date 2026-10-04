@@ -1,12 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import type * as DispatchArgsModule from "./dispatch-args";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
 // .ts 拡張子付きのリテラル文字列で動的importする。
 // allowImportingTsExtensions により tsc --noEmit もこの指定子を許容する。
-const { buildForwardedCommand, shellQuote, hasCloudFlag, resetCloudFlagCache, assertCloudCompatibleCommand } =
-  (await import("./dispatch-args")) as typeof DispatchArgsModule;
+const {
+  buildForwardedCommand,
+  shellQuote,
+  hasCloudFlag,
+  resetCloudFlagCache,
+  assertCloudCompatibleCommand,
+  getInheritConfigPath,
+  resetInheritConfigPathCache,
+} = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
 test("buildForwardedCommand strips --project and its value from argv.slice(2)-shaped input", () => {
   const argv = ["all", "--project", "foo"];
@@ -86,4 +94,34 @@ test("assertCloudCompatibleCommand does not exit for compatible commands", (t) =
     assertCloudCompatibleCommand(command);
   }
   assert.deepEqual(exitCodes, []);
+});
+
+test("buildForwardedCommand resolves a relative --inherit-config value to an absolute path", () => {
+  const argv = ["all", "--project", "foo", "--inherit-config", "shared/ctw.json"];
+  assert.equal(
+    buildForwardedCommand(argv),
+    `claude-task-worker 'all' '--inherit-config' ${shellQuote(resolve("shared/ctw.json"))}`,
+  );
+});
+
+test("buildForwardedCommand keeps an absolute --inherit-config value as is", () => {
+  assert.equal(
+    buildForwardedCommand(["all", "--inherit-config", "/etc/ctw.json"]),
+    "claude-task-worker 'all' '--inherit-config' '/etc/ctw.json'",
+  );
+});
+
+test("getInheritConfigPath resolves the value against the cwd and is null when absent", (t) => {
+  const original = process.argv;
+  t.after(() => {
+    process.argv = original;
+    resetInheritConfigPathCache();
+  });
+  process.argv = ["node", "cli", "all"];
+  resetInheritConfigPathCache();
+  assert.equal(getInheritConfigPath(), null);
+
+  process.argv = ["node", "cli", "all", "--inherit-config", "conf/ctw.json"];
+  resetInheritConfigPathCache();
+  assert.equal(getInheritConfigPath(), resolve("conf/ctw.json"));
 });

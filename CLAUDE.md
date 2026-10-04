@@ -395,6 +395,16 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 **`writeLastRun()` は本体（`claude-task-worker.json`）だけを書く**。定期ワーカーの実行記録はコミットして共有する値であり、ローカル上書きの対象ではない。
 
+#### `--inherit-config <path>`（土台の設定ファイル）
+
+`--inherit-config <path>`（`getInheritConfigPath()`、`src/dispatch-args.ts`。`--cloud` と同じくプロセス内で1回だけ解決し、値は起動時の cwd 基準で絶対化）で、指定ファイルを土台に重ねる。重ね順（後が勝つ）は **`--inherit-config` < cwd の `claude-task-worker.json` < cwd の `claude-task-worker.local.json`**。未指定時は従来の2段のままで結果は不変。
+
+- **ファイル内の相対パスは定義元ファイルの所在ディレクトリ基準**。`resolveInheritedRelativePaths()` が土台ファイルの生JSONに対して**マージ前に**処理する（マージ後は出所が分からないため）。`workerFiles` は絶対パスへ、`uiDesign.designDir` は絶対化してからリポジトリルート（cwd）相対へ戻す（下流の契約を保ち、リポジトリ外なら `parseUiDesignEntry()` の既存検証が既定へ倒す）。cwd 直下の2ファイルは所在＝cwd なので処理しない
+- 指定ファイルの不在は `index.ts` の起動時（`init` 以外）と `loadConfig()` の両方で拒否する。`init` は指定パスへ生成する
+- **`getLastRunAt()` は `--inherit-config` を読まず cwd 直下だけを見る**。書き込み側（`writeLastRun()` / `publishLastRunPr()`）がリポジトリ直下固定なので、読み先がずれると再起動のたびに24時間ガードが外れる
+- `--project` では `buildForwardedCommand()` が値を絶対パスにして転送する（転送先は各プロジェクトの cwd で起動するため）
+- スキルはリポジトリ直下の `claude-task-worker.json` を `jq` で直接読むため、土台ファイルの `uiDesign` はスキルに届かない（README に明記済み。スキル改修は未対応）
+
 #### `--cloud` 付与時の起動引数の差分
 
 - `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` と `--permission-mode` の2つ**。逆にクラウド時のみ付くのは `--environment`（`remoteEnvId` 指定時、前節）と `--ref` / `--on-branch`。`--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**

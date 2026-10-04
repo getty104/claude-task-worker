@@ -10,6 +10,7 @@ import {
   SCHEDULED_WORKER_NAMES,
   CLOUD_DONE_LABEL,
 } from "../config";
+import { getInheritConfigPath } from "../dispatch-args";
 import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph";
 
 // cc-triage-scope を除く15色は**ビビッド固定**（HSL 彩度 90〜100 / L* 24〜95 / C* 56〜123）。その
@@ -180,8 +181,10 @@ async function createConfig(force: boolean): Promise<void> {
     lastRun: Object.fromEntries(SCHEDULED_WORKER_NAMES.map((name) => [name, now])),
     workers: {},
   };
-  const result = await writeFileWithMode(CONFIG_PATH, JSON.stringify(initialConfig, null, 2), force);
-  logWriteResult(result, CONFIG_PATH);
+  // --inherit-config 指定時は土台にするファイルとしてそのパスへ生成する。
+  const path = getInheritConfigPath() ?? CONFIG_PATH;
+  const result = await writeFileWithMode(path, JSON.stringify(initialConfig, null, 2), force);
+  logWriteResult(result, path);
 }
 
 // claude-task-worker.local.json はコミットしない前提（個人ごとの remoteEnvId などを置く）の

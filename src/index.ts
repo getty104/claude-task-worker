@@ -25,6 +25,8 @@ import {
   buildForwardedCommand,
   hasCloudFlag,
   assertCloudCompatibleCommand,
+  getInheritConfigPath,
+  INHERIT_CONFIG_FLAG,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
 import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
@@ -42,6 +44,7 @@ import {
 import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
@@ -103,6 +106,7 @@ ${customWorkers.map((c) => `  ${c.definition.name.padEnd(17)}${c.definition.name
 
 Options:
   --project <name>  Dispatch to project(s) via herdr instead of running the worker locally. Accepts a project name, a project group name, or "all". Repeatable.
+  --inherit-config <path>  Use the given config file as the base. claude-task-worker.json and claude-task-worker.local.json in the current directory are layered on top (their keys win). Relative paths inside the file resolve from its own directory. With init, the config file is generated at this path.
   --debug           Post each task's final report as a comment on the target Issue/PR (off by default; the report is only sent to Slack). Works in both local and --cloud runs.
   --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue. Repeatable: any matching parent (OR).
   --label <name>    Limit issue-based workers to issues that also carry the specified label. Repeatable: all must be present (AND).
@@ -131,6 +135,14 @@ if (workerType === "version" || workerType === "--version" || workerType === "-v
 // 最新版の案内。ワーカーは captureConsole() 後にログテーブルへ流れるよう、
 // 待たずに投げっぱなしにする（起動を数秒遅らせないため）。
 void notifyIfOutdated();
+
+// --inherit-config の値欠落・ファイル不在は、設定を読む前（workerFiles のロードより前）に拒否する。
+// init は指定パスへ設定ファイルを生成するコマンドなので、不在を許容する。
+const inheritConfigPath = getInheritConfigPath();
+if (inheritConfigPath && workerType !== "init" && !existsSync(inheritConfigPath)) {
+  console.error(`${INHERIT_CONFIG_FLAG} ${inheritConfigPath} does not exist`);
+  process.exit(1);
+}
 
 const customWorkers: CustomWorker[] =
   workerType && !NON_WORKER_COMMANDS.includes(workerType) && !hasProjectFilter() ? await loadCustomWorkersOrExit() : [];
