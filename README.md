@@ -241,7 +241,7 @@ claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ�
 - 値自体の相対パスは起動時の cwd 基準。ファイル内の相対パス（`workerFiles` / `uiDesign.designDir`）は**そのファイルの所在ディレクトリ基準**で解決する
 - `claude-task-worker.local.json` は常に cwd 直下のものを読む（指定ファイルと同じディレクトリのものは読まない）。cwd 直下の `claude-task-worker.json` は無くてもよい
 - 指定ファイルが存在しなければエラー終了する（既定ファイルへは倒さない）。`--project` では絶対パスにして各プロジェクトへ転送する
-- 定期ワーカーの `lastRun` は指定に関わらずリポジトリ直下の `claude-task-worker.json` で読み書きする。リポジトリ直下に同ファイルが無ければ `lastRun` だけを持つファイルが作られる（他のキーを持たないので土台の設定とは衝突しない）
+- 定期ワーカーの `lastRun` は指定に関わらずリポジトリ直下の `claude-task-worker.json` で読み書きする。リポジトリ直下に同ファイルが無ければ `lastRun` だけを持つファイルが作られる（他のキーを持たないので土台の設定とは衝突しない）。`init` を `--inherit-config` 付きで実行した場合も、未記録のワーカーの `lastRun` はリポジトリ直下へ記録する（セットアップ直後に定期ワーカーが一斉に走らないようにするため）
 - スキル（`create-ui-design` / `update-design-md` / `triage-created-issue`）はリポジトリ直下の `claude-task-worker.json` を直接読むため、**`uiDesign` の設定は `--inherit-config` のファイルに書いてもスキルには届かない**。`uiDesign` はリポジトリ直下に書くこと
 
 ### Pen CLI のログイン

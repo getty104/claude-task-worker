@@ -9,6 +9,8 @@ import {
   LOCAL_CONFIG_PATH,
   SCHEDULED_WORKER_NAMES,
   CLOUD_DONE_LABEL,
+  getLastRunAt,
+  writeLastRun,
 } from "../config";
 import { getInheritConfigPath } from "../dispatch-args";
 import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from "./codegraph";
@@ -182,9 +184,19 @@ async function createConfig(force: boolean): Promise<void> {
     workers: {},
   };
   // --inherit-config 指定時は土台にするファイルとしてそのパスへ生成する。
-  const path = getInheritConfigPath() ?? CONFIG_PATH;
+  const inheritPath = getInheritConfigPath();
+  const path = inheritPath ?? CONFIG_PATH;
   const result = await writeFileWithMode(path, JSON.stringify(initialConfig, null, 2), force);
   logWriteResult(result, path);
+  if (inheritPath) seedCwdLastRun(new Date(now));
+}
+
+// lastRun は cwd 直下からしか読まれない（getLastRunAt）ため、--inherit-config の土台ファイルに
+// 書いてもセットアップ直後の一斉起動は防げない。cwd 側に未記録のワーカーだけ init 時刻で埋める。
+export function seedCwdLastRun(at: Date): void {
+  for (const name of SCHEDULED_WORKER_NAMES) {
+    if (getLastRunAt(name) === undefined) writeLastRun(process.cwd(), name, at);
+  }
 }
 
 // claude-task-worker.local.json はコミットしない前提（個人ごとの remoteEnvId などを置く）の

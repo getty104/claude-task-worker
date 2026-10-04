@@ -563,6 +563,32 @@ test("getLastRunAt reads the cwd claude-task-worker.json regardless of --inherit
   assert.deepEqual(out, [Date.parse("2026-08-17T09:00:00.000Z"), null]);
 });
 
+test("init's seedCwdLastRun fills only missing cwd lastRun entries", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(
+    join(cwd, "claude-task-worker.json"),
+    JSON.stringify({ labels: ["keep"], lastRun: { "update-coding-guidelines": "2026-08-17T09:00:00.000Z" } }),
+  );
+  const initUrl = pathToFileURL(resolve("src/commands/init.ts")).href;
+  execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      `const m = await import(${JSON.stringify(initUrl)}); m.seedCwdLastRun(new Date("2026-10-04T00:00:00.000Z"));`,
+    ],
+    { cwd, stdio: "ignore" },
+  );
+  const written = JSON.parse(readFileSync(join(cwd, "claude-task-worker.json"), "utf-8"));
+  assert.deepEqual(written.labels, ["keep"]);
+  assert.equal(written.lastRun["update-coding-guidelines"], "2026-08-17T09:00:00.000Z");
+  assert.equal(written.lastRun["update-requirement-rules"], "2026-10-04T00:00:00.000Z");
+  assert.equal(written.lastRun["update-design-md"], "2026-10-04T00:00:00.000Z");
+});
+
 test("resolveInheritedRelativePaths resolves designDir from the config file's directory, relative to the repo", () => {
   assert.deepEqual(resolveInheritedRelativePaths({ uiDesign: { designDir: "designs" } }, "/repo/conf", "/repo"), {
     uiDesign: { designDir: join("conf", "designs") },
