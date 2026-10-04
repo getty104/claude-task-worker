@@ -402,7 +402,8 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 - **土台へ重ねるときだけ、配列は置き換えず土台の後ろへ追記する**（`mergeConfigRaw()` の `appendArrays`。重複は除く）。リポジトリ側の `labels` / `workerFiles` は「共通パックへの足し込み」として書けるようにし、旧 `init` が書いていた `[]` もパックの値を消さない。`init` 自体も両キーを書き出さなくなった（`buildInitialConfig()`）。土台の配列を減らす手段は無い（使わないワーカーは `workers.<name>.enabled: false`）。cwd の2ファイル同士のマージ（local が配列を丸ごと置き換える）は従来どおりで、その結果を土台へ追記する
 
 - **ファイル内の相対パスは定義元ファイルの所在ディレクトリ基準**。`resolveInheritedRelativePaths()` が土台ファイルの生JSONに対して**マージ前に**処理する（マージ後は出所が分からないため）。`workerFiles` は絶対パスへ、`uiDesign.designDir` は絶対化してからリポジトリルート（cwd）相対へ戻す（下流の契約を保ち、リポジトリ外なら `parseUiDesignEntry()` の既存検証が既定へ倒す）。cwd 直下の2ファイルは所在＝cwd なので処理しない
-- 指定ファイルの不在は `index.ts` の起動時（`init` 以外）と `loadConfig()` の両方で拒否する。`init` は指定パスへ生成する
+- **cwd の `claude-task-worker.json` / `.local.json` のトップレベル `inheritConfig`（string）でもフラグ無しで同じ土台を指定できる**（`resolveInheritConfigSource()`、`src/config.ts`。フラグ同様プロセス内で1回だけ解決）。フラグが勝ち、2ファイル間は `mergeConfigRaw()` どおり local が勝つ。値は cwd 基準＋`~` 展開（`resolveWorkerFilePath()` を再利用）。非 string・空文字は警告して未指定扱い。土台ファイル側の `inheritConfig` は `readInheritedRawConfig()` が落とす（継承は1段のみ）。`Config` にはパース対象外のキーとして残らない。`init` の生成先はフラグ指定時のみ変える（キーはこれから書く cwd 設定の値のため）
+- 指定ファイルの不在は `index.ts` の起動時（`init` 以外）と `loadConfig()` の両方で拒否する（メッセージは指定元で `--inherit-config <path>` / `inheritConfig <path>` を出し分ける）。`init` は指定パスへ生成する
 - **`getLastRunAt()` は `--inherit-config` を読まず cwd 直下だけを見る**。書き込み側（`writeLastRun()` / `publishLastRunPr()`）がリポジトリ直下固定なので、読み先がずれると再起動のたびに24時間ガードが外れる
 - `--project` では `buildForwardedCommand()` が値を絶対パスにして転送する（転送先は各プロジェクトの cwd で起動するため）
 - スキルはリポジトリ直下の `claude-task-worker.json` を `jq` で直接読むため、土台ファイルの `uiDesign` はスキルに届かない（README に明記済み。スキル改修は未対応）

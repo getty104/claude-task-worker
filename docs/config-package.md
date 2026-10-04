@@ -252,12 +252,21 @@ ctw all
 ctw exec-issue --epic 120
 ```
 
+フラグを毎回付けたくない場合は、リポジトリ直下の `claude-task-worker.json`（個人ごとにパスが違うなら `claude-task-worker.local.json`）に `inheritConfig` を書く。フラグと同じ挙動になり、以降は `claude-task-worker all` だけで土台が読まれる（`--project` の転送先でも各リポジトリの値が使われる）。
+
+```json
+{ "inheritConfig": "~/src/ctw-pack/shared.json" }
+```
+
+- 相対パスはこのファイルのあるディレクトリ（リポジトリ直下）基準、`~` はホーム展開
+- `--inherit-config` を付けた場合はフラグが勝つ。`init` の生成先はフラグ指定時だけ変わる（キーでは変わらない）
+
 ## Step 8. リポジトリごとの差分を書く
 
 設定は次の順に重なり、**後のものが勝つ**。
 
 ```text
---inherit-config のファイル  <  ./claude-task-worker.json  <  ./claude-task-worker.local.json
+--inherit-config / inheritConfig のファイル  <  ./claude-task-worker.json  <  ./claude-task-worker.local.json
 （パック・共通）              （リポジトリ・コミットする）   （個人・コミットしない）
 ```
 

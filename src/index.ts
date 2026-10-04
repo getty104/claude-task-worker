@@ -25,8 +25,6 @@ import {
   buildForwardedCommand,
   hasCloudFlag,
   assertCloudCompatibleCommand,
-  getInheritConfigPath,
-  INHERIT_CONFIG_FLAG,
 } from "./dispatch-args";
 import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
 import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
@@ -39,7 +37,10 @@ import {
   disabledWorkerMessage,
   isWorkerEnabled,
   partitionEnabledWorkers,
+  INHERIT_CONFIG_KEY,
+  resolveInheritConfigSource,
   type CloudAuthStatus,
+  type InheritConfigSource,
 } from "./config";
 import { buildScriptCommand } from "./claude-args";
 import { createLabel } from "./gh";
@@ -136,12 +137,25 @@ if (workerType === "version" || workerType === "--version" || workerType === "-v
 // 待たずに投げっぱなしにする（起動を数秒遅らせないため）。
 void notifyIfOutdated();
 
-// --inherit-config の値欠落・ファイル不在は、設定を読む前（workerFiles のロードより前）に拒否する。
+// --inherit-config / inheritConfig キーの土台ファイル不在は、設定を読む前（workerFiles のロードより前）に拒否する。
 // init は指定パスへ設定ファイルを生成するコマンドなので、不在を許容する。
-const inheritConfigPath = getInheritConfigPath();
-if (inheritConfigPath && workerType !== "init" && !existsSync(inheritConfigPath)) {
-  console.error(`${INHERIT_CONFIG_FLAG} ${inheritConfigPath} does not exist`);
-  process.exit(1);
+// cwd の設定ファイルが読めない場合はここでは判定せず、後段の設定読み込みのエラーに任せる。
+// --project では起動元の inheritConfig キーは転送されない（転送先は各プロジェクトの設定で解決する）ため検査しない。
+if (workerType !== "init") {
+  let inheritSource: InheritConfigSource | null;
+  try {
+    inheritSource = resolveInheritConfigSource();
+  } catch {
+    inheritSource = null;
+  }
+  if (
+    inheritSource &&
+    !(hasProjectFilter() && inheritSource.origin === INHERIT_CONFIG_KEY) &&
+    !existsSync(inheritSource.path)
+  ) {
+    console.error(`${inheritSource.origin} ${inheritSource.path} does not exist`);
+    process.exit(1);
+  }
 }
 
 const customWorkers: CustomWorker[] =

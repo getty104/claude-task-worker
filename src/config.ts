@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep as SEP } from "node:path";
 import { getInheritConfigPath, hasCloudFlag, INHERIT_CONFIG_FLAG } from "./dispatch-args";
 
@@ -613,12 +614,48 @@ export function resolveInheritedRelativePaths(
   return result;
 }
 
-// 指定された土台ファイルの不在は、サイレントに既定へ倒さず拒否する（cwd 直下ファイルの不在とは違う）。
-function readInheritedRawConfig(path: string, repoRoot: string): Record<string, unknown> {
-  if (!existsSync(path)) {
-    throw new Error(`${INHERIT_CONFIG_FLAG} ${path} does not exist`);
+// 土台ファイルの指定元。エラーメッセージで「どこで指定したか」を出し分けるために持つ。
+export const INHERIT_CONFIG_KEY = "inheritConfig";
+export interface InheritConfigSource {
+  path: string;
+  origin: typeof INHERIT_CONFIG_FLAG | typeof INHERIT_CONFIG_KEY;
+}
+let cachedInheritConfigSource: InheritConfigSource | null | undefined;
+
+// 土台ファイルの解決。--inherit-config（フラグ）が cwd の claude-task-worker(.local).json の
+// inheritConfig キーより勝つ。キーの相対パスは書いたファイルの所在（＝cwd）基準、~ は home 展開。
+// フラグと同じくプロセス内で1回だけ解決する。
+export function resolveInheritConfigSource(): InheritConfigSource | null {
+  if (cachedInheritConfigSource !== undefined) return cachedInheritConfigSource;
+  const flagPath = getInheritConfigPath();
+  if (flagPath) return (cachedInheritConfigSource = { path: flagPath, origin: INHERIT_CONFIG_FLAG });
+  const raw = readCwdRawConfig();
+  if (!(INHERIT_CONFIG_KEY in raw)) return (cachedInheritConfigSource = null);
+  const val = raw[INHERIT_CONFIG_KEY];
+  if (typeof val !== "string" || val.trim().length === 0) {
+    console.warn(`[config] invalid ${INHERIT_CONFIG_KEY}: ${String(val)}, ignoring`);
+    return (cachedInheritConfigSource = null);
   }
-  return resolveInheritedRelativePaths(readRawConfig(path), dirname(path), repoRoot);
+  cachedInheritConfigSource = {
+    path: resolveWorkerFilePath(val.trim(), process.cwd(), homedir()),
+    origin: INHERIT_CONFIG_KEY,
+  };
+  return cachedInheritConfigSource;
+}
+
+// テスト用。キャッシュを未解決へ戻す。
+export function resetInheritConfigSourceCache(): void {
+  cachedInheritConfigSource = undefined;
+}
+
+// 指定された土台ファイルの不在は、サイレントに既定へ倒さず拒否する（cwd 直下ファイルの不在とは違う）。
+// 土台側の inheritConfig は解釈しない（継承は1段のみ）。
+function readInheritedRawConfig(source: InheritConfigSource, repoRoot: string): Record<string, unknown> {
+  if (!existsSync(source.path)) {
+    throw new Error(`${source.origin} ${source.path} does not exist`);
+  }
+  const { [INHERIT_CONFIG_KEY]: _ignored, ...raw } = readRawConfig(source.path);
+  return resolveInheritedRelativePaths(raw, dirname(source.path), repoRoot);
 }
 
 // cwd 直下の claude-task-worker.json に claude-task-worker.local.json を重ねた生JSON。
@@ -626,11 +663,13 @@ function readCwdRawConfig(): Record<string, unknown> {
   return mergeConfigRaw(readRawConfig(CONFIG_PATH), readRawConfig(LOCAL_CONFIG_PATH));
 }
 
-// 重ね順（後が勝つ）: --inherit-config < cwd の claude-task-worker.json < cwd の claude-task-worker.local.json。
+// 重ね順（後が勝つ）: --inherit-config（または inheritConfig キー） < cwd の claude-task-worker.json < cwd の claude-task-worker.local.json。
 export function loadConfig(): Config {
-  const inheritPath = getInheritConfigPath();
+  const inheritSource = resolveInheritConfigSource();
   const cwdRaw = readCwdRawConfig();
-  const raw = inheritPath ? mergeConfigRaw(readInheritedRawConfig(inheritPath, process.cwd()), cwdRaw, true) : cwdRaw;
+  const raw = inheritSource
+    ? mergeConfigRaw(readInheritedRawConfig(inheritSource, process.cwd()), cwdRaw, true)
+    : cwdRaw;
 
   const result: Config = {
     ...DEFAULT_CONFIG,
