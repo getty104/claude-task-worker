@@ -321,7 +321,7 @@ test("isCloudWorker returns true for every worker when --cloud is passed", (t) =
   }
 });
 
-// M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
+// M1: 通常のサインイン（旧 `docs/cloud-prerequisite-checks.md`（git 履歴） verbatim）
 test("checkCloudAuth allows a normal claude.ai sign-in", () => {
   const errors = checkCloudAuth({
     status: { kind: "ok", loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # クラウド実行（--cloud フラグ）の実クラウドセッションによる
-# smoke test を補助するスクリプト。docs/cloud-smoke-test.md から参照される。
+# smoke test を補助するスクリプト。手順は git 履歴の旧 docs/cloud-smoke-test.md を参照。
 #
 # 自動判定できる範囲（事前条件・実行前後のスナップショット差分・ラベル遷移・
 # closing参照PR候補の列挙）だけを担う。claude.ai上のセッション表示・最終報告
@@ -133,10 +133,10 @@ cmd_preflight() {
   if command -v claude >/dev/null 2>&1; then
     local claude_version
     claude_version="$(claude --version 2>/dev/null || echo "")"
-    echo "[INFO] claude --version: $claude_version (docs/cloud-smoke-test.md was last measured against $EXPECTED_CLAUDE_VERSION; re-measure S-1/S-2 if newer)"
+    echo "[INFO] claude --version: $claude_version (last measured against $EXPECTED_CLAUDE_VERSION; re-measure S-1/S-2 if newer)"
   fi
   if command -v herdr >/dev/null 2>&1; then
-    echo "[INFO] herdr --version: $(herdr --version 2>/dev/null || echo unknown) (docs/cloud-smoke-test.md was last measured against $EXPECTED_HERDR_VERSION; re-measure S-1/S-2 if newer)"
+    echo "[INFO] herdr --version: $(herdr --version 2>/dev/null || echo unknown) (last measured against $EXPECTED_HERDR_VERSION; re-measure S-1/S-2 if newer)"
   fi
 
   echo ""
@@ -274,7 +274,7 @@ query($owner: String!, $repo: String!, $issue: Int!) {
 
 cmd_checklist() {
   cat <<'EOF'
-人の目視が必要な項目（このスクリプトでは自動判定しない。docs/cloud-smoke-test.md 参照）:
+人の目視が必要な項目（このスクリプトでは自動判定しない）:
   [ ] claude.ai/code 上でクラウドセッションが作成され、対象タスクの内容で走っている（基準2）
   [ ] クラウドセッションが最終報告コメント（見出し: ## claude-task-worker 実行結果）を投稿した（基準7）
   [ ] クラウドセッションが cc-cloud-done ラベルを付与した（基準7）

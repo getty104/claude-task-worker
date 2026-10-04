@@ -100,7 +100,7 @@ test("cloud failure guidance survives truncation alongside the error tail when o
   const longError = "e".repeat(1500);
   const { output } = appendCloudFailureGuidance({ status: "failed", output: longError }, true);
   const text = buildTaskNotificationText({ status: "failed", ...base, output });
-  assert.ok(text.includes("docs/cloud-prerequisite-checks.md"), "guidance text must survive truncation");
+  assert.ok(text.includes("docs/cloud.md"), "guidance text must survive truncation");
   assert.ok(text.includes(longError.slice(-1000)), "tail of the actual error must survive truncation");
 });
 

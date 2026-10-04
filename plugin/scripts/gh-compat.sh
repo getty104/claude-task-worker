@@ -4,7 +4,7 @@
 #
 # なぜ必要か: クラウドセッション（`claude --cloud`）の GitHub プロキシは操作名単位の
 # アローリストで、`gh (issue|pr) view --json` はフィールドを問わず GraphQL 経由になり
-# 403 で落ちる（実測は docs/cloud-graphql-proxy-limits.md）。加えてクラウド VM の gh は
+# 403 で落ちる（実測。Issue #226）。加えてクラウド VM の gh は
 # 一方 REST（`gh api repos/{o}/{r}/...`）と git のローカル導出はゲートを通らない。
 #
 # gh のバージョンを上げても解決しない: 2026-08-29 に gh 2.98.0 で `GH_DEBUG=api` を取ったところ、

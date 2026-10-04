@@ -51,7 +51,7 @@ $ARGUMENTS
 | `skill` | `command` の値 | 起動するスキルの上書き（通常は不要） |
 | `model` | `opus` | 実行モデル |
 | `advisorModel` | `""`（渡さない） | `--advisor` に渡すモデル |
-| `effort` | `high` | 推論の深さ |
+| `effort` | `medium` | 推論の深さ |
 | `pollingIntervalSeconds` | `60` | ポーリング間隔（正の数）。scheduled では「24時間経過したかの確認頻度」 |
 | `cooldownSeconds` | `0` | 前回完了からの待機（issue / pr のみ） |
 | `maxConcurrentTasks` | `1` | 同時実行数（issue / pr のみ） |

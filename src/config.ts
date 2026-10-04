@@ -288,7 +288,7 @@ export type CloudAuthStatus =
 
 // claude.ai サインイン以外の構成（第三者プロバイダ・APIキー認証・未サインイン・カスタム
 // エンドポイント）でのクラウドセッション作成失敗を、起動前に検出する。
-// `docs/cloud-prerequisite-checks.md` の判定式・文面案が正。判定不能（コマンド実行/パース
+// 旧 `docs/cloud-prerequisite-checks.md`（git 履歴） の判定式・文面案が正。判定不能（コマンド実行/パース
 // 失敗）はエラーにしない — サインイン状態が読めないことを拒否根拠にしない安全側の倒し方。
 export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: string }): string[] {
   if (input.status.kind === "unknown") return [];
