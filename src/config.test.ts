@@ -574,6 +574,80 @@ test("getLastRunAt reads the cwd claude-task-worker.json regardless of --inherit
   assert.deepEqual(out, [Date.parse("2026-08-17T09:00:00.000Z"), null]);
 });
 
+test("inheritConfig key layers the base exactly like --inherit-config", () => {
+  const base = mkdtempSync(join(tmpdir(), "ctw-inherit-base-"));
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(
+    join(base, "shared.json"),
+    JSON.stringify({
+      remoteEnvId: "env_base",
+      labels: ["base"],
+      workerFiles: ["w.ts"],
+      fixReviewPointCallbackCommentMessage: "base",
+    }),
+  );
+  writeFileSync(join(cwd, "claude-task-worker.json"), JSON.stringify({ remoteEnvId: "env_cwd", labels: ["cwd"] }));
+  writeFileSync(join(cwd, "claude-task-worker.local.json"), JSON.stringify({ labels: ["local"] }));
+  const expr =
+    "(c => [c.remoteEnvId, c.labels, c.workerFiles, c.fixReviewPointCallbackCommentMessage])(m.loadConfig())";
+  const viaFlag = evalConfigIn(cwd, expr, ["--inherit-config", join(base, "shared.json")]);
+  writeFileSync(
+    join(cwd, "claude-task-worker.json"),
+    JSON.stringify({ inheritConfig: join(base, "shared.json"), remoteEnvId: "env_cwd", labels: ["cwd"] }),
+  );
+  assert.deepEqual(evalConfigIn(cwd, expr), viaFlag);
+  assert.deepEqual(viaFlag, ["env_cwd", ["base", "local"], [join(base, "w.ts")], "base"]);
+});
+
+test("inheritConfig: flag beats key, local.json beats claude-task-worker.json, relative and ~ paths resolve", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(join(cwd, "a.json"), JSON.stringify({ remoteEnvId: "env_a" }));
+  writeFileSync(join(cwd, "b.json"), JSON.stringify({ remoteEnvId: "env_b" }));
+  writeFileSync(join(cwd, "c.json"), JSON.stringify({ remoteEnvId: "env_c" }));
+  writeFileSync(join(cwd, "claude-task-worker.json"), JSON.stringify({ inheritConfig: "a.json" }));
+  assert.equal(evalConfigIn(cwd, "m.loadConfig().remoteEnvId"), "env_a");
+  writeFileSync(join(cwd, "claude-task-worker.local.json"), JSON.stringify({ inheritConfig: "./b.json" }));
+  assert.equal(evalConfigIn(cwd, "m.loadConfig().remoteEnvId"), "env_b");
+  assert.equal(evalConfigIn(cwd, "m.loadConfig().remoteEnvId", ["--inherit-config", join(cwd, "c.json")]), "env_c");
+  assert.deepEqual(evalConfigIn(cwd, "m.resolveInheritConfigSource()", ["--inherit-config", join(cwd, "c.json")]), {
+    path: join(cwd, "c.json"),
+    origin: "--inherit-config",
+  });
+  writeFileSync(join(cwd, "claude-task-worker.local.json"), JSON.stringify({ inheritConfig: "~/x.json" }));
+  const homeOut = evalConfigIn(cwd, "[m.resolveInheritConfigSource(), (await import('node:os')).homedir()]") as [
+    { path: string; origin: string },
+    string,
+  ];
+  assert.deepEqual(homeOut[0], { path: join(homeOut[1], "x.json"), origin: "inheritConfig" });
+});
+
+test("inheritConfig in the base file is ignored and does not leak into Config", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(join(cwd, "base.json"), JSON.stringify({ inheritConfig: "missing.json", remoteEnvId: "env_base" }));
+  writeFileSync(join(cwd, "claude-task-worker.json"), JSON.stringify({ inheritConfig: "base.json" }));
+  assert.deepEqual(evalConfigIn(cwd, "(c => [c.remoteEnvId, 'inheritConfig' in c])(m.loadConfig())"), [
+    "env_base",
+    false,
+  ]);
+});
+
+test("inheritConfig rejects a missing file naming the key, and ignores invalid values", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  const expr = "(() => { try { return m.loadConfig().remoteEnvId; } catch (e) { return e.message; } })()";
+  writeFileSync(join(cwd, "claude-task-worker.json"), JSON.stringify({ inheritConfig: "missing.json" }));
+  assert.match(evalConfigIn(cwd, expr) as string, /^inheritConfig .*missing\.json does not exist/);
+  for (const invalid of [1, "", "  ", null]) {
+    writeFileSync(
+      join(cwd, "claude-task-worker.json"),
+      JSON.stringify({ inheritConfig: invalid, remoteEnvId: "env_cwd" }),
+    );
+    assert.deepEqual(evalConfigIn(cwd, "[m.loadConfig().remoteEnvId, m.resolveInheritConfigSource()]"), [
+      "env_cwd",
+      null,
+    ]);
+  }
+});
+
 test("init's seedCwdLastRun fills only missing cwd lastRun entries", () => {
   const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
   writeFileSync(
