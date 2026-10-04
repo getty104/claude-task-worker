@@ -24,6 +24,7 @@ const {
   checkCloudAuth,
   isCloudWorker,
   mergeConfigRaw,
+  resolveInheritedRelativePaths,
   partitionEnabledWorkers,
   disabledWorkerMessage,
 } = (await import("./config")) as typeof ConfigModule;
@@ -472,4 +473,140 @@ test("claude-task-worker.local.json can toggle workers.<name>.enabled over the b
   assert.equal(exec.model, "sonnet");
   assert.equal(triage, true);
   assert.equal(other, true);
+});
+
+// cwd とコマンドライン引数を指定して、新しいプロセスで config.ts の式を評価する（引数・cwd はモジュールロード時に固定されるため）。
+function evalConfigIn(cwd: string, expr: string, args: string[] = []): unknown {
+  const configUrl = pathToFileURL(resolve("src/config.ts")).href;
+  const script = `const m = await import(${JSON.stringify(configUrl)}); console.log(JSON.stringify(${expr}));`;
+  const out = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      script,
+      "--",
+      ...args,
+    ],
+    { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  return JSON.parse(out.trim().split("\n").at(-1) as string);
+}
+
+test("loadConfig without --inherit-config reads only the cwd files, unchanged", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ctw-inherit-"));
+  writeFileSync(join(dir, "claude-task-worker.json"), JSON.stringify({ uiDesign: { designDir: "designs/" } }));
+  writeFileSync(join(dir, "claude-task-worker.local.json"), JSON.stringify({ remoteEnvId: "env_local" }));
+  assert.deepEqual(evalConfigIn(dir, "[m.loadConfig().uiDesign.designDir, m.loadConfig().remoteEnvId]"), [
+    "designs/",
+    "env_local",
+  ]);
+});
+
+test("loadConfig layers --inherit-config < cwd claude-task-worker.json < cwd local.json", () => {
+  const base = mkdtempSync(join(tmpdir(), "ctw-inherit-base-"));
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(
+    join(base, "shared.json"),
+    JSON.stringify({ remoteEnvId: "env_base", labels: ["base"], fixReviewPointCallbackCommentMessage: "base" }),
+  );
+  // --inherit-config の所在ディレクトリの local.json は読まない。
+  writeFileSync(join(base, "claude-task-worker.local.json"), JSON.stringify({ labels: ["ignored"] }));
+  writeFileSync(join(cwd, "claude-task-worker.json"), JSON.stringify({ remoteEnvId: "env_cwd", labels: ["cwd"] }));
+  writeFileSync(join(cwd, "claude-task-worker.local.json"), JSON.stringify({ labels: ["local"] }));
+  const out = evalConfigIn(
+    cwd,
+    "(c => [c.remoteEnvId, c.labels, c.fixReviewPointCallbackCommentMessage])(m.loadConfig())",
+    ["--inherit-config", join(base, "shared.json")],
+  );
+  assert.deepEqual(out, ["env_cwd", ["local"], "base"]);
+});
+
+test("loadConfig works from --inherit-config alone when the cwd has no config file", () => {
+  const base = mkdtempSync(join(tmpdir(), "ctw-inherit-base-"));
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(join(base, "shared.json"), JSON.stringify({ remoteEnvId: "env_base" }));
+  assert.equal(
+    evalConfigIn(cwd, "m.loadConfig().remoteEnvId", ["--inherit-config", join(base, "shared.json")]),
+    "env_base",
+  );
+});
+
+test("loadConfig rejects a missing --inherit-config file instead of falling back", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  const expr = "(() => { try { m.loadConfig(); return 'loaded'; } catch (e) { return e.message; } })()";
+  assert.match(
+    evalConfigIn(cwd, expr, ["--inherit-config", join(cwd, "missing.json")]) as string,
+    /--inherit-config .*missing\.json does not exist/,
+  );
+});
+
+test("getLastRunAt reads the cwd claude-task-worker.json regardless of --inherit-config", () => {
+  const base = mkdtempSync(join(tmpdir(), "ctw-inherit-base-"));
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(
+    join(base, "shared.json"),
+    JSON.stringify({ lastRun: { "update-design-md": "2026-01-01T00:00:00.000Z" } }),
+  );
+  writeFileSync(
+    join(cwd, "claude-task-worker.json"),
+    JSON.stringify({ lastRun: { "update-coding-guidelines": "2026-08-17T09:00:00.000Z" } }),
+  );
+  const out = evalConfigIn(
+    cwd,
+    "[m.getLastRunAt('update-coding-guidelines'), m.getLastRunAt('update-design-md') ?? null]",
+    ["--inherit-config", join(base, "shared.json")],
+  );
+  assert.deepEqual(out, [Date.parse("2026-08-17T09:00:00.000Z"), null]);
+});
+
+test("init's seedCwdLastRun fills only missing cwd lastRun entries", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ctw-inherit-cwd-"));
+  writeFileSync(
+    join(cwd, "claude-task-worker.json"),
+    JSON.stringify({ labels: ["keep"], lastRun: { "update-coding-guidelines": "2026-08-17T09:00:00.000Z" } }),
+  );
+  const initUrl = pathToFileURL(resolve("src/commands/init.ts")).href;
+  execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--import",
+      pathToFileURL(resolve("scripts/test-resolver.mjs")).href,
+      "--input-type=module",
+      "-e",
+      `const m = await import(${JSON.stringify(initUrl)}); m.seedCwdLastRun(new Date("2026-10-04T00:00:00.000Z"));`,
+    ],
+    { cwd, stdio: "ignore" },
+  );
+  const written = JSON.parse(readFileSync(join(cwd, "claude-task-worker.json"), "utf-8"));
+  assert.deepEqual(written.labels, ["keep"]);
+  assert.equal(written.lastRun["update-coding-guidelines"], "2026-08-17T09:00:00.000Z");
+  assert.equal(written.lastRun["update-requirement-rules"], "2026-10-04T00:00:00.000Z");
+  assert.equal(written.lastRun["update-design-md"], "2026-10-04T00:00:00.000Z");
+});
+
+test("resolveInheritedRelativePaths resolves designDir from the config file's directory, relative to the repo", () => {
+  assert.deepEqual(resolveInheritedRelativePaths({ uiDesign: { designDir: "designs" } }, "/repo/conf", "/repo"), {
+    uiDesign: { designDir: join("conf", "designs") },
+  });
+  assert.deepEqual(resolveInheritedRelativePaths({ uiDesign: { designDir: ".." } }, "/repo/conf", "/repo"), {
+    uiDesign: { designDir: "." },
+  });
+});
+
+test("resolveInheritedRelativePaths leaves a designDir outside the repo for parseUiDesignEntry to reject", (t) => {
+  silenceWarn(t);
+  const raw = resolveInheritedRelativePaths({ uiDesign: { designDir: "designs" } }, "/elsewhere", "/repo");
+  assert.equal(parseUiDesignEntry(raw["uiDesign"]).designDir, DEFAULT_UI_DESIGN_CONFIG.designDir);
+});
+
+test("resolveInheritedRelativePaths makes relative workerFiles absolute and keeps ~ and absolute entries", () => {
+  assert.deepEqual(
+    resolveInheritedRelativePaths({ workerFiles: ["w/a.ts", "~/b.ts", "/abs/c.ts"] }, "/conf", "/repo"),
+    { workerFiles: [resolve("/conf", "w/a.ts"), "~/b.ts", "/abs/c.ts"] },
+  );
 });

@@ -228,6 +228,22 @@ claude-task-worker exec-issue --cloud --debug
 
 投稿の担当は実行形態で違う。ローカルはワーカーが報告そのもの（`claude -p` の stdout / transcript）を持っているのでワーカーが投稿し、クラウドはワーカーに報告が届かないのでセッション自身に投稿させる（ワーカーはそれを回収して Slack へ載せる）。定期ワーカー（`update-*`）の投稿先は実行記録PR（`ctw-last-run-<ワーカー名>`）。クラウド実行の完了検知（`cc-cloud-done`）はフラグの有無に関わらず従来どおり動く。
 
+### `--inherit-config <path>`
+
+指定した設定ファイルを土台として読み、その上に起動ディレクトリ（cwd）直下の `claude-task-worker.json` → `claude-task-worker.local.json` を重ねる（後が勝つ。マージ規則は下記「ローカル上書き」と同じ）。複数リポジトリで共通の設定を1ファイルにまとめ、リポジトリごとの差分だけを各リポジトリに置く用途。
+
+```bash
+claude-task-worker all --inherit-config ~/ctw/shared.json
+claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ設定ファイルを生成する
+```
+
+- 未指定時は従来どおり cwd 直下の `claude-task-worker.json` / `claude-task-worker.local.json` だけを読む
+- 値自体の相対パスは起動時の cwd 基準。ファイル内の相対パス（`workerFiles` / `uiDesign.designDir`）は**そのファイルの所在ディレクトリ基準**で解決する
+- `claude-task-worker.local.json` は常に cwd 直下のものを読む（指定ファイルと同じディレクトリのものは読まない）。cwd 直下の `claude-task-worker.json` は無くてもよい
+- 指定ファイルが存在しなければエラー終了する（既定ファイルへは倒さない）。`--project` では絶対パスにして各プロジェクトへ転送する
+- 定期ワーカーの `lastRun` は指定に関わらずリポジトリ直下の `claude-task-worker.json` で読み書きする。リポジトリ直下に同ファイルが無ければ `lastRun` だけを持つファイルが作られる（他のキーを持たないので土台の設定とは衝突しない）。`init` を `--inherit-config` 付きで実行した場合も、未記録のワーカーの `lastRun` はリポジトリ直下へ記録する（セットアップ直後に定期ワーカーが一斉に走らないようにするため）
+- スキル（`create-ui-design` / `update-design-md` / `triage-created-issue`）はリポジトリ直下の `claude-task-worker.json` を直接読むため、**`uiDesign` の設定は `--inherit-config` のファイルに書いてもスキルには届かない**。`uiDesign` はリポジトリ直下に書くこと
+
 ### Pen CLI のログイン
 
 `.pen` を扱うスキルは Pen CLI の認証を必要とする。UIデザイン先行ワークフローを使うなら一度ログインしておく。

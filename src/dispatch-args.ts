@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 // --project と --cloud のどちらも「ワーカー起動」を前提とするフラグのため、
 // 非互換コマンド集合は共有する。
 const FLAG_INCOMPATIBLE_COMMANDS = [
@@ -73,6 +75,25 @@ export function resetDebugFlagCache(): void {
   cachedDebugFlag = undefined;
 }
 
+// --inherit-config <path> は土台にする設定ファイル。cwd 直下の claude-task-worker.json /
+// claude-task-worker.local.json がその上に重なる（衝突キーは cwd 側が勝つ）。
+// 相対パスは起動時の cwd 基準で絶対化し、--cloud と同じくプロセス内で1回だけ解決する。未指定なら null。
+export const INHERIT_CONFIG_FLAG = "--inherit-config";
+let cachedInheritConfigPath: string | null | undefined;
+
+export function getInheritConfigPath(): string | null {
+  if (cachedInheritConfigPath === undefined) {
+    const values = collectFlagValues(process.argv, INHERIT_CONFIG_FLAG);
+    cachedInheritConfigPath = values.length > 0 ? resolve(values[values.length - 1]) : null;
+  }
+  return cachedInheritConfigPath;
+}
+
+// テスト用。キャッシュを未解決へ戻す。
+export function resetInheritConfigPathCache(): void {
+  cachedInheritConfigPath = undefined;
+}
+
 export function assertCloudCompatibleCommand(command: string): void {
   if (FLAG_INCOMPATIBLE_COMMANDS.includes(command)) {
     console.error(`[worker] --cloud cannot be used with the "${command}" command`);
@@ -89,6 +110,12 @@ export function buildForwardedCommand(argv: string[]): string {
   const tokens: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--project") {
+      i++;
+      continue;
+    }
+    // 転送先は各プロジェクトの cwd で起動するため、相対パスのままだと解決し直されてしまう。
+    if (argv[i] === INHERIT_CONFIG_FLAG && i + 1 < argv.length) {
+      tokens.push(argv[i], resolve(argv[i + 1]));
       i++;
       continue;
     }
