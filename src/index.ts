@@ -37,6 +37,7 @@ import {
   disabledWorkerMessage,
   isWorkerEnabled,
   partitionEnabledWorkers,
+  INHERIT_CONFIG_KEY,
   resolveInheritConfigSource,
   type CloudAuthStatus,
   type InheritConfigSource,
@@ -139,6 +140,7 @@ void notifyIfOutdated();
 // --inherit-config / inheritConfig キーの土台ファイル不在は、設定を読む前（workerFiles のロードより前）に拒否する。
 // init は指定パスへ設定ファイルを生成するコマンドなので、不在を許容する。
 // cwd の設定ファイルが読めない場合はここでは判定せず、後段の設定読み込みのエラーに任せる。
+// --project では起動元の inheritConfig キーは転送されない（転送先は各プロジェクトの設定で解決する）ため検査しない。
 if (workerType !== "init") {
   let inheritSource: InheritConfigSource | null;
   try {
@@ -146,7 +148,11 @@ if (workerType !== "init") {
   } catch {
     inheritSource = null;
   }
-  if (inheritSource && !existsSync(inheritSource.path)) {
+  if (
+    inheritSource &&
+    !(hasProjectFilter() && inheritSource.origin === INHERIT_CONFIG_KEY) &&
+    !existsSync(inheritSource.path)
+  ) {
     console.error(`${inheritSource.origin} ${inheritSource.path} does not exist`);
     process.exit(1);
   }
