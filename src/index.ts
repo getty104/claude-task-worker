@@ -236,7 +236,7 @@ async function assertRunModeAvailable(): Promise<void> {
 }
 
 // `claude auth status --json` を実行してパースする。未ログイン時は exit 1 だが stdout に
-// JSON が出る（`docs/cloud-prerequisite-checks.md` M3）ため、終了コードでは判定しない。
+// JSON が出る（旧 `docs/cloud-prerequisite-checks.md`（git 履歴） M3）ため、終了コードでは判定しない。
 // 実行・パースに失敗した場合は「判定不能」として扱い、起動を止める根拠にしない。
 async function readCloudAuthStatus(): Promise<CloudAuthStatus> {
   let stdout: string;

@@ -14,7 +14,7 @@
 
 ## クラウド実行では GitHub MCP を優先する
 
-クラウドセッション（`claude --cloud` / Claude Code on the web）の GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず 403** になる（実測は `docs/cloud-graphql-proxy-limits.md`）。この状態ではタスクセッションが Issue/PR 本文を1文字も読めない。GitHub MCP はこのプロキシを経由しないため、クラウド実行でも読み書きが成立する。
+クラウドセッション（`claude --cloud` / Claude Code on the web）の GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず 403** になる（実測。Issue #226）。この状態ではタスクセッションが Issue/PR 本文を1文字も読めない。GitHub MCP はこのプロキシを経由しないため、クラウド実行でも読み書きが成立する。
 
 **クラウド実行かどうかはスキル本文では判定しない。** ワーカーが起動プロンプト本文へ「クラウド実行なので GitHub MCP を優先する」旨を注入する（`src/claude-args.ts` の `buildCloudGitHubAccessInstruction()`）。その指示が無ければローカル実行として扱い、`gh` を第一手段にする。
 

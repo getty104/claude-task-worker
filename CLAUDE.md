@@ -258,7 +258,7 @@ SKILL.md のプリアンブル（`!` インライン実行）のコマンドが�
 
 レビュースレッドの一括 Resolve は `fix-review-point` のフェーズ6が `resolve-pr-comments` スキルを呼んで行う（`plugin/skills/resolve-pr-comments/SKILL.md`）。**`Stop` フックへ移してはいけない**。同フックはセッションの終わり方に関わらず必ず走るため、フェーズ0の安全ガード（worktree 外・デフォルトブランチ）や実装フェーズの失敗で中断した場合でも、**1件も修正していないのに未解決スレッドが全件 Resolve される**。`triage-pr` は Resolve 済みを「対応済み」とみなすため、指摘が消えたまま PR がマージされる。Resolve は「修正を push し終えた」ことを前提にした操作であり、その前提を判定できるのはスキル本文だけである。
 
-Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` から取得）で、**クラウド実行でも成立する**。`resolveReviewThread` は REST 代替が無く `gh` 経路では GraphQL 直叩きになるため、クラウドセッションのプロキシで 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、MCP はそのゲートを迂回する。したがってワーカープロセス側から Resolve スクリプトを実行する必要はない（`src/workers/fix-review-point.ts` の `onCompleted` はコールバックコメント投稿のみで、レビュースレッドには触らない）。`gh` フォールバック（`plugin/scripts/resolve-pr-comments.sh`）はローカル実行向けに残してあり、失敗時は非0で終了して「0件」と区別できるようにしてある。
+Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resolve_thread`、`threadId` は `pull_request_read` の `get_review_comments` から取得）で、**クラウド実行でも成立する**。`resolveReviewThread` は REST 代替が無く `gh` 経路では GraphQL 直叩きになるため、クラウドセッションのプロキシで 403 になる（`docs/cloud-graphql-proxy-limits.md`（削除済み。git 履歴を参照） B4）が、MCP はそのゲートを迂回する。したがってワーカープロセス側から Resolve スクリプトを実行する必要はない（`src/workers/fix-review-point.ts` の `onCompleted` はコールバックコメント投稿のみで、レビュースレッドには触らない）。`gh` フォールバック（`plugin/scripts/resolve-pr-comments.sh`）はローカル実行向けに残してあり、失敗時は非0で終了して「0件」と区別できるようにしてある。
 
 ### `workers.<name>.enabled`（ワーカー単位の有効/無効）
 
@@ -354,7 +354,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 
 #### TTY 要件を `script(1)` の疑似 pty で満たす
 
-- **新規クラウドセッションの作成には TTY が必要**。claude CLI は stdout が TTY でない場合 print モード扱いになり、非TTY での `--cloud` は `Error: --cloud requires an interactive terminal.` で拒否される（実測 `docs/cloud-session-launch-flags.md` T1、claude 2.1.247）。ワーカーの spawn 自体は TTY を持たないため、この要件を `script(1)` の疑似 pty で満たす（`buildScriptCommand()`、`src/claude-args.ts`）: darwin は `script -q /dev/null <command> <args...>`（BSD script は `-c` を持たず、コマンドと引数をそのまま後続に並べる）、linux は `script -qec "<command と args を shellQuote で連結した1文字列>" /dev/null`（util-linux の `-c` は単一のコマンド文字列を要求する）。それ以外の platform（Windows 等）は例外を投げ、サイレントに壊れた形へは倒さない
+- **新規クラウドセッションの作成には TTY が必要**。claude CLI は stdout が TTY でない場合 print モード扱いになり、非TTY での `--cloud` は `Error: --cloud requires an interactive terminal.` で拒否される（実測 `docs/cloud-session-launch-flags.md`（削除済み。git 履歴を参照） T1、claude 2.1.247）。ワーカーの spawn 自体は TTY を持たないため、この要件を `script(1)` の疑似 pty で満たす（`buildScriptCommand()`、`src/claude-args.ts`）: darwin は `script -q /dev/null <command> <args...>`（BSD script は `-c` を持たず、コマンドと引数をそのまま後続に並べる）、linux は `script -qec "<command と args を shellQuote で連結した1文字列>" /dev/null`（util-linux の `-c` は単一のコマンド文字列を要求する）。それ以外の platform（Windows 等）は例外を投げ、サイレントに壊れた形へは倒さない
 - 可用性は `resolveScriptAvailable()`（`src/index.ts`。platform が darwin/linux かの判定＋ `which script` の成否、ENOENT・非0終了はいずれも「利用不可」）が確認し、満たさなければ `assertCloudAvailable()`（内部で `checkCloudConfig()` を呼ぶ）が**タスクを1件も起動せずエラー終了**する。**サイレントにローカル実行へフォールバックしない**（実行形態が要件と食い違ったまま走る方が事故が大きいため）。エラーメッセージはワーカー名ではなく `--cloud` フラグを指す文言にする（プロセス単位の指定であり、特定ワーカーの設定ミスではないため）。`checkCloudConfig()` は `mode` フィールドを持たず、mode に依らず同じ基準で判定する
 - pty 経由の stdout には ANSI/OSC エスケープ・制御文字が混入するため、`normalizePtyOutput()`（`src/herdr-runner.ts`）で除去してから `extractCloudSessionId()` にかける。**空白ではなく空文字へ置換する**のは、空白に潰すと URL 中に混入したエスケープが `https://claude.ai/code/` の連続一致を壊すため
 - `claude --cloud` は作成後すぐ exit する短命プロセスなので、常駐タブ・TUI の管理は不要。`createCloudSession()`（`src/process-manager.ts`）は `buildScriptCommand("claude", buildCloudCreateArgs(args, initialPrompt))` を `spawn()` し、stdout の `data` ごとに ID 抽出を試みて、ID を拾うか終了するかのどちらかで決着させる。この script(1) 子プロセス自体は短命かつ通常の `finishTask` 経路を通らないため `childProcesses` 台帳へは登録しない
@@ -373,7 +373,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - PR 系のローカルブランチ掃除（`removeWorktreeByBranch()` / `deleteLocalBranch()` / `localBranchExists()` のプリフライト）は**スキップする**。ローカルの checkout 競合はクラウド実行では発生しない（`gh pr checkout` はクラウド VM 側で走る）
 - **副作用**: `exec-issue` の PR 実在検証で「worktreeId を head とする PR」の条件が成立しなくなる（クラウドセッションは作業ブランチ名を自分で決め、ローカルからはその名前を取得する手段が無い）。代わりに `selectOwnedClosingPr()`（`src/workers/exec-issue.ts`）が closing 参照PRの **base ブランチ一致 ＋ 作成時刻がタスク起動時刻以降**で所有権を判定する。所有権を確認できなければ `cc-pr-created` を付けず `cc-need-human-check` へ倒す
 - **closing 参照だけでは Epic 配下のサブ Issue を検出できない**。GitHub は **base がデフォルトブランチでない PR に closing reference（linked issue）を作らない**ため、PR body に `Closes #N` があっても `closedByPullRequestsReferences` は 0 件のまま（実測で確認済み）。サブ Issue の PR は base が `cc-epic-<N>` なので、クラウド実行では判定材料が全て尽き、**PR が正しく作られていても必ず `cc-need-human-check` に落ちる**。そこで `verifyPrCreated()` は closing 参照が空だった場合に `listPrsCrossReferencingIssue()`（`src/gh.ts`）へフォールバックする。timeline（REST `repos/{o}/{r}/issues/{n}/timeline`）の `cross-referenced` イベントは base に依存せず PR 作成と同時に記録されるため、ここからPR番号を拾って詳細（base / head / state / created_at / body）を REST で引き直す。ただし `cross-referenced` は closing keyword の有無を保証しない（`Refs #N` のような単なる言及でも記録される）ため、`bodyClosesIssue()` で body が `Closes #N` 等の closing keyword で対象Issueを指しているものだけへ絞り込んでから、同じ `selectOwnedClosingPr()` に掛ける
-- **この経路で採用したPRは `linkClosingPr()` で明示的に紐付ける**（GraphQL の `addCloseIssueReferences` ミューテーション。base がデフォルトブランチでなくても linked issue を作れる。同じ組み合わせの再実行は no-op で冪等）。GitHub UI の Development パネルに出るようになり、次回以降は closing 参照側の一次判定が効く。**紐付けはワーカープロセス（ローカル）でしか行えない** — クラウドセッション内の `gh api graphql` は403（`docs/cloud-graphql-proxy-limits.md` B1）で、GitHub MCP にも closing reference を書くツールが無いため（`sub_issue_write` は Issue 同士の親子階層専用）。したがって「PR 作成時に紐付ける」形では解決できず、検出が先で紐付けが後になる
+- **この経路で採用したPRは `linkClosingPr()` で明示的に紐付ける**（GraphQL の `addCloseIssueReferences` ミューテーション。base がデフォルトブランチでなくても linked issue を作れる。同じ組み合わせの再実行は no-op で冪等）。GitHub UI の Development パネルに出るようになり、次回以降は closing 参照側の一次判定が効く。**紐付けはワーカープロセス（ローカル）でしか行えない** — クラウドセッション内の `gh api graphql` は403（`docs/cloud-graphql-proxy-limits.md`（削除済み。git 履歴を参照） B1）で、GitHub MCP にも closing reference を書くツールが無いため（`sub_issue_write` は Issue 同士の親子階層専用）。したがって「PR 作成時に紐付ける」形では解決できず、検出が先で紐付けが後になる
 
 #### クラウド環境の指定（`remoteEnvId`）
 
@@ -399,6 +399,8 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 `--inherit-config <path>`（`getInheritConfigPath()`、`src/dispatch-args.ts`。`--cloud` と同じくプロセス内で1回だけ解決し、値は起動時の cwd 基準で絶対化）で、指定ファイルを土台に重ねる。重ね順（後が勝つ）は **`--inherit-config` < cwd の `claude-task-worker.json` < cwd の `claude-task-worker.local.json`**。未指定時は従来の2段のままで結果は不変。
 
+- **土台へ重ねるときだけ、配列は置き換えず土台の後ろへ追記する**（`mergeConfigRaw()` の `appendArrays`。重複は除く）。リポジトリ側の `labels` / `workerFiles` は「共通パックへの足し込み」として書けるようにし、旧 `init` が書いていた `[]` もパックの値を消さない。`init` 自体も両キーを書き出さなくなった（`buildInitialConfig()`）。土台の配列を減らす手段は無い（使わないワーカーは `workers.<name>.enabled: false`）。cwd の2ファイル同士のマージ（local が配列を丸ごと置き換える）は従来どおりで、その結果を土台へ追記する
+
 - **ファイル内の相対パスは定義元ファイルの所在ディレクトリ基準**。`resolveInheritedRelativePaths()` が土台ファイルの生JSONに対して**マージ前に**処理する（マージ後は出所が分からないため）。`workerFiles` は絶対パスへ、`uiDesign.designDir` は絶対化してからリポジトリルート（cwd）相対へ戻す（下流の契約を保ち、リポジトリ外なら `parseUiDesignEntry()` の既存検証が既定へ倒す）。cwd 直下の2ファイルは所在＝cwd なので処理しない
 - 指定ファイルの不在は `index.ts` の起動時（`init` 以外）と `loadConfig()` の両方で拒否する。`init` は指定パスへ生成する
 - **`getLastRunAt()` は `--inherit-config` を読まず cwd 直下だけを見る**。書き込み側（`writeLastRun()` / `publishLastRunPr()`）がリポジトリ直下固定なので、読み先がずれると再起動のたびに24時間ガードが外れる
@@ -409,13 +411,13 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 - `buildClaudeArgs()`（`src/claude-args.ts`）がクラウド時に**落とすのは `-p` と `--permission-mode` の2つ**。逆にクラウド時のみ付くのは `--environment`（`remoteEnvId` 指定時、前節）と `--ref` / `--on-branch`。`--disallowedTools` / `--append-system-prompt-file` / `--model` / `--effort` / `--advisor` は**ローカルと同一に付与される**
 - **`--permission-mode` をクラウドで渡してはいけない**。クラウドセッションは同フラグを受理するが VM 側へ反映せず（Issue #307。VM の権限モードは `cloud-setup` が書く settings.json の `permissions.defaultMode` が決める）、一方でローカル側の作成コマンドは `script(1)` の疑似pty越しに起動するため **claude からは対話起動に見える**。この状態で `bypassPermissions` を渡すと、そのマシンで一度も承認していない場合に「WARNING: Claude Code running in Bypass Permissions mode … ❯ No, exit / Yes, I accept」の承認ダイアログが描画される（`~/.claude.json` の `bypassPermissionsModeAccepted` が承認済みフラグ。print モードでは出ないためローカル実行では気づけない）。作成コマンドの stdin は `"ignore"` で誰も応答できず、セッションIDが出力されないまま `timed out waiting for the cloud session id` で必ず失敗する
-- 実測（`docs/cloud-session-launch-flags.md` の T5 / T6 / T7、claude 2.1.247）でこれらのフラグはいずれも**受理された**。ただし「受理された＝クラウド VM 側で実際に反映される」ことまでは未確認（起動引数として拒否されないことのみを確認）
+- 実測（`docs/cloud-session-launch-flags.md`（削除済み。git 履歴を参照） の T5 / T6 / T7、claude 2.1.247）でこれらのフラグはいずれも**受理された**。ただし「受理された＝クラウド VM 側で実際に反映される」ことまでは未確認（起動引数として拒否されないことのみを確認）
 - **「クラウドセッションが受理しないフラグを渡すと起動そのものが失敗する（黙って無視されない）」という原則は維持する**。実際にそれへ該当するのは2つだけ: (a) `-p` との併用（`Error: --cloud cannot be combined with --print.`）、(b) `--ref` と `--on-branch` の同時指定（`Error: --on-branch and --ref both set the cloud session's base branch; pass one or the other`）
 - `--ref` と `--on-branch` は**どちらもベースブランチ指定で排他**。実装は起動前に `buildClaudeArgs()` が例外で弾く（外部プロセスのエラーで気づく形にしないため）。Issue 系ワーカーはベースブランチを `--ref` へ、PR 系は PR の head ブランチを `--on-branch` へ渡す
 - 2026-08-29 の smoke test で両者の実際の挙動を確認した。**`--on-branch <PR の head ブランチ>`** はそのブランチ上で**直接**作業し、push すると**その PR がそのまま更新される**（新しいブランチは切られない）。**`--ref <branch>`** は指定ブランチを起点に `claude/<description 由来>-<6文字>` 形式の**新規**作業ブランチを作る。作業ブランチ名は `--cloud` に渡す description に依存するため、ローカルからは事前に取得・予測できない。この確認により、`--ref` 系ワーカー（Issue 系）で「作業ブランチ名を取得する手段が無い」という前節の結論、および `selectOwnedClosingPr()` による所有権判定が必要という結論は変わらない
 - **プロンプトは作成コマンドの `--cloud` の値として渡す**（`buildCloudCreateArgs(commonArgs, description)` の `description`）。実測（claude 2.1.250）により `--cloud <description>` の `description` は表示名ではなく**初期プロンプトとして即実行される**ことが判明したため、これがクラウドセッションの新規作成に `-p` を付けられない制約下でプロンプトを渡す唯一の経路になる。herdr の `agent prompt`（上記「mode（タスクの実行形態）」の「プロンプトを起動引数で渡してはいけない」）はローカル herdr 実行専用の投入経路であり、クラウド実行では使わない — クラウドの作成コマンドは `script(1)` 経由で直接 spawn され、投入されるプロンプトは`agent prompt`ではなく`--cloud`の値そのもの
 - `buildClaudeEnv(mode, cloud)` は `cloud` のときのみ `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を注入する。GitHub App 連携済みのリポジトリでも `--ref` / `--on-branch` が `the GitHub App is not set up for this repository` として誤って拒否される Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)、2026-08-29時点 OPEN）の回避策。`createCloudSession()` の `spawn()` に渡す env へ直接設定するため、作成コマンドの起動プロセスに自動的に効く
-- **最終レポートはドライバ経路には乗らないため、Issue/PR コメント経由で回収する**（実測 `docs/cloud-session-launch-flags.md` の M-1 / M-3 / M-6 / M-8、Issue #285）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。そこで **`--debug` フラグ指定時のみ**、`appendCloudDoneInstruction()`（`src/claude-args.ts`）が `cc-cloud-done` を付ける直前に、固定見出し `CLOUD_REPORT_HEADING`（生成側・取得側で共有する定数）を持つコメントへ最終報告を投稿させ、ワーカーは完了検知（次節）後に1回だけ `findCommentSince()`（`src/gh.ts`）でその本文を取得して `TaskResult.output` にする。取得できない・例外の場合は従来どおりの定型文へフォールバックし、通知自体は落とさない。**`--debug`（`hasDebugFlag()`、`src/dispatch-args.ts`）が無い既定ではコメントを投稿させず、回収もしない** — 通常運用の最終報告は Slack 通知で足りる一方、毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。投稿指示だけを落とし、完了検知の `cc-cloud-done` 付与指示は常に付ける（落とすとタイムアウトまで完了を検知できない）。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
+- **最終レポートはドライバ経路には乗らないため、Issue/PR コメント経由で回収する**（実測 `docs/cloud-session-launch-flags.md`（削除済み。git 履歴を参照） の M-1 / M-3 / M-6 / M-8、Issue #285）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。そこで **`--debug` フラグ指定時のみ**、`appendCloudDoneInstruction()`（`src/claude-args.ts`）が `cc-cloud-done` を付ける直前に、固定見出し `CLOUD_REPORT_HEADING`（生成側・取得側で共有する定数）を持つコメントへ最終報告を投稿させ、ワーカーは完了検知（次節）後に1回だけ `findCommentSince()`（`src/gh.ts`）でその本文を取得して `TaskResult.output` にする。取得できない・例外の場合は従来どおりの定型文へフォールバックし、通知自体は落とさない。**`--debug`（`hasDebugFlag()`、`src/dispatch-args.ts`）が無い既定ではコメントを投稿させず、回収もしない** — 通常運用の最終報告は Slack 通知で足りる一方、毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。投稿指示だけを落とし、完了検知の `cc-cloud-done` 付与指示は常に付ける（落とすとタイムアウトまで完了を検知できない）。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
 
 #### 完了検知（`cc-cloud-done` ラベルのポーリング）
 
@@ -437,11 +439,11 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 #### ワーカー別の適合性
 
-下表は「クラウド実行が**有用**か」の目安であり、実行の可否ではない（許可リスト撤去後は `--cloud` を付けた全ワーカーがクラウドで走る）。内容は `docs/cloud-graphql-proxy-limits.md`（Issue #226 の実測）の「ワーカー別適合性」表を正とする。
+下表は「クラウド実行が**有用**か」の目安であり、実行の可否ではない（許可リスト撤去後は `--cloud` を付けた全ワーカーがクラウドで走る）。根拠は Issue #226 の実測（旧 `docs/cloud-graphql-proxy-limits.md`。削除済みのため git 履歴を参照）。
 
 前節「GitHub アクセス（ローカルは `gh` 優先 / クラウドのみ GitHub MCP 優先）」のクラウド側の切り替えにより、下表の劣化要因（GraphQL 403）は MCP 経由で回避されうる見込みだった。2026-08-29 の smoke test で実際にクラウド VM 上の GitHub MCP（`mcp__github__*`、55ツール）を確認したところ、`issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4ツールが動作した。一方 `gh … --json`（GraphQL 経由）は引き続き403で、GraphQL ゲート自体は解消していない（MCP はゲートを迂回する別経路であり、ゲートを塞いだわけではない）。`gh api repos/...`（REST）は成功する。動作確認できたのはこの4ツールのみで、`gh pr view --json` / `gh pr checks` / `reviewThreads` / `resolveReviewThread` に相当する MCP 操作は未実測のため、**下表はこの4ツールで代替できる範囲の行のみ見直し、それ以外は従来の判定を据え置いている**。
 
-前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md` M-5）。ただし M-5 の実測環境が本当に未連携だったかは #81776（`--ref` の誤判定バグ）により確定していないため、**連携済み環境でも同じになるかは未確認**（同 M-5 の訂正注記を参照）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
+前提として2点ある。(a) **GitHub App 連携が未設定のリポジトリでは全ワーカーが成立しない**。クラウドセッションはローカル作業ツリーのアップロードでシードされ、VM 側に `git remote` が0件なので push も PR 作成もできない（実測 `docs/cloud-session-launch-flags.md`（削除済み。git 履歴を参照） M-5）。ただし M-5 の実測環境が本当に未連携だったかは #81776（`--ref` の誤判定バグ）により確定していないため、**連携済み環境でも同じになるかは未確認**（同 M-5 の訂正注記を参照）。(b) 連携を設定してリポジトリゲートを解いても **GraphQL ゲートが残る**。GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` が**フィールドを問わず**403になる。`gh pr list` / `gh pr checks` も同様で、ワーカー起動スキル15個すべてが影響を受ける。**レビュースレッドの解決（`resolveReviewThread`）だけは REST 代替が原理的に存在しない**。
 
 かつてはクラウド VM の `gh` が古く（2.45.0）`--json parent` / `blockedBy` / `subIssuesSummary` / `closingIssuesReferences` が `Unknown JSON field` で失敗するという**プロキシ制限とは独立した交絡**もあったが、2026-08-29 時点で 2.98.0 へ上がりこの交絡は解消した。ただし同バージョンでも `GH_DEBUG=api` 実測のとおりこれらは GraphQL 経由のままで、**403 になる事実は変わらない**（フィールドの有無ではなく転送経路の問題なので、gh を新しくしても解決しない）。
 
@@ -471,7 +473,7 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 
 #### 前提条件
 
-4つあり、**起動時に静的検査でき、満たさなければエラー終了する**（タスクを1件も起動しない）のは 1（claude.ai アカウントでのサインイン）のみ。2（GitHub 連携）・3（プラグイン導入）・4（`allow_remote_sessions` 組織ポリシー）は**ローカルから照会する手段が無い**ため静的検査せず、案内に留める（`docs/cloud-prerequisite-checks.md`、Issue #225 の実測）。
+4つあり、**起動時に静的検査でき、満たさなければエラー終了する**（タスクを1件も起動しない）のは 1（claude.ai アカウントでのサインイン）のみ。2（GitHub 連携）・3（プラグイン導入）・4（`allow_remote_sessions` 組織ポリシー）は**ローカルから照会する手段が無い**ため静的検査せず、案内に留める（`docs/cloud-prerequisite-checks.md`（削除済み。git 履歴を参照）、Issue #225 の実測）。
 
 - **1（サインイン）**: `checkCloudAuth()` が `claude auth status --json` の `loggedIn` / `authMethod` / `apiProvider` / `apiKeySource` と `ANTHROPIC_BASE_URL` の有無で判定する。API キー認証・第三者プロバイダ（Bedrock / Vertex）・カスタムエンドポイント構成ではクラウドセッションを作成できない。**`ANTHROPIC_API_KEY` 設定時も `authMethod` は `"claude.ai"` を返す**ため `apiKeySource` の不在を併せて見る必要がある。コマンドの実行・パースに失敗した「判定不能」は**エラーにしない**（サインイン状態が読めないことを拒否根拠にしない安全側の倒し方）
 - **2（GitHub 連携）**: 非公開 API（`GET /api/oauth/organizations/:orgUUID/sync/github/auth`）経由でしか取れず CLI 表層に無いため、静的検査しない
@@ -664,7 +666,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 **既定は `gh` コマンド**で、`plugin/` 配下スキルの本文に書かれた `gh` の例はそのまま第一手段として読む。MCP は `gh` が使えない場合のフォールバック。`gh` を既定にするのは、MCP ツールが1操作＝1ターンでパイプや `--jq` をまとめられず同じ情報に必要なターン数が増えること、そして MCP は前提条件ではなく最適化であり未設定の環境では毎操作が「MCP を試す → 失敗 → `gh`」の2手になることによる。
 
-**クラウド実行のときだけ優先順位が逆転する。** クラウドセッションの GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` がフィールドを問わず 403 になる（`docs/cloud-graphql-proxy-limits.md`）。この状態では `gh` を第一手段にすると Issue/PR 本文を1文字も読めない。GitHub MCP はこのプロキシを経由しないため成立する。
+**クラウド実行のときだけ優先順位が逆転する。** クラウドセッションの GitHub プロキシは操作名単位のアローリストで、`gh issue view --json` / `gh pr view --json` がフィールドを問わず 403 になる（`docs/cloud-graphql-proxy-limits.md`（削除済み。git 履歴を参照））。この状態では `gh` を第一手段にすると Issue/PR 本文を1文字も読めない。GitHub MCP はこのプロキシを経由しないため成立する。
 
 **実行形態はスキル本文から判定できないので、ワーカーが起動プロンプト本文で伝える**（`buildCloudGitHubAccessInstruction()`、`src/claude-args.ts`。`buildCloudCheckoutInstruction()` と同じ形で `buildCloudPrompt()` から連結される）。スキル側は「その指示が無ければローカル実行として `gh` を使う」と書いてあるだけで、ローカル実行の挙動はプラグイン単体で完結する。
 
@@ -688,9 +690,9 @@ Issue Dependencies / sub-issue の POST（`add-blocked-by` / `add-blocking` / `a
 
 `src/gh.ts` などワーカープロセス（ローカル）側の `gh` 呼び出しは対象外。ワーカーはローカルで走り続けるためプロキシのゲートを受けない。クラウドで走るのはタスクセッション（スキル）だけである。
 
-レビュースレッドの Resolve（`resolve-pr-comments` スキル）も MCP 経路へ移した。`resolveReviewThread` は REST 代替が無いため `gh` 経路では GraphQL 直叩きになり、クラウドでは 403 になる（`docs/cloud-graphql-proxy-limits.md` B4）が、GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）がゲートを迂回する。`threadId` は `pull_request_read`（method: `get_review_comments`）が返す node ID（`PRRT_...`）を使い、カーソル方式（`perPage` / `after`）でページングを取得しきる。`resolve_thread` は既に解決済みのスレッドに対して no-op なので冪等で、フォールバックによる二重実行の害が無い。
+レビュースレッドの Resolve（`resolve-pr-comments` スキル）も MCP 経路へ移した。`resolveReviewThread` は REST 代替が無いため `gh` 経路では GraphQL 直叩きになり、クラウドでは 403 になる（`docs/cloud-graphql-proxy-limits.md`（削除済み。git 履歴を参照） B4）が、GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）がゲートを迂回する。`threadId` は `pull_request_read`（method: `get_review_comments`）が返す node ID（`PRRT_...`）を使い、カーソル方式（`perPage` / `after`）でページングを取得しきる。`resolve_thread` は既に解決済みのスレッドに対して no-op なので冪等で、フォールバックによる二重実行の害が無い。
 
-**クラウドセッションでの GitHub MCP の起動・認証**は、2026-08-29 の smoke test で実測した（`docs/cloud-graphql-proxy-limits.md` 参照）。クラウド VM 上で `mcp__github__*` が55ツール利用可能で、うち `issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4つの動作を確認した。ただし `gh … --json`（GraphQL 経由）は依然403のままで、GraphQL ゲート自体は健在（MCP はゲートを迂回する別経路であり、解消したわけではない）。下記「クラウド実行」の「ワーカー別の適合性」表は、動作確認できたこの4ツールで代替できる範囲に限って見直した（未実測の操作に依存するワーカーの判定は据え置いてある）。
+**クラウドセッションでの GitHub MCP の起動・認証**は、2026-08-29 の smoke test で実測した（`docs/cloud-graphql-proxy-limits.md`（削除済み。git 履歴を参照） 参照）。クラウド VM 上で `mcp__github__*` が55ツール利用可能で、うち `issue_read` / `add_issue_comment` / `issue_write` / `create_pull_request` の4つの動作を確認した。ただし `gh … --json`（GraphQL 経由）は依然403のままで、GraphQL ゲート自体は健在（MCP はゲートを迂回する別経路であり、解消したわけではない）。下記「クラウド実行」の「ワーカー別の適合性」表は、動作確認できたこの4ツールで代替できる範囲に限って見直した（未実測の操作に依存するワーカーの判定は据え置いてある）。
 
 ## Conventions
 

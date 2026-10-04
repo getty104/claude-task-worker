@@ -95,7 +95,7 @@ export function observeAgentStatus(
 // （同一タスクの起動出力に複数のセッションURLが出ることは想定していないため、最後まで
 // スキャンして上書きし続けるより単純で、事故時の挙動も予測しやすい）。
 const CLOUD_SESSION_URL_RE = /https:\/\/claude\.ai\/code\/([A-Za-z0-9_-]+)/;
-// 実測（docs/cloud-session-launch-flags.md の T5/T7/M-1）で `Created cloud session:` の
+// 実測（旧 docs/cloud-session-launch-flags.md（git 履歴） の T5/T7/M-1）で `Created cloud session:` の
 // 後ろに出るのは**セッションIDではなく description そのもの**（例:
 // `Created cloud session: CTW probe`）。本Issueの description は `ctw:<project>:#<n>` の形を
 // しており、セッションID形式（`[A-Za-z0-9_-]+`）にマッチしてしまうと、作成待ちのポーリング中に

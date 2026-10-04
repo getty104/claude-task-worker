@@ -4,6 +4,8 @@ GitHub Issues/PRを定期ポーリングし、Claude Codeに処理を委譲す�
 
 同梱の Claude Code プラグイン（`plugin/`）と組み合わせることで、Issue の実装からPRのレビュー対応、Dependabot PR の対応までを自動化する。CLI 本体（npm パッケージ）とプラグイン（Claude Code マーケットプレイス）は同じリポジトリ・同じ名前で提供される。
 
+使い方のマニュアル（ハンズオン形式の導入・カスタムワーカーの作り方・設定のパッケージ化など）は [`docs/`](./docs/README.md) にある。
+
 ## アーキテクチャ
 
 CLI が GitHub ラベルを検知してタスクを起動し、プラグインのスキルが実際の処理を担う。
@@ -181,7 +183,7 @@ claude-task-worker exec-issue --cloud
 claude-task-worker all --cloud
 ```
 
-**クラウドで実行されるのは `exec-issue` と `fix-review-point` の2ワーカーだけ**で、それ以外は `--cloud` を付けてもローカル実行のまま残る（`all` / `yolo` にそのまま付けられる）。どのワーカーがクラウドで走るかは起動時にログへ出る。
+`--cloud` を付けたプロセスが起動するワーカーはすべてクラウドで実行される。ワーカーごとの向き不向きは [`docs/cloud.md`](./docs/cloud.md) を参照。
 
 前提条件:
 
@@ -213,7 +215,7 @@ npx claude-task-worker cloud-setup
 - `--cloud` と併用できないコマンド: `init` / `apply-labels` / `install` / `update` / `cloud-setup` / `usage` / `version` / `list-workers`
 - `--cloud` は `mode`（`default` / `herdr`）に依存しない。クラウドセッションの作成は `script` コマンドの疑似 pty で完結し、herdr のペインを使わないため、どちらの `mode` でも同じ経路を通る
 
-詳細は [`docs/prd-cloud-worker-execution.md`](./docs/prd-cloud-worker-execution.md) を参照。
+詳細は [`docs/cloud.md`](./docs/cloud.md) を参照。
 
 ### `--debug`
 
@@ -239,10 +241,13 @@ claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ�
 
 - 未指定時は従来どおり cwd 直下の `claude-task-worker.json` / `claude-task-worker.local.json` だけを読む
 - 値自体の相対パスは起動時の cwd 基準。ファイル内の相対パス（`workerFiles` / `uiDesign.designDir`）は**そのファイルの所在ディレクトリ基準**で解決する
+- 配列（`labels` / `workerFiles` など）は置き換えではなく、cwd 側の値を土台の後ろへ追記する（重複は除く）。cwd の `claude-task-worker.json` と `claude-task-worker.local.json` 同士は従来どおり local が丸ごと置き換え、その結果を土台へ追記する
 - `claude-task-worker.local.json` は常に cwd 直下のものを読む（指定ファイルと同じディレクトリのものは読まない）。cwd 直下の `claude-task-worker.json` は無くてもよい
 - 指定ファイルが存在しなければエラー終了する（既定ファイルへは倒さない）。`--project` では絶対パスにして各プロジェクトへ転送する
 - 定期ワーカーの `lastRun` は指定に関わらずリポジトリ直下の `claude-task-worker.json` で読み書きする。リポジトリ直下に同ファイルが無ければ `lastRun` だけを持つファイルが作られる（他のキーを持たないので土台の設定とは衝突しない）。`init` を `--inherit-config` 付きで実行した場合も、未記録のワーカーの `lastRun` はリポジトリ直下へ記録する（セットアップ直後に定期ワーカーが一斉に走らないようにするため）
 - スキル（`create-ui-design` / `update-design-md` / `triage-created-issue`）はリポジトリ直下の `claude-task-worker.json` を直接読むため、**`uiDesign` の設定は `--inherit-config` のファイルに書いてもスキルには届かない**。`uiDesign` はリポジトリ直下に書くこと
+
+設定・カスタムワーカー・スキルを1つのリポジトリにまとめて配る手順は [`docs/config-package.md`](./docs/config-package.md) を参照。
 
 ### Pen CLI のログイン
 
@@ -374,7 +379,7 @@ export const myWorker = createIssuePollingWorker({
 });
 ```
 
-起動時に全件を検証し、次のいずれかがあればタスクを1件も起動せず exit 1 する（メッセージにファイルパスと直し方を含む）: ファイルが存在しない／読み込み・トランスパイルに失敗／定義が1つも export されていない／`name` がプリセットと衝突／`name` がカスタム同士で衝突。`claude-task-worker list-workers` でロード結果を確認できる。
+起動時に全件を検証し、次のいずれかがあればタスクを1件も起動せず exit 1 する（メッセージにファイルパスと直し方を含む）: ファイルが存在しない／読み込み・トランスパイルに失敗／定義が1つも export されていない／`name` がプリセットと衝突／`name` がカスタム同士で衝突。`claude-task-worker list-workers` でロード結果を確認できる。作り方の詳しい手順は [`docs/custom-worker.md`](./docs/custom-worker.md) を参照。
 
 ## ワークフロー
 

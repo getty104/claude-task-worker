@@ -321,7 +321,7 @@ test("isCloudWorker returns true for every worker when --cloud is passed", (t) =
   }
 });
 
-// M1: 通常のサインイン（`docs/cloud-prerequisite-checks.md` verbatim）
+// M1: 通常のサインイン（旧 `docs/cloud-prerequisite-checks.md`（git 履歴） verbatim）
 test("checkCloudAuth allows a normal claude.ai sign-in", () => {
   const errors = checkCloudAuth({
     status: { kind: "ok", loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
@@ -412,6 +412,16 @@ test("mergeConfigRaw replaces arrays and scalars wholesale and leaves the base u
   const merged = mergeConfigRaw(base, { tags: ["c"], uiDesign: false });
   assert.deepEqual(merged, { tags: ["c"], uiDesign: false });
   assert.deepEqual(base, { tags: ["a", "b"], uiDesign: { enabled: true } });
+});
+
+test("mergeConfigRaw with appendArrays appends override arrays to the base without duplicates", () => {
+  const base = { labels: ["cc-a"], workerFiles: ["/pack/w.ts"] };
+  assert.deepEqual(mergeConfigRaw(base, { labels: [], workerFiles: ["w2.ts", "/pack/w.ts"], extra: ["x"] }, true), {
+    labels: ["cc-a"],
+    workerFiles: ["/pack/w.ts", "w2.ts"],
+    extra: ["x"],
+  });
+  assert.deepEqual(mergeConfigRaw(base, { labels: [] }), { labels: [], workerFiles: ["/pack/w.ts"] });
 });
 
 test("parseWorkerEntry reads enabled and falls back to true on a non-boolean", (t) => {
@@ -522,7 +532,8 @@ test("loadConfig layers --inherit-config < cwd claude-task-worker.json < cwd loc
     "(c => [c.remoteEnvId, c.labels, c.fixReviewPointCallbackCommentMessage])(m.loadConfig())",
     ["--inherit-config", join(base, "shared.json")],
   );
-  assert.deepEqual(out, ["env_cwd", ["local"], "base"]);
+  // 配列は cwd 側（local が cwd を置き換えた結果）を土台の後ろへ追記する。
+  assert.deepEqual(out, ["env_cwd", ["base", "local"], "base"]);
 });
 
 test("loadConfig works from --inherit-config alone when the cwd has no config file", () => {

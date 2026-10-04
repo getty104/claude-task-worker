@@ -69,3 +69,10 @@ test("isContentMismatch ignores created and overwritten", () => {
   assert.equal(init.isContentMismatch("created", "expected", "different"), false);
   assert.equal(init.isContentMismatch("overwritten", "expected", "different"), false);
 });
+
+test("buildInitialConfig omits the array keys so they never shadow an --inherit-config base", () => {
+  const config = init.buildInitialConfig("2026-10-04T00:00:00.000Z");
+  assert.equal("labels" in config, false);
+  assert.equal("workerFiles" in config, false);
+  assert.deepEqual(config.workers, {});
+});

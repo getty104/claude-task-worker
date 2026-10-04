@@ -288,7 +288,7 @@ export type CloudAuthStatus =
 
 // claude.ai サインイン以外の構成（第三者プロバイダ・APIキー認証・未サインイン・カスタム
 // エンドポイント）でのクラウドセッション作成失敗を、起動前に検出する。
-// `docs/cloud-prerequisite-checks.md` の判定式・文面案が正。判定不能（コマンド実行/パース
+// 旧 `docs/cloud-prerequisite-checks.md`（git 履歴） の判定式・文面案が正。判定不能（コマンド実行/パース
 // 失敗）はエラーにしない — サインイン状態が読めないことを拒否根拠にしない安全側の倒し方。
 export function checkCloudAuth(input: { status: CloudAuthStatus; baseUrl?: string }): string[] {
   if (input.status.kind === "unknown") return [];
@@ -547,11 +547,22 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
 // claude-task-worker.local.json を claude-task-worker.json へ重ねる。同じキーは local が勝つ。
 // プレーンオブジェクト同士だけ再帰的にマージするので、`workers.<name>.model` のような深い
 // キーだけをローカルで差し替えられる（配列・スカラー・型違いは local の値で丸ごと置き換え）。
-export function mergeConfigRaw(base: Record<string, unknown>, local: Record<string, unknown>): Record<string, unknown> {
+// appendArrays は --inherit-config の土台へ重ねるとき用。配列は置き換えず土台の後ろへ追記する
+// （重複は除く）。リポジトリ側の `labels` / `workerFiles` が共通パックの値を消さず足し込みになり、
+// 旧 init が書いていた空配列も土台をそのまま残す。
+export function mergeConfigRaw(
+  base: Record<string, unknown>,
+  local: Record<string, unknown>,
+  appendArrays = false,
+): Record<string, unknown> {
   const result: Record<string, unknown> = { ...base };
   for (const [key, val] of Object.entries(local)) {
     const current = result[key];
-    result[key] = isPlainObject(current) && isPlainObject(val) ? mergeConfigRaw(current, val) : val;
+    if (appendArrays && Array.isArray(current) && Array.isArray(val)) {
+      result[key] = [...current, ...val.filter((v) => !current.includes(v))];
+    } else {
+      result[key] = isPlainObject(current) && isPlainObject(val) ? mergeConfigRaw(current, val, appendArrays) : val;
+    }
   }
   return result;
 }
@@ -619,7 +630,7 @@ function readCwdRawConfig(): Record<string, unknown> {
 export function loadConfig(): Config {
   const inheritPath = getInheritConfigPath();
   const cwdRaw = readCwdRawConfig();
-  const raw = inheritPath ? mergeConfigRaw(readInheritedRawConfig(inheritPath, process.cwd()), cwdRaw) : cwdRaw;
+  const raw = inheritPath ? mergeConfigRaw(readInheritedRawConfig(inheritPath, process.cwd()), cwdRaw, true) : cwdRaw;
 
   const result: Config = {
     ...DEFAULT_CONFIG,
