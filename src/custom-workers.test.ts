@@ -45,6 +45,13 @@ test("validateCustomWorkers detects a collision inside one file", () => {
   assert.match(errors[0], /"same".*\/a\.ts/);
 });
 
+test("validateCustomWorkers rejects names reserved by CLI commands", () => {
+  const errors = validateCustomWorkers([file("/a.ts", "all", "yolo", "ok")], []);
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /"all", which collides with a CLI command/);
+  assert.match(errors[1], /"yolo", which collides with a CLI command/);
+});
+
 test("loadCustomWorkers loads TS files importing claude-task-worker/lib and relative .ts helpers", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ctw-custom-"));
   mkdirSync(join(dir, "sub"));

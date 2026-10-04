@@ -24,24 +24,24 @@ function preset(skill: string, model: string, effort: string, pollingIntervalSec
 }
 
 const EXPECTED_WORKER_DEFAULTS = {
-  "answer-issue-questions": preset("/claude-task-worker:answer-issue-questions", "opus", "high", 60),
-  "create-issue": preset("/claude-task-worker:create-issue-from-issue-number", "opus", "high", 60),
-  "update-issue": preset("/claude-task-worker:update-issue", "sonnet", "high", 60),
-  "exec-issue": preset("/claude-task-worker:exec-issue", "opus", "high", 60),
-  "fix-review-point": preset("/claude-task-worker:fix-review-point", "opus", "high", 60),
-  "triage-created-issue": preset("/claude-task-worker:triage-created-issue", "sonnet", "high", 60),
-  "triage-pr": preset("/claude-task-worker:triage-pr", "opus", "high", 60),
+  "answer-issue-questions": preset("/claude-task-worker:answer-issue-questions", "opus", "medium", 60),
+  "create-issue": preset("/claude-task-worker:create-issue-from-issue-number", "opus", "medium", 60),
+  "update-issue": preset("/claude-task-worker:update-issue", "sonnet", "medium", 60),
+  "exec-issue": preset("/claude-task-worker:exec-issue", "opus", "medium", 60),
+  "fix-review-point": preset("/claude-task-worker:fix-review-point", "opus", "medium", 60),
+  "triage-created-issue": preset("/claude-task-worker:triage-created-issue", "sonnet", "medium", 60),
+  "triage-pr": preset("/claude-task-worker:triage-pr", "opus", "medium", 60),
   "resolve-conflict": preset("/claude-task-worker:resolve-pr-conflict", "sonnet", "high", 60),
   "check-dependabot": preset("/claude-task-worker:check-dependabot", "sonnet", "high", 3600),
   "epic-issue": preset("/claude-task-worker:create-epic-pr", "sonnet", "medium", 300),
-  "create-ui-design": preset("/claude-task-worker:create-ui-design", "opus", "high", 60),
+  "create-ui-design": preset("/claude-task-worker:create-ui-design", "opus", "medium", 60),
   "apply-ui-design": preset("/claude-task-worker:apply-ui-design", "sonnet", "medium", 300),
-  "update-coding-guidelines": preset("/claude-task-worker:update-coding-guidelines", "opus", "high", 3600),
-  "update-requirement-rules": preset("/claude-task-worker:update-requirement-rules", "opus", "high", 3600),
-  "update-design-md": preset("/claude-task-worker:update-design-md", "opus", "high", 3600),
+  "update-coding-guidelines": preset("/claude-task-worker:update-coding-guidelines", "opus", "medium", 3600),
+  "update-requirement-rules": preset("/claude-task-worker:update-requirement-rules", "opus", "medium", 3600),
+  "update-design-md": preset("/claude-task-worker:update-design-md", "opus", "medium", 3600),
 };
 
-const EXPECTED_DEFAULT_WORKER_CONFIG = preset("", "opus", "high", 60);
+const EXPECTED_DEFAULT_WORKER_CONFIG = preset("", "opus", "medium", 60);
 
 const EXPECTED_DEFAULT_CONFIG = {
   fixReviewPointCallbackCommentMessage: "",

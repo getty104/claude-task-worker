@@ -49,6 +49,22 @@ function registerHooks(): void {
   });
 }
 
+// index.ts がワーカー名の解決より先に処理するコマンド。同名のカスタムワーカーは起動できない
+const CLI_RESERVED_COMMANDS: readonly string[] = [
+  "init",
+  "apply-labels",
+  "install",
+  "update",
+  "cloud-setup",
+  "usage",
+  "list-workers",
+  "all",
+  "yolo",
+  "version",
+  "--version",
+  "-v",
+];
+
 export function validateCustomWorkers(loaded: readonly LoadedWorkerFile[], presetNames: readonly string[]): string[] {
   const errors: string[] = [];
   const owners = new Map<string, string>();
@@ -73,6 +89,12 @@ export function validateCustomWorkers(loaded: readonly LoadedWorkerFile[], prese
       if (presetNames.includes(name)) {
         errors.push(
           `workerFiles: ${file.path} defines worker "${name}", which collides with a preset worker. Rename it.`,
+        );
+        continue;
+      }
+      if (CLI_RESERVED_COMMANDS.includes(name)) {
+        errors.push(
+          `workerFiles: ${file.path} defines worker "${name}", which collides with a CLI command. Rename it.`,
         );
         continue;
       }
