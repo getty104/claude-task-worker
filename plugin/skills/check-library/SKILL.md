@@ -1,8 +1,8 @@
 ---
 name: check-library
 description: ライブラリの情報を確認するためのスキル。Next.js、shadcn、その他のライブラリについて、適切なMCPサーバーを使用して最新のドキュメントと使用方法を取得します。
-model: sonnet
-effort: low
+model: haiku
+effort: medium
 context: fork
 ---
 

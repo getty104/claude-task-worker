@@ -3,7 +3,6 @@ name: general-purpose-assistant
 description: >
   Use this agent when the user has a general request that doesn't fit into a specific specialized agent's domain, or when the task requires broad problem-solving capabilities across multiple areas. This agent should be used as a fallback for diverse tasks including:\n\n<example>\nContext: User needs help with a task that doesn't match any specialized agent.\nuser: "プロジェクトの全体的な構造を説明してください"\nassistant: "一般的な質問なので、general-purpose-assistantエージェントを使用して回答します"\n<commentary>\nGeneral inquiry that doesn't require specialized expertise, so this agent is appropriate.\n</commentary>\n</example>\n\n<example>\nContext: User needs help understanding or explaining concepts.\nuser: "このコードベースで使われているアーキテクチャパターンについて教えて"\nassistant: "アーキテクチャの説明という一般的なタスクなので、general-purpose-assistantエージェントを使用します"\n<commentary>\nExplaining architectural concepts is a general educational task suitable for this agent.\n</commentary>\n</example>
 model: sonnet
-effort: medium
 color: blue
 background: false
 ---

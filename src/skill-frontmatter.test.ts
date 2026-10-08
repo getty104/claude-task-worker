@@ -62,3 +62,22 @@ test("worker entry skills do not pin a model", () => {
     assert.ok(!("context" in fm), `plugin/skills/${name}: must not fork (worker spawns it directly)`);
   }
 });
+
+test("generic subagents leave effort to the caller, and every caller says how to pick it", () => {
+  // Agent ツールの `effort` パラメータで呼び出し元がタスクごとに決める（定義に書くと固定値になる）。
+  // 選び方の基準は references/agent-effort.md に集約し、呼び出すスキルはそれを参照する。
+  const agentsDir = join(process.cwd(), "plugin", "agents");
+  const generic = ["explore-agent", "general-purpose-assistant", "lightweight-assistant"];
+  for (const name of generic) {
+    const fm = frontmatter(join(agentsDir, `${name}.md`));
+    assert.ok(!("effort" in fm), `plugin/agents/${name}.md: effort must be chosen by the caller`);
+  }
+  for (const [name] of skills) {
+    const src = readFileSync(join(SKILLS_DIR, name, "SKILL.md"), "utf-8");
+    if (!generic.some((a) => src.includes(a))) continue;
+    assert.ok(
+      src.includes("references/agent-effort.md"),
+      `plugin/skills/${name}: invokes a generic subagent without the effort rule`,
+    );
+  }
+});

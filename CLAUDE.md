@@ -129,7 +129,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 両スキルはタスクをサブエージェントへ委譲する設計だが、委譲の是非は**モデル世代で逆方向に振れる**。かつては選定基準（フェーズ2）とブリーフィング（フェーズ3）を書くだけでは**メインエージェントが自分で実装してしまう**（委譲のオーバーヘッドを避ける方向に倒れる）ため、`exec-issue` は「フェーズ3の実装タスク本体は規模を問わず全件委譲」という無条件ルールで押し切っていた。Opus 5 は逆に**以前のモデルより積極的に委譲する**（[Opus 5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-opus-5)）ため、全件委譲を強制すると小粒タスクでコストと時間が倍になるだけになる。この無条件ルールは撤去した。
 
-委譲1回のコストはブリーフィング作成（500〜1500トークン）＋サブエージェント側の再探索（会話履歴を持たないため、対象箇所と経緯を引き直す）で、1ファイル数行の修正では直接編集より一桁高くつく。委譲が本当に効くのは (1) メインのコンテキスト消費を実装ログから隔離できる、(2) 独立タスクを並列化できる、(3) `lightweight-assistant`（sonnet/low）へ単価を落とせる、(4) `frontend-implementer` 等の専門エージェントの前提知識を使える、の4点であり、いずれも小粒タスクでは効かない。
+委譲1回のコストはブリーフィング作成（500〜1500トークン）＋サブエージェント側の再探索（会話履歴を持たないため、対象箇所と経緯を引き直す）で、1ファイル数行の修正では直接編集より一桁高くつく。委譲が本当に効くのは (1) メインのコンテキスト消費を実装ログから隔離できる、(2) 独立タスクを並列化できる、(3) `lightweight-assistant`（haiku）へ単価を落とせる、(4) `frontend-implementer` 等の専門エージェントの前提知識を使える、の4点であり、いずれも小粒タスクでは効かない。
 
 そのため両スキル本文には「実装の委任（判断ロジック）」セクションを置き、**着手前に判定させる3ステップ**を規定している（フェーズ境界ではなくタスクの性質で判定するため、両スキルで条件が揃っている）:
 
@@ -216,17 +216,17 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 
 ### Sonnet 実行スキル/エージェントのプロンプト方針
 
-`model: sonnet` のエージェント（`explore-agent` / `general-purpose-assistant` / `lightweight-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push` / `check-library` / `resolve-pr-comments`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `model: sonnet` のワーカー（`update-issue` / `triage-created-issue` / `resolve-conflict` / `check-dependabot` / `epic-issue` / `apply-ui-design`）は、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)と[Sonnet 5.5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。Sonnet 5.5 ガイドも「Sonnet 5 向けのプロンプトはそのまま妥当な出発点」としているため、Sonnet 5 向けの項目は維持し、5.5 固有の項目（effort・途中確認・検証・スコープ外の追加）を足している。
+`model: sonnet` のエージェント（`general-purpose-assistant`）と `model: sonnet` の補助スキル（`create-review-fix-plan` / `create-pr` / `commit-push`。いずれも `context: fork` 併記で実際に sonnet で走る）、および `model: sonnet` のワーカー（`update-issue` / `triage-created-issue` / `resolve-conflict` / `check-dependabot` / `epic-issue` / `apply-ui-design`）は、[Sonnet 5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)と[Sonnet 5.5 のプロンプティング](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5)に合わせて以下を持たせる。opus 側の調整（冗長化・スコープ拡大・過剰委譲の抑制）とは**方向が違う**点に注意（Sonnet は指示をより文字通りに解釈し、低 effort ではスコープを求められた範囲に限定するため、抑制ではなく「基準の具体化」と「必要な深さの確保」が要る）。Sonnet 5.5 ガイドも「Sonnet 5 向けのプロンプトはそのまま妥当な出発点」としているため、Sonnet 5 向けの項目は維持し、5.5 固有の項目（effort・途中確認・検証・スコープ外の追加）を足している。
 
-- **effort は難易度で二分する**（Sonnet 5.5 ガイドの「エージェント的なツール使用は、仕様が確定したタスクは `medium` から、難しい・長いタスクは `high`」）。手順が本文に書き切ってあるワーカー（`update-issue` / `triage-created-issue` / `epic-issue` / `apply-ui-design`）は `medium`、コード変更の判断を伴うワーカー（`resolve-conflict` / `check-dependabot`）と `create-review-fix-plan`（判定の質が `fix-review-point` の修正範囲を決める）は `high`。`general-purpose-assistant`（`medium`）・`commit-push` / `create-pr`（`medium`）・`explore-agent` / `lightweight-assistant` / `check-library` / `resolve-pr-comments`（`low`）は据え置き。Sonnet 5.5 はレベルが再較正されていて Sonnet 5 の同名レベルと思考量が一致しないため、観測に基づかずに `xhigh` / `max` へ上げない（同レベルでは自発的なレビュー往復・サブエージェント起動が増える、と同ガイド）。`src/config.test.ts` の「opus workers default to medium effort; sonnet workers split by task difficulty」で固定してある
-- **途中確認で止まらせない**: Sonnet 5.5 は `low` / `medium` の長いエージェント的タスクで、計画の確認・自分で答えられる質問・多段タスクの一部を終えた時点での「続けるか」のために止まることがある。無人のワーカー実行ではそこで処理が打ち切られるため、`SONNET_SYSTEM_PROMPT_ADDENDUM` と `general-purpose-assistant` / `lightweight-assistant` の本文に「完了条件を満たすまで続ける。止まるのは中断条件／差し戻し基準に該当したときだけ」を置く（ガイドの "Keep working until everything the user asked for is done" 相当）
+- **effort は難易度で二分する**（Sonnet 5.5 ガイドの「エージェント的なツール使用は、仕様が確定したタスクは `medium` から、難しい・長いタスクは `high`」）。手順が本文に書き切ってあるワーカー（`update-issue` / `triage-created-issue` / `epic-issue` / `apply-ui-design`）は `medium`、コード変更の判断を伴うワーカー（`resolve-conflict` / `check-dependabot`）と `create-review-fix-plan`（判定の質が `fix-review-point` の修正範囲を決める）は `high`。`commit-push` / `create-pr`（`medium`）は据え置き。`general-purpose-assistant` は定義に effort を持たず呼び出し元が指定する（後述「汎用サブエージェントの effort は呼び出し元が決める」）。Sonnet 5.5 はレベルが再較正されていて Sonnet 5 の同名レベルと思考量が一致しないため、観測に基づかずに `xhigh` / `max` へ上げない（同レベルでは自発的なレビュー往復・サブエージェント起動が増える、と同ガイド）。`src/config.test.ts` の「opus workers default to medium effort; sonnet workers split by task difficulty」で固定してある
+- **途中確認で止まらせない**: Sonnet 5.5 は `low` / `medium` の長いエージェント的タスクで、計画の確認・自分で答えられる質問・多段タスクの一部を終えた時点での「続けるか」のために止まることがある。無人のワーカー実行ではそこで処理が打ち切られるため、`SONNET_SYSTEM_PROMPT_ADDENDUM` と `general-purpose-assistant` / `lightweight-assistant`（現 haiku。同じ文言が Haiku 5.5 ガイドの早期停止対策でもある）の本文に「完了条件を満たすまで続ける。止まるのは中断条件／差し戻し基準に該当したときだけ」を置く（ガイドの "Keep working until everything the user asked for is done" 相当）
 - **変更の検証を省かせない**: Sonnet 5.5 は `low` で「依存が入っていないからテストを飛ばす」「構文チェックだけで完了にする」ことがある。同追補と両エージェントの品質チェック項目に、ガイドの "Verification on coding tasks" 段落相当（変更を実際に通す検証を実行する・構文チェックや起動に失敗したチェックは数えない・足りないのが宣言済み依存だけならロックファイルで入れる・どの検証も実行できないときだけその旨を報告する）を置く
 - **スコープ外の追加を名指しで禁じる**: Sonnet 5.5 は依頼されていないテスト・ドキュメント・補助ファイルを全 effort で足す（高いほど増える）。指示を文字どおりに読むモデルなので「周辺の改善をしない」では足りず、同追補と両エージェントの本文で種類を名指しする。`create-review-fix-plan` には「プランを返して終える（修正・コミット・返信はしない）」を置き、開かれた依頼で作り始める挙動（ガイドの "Open-ended requests"）を塞ぐ
 
 - **定性的な軽重で切らせない**: 「重要な」「軽微な」といった主観語で判定を分けると、Sonnet 5 はその基準に忠実に従って報告・対応を落とす。判定は具体的な基準線で書く。`triage-pr` の二分判定は「不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて対応すべき」「対応不要に落とすのは列挙6項目に具体的に該当する場合のみ」に書き換えてある（旧「非クリティカルパスへの指摘＝対応不要」は、マージゲートである本スキルで取りこぼすと誰も直さないまま PR がマージされるため撤去）
 - **例示リストには判定基準を併記する**: Sonnet 5 は列挙されていないケースへ指示を暗黙に一般化しない。「例であり網羅ではない」だけでは列挙外のシグナルを取りこぼすため、`triage-created-issue` のパターンA（人間確認シグナル・確認事項の個別評価）には**リストの当てはめではなく満たすべき基準**を1行で明記してある
-- **低 effort エージェントに深追いを強いない/浅すぎさせない**: `explore-agent`（effort: low）は「労力は徹底度で決めるが、問いに答えるのに必要な深さ（呼び出し関係の段数など）は削らない」と明示。`lightweight-assistant`（effort: low）は逆に、探索が必要・2ファイル以上・多段の推論が要る依頼を**呼び出し元へ差し戻す**基準を持たせ、低 effort で押し切らせない
-- **`lightweight-assistant` の本文は軽量タスク専用に書き換えた**: 以前は `general-purpose-assistant` のほぼ複製で「包括的な問題分析」「TDD の実践」「レイヤーアーキテクチャの遵守」まで載っており、sonnet/low の単一ステップ用エージェントとしては自己矛盾していた（宣言された用途と本文の要求が食い違う）
+- **探索・軽量エージェントに深追いを強いない/浅すぎさせない**: `explore-agent` は「労力は徹底度で決めるが、問いに答えるのに必要な深さ（呼び出し関係の段数など）は削らない」と明示。`lightweight-assistant` は逆に、探索が必要・2ファイル以上・多段の推論が要る依頼を**呼び出し元へ差し戻す**基準を持たせ、低 effort で押し切らせない
+- **`lightweight-assistant` の本文は軽量タスク専用に書き換えた**: 以前は `general-purpose-assistant` のほぼ複製で「包括的な問題分析」「TDD の実践」「レイヤーアーキテクチャの遵守」まで載っており、軽量な単一ステップ用エージェントとしては自己矛盾していた（宣言された用途と本文の要求が食い違う）
 - **進捗ナレーションの強制スキャフォールディングを外した**: Sonnet 5 は長いエージェント的トレース中に自前で適度な更新を出すため、「各ステップの結果を報告する」「作業の各段階で状況を報告する」は削除し、「重要な発見・方針転換時のみ」＋「完了報告は結論から」に置き換えた（`general-purpose-assistant` / `lightweight-assistant`）
 - **サブエージェントは人に質問できない**: opus 側と同じ理由で、`general-purpose-assistant` / `lightweight-assistant` / `check-library` の「ユーザーに確認する」を「安全側の既定を選んで前提を報告する」「差し戻す」へ置き換えた
 - **探索手段の指示を CodeGraph 優先へ統一**: `general-purpose-assistant` に残っていた「LSPツールを最優先」は、システムプロンプトおよび `explore-agent` の CodeGraph 優先方針と矛盾していたため、CodeGraph → LSP → `Grep`/`Glob` の順に修正した
@@ -234,6 +234,24 @@ fork するスキル: `create-pr` / `check-library` / `create-review-fix-plan` /
 上記のうち `triage-pr` のスキル本文の調整は、**同ワーカーを opus に据え置いた後もそのまま残してある**（`triage-created-issue` は sonnet のまま）。「主観語で判定を分けない」「例示リストに判定基準を併記する」はモデルに依らず判定を安定させる書き方であり、`model` を `sonnet` へ下げ直した場合にも効き続ける必要があるため。
 
 effort を上げる場合は `claude-task-worker.json` の `workers.<name>.effort` で指定する。プロンプト側で深く考えさせようとしても効かない（Sonnet 5.5 ガイド: 思考量はプロンプトでは確実に減らせず、effort が主な制御）ため、「よく考えて」類の文言はどこにも置かない。
+
+### Haiku 実行スキル/エージェントの選定
+
+[Haiku 5.5 のプロンプティング](https://platform.claude.com/docs/ja/build-with-claude/prompt-engineering/prompting-claude-haiku-5-5)を受けて、**手順が一意で判断を要さない補助単位だけ**を haiku へ移した: `lightweight-assistant`（差し戻し基準で探索・多段推論を自分で弾く単一ステップ用）・`explore-agent`（所在特定）・`check-library`（ドキュメント取得と要約）・`resolve-pr-comments`（未解決スレッドを取得して全件 Resolve するだけ）。
+
+- **fork スキル（`check-library` / `resolve-pr-comments`）の effort は `medium`**（low にしない）。同ガイドは `low` × 長いエージェントプロンプト（Claude Code の system prompt はこれに当たる）で「検索をスキップする・早期停止して差し戻す・チェックを省く」と明記しており、`medium` で早期停止がおよそ半減する。haiku の `medium` でも sonnet の `low` より単価は下がる
+- **`explore-agent` も haiku**。読み取り専用の所在特定で、深さは呼び出し元が effort（調査が複数段に及ぶなら `high`）と徹底度で上げる。取りこぼしは下流で気づけないため、`low` は所在を1か所確かめるだけの呼び出しに限る
+- **haiku へ下げないもの**: `commit-push`（squash・履歴の再構成・force push という破壊的操作の判断を含む）、`create-pr`（PR本文の質がレビューと `triage-pr` の判断材料になる）、`general-purpose-assistant` / `create-review-fix-plan` / ワーカー全般（長いエージェント的タスク、または誤りが下流の手戻りに直結する）。opus / fable の割り当ては前節までの根拠のまま変えていない
+- 早期停止・検証省略の対策文言（ガイドの "Keep working until …" / "When you change code …"）は `lightweight-assistant` の本文に既にある（Sonnet 5.5 対策と同一文言）。`systemPromptFor()` は haiku に追補を足さないが、haiku で走るのはサブエージェント／fork スキルだけで `--append-system-prompt-file` は届かないため影響しない（ワーカーの `model` を haiku にする場合は基底のみになる点に注意）
+
+### 汎用サブエージェントの effort は呼び出し元が決める
+
+`explore-agent` / `general-purpose-assistant` / `lightweight-assistant` は定義（フロントマター）に `effort` を持たず、**呼び出し元が Agent ツールの `effort` パラメータ（Claude Code 2.1.292+）でタスクごとに指定する**。同じエージェントでも「所在を1か所確かめる」と「影響範囲を複数段たどる」では要る思考量が違い、定義に固定値を書くとどちらかに合わない。
+
+- 選び方の基準（エージェント × `low` / `medium` / `high` の表、`xhigh` / `max` を使わないこと、迷ったら1段上）は `plugin/references/agent-effort.md` に集約した
+- 呼び出すスキルは、呼び出し箇所に「そのスキルで何を選ぶか」を1行で書き、表を参照する（`exec-issue` / `fix-review-point` / `create-issue` / `create-issue-from-issue-number` / `update-issue` / `answer-issue-questions` / `read-github-issue` / `create-review-fix-plan` / `update-requirement-rules` / `update-design-md` / `triage-sentry-issues`）
+- `src/skill-frontmatter.test.ts` の「generic subagents leave effort to the caller, and every caller says how to pick it」で、3エージェントに `effort` が無いことと、いずれかを名指しするスキルが `references/agent-effort.md` を参照していることを固定してある
+- 指定を忘れた場合の既定（親セッションの effort を継ぐか等）は changelog に記載が無く未確認。そのためルールは「毎回必ず指定する」にしてある
 
 ### 空振りセッションガード（スキルプリアンブル失敗による無限リトライ防止）
 
