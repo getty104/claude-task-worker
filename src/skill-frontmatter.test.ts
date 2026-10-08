@@ -75,6 +75,9 @@ test("generic subagents leave effort to the caller, and every caller says how to
   for (const [name] of skills) {
     const src = readFileSync(join(SKILLS_DIR, name, "SKILL.md"), "utf-8");
     if (!generic.some((a) => src.includes(a))) continue;
-    assert.ok(src.includes("references/agent-effort.md"), `plugin/skills/${name}: invokes a generic subagent without the effort rule`);
+    assert.ok(
+      src.includes("references/agent-effort.md"),
+      `plugin/skills/${name}: invokes a generic subagent without the effort rule`,
+    );
   }
 });
