@@ -2,8 +2,8 @@
 name: resolve-pr-comments
 description: GitHub PRの未解決Review threadsを一括Resolveします。
 argument-hint: "[pr-number]"
-model: sonnet
-effort: low
+model: haiku
+effort: medium
 context: fork
 ---
 
