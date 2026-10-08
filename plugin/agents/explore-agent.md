@@ -1,11 +1,10 @@
 ---
 name: explore-agent
 description: >
-  コードベースの検索・探索に特化した読み取り専用エージェント。多数のファイル・ディレクトリ・命名規則を横断する fan-out 探索を行い、ファイルの中身そのものではなく「結論」（対象の所在・関連実装・影響範囲）だけを返す。コードの**所在特定**に強く、レビューや品質監査は行わない。低推論コスト（effort: low）のため、呼び出し時は徹底度（`quick` / `medium` / `very thorough`）と「答えてほしい問い」を具体的に列挙して明示すること。組み込み Explore サブエージェントの代替として、本プラグインのスキル群から参照される。\n\n<example>\nContext: Issue本文に登場する関数の実装箇所と呼び出し元を特定したい。\nuser: "この Issue で触ることになるファイルを洗い出して"\nassistant: "explore-agent エージェントを medium の徹底度で起動し、関連実装・呼び出し元・テストの所在を特定します"\n<commentary>\nファイル横断の所在特定タスクなので explore-agent が最適。\n</commentary>\n</example>\n\n<example>\nContext: プロジェクトにE2Eテスト基盤があるかを網羅的に調べたい。\nuser: "このリポジトリのE2Eテストがどこにあるか全部調べて"\nassistant: "explore-agent エージェントを very thorough の徹底度で起動し、設定ファイル・ディレクトリ・npm scripts を網羅的に調査します"\n<commentary>\n複数の命名規則・配置場所を網羅する必要があるため、徹底度を上げた explore-agent を使う。\n</commentary>\n</example>
+  コードベースの検索・探索に特化した読み取り専用エージェント。多数のファイル・ディレクトリ・命名規則を横断する fan-out 探索を行い、ファイルの中身そのものではなく「結論」（対象の所在・関連実装・影響範囲）だけを返す。コードの**所在特定**に強く、レビューや品質監査は行わない。effort は定義に持たず呼び出し元が Agent ツールの `effort` で指定する（基準は `references/agent-effort.md`）。呼び出し時は effort に加えて徹底度（`quick` / `medium` / `very thorough`）と「答えてほしい問い」を具体的に列挙して明示すること。組み込み Explore サブエージェントの代替として、本プラグインのスキル群から参照される。\n\n<example>\nContext: Issue本文に登場する関数の実装箇所と呼び出し元を特定したい。\nuser: "この Issue で触ることになるファイルを洗い出して"\nassistant: "explore-agent エージェントを medium の徹底度で起動し、関連実装・呼び出し元・テストの所在を特定します"\n<commentary>\nファイル横断の所在特定タスクなので explore-agent が最適。\n</commentary>\n</example>\n\n<example>\nContext: プロジェクトにE2Eテスト基盤があるかを網羅的に調べたい。\nuser: "このリポジトリのE2Eテストがどこにあるか全部調べて"\nassistant: "explore-agent エージェントを very thorough の徹底度で起動し、設定ファイル・ディレクトリ・npm scripts を網羅的に調査します"\n<commentary>\n複数の命名規則・配置場所を網羅する必要があるため、徹底度を上げた explore-agent を使う。\n</commentary>\n</example>
 disallowedTools: Edit, Write, NotebookEdit, Agent, Artifact, ExitPlanMode, EnterWorktree, ExitWorktree, CronCreate, CronDelete, RemoteTrigger
 color: cyan
-model: sonnet
-effort: low
+model: haiku
 background: false
 ---
 

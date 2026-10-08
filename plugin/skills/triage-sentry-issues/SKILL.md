@@ -69,7 +69,7 @@ search_issues(organizationSlug=<org>, projectSlugOrId=<project or 省略>, query
 
 ## ステップ3: 並列調査（サブエージェント）
 
-**1 Sentry Issue = 1 サブエージェント**（`general-purpose-assistant`）で調査する。1回のメッセージに複数の Agent 呼び出しを並べて並列起動し、**同時実行は最大5件**まで（Sentry API のレート制限と、`create-issue` の同時実行数を抑えるため）。5件ずつのバッチで回す。
+**1 Sentry Issue = 1 サブエージェント**（`general-purpose-assistant`）で調査する。1回のメッセージに複数の Agent 呼び出しを並べて並列起動し、**同時実行は最大5件**まで（Sentry API のレート制限と、`create-issue` の同時実行数を抑えるため）。5件ずつのバッチで回す。Agent ツールの `effort` は**毎回指定する**（general-purpose-assistant は定義に effort を持たない。基準は `${CLAUDE_PLUGIN_ROOT}/references/agent-effort.md`）。1件ごとに原因調査を伴うため `high`。
 
 サブエージェントは人に質問できない。判断はすべて自力で行わせ、迷った場合は**未解消側に倒す**（誤って resolve するとエラーが埋もれるため）。
 

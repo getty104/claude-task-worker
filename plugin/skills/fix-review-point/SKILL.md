@@ -168,6 +168,8 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> comple
 - **lightweight-assistant**: 内容が具体的で探索不要・単一ファイル編集レベルの軽量タスク（型定義追加、定数追加、設定ファイル更新など）
 - **general-purpose-assistant**: 上記以外（複数ファイルにまたがる実装、調査を伴うタスク、テスト/Lint修正、**フロントエンドのマークアップ以外の指摘**）
 
+`lightweight-assistant` / `general-purpose-assistant` を起動するときは、Agent ツールの `effort` を**毎回指定する**（両エージェントとも定義に effort を持たない）。基準は `${CLAUDE_PLUGIN_ROOT}/references/agent-effort.md` の表で、本スキルでは次のとおり選ぶ: `lightweight-assistant` は変更を伴うので `medium`、`general-purpose-assistant` は失敗ログ付きのテスト/Lint修正や指示が一意な単一の指摘なら `medium`、複数ファイルにまたがる・原因調査を伴う・設計の再考を求めるものなら `high`。判定が割れたら上の段を選ぶ
+
 ### デザインマークアップの指摘の分離
 
 1つの指摘にマークアップの修正とロジックの修正が混ざっている場合（例: 「この一覧の余白がデザインとずれているうえ、取得件数の上限も違う」）は、`create-review-fix-plan` の返却の分離に従って別タスクとして扱う。返却が分離されていない場合は本フェーズで分割し、マークアップ部分だけを `frontend-implementer` に、残りを `general-purpose-assistant` に委譲する。同一ファイルを触るため、この2タスクは**逐次**で実行し、両方が同じ指摘に紐づくことをブリーフィングに明記する（Resolve時に取りこぼさないため）。

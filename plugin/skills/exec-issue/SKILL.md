@@ -208,6 +208,8 @@ GitHub Issue `$0` の内容を読み取り、実装からPR作成までを完遂
 - **lightweight-assistant**: 内容が具体的で探索不要・単一ファイル編集レベルの軽量タスク（型定義追加、定数追加、設定ファイル更新など）
 - **general-purpose-assistant**: 上記以外（複数ファイルにまたがる実装、調査を伴うタスク、テスト/Lint修正、**フロントエンドのマークアップ以外の実装**）
 
+`lightweight-assistant` / `general-purpose-assistant` を起動するときは、Agent ツールの `effort` を**毎回指定する**（両エージェントとも定義に effort を持たない）。基準は `${CLAUDE_PLUGIN_ROOT}/references/agent-effort.md` の表で、本スキルでは次のとおり選ぶ: `lightweight-assistant` は変更を伴うので `medium`、`general-purpose-assistant` は失敗ログ付きのテスト/Lint修正や指示が一意な単一の実装なら `medium`、複数ファイルにまたがる・原因調査を伴う・設計の再考を求めるものなら `high`。判定が割れたら上の段を選ぶ
+
 ### デザインマークアップタスクの分離
 
 UI変更を含むタスクは、`read-github-issue` の返却で「デザインマークアップタスク」と「配線タスク（状態管理・データ取得・ロジック）」に分離されている。返却が分離されていない場合（明示マーキングが欠けている場合）は、本フェーズで同じ基準で分割してから委譲する。
