@@ -580,6 +580,15 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 `cc-epic-issue` の付いたPRをデフォルトブランチへマージする＝リリースなので、**PRをマージしうるスキルはすべて Epic PR 判定を持ち、マージの代わりに `cc-release-ready` を付けて終える**。対象は `triage-pr`（ステップ3）と `fix-review-point`（フェーズ1の「修正点がない場合」）の2箇所。`fix-review-point` 側にゲートが無かったため、`cc-fix-onetime` を経由した Epic PR が人の判断を挟まずマージされていた。判定に使うラベル一覧はステップ0の `gh pr view --json ...,labels` で取得したものを使い回す。
 
+### レビュー指摘の判定は Issue の要件を正とする（`triage-pr` / `create-review-fix-plan` / `fix-review-point`）
+
+自動レビュー（OpenCodeReview / Gemini / CodeRabbit 等）は PR の差分しか見ておらず、Issue で確定した要件や確認事項への回答を知らない。その指摘へ素直に対応した結果、**Issue の要件・回答と食い違う実装がマージされる**事故が実運用で観測された（マージ済み 77 PR の bot 指摘 259 件のうち、要件との矛盾 19 件・要件外の利用者から見える追加 24 件。1件は検収 NG として再起票に至った）。レビューのコンテキストに要件を入れる経路は無いため、判定側の3スキルで Issue の要件を「正」として突き合わせる。
+
+- **取得**: PR 本文の `Closes` / `Fixes` / `Resolves` / `Refs` `#<N>` から Issue 番号を抽出し、`issue_read`（`get` / `get_comments`。`get_comments` は全ページ取得する。`gh` フォールバックは `gh issue view --json body,comments`）で本文とコメントを読む。正とするのは description の `## 要件` / `## 実装プラン` / `## 影響範囲`、確認事項への回答コメント（`## 回答`。description に反映済みなら description 優先）、人間が書いたコメントのうち確定した要件・方針を明示しているもの（未決着の議論・案・質問は含めない）。Issue が無い・取得失敗は「要件不明」として突き合わせを省略し、従来の基準だけで判定する（エラーで止めない。Issue を持たない PR も存在する）
+- **`triage-pr`**: 要件・回答で確定している挙動を別の挙動へ変える提案、要件に無い利用者から見える挙動の追加を求める提案は「対応不要」（7項目目）。逆に実装が要件を満たしていない点を突く指摘は文面が軽くても「対応すべき」。落とすときは該当する要件・回答の箇所を特定する（印象で落とさない）
+- **`create-review-fix-plan`**: 同じ基準で矛盾する指摘を修正タスクにせず、返却の `## 要件優先で対応しない指摘` に根拠付きで列挙する。修正方針も要件の範囲内に収める
+- **`fix-review-point`**: 同一覧の指摘は実装せず、フェーズ6の Resolve より先に該当スレッドへ要件・回答の該当箇所を引いて返信する（返信せずに Resolve すると見送った根拠が GitHub 上に残らない）。返信に失敗したスレッドは `resolve-pr-comments` の除外引数で Resolve 対象から外す。差分が無い（見送りだけの）場合はフェーズ5のコミット・push を省いてフェーズ6へ進む。サブエージェントのブリーフィングにも `【Issueの要件（正）】` を渡し、修正履歴に「要件優先で見送り」として残す
+
 ### サブIssueのクローズはワーカーが担保する（`triage-pr` の `onCompleted`）
 
 **base が非デフォルトブランチ（`cc-epic-<N>`）の PR がマージされても、GitHub は closing reference のある Issue を閉じない。** Epic PR 本文もサブIssueを closing keyword で参照しない（`create-epic-pr` はサブIssueを平文で列挙し `Closes` は Epic Issue にだけ付ける）ため、Epic 配下のサブIssueは**どのタイミングでも GitHub 側からは閉じられない**。

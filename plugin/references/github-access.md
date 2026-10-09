@@ -93,6 +93,7 @@ MCP 未設定・未認証の環境でもスキルは従来どおり動作する�
 | `gh pr edit --add-label` / `--remove-label` | **MCP を使わない**。`gh-compat.sh add-label` / `remove-label`（Issue と同じ。番号空間を共有する） |
 | `gh pr merge` | `pull_request_write`（method: `merge`） |
 | `gh pr comment` | `add_issue_comment`（PR は Issue 番号空間を共有する） |
+| `gh api repos/{o}/{r}/pulls/{n}/comments/{comment_id}/replies -f body=...`（インラインレビュースレッドへの返信） | `add_reply_to_pull_request_comment` |
 
 ### Actions
 
