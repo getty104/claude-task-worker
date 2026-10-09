@@ -1,7 +1,7 @@
 ---
 name: resolve-pr-comments
 description: GitHub PRの未解決Review threadsを一括Resolveします。
-argument-hint: "[pr-number]"
+argument-hint: "[pr-number] [exclude-thread-id...]"
 model: haiku
 effort: medium
 context: fork
@@ -31,7 +31,7 @@ GitHub MCP の `pull_request_read`（method: `get_review_comments`）で対象 P
 
 **ページングは取得しきる。** カーソル方式（`perPage` は最大 100、`after` に前ページの `endCursor` を渡す）で、`pageInfo.hasNextPage` が `true` の間は呼び直す。1ページ目で打ち切ると、指摘の多い PR で後続ページのスレッドが未解決のまま残る。
 
-`isResolved: false` のスレッドの node ID を集める。0件なら Resolve は実行せず、ステップ3でその旨を報告して終了する。
+`isResolved: false` のスレッドの node ID を集める。2番目以降の引数で thread ID（`PRRT_...`）が渡されていれば、それらは集めた対象から除外する（呼び出し元が返信に失敗したスレッドを Resolve させないため）。0件なら Resolve は実行せず、ステップ3でその旨を報告して終了する。
 
 MCP が利用不可（ツール未検出・認証エラー・呼び出し失敗）の場合はステップ2-Bのフォールバックへ進む。
 
@@ -47,7 +47,7 @@ MCP の書き込みが失敗した場合、`github-access.md` の「書き込み
 
 ## ステップ2-B: Resolve（`gh` フォールバック）
 
-MCP が使えない場合のみ、共有スクリプトを使う。
+MCP が使えない場合のみ、共有スクリプトを使う。スクリプトは除外を指定できず全件 Resolve するため、**除外 thread ID が渡されている場合は実行せず**、ステップ3で「Resolve できなかった」と報告する。
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-pr-comments.sh" <PR番号>

@@ -248,15 +248,15 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> comple
 
 ## フェーズ5: コミットとpush
 
-1. `commit-push` skill を呼び出し、変更をコミット・push
+1. `commit-push` skill を呼び出し、変更をコミット・push。`git status --short` が空（要件優先で見送った指摘だけでコード変更が無い）の場合は、コミット・pushを行わずにフェーズ5を完了扱いとしてフェーズ6へ進む（見送りの返信と Resolve に修正 push は不要なため）
 2. Push後のCI結果は **待たずに** 次のフェーズへ進む（CIの収束は別ループで扱う）
 
 ## フェーズ6: Resolve と description 更新
 
-**フェーズ5の push が完了してからこのフェーズに入ること。** 本フェーズの Resolve は未解決スレッドを全件対象にするため、修正が push されていない段階で実行すると、対応していない指摘まで Resolve されてレビュー未対応のままマージされうる。フェーズ2〜5のいずれかで中断した場合は、Resolve を行わずに中断理由を報告して終了する。
+**フェーズ5の push が完了してから（差分が無くフェーズ5を完了扱いにした場合はその時点から）このフェーズに入ること。** 本フェーズの Resolve は未解決スレッドを全件対象にするため、修正が push されていない段階で実行すると、対応していない指摘まで Resolve されてレビュー未対応のままマージされうる。フェーズ2〜5のいずれかで中断した場合は、Resolve を行わずに中断理由を報告して終了する。
 
-1. 「要件優先で対応しない指摘」（フェーズ1の一覧と、実装中に矛盾と判定したもの）があれば、Resolve より先に各スレッドへ返信する。本文は「Issue #<N> の要件（または確認事項への回答）『<該当箇所の引用>』に従い、この指摘は反映しません」の1-2行。インラインスレッドは GitHub MCP の `add_reply_to_pull_request_comment` を優先し、利用不可なら `gh api repos/{owner}/{repo}/pulls/$0/comments/<comment_id>/replies -f body=...` へフォールバックする。会話コメント由来なら `gh pr comment $0`（MCP は `add_issue_comment`）で返す。返信せずに Resolve すると、要件を理由に見送った事実がGitHub上に残らず、後から「指摘を無視した」ようにしか見えない
-2. `resolve-pr-comments` skill を PR 番号 `$0` を渡して呼び出し、対応済みのレビューコメントをすべてResolveする。同スキルは GitHub MCP（`pull_request_review_write` の `resolve_thread`）を優先し、利用不可なら `gh` の GraphQL へフォールバックする。Resolve に失敗したスレッドが報告された場合は、件数と thread ID を本スキルの最終報告にも引き継ぐ
+1. 「要件優先で対応しない指摘」（フェーズ1の一覧と、実装中に矛盾と判定したもの）があれば、Resolve より先に各スレッドへ返信する。本文は「Issue #<N> の要件（または確認事項への回答）『<該当箇所の引用>』に従い、この指摘は反映しません」の1-2行。インラインスレッドは GitHub MCP の `add_reply_to_pull_request_comment` を優先し、利用不可なら `gh api repos/{owner}/{repo}/pulls/$0/comments/<comment_id>/replies -f body=...` へフォールバックする。会話コメント由来なら `gh pr comment $0`（MCP は `add_issue_comment`）で返す。返信せずに Resolve すると、要件を理由に見送った事実がGitHub上に残らず、後から「指摘を無視した」ようにしか見えない。MCP・フォールバックの両方で返信に失敗したインラインスレッドは thread ID（`PRRT_...`）を記録し、次の Resolve の対象から外す。失敗件数と thread ID は最終報告に含める
+2. `resolve-pr-comments` skill を PR 番号 `$0`（返信に失敗したスレッドがあれば、続けてその thread ID を除外対象として列挙）を渡して呼び出し、対応済みのレビューコメントをすべてResolveする。同スキルは GitHub MCP（`pull_request_review_write` の `resolve_thread`）を優先し、利用不可なら `gh` の GraphQL へフォールバックする。Resolve に失敗したスレッドが報告された場合は、件数と thread ID を本スキルの最終報告にも引き継ぐ
 3. 今回の修正内容を反映してPRのdescriptionを最新化する
    - `gh pr edit $0 --body "<更新後の本文>"` を使用
    - 変更点の要約・テスト観点の追記・既存セクションの整合性を保つ
