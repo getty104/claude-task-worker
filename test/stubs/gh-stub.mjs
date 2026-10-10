@@ -6,6 +6,7 @@
 // よう状態化してある。herdr-stub.mjs の readState/writeState に倣い、記録ファイルと同じ
 // ディレクトリの別ファイル（`.gh-state.json`）へ永続化する（herdr の状態ファイルとは混ぜない）。
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { URLSearchParams } from "node:url";
 
 const argv = process.argv.slice(2);
 const recordFile = process.env.CTW_STUB_RECORD_FILE;
@@ -87,6 +88,13 @@ if (sub === "api" && action === "user") {
       },
     }));
     process.stdout.write(JSON.stringify(events));
+  } else if (/\/pulls\?/.test(path)) {
+    // listOpenPrsByBase() が叩く `repos/{o}/{r}/pulls?state=open&base=<base>`。
+    const base = new URLSearchParams(path.split("?")[1]).get("base");
+    const prs = (scenario.crossRefPrs ?? []).filter(
+      (pr) => (pr.state ?? "OPEN") === "OPEN" && (base === null || pr.baseRefName === base),
+    );
+    process.stdout.write(JSON.stringify(prs.map(toRestPr)));
   } else if (/\/pulls\/\d+$/.test(path)) {
     // fetchPrRef() / linkClosingPr() が叩くPR詳細（REST 形状）。
     const number = Number(path.split("/").pop());
@@ -95,22 +103,7 @@ if (sub === "api" && action === "user") {
       process.stderr.write(`unknown pull request: ${number}\n`);
       process.exit(1);
     }
-    process.stdout.write(
-      JSON.stringify({
-        node_id: `PR_${number}`,
-        state: pr.state === "MERGED" ? "closed" : (pr.state ?? "OPEN").toLowerCase(),
-        merged_at: pr.state === "MERGED" ? "2026-01-01T00:00:00Z" : null,
-        created_at: pr.createdAt,
-        head: {
-          ref: pr.headRefName,
-          sha: pr.headSha ?? `sha-${number}`,
-          repo: { full_name: pr.headRepo ?? "acme/demo" },
-        },
-        base: { ref: pr.baseRefName },
-        title: pr.title ?? "",
-        body: pr.body ?? "",
-      }),
-    );
+    process.stdout.write(JSON.stringify(toRestPr(pr)));
   } else if (/\/issues\/\d+$/.test(path)) {
     process.stdout.write(JSON.stringify({ node_id: `I_${path.split("/").pop()}` }));
   } else if (/\/git\/refs(\/heads\/.+)?$/.test(path)) {
@@ -194,3 +187,21 @@ if (sub === "api" && action === "user") {
 }
 
 process.exit(0);
+
+function toRestPr(pr) {
+  return {
+    number: pr.number,
+    node_id: `PR_${pr.number}`,
+    state: pr.state === "MERGED" ? "closed" : (pr.state ?? "OPEN").toLowerCase(),
+    merged_at: pr.state === "MERGED" ? "2026-01-01T00:00:00Z" : null,
+    created_at: pr.createdAt,
+    head: {
+      ref: pr.headRefName,
+      sha: pr.headSha ?? `sha-${pr.number}`,
+      repo: { full_name: pr.headRepo ?? "acme/demo" },
+    },
+    base: { ref: pr.baseRefName },
+    title: pr.title ?? "",
+    body: pr.body ?? "",
+  };
+}

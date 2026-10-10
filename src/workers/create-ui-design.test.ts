@@ -62,6 +62,8 @@ test("adoptCloudDesignPr: recreates the design PR from cc-ui-design-<N> and clos
 for (const [label, overrides] of [
   ["a fork PR", { headRepo: "someone/demo" }],
   ["a merged PR", { state: "MERGED" }],
+  ["a PR on another base", { baseRefName: "cc-epic-1" }],
+  ["a PR not referencing the issue", { body: "Refs #6" }],
 ] as const) {
   test(`adoptCloudDesignPr: ${label} is not adopted and no branch or PR is touched`, async (t) => {
     const stubs = installCliStubs({ gh: { crossRefPrs: [cloudPr(overrides)] } });

@@ -27,7 +27,8 @@ export interface GhScenario {
   closingPrs?: unknown[];
   /**
    * `gh api repos/{o}/{r}/issues/<n>/timeline`（listPrsCrossReferencingIssue）が
-   * cross-referenced として返すPR。同じ配列が `repos/{o}/{r}/pulls/<n>` の応答元にもなる。
+   * cross-referenced として返すPR。同じ配列が `repos/{o}/{r}/pulls/<n>` と
+   * `repos/{o}/{r}/pulls?state=open&base=<base>`（listOpenPrsByBase）の応答元にもなる。
    */
   crossRefPrs?: {
     number: number;

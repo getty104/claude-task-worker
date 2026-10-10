@@ -13,7 +13,7 @@ import {
   getCurrentUser,
   getRepoInfo,
   hasLabel,
-  listPrsCrossReferencingIssue,
+  listOpenPrsByBase,
 } from "../gh";
 import { selectOwnedClosingPr } from "./exec-issue";
 import { createIssuePollingWorker } from "./issue-worker";
@@ -57,9 +57,11 @@ export async function adoptCloudDesignPr(
   ctx: { baseBranch: string; startedAt: number },
 ): Promise<number | null> {
   const { owner, name } = await getRepoInfo();
-  // fork の head は対象リポジトリにブランチが無く作り直せない。merged/closed は今回の成果ではない。
-  const candidates = (await listPrsCrossReferencingIssue(issueNumber, bodyMentionsIssue)).filter(
-    (c) => c.state === "OPEN" && c.headRepo === `${owner}/${name}`,
+  // timeline の cross-referenced は非同期に記録され、cc-cloud-done 検知の時点で未反映のことがある
+  // （デザインPRがあるのに未作成扱いになり、ラベルが付かない）。作成と同時に反映される PR 一覧から引く。
+  // fork の head は対象リポジトリにブランチが無く作り直せない。
+  const candidates = (await listOpenPrsByBase(ctx.baseBranch)).filter(
+    (c) => c.headRepo === `${owner}/${name}` && bodyMentionsIssue(c.body, issueNumber),
   );
   const prNumber = selectOwnedClosingPr(candidates, {
     cloud: true,
