@@ -260,22 +260,52 @@ async function fetchPrRef(
   prNumber: number,
 ): Promise<(ClosingPrRef & { body: string }) | null> {
   try {
-    const parsed = JSON.parse(await execGh(["api", `repos/${owner}/${name}/pulls/${prNumber}`]));
     return {
+      ...toPrRef(JSON.parse(await execGh(["api", `repos/${owner}/${name}/pulls/${prNumber}`]))),
       number: prNumber,
-      state: parsed?.merged_at ? "MERGED" : String(parsed?.state ?? "").toUpperCase(),
-      headRefName: parsed?.head?.ref ?? "",
-      baseRefName: parsed?.base?.ref ?? "",
-      createdAt: parsed?.created_at ?? "",
-      headRepo: parsed?.head?.repo?.full_name ?? "",
-      headSha: parsed?.head?.sha ?? "",
-      title: parsed?.title ?? "",
-      body: typeof parsed?.body === "string" ? parsed.body : "",
     };
   } catch (err) {
     console.error(`[gh] failed to read PR #${prNumber}: ${err}`);
     return null;
   }
+}
+
+// REST の pull request オブジェクトを ClosingPrRef へ詰め替える。
+interface RestPullRequest {
+  number?: number;
+  state?: string;
+  merged_at?: string | null;
+  created_at?: string;
+  head?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
+  base?: { ref?: string };
+  title?: string;
+  body?: unknown;
+}
+
+function toPrRef(parsed: RestPullRequest): ClosingPrRef & { body: string } {
+  return {
+    number: Number(parsed?.number),
+    state: parsed?.merged_at ? "MERGED" : String(parsed?.state ?? "").toUpperCase(),
+    headRefName: parsed?.head?.ref ?? "",
+    baseRefName: parsed?.base?.ref ?? "",
+    createdAt: parsed?.created_at ?? "",
+    headRepo: parsed?.head?.repo?.full_name ?? "",
+    headSha: parsed?.head?.sha ?? "",
+    title: parsed?.title ?? "",
+    body: typeof parsed?.body === "string" ? parsed.body : "",
+  };
+}
+
+// base ブランチを指定して open PR を REST で列挙する。timeline の cross-referenced と違い
+// PR 作成と同時に反映されるため、作成直後のPRを探す用途ではこちらを使う。
+export async function listOpenPrsByBase(base: string): Promise<(ClosingPrRef & { body: string })[]> {
+  const { owner, name } = await getRepoInfo();
+  const output = await execGh([
+    "api",
+    `repos/${owner}/${name}/pulls?state=open&base=${encodeURIComponent(base)}&per_page=100`,
+    "--paginate",
+  ]);
+  return (JSON.parse(output) as RestPullRequest[]).map(toPrRef);
 }
 
 // PR の詳細（state / base / head / body）を REST で取得する。GraphQL を経由しない。
