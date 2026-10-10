@@ -153,3 +153,17 @@ GitHub API・MCP などの一覧取得は、既定で一部しか返さない。
 ページングは次ページがなくなるまで繰り返し、複数エンドポイントに分かれている場合は両方を取得して統合する。
 
 参考: [PR#266 MCP のページング手順を追加する](https://github.com/getty104/claude-task-worker/pull/266#discussion_r3879332041), [PR#266 通常コメントは `get_comments` で取得する](https://github.com/getty104/claude-task-worker/pull/266#discussion_r3879332028)
+
+## 状態変更
+
+### 状態を変える操作の対象は、その操作が成立する条件で絞り込む
+
+一括 Resolve・ブランチ操作・PR の採用のように状態を変える操作は、対象候補を操作が成立する条件
+（前段の返信が成功したスレッドだけ、open かつ対象リポジトリに head を持つ PR だけ）で絞ってから実行する。
+条件を確かめずに候補全体へ適用すると、根拠の残らない Resolve や、fork の head の改名失敗・
+マージ済み PR の誤採用のように、成功扱いのまま状態だけが壊れる。
+
+操作そのものの副作用（open PR の head ブランチを改名すると PR が閉じる、など）も公式仕様で確認し、
+操作後に対象が期待する状態（open のまま等）にあることを確かめてから完了扱いにする。
+
+参考: [PR#462 open PR・同一リポジトリの候補に限定する](https://github.com/getty104/claude-task-worker/pull/462#discussion_r4236184333), [PR#459 返信に成功したスレッドだけを Resolve する](https://github.com/getty104/claude-task-worker/pull/459#discussion_r4230198280)
