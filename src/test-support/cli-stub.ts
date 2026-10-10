@@ -36,6 +36,11 @@ export interface GhScenario {
     baseRefName: string;
     createdAt: string;
     body?: string;
+    /** 既定は `sha-<number>` */
+    headSha?: string;
+    /** 既定は `acme/demo`（対象リポジトリ）。fork を表すには別の値を渡す */
+    headRepo?: string;
+    title?: string;
   }[];
 }
 

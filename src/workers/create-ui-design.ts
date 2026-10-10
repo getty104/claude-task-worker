@@ -3,13 +3,17 @@ import {
   addAssignee,
   addLabel,
   bodyMentionsIssue,
+  closePullRequest,
   commentOnIssue,
+  commentOnPR,
+  createPullRequest,
+  createRemoteBranch,
   deleteRemoteBranch,
   findPrNumberByHeadRef,
   getCurrentUser,
+  getRepoInfo,
   hasLabel,
   listPrsCrossReferencingIssue,
-  renameRemoteBranch,
 } from "../gh";
 import { selectOwnedClosingPr } from "./exec-issue";
 import { createIssuePollingWorker } from "./issue-worker";
@@ -44,14 +48,19 @@ export function designPrLabelingFailedComment(
 // クラウドセッションは `--ref` 起点の `claude/<...>` ブランチで作業し、セッション側のブランチ規約が
 // スキルの固定ブランチ（`cc-ui-design-<N>`）への切り替えに勝つため、デザインPRが正しく作られても
 // head ref 一致では見つからない。exec-issue と同じ所有権判定（Issue を `#N` で参照する PR ＋ base
-// 一致 ＋ 起動時刻以降の作成）で特定し、head ブランチを固定名へ改名して、後段（apply-ui-design の
-// ワーカー preflight とスキル）の head ref 一致をそのまま成立させる。
+// 一致 ＋ 起動時刻以降の作成）で特定し、固定名ブランチから同じ内容のPRを作り直して元のPRを閉じる。
+// 後段（apply-ui-design のワーカー preflight とスキル）の head ref 一致をそのまま成立させるため。
+// 元の head を改名しないのは、GitHub が改名された head を持つ open PR を閉じるから。
 export async function adoptCloudDesignPr(
   issueNumber: number,
   branch: string,
   ctx: { baseBranch: string; startedAt: number },
 ): Promise<number | null> {
-  const candidates = await listPrsCrossReferencingIssue(issueNumber, bodyMentionsIssue);
+  const { owner, name } = await getRepoInfo();
+  // fork の head は対象リポジトリにブランチが無く作り直せない。merged/closed は今回の成果ではない。
+  const candidates = (await listPrsCrossReferencingIssue(issueNumber, bodyMentionsIssue)).filter(
+    (c) => c.state === "OPEN" && c.headRepo === `${owner}/${name}`,
+  );
   const prNumber = selectOwnedClosingPr(candidates, {
     cloud: true,
     expectedHeadRefName: branch,
@@ -60,14 +69,28 @@ export async function adoptCloudDesignPr(
     now: Date.now(),
   });
   if (prNumber === null) return null;
-  const head = candidates.find((c) => c.number === prNumber)?.headRefName ?? "";
-  if (head === "" || head === branch) return prNumber;
-  // 過去ラウンドの残骸（open PR の無い固定ブランチ）があると改名が 422 で止まるため先に消す。
+  const pr = candidates.find((c) => c.number === prNumber);
+  if (!pr || pr.headRefName === branch) return prNumber;
+  if (!pr.headSha) throw new Error(`design PR #${prNumber} has no head sha`);
+  // 過去ラウンドの残骸（open PR の無い固定ブランチ）があると作成が 422 で止まるため先に消す。
   // スキル自身も同ブランチを force-push で上書きする契約なので、消してよい。
   await deleteRemoteBranch(branch).catch(() => {});
-  await renameRemoteBranch(head, branch);
-  console.log(`[create-ui-design] #${issueNumber}: renamed design PR #${prNumber} head ${head} -> ${branch}`);
-  return prNumber;
+  await createRemoteBranch(branch, pr.headSha);
+  const newPr = await createPullRequest(
+    pr.baseRefName,
+    branch,
+    pr.title || `UI design for #${issueNumber}`,
+    pr.body ?? "",
+  );
+  await commentOnPR(
+    prNumber,
+    `ブランチ \`${branch}\` から作り直した #${newPr} へ移行したため、このPRを閉じます。`,
+  ).catch(() => {});
+  await closePullRequest(prNumber);
+  console.log(
+    `[create-ui-design] #${issueNumber}: recreated design PR #${prNumber} (${pr.headRefName}) as #${newPr} (${branch})`,
+  );
+  return newPr;
 }
 
 export const createUiDesignWorker = defineWorker({
