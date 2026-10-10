@@ -213,6 +213,11 @@ export interface ClosingPrRef {
   headRefName: string;
   baseRefName: string;
   createdAt: string;
+  // REST（fetchPrRef）経由でのみ埋まる。fork の head リポジトリ判定とPRの作り直しに使う。
+  headRepo?: string;
+  headSha?: string;
+  title?: string;
+  body?: string;
 }
 
 // Issue を closing keyword（Closes #N 等）で参照する PR の候補一覧を取得する（絞り込みは呼び出し側の責務）。
@@ -262,6 +267,9 @@ async function fetchPrRef(
       headRefName: parsed?.head?.ref ?? "",
       baseRefName: parsed?.base?.ref ?? "",
       createdAt: parsed?.created_at ?? "",
+      headRepo: parsed?.head?.repo?.full_name ?? "",
+      headSha: parsed?.head?.sha ?? "",
+      title: parsed?.title ?? "",
       body: typeof parsed?.body === "string" ? parsed.body : "",
     };
   } catch (err) {
@@ -308,6 +316,12 @@ export function bodyClosesIssue(body: string, issueNumber: number): boolean {
   return pattern.test(body);
 }
 
+// PR body が対象Issueを `#N` で言及しているか（closing keyword の有無を問わない）。
+// デザインPRは closing keyword を禁じ `Refs #N` で参照するため、bodyClosesIssue では拾えない。
+export function bodyMentionsIssue(body: string, issueNumber: number): boolean {
+  return new RegExp(`#${issueNumber}(?!\\d)`).test(body);
+}
+
 // Issue を closing keyword で参照している PR の候補一覧を timeline（REST）から取得する（所有権判定は呼び出し側の責務）。
 // GitHub は base がデフォルトブランチでない PR に closing reference を作らないため、Epic 配下
 // （base: cc-epic-<N>）の PR は body に `Closes #N` があっても listPrsClosingIssue() では 1 件も返らない。
@@ -317,7 +331,10 @@ export function bodyClosesIssue(body: string, issueNumber: number): boolean {
 //
 // `--paginate` に `--slurp` は付けない。gh は REST の JSON 配列を全ページ通しの単一配列へマージして出力し、
 // `--slurp` を付けるとページ単位の配列で包まれた形（配列の配列）に変わる（gh 2.98.0 で実測）。
-export async function listPrsCrossReferencingIssue(issueNumber: number): Promise<ClosingPrRef[]> {
+export async function listPrsCrossReferencingIssue(
+  issueNumber: number,
+  bodyFilter: (body: string, issueNumber: number) => boolean = bodyClosesIssue,
+): Promise<ClosingPrRef[]> {
   const { owner, name } = await getRepoInfo();
   const output = await execGh(["api", `repos/${owner}/${name}/issues/${issueNumber}/timeline`, "--paginate"]);
   const events: {
@@ -338,9 +355,34 @@ export async function listPrsCrossReferencingIssue(issueNumber: number): Promise
     ),
   ];
   const refs = await Promise.all(numbers.map((number) => fetchPrRef(owner, name, number)));
-  return refs
-    .filter((ref): ref is ClosingPrRef & { body: string } => ref !== null && bodyClosesIssue(ref.body, issueNumber))
-    .map(({ body: _body, ...ref }) => ref);
+  return refs.filter(
+    (ref): ref is ClosingPrRef & { body: string } => ref !== null && bodyFilter(ref.body, issueNumber),
+  );
+}
+
+// リモートブランチを指定コミットから作成する（REST）。
+export async function createRemoteBranch(branch: string, sha: string): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  await execGh([
+    "api",
+    "-X",
+    "POST",
+    `repos/${owner}/${name}/git/refs`,
+    "-f",
+    `ref=refs/heads/${branch}`,
+    "-f",
+    `sha=${sha}`,
+  ]);
+}
+
+export async function closePullRequest(prNumber: number): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  await execGh(["api", "-X", "PATCH", `repos/${owner}/${name}/pulls/${prNumber}`, "-f", "state=closed"]);
+}
+
+export async function deleteRemoteBranch(branch: string): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  await execGh(["api", "-X", "DELETE", `repos/${owner}/${name}/git/refs/heads/${branch}`]);
 }
 
 const ADD_CLOSE_ISSUE_REFERENCES = `mutation($issueId: ID!, $prId: ID!) {

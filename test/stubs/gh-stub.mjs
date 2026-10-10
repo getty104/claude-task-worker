@@ -63,7 +63,8 @@ if (sub === "api" && action === "user") {
   }
 } else if (sub === "api") {
   // findCommentSince() が叩く `gh api repos/{owner}/{repo}/issues/<n>/comments?since=<ISO8601>`。
-  const path = argv[1] ?? "";
+  // `gh api -X <METHOD> <path>` 形式（closeIssue / closePullRequest / createRemoteBranch / deleteRemoteBranch）にも対応する。
+  const path = (argv[1] === "-X" ? argv[3] : argv[1]) ?? "";
   const match = /\/issues\/(\d+)\/comments\?since=(.+)$/.exec(path);
   if (match) {
     const [, numberStr, since] = match;
@@ -100,13 +101,21 @@ if (sub === "api" && action === "user") {
         state: pr.state === "MERGED" ? "closed" : (pr.state ?? "OPEN").toLowerCase(),
         merged_at: pr.state === "MERGED" ? "2026-01-01T00:00:00Z" : null,
         created_at: pr.createdAt,
-        head: { ref: pr.headRefName },
+        head: {
+          ref: pr.headRefName,
+          sha: pr.headSha ?? `sha-${number}`,
+          repo: { full_name: pr.headRepo ?? "acme/demo" },
+        },
         base: { ref: pr.baseRefName },
+        title: pr.title ?? "",
         body: pr.body ?? "",
       }),
     );
   } else if (/\/issues\/\d+$/.test(path)) {
     process.stdout.write(JSON.stringify({ node_id: `I_${path.split("/").pop()}` }));
+  } else if (/\/git\/refs(\/heads\/.+)?$/.test(path)) {
+    // createRemoteBranch() / deleteRemoteBranch()。記録だけ残し、応答内容は使われない。
+    process.stdout.write("{}");
   } else {
     process.stderr.write(`unknown gh api command: ${argv.join(" ")}\n`);
     process.exit(1);
