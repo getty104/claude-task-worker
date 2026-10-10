@@ -157,8 +157,11 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
       } catch {
         return [];
       }
+      // スタブの追記は大きなレコードでは原子的でなく、書き込み途中の末尾行を読むことがある。
+      // 改行で終わった行だけを完成したレコードとして扱う（末尾の要素は空か書きかけ）。
       return content
         .split("\n")
+        .slice(0, -1)
         .filter((line) => line.trim() !== "")
         .map((line) => JSON.parse(line) as StubRecord);
     },
@@ -168,7 +171,7 @@ export function installCliStubs(options?: CliStubOptions): InstalledCliStubs {
       // ワーカーが SIGKILL された後もスタブ（gh / claude のシェルスクリプト）が孫プロセスとして
       // 生き残り、記録ファイルへ追記し続けることがある。削除中に書き込まれると rmSync が
       // ENOTEMPTY で落ちてテスト自体を失敗させるため、リトライ付きで消す（CI で実際に発生）。
-      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
     },
   };
 }
