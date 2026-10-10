@@ -308,6 +308,12 @@ export function bodyClosesIssue(body: string, issueNumber: number): boolean {
   return pattern.test(body);
 }
 
+// PR body が対象Issueを `#N` で言及しているか（closing keyword の有無を問わない）。
+// デザインPRは closing keyword を禁じ `Refs #N` で参照するため、bodyClosesIssue では拾えない。
+export function bodyMentionsIssue(body: string, issueNumber: number): boolean {
+  return new RegExp(`#${issueNumber}(?!\\d)`).test(body);
+}
+
 // Issue を closing keyword で参照している PR の候補一覧を timeline（REST）から取得する（所有権判定は呼び出し側の責務）。
 // GitHub は base がデフォルトブランチでない PR に closing reference を作らないため、Epic 配下
 // （base: cc-epic-<N>）の PR は body に `Closes #N` があっても listPrsClosingIssue() では 1 件も返らない。
@@ -317,7 +323,10 @@ export function bodyClosesIssue(body: string, issueNumber: number): boolean {
 //
 // `--paginate` に `--slurp` は付けない。gh は REST の JSON 配列を全ページ通しの単一配列へマージして出力し、
 // `--slurp` を付けるとページ単位の配列で包まれた形（配列の配列）に変わる（gh 2.98.0 で実測）。
-export async function listPrsCrossReferencingIssue(issueNumber: number): Promise<ClosingPrRef[]> {
+export async function listPrsCrossReferencingIssue(
+  issueNumber: number,
+  bodyFilter: (body: string, issueNumber: number) => boolean = bodyClosesIssue,
+): Promise<ClosingPrRef[]> {
   const { owner, name } = await getRepoInfo();
   const output = await execGh(["api", `repos/${owner}/${name}/issues/${issueNumber}/timeline`, "--paginate"]);
   const events: {
@@ -339,8 +348,19 @@ export async function listPrsCrossReferencingIssue(issueNumber: number): Promise
   ];
   const refs = await Promise.all(numbers.map((number) => fetchPrRef(owner, name, number)));
   return refs
-    .filter((ref): ref is ClosingPrRef & { body: string } => ref !== null && bodyClosesIssue(ref.body, issueNumber))
+    .filter((ref): ref is ClosingPrRef & { body: string } => ref !== null && bodyFilter(ref.body, issueNumber))
     .map(({ body: _body, ...ref }) => ref);
+}
+
+// リモートブランチを改名する（REST）。そのブランチを head とする open PR は GitHub が自動で追随する。
+export async function renameRemoteBranch(branch: string, newName: string): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  await execGh(["api", "-X", "POST", `repos/${owner}/${name}/branches/${branch}/rename`, "-f", `new_name=${newName}`]);
+}
+
+export async function deleteRemoteBranch(branch: string): Promise<void> {
+  const { owner, name } = await getRepoInfo();
+  await execGh(["api", "-X", "DELETE", `repos/${owner}/${name}/git/refs/heads/${branch}`]);
 }
 
 const ADD_CLOSE_ISSUE_REFERENCES = `mutation($issueId: ID!, $prId: ID!) {

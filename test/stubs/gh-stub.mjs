@@ -63,7 +63,8 @@ if (sub === "api" && action === "user") {
   }
 } else if (sub === "api") {
   // findCommentSince() が叩く `gh api repos/{owner}/{repo}/issues/<n>/comments?since=<ISO8601>`。
-  const path = argv[1] ?? "";
+  // `gh api -X <METHOD> <path>` 形式（closeIssue / renameRemoteBranch / deleteRemoteBranch）にも対応する。
+  const path = (argv[1] === "-X" ? argv[3] : argv[1]) ?? "";
   const match = /\/issues\/(\d+)\/comments\?since=(.+)$/.exec(path);
   if (match) {
     const [, numberStr, since] = match;
@@ -107,6 +108,9 @@ if (sub === "api" && action === "user") {
     );
   } else if (/\/issues\/\d+$/.test(path)) {
     process.stdout.write(JSON.stringify({ node_id: `I_${path.split("/").pop()}` }));
+  } else if (/\/branches\/.+\/rename$/.test(path) || /\/git\/refs\/heads\/.+$/.test(path)) {
+    // renameRemoteBranch() / deleteRemoteBranch()。記録だけ残し、応答内容は使われない。
+    process.stdout.write("{}");
   } else {
     process.stderr.write(`unknown gh api command: ${argv.join(" ")}\n`);
     process.exit(1);

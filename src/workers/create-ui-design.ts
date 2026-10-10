@@ -1,5 +1,17 @@
 import { getUiDesignConfig } from "../config";
-import { addAssignee, addLabel, commentOnIssue, findPrNumberByHeadRef, getCurrentUser, hasLabel } from "../gh";
+import {
+  addAssignee,
+  addLabel,
+  bodyMentionsIssue,
+  commentOnIssue,
+  deleteRemoteBranch,
+  findPrNumberByHeadRef,
+  getCurrentUser,
+  hasLabel,
+  listPrsCrossReferencingIssue,
+  renameRemoteBranch,
+} from "../gh";
+import { selectOwnedClosingPr } from "./exec-issue";
 import { createIssuePollingWorker } from "./issue-worker";
 import { defineWorker } from "./worker-definition";
 import { designBranchName, designPrNotCreatedComment } from "./ui-design";
@@ -29,6 +41,35 @@ export function designPrLabelingFailedComment(
   ].join("\n");
 }
 
+// クラウドセッションは `--ref` 起点の `claude/<...>` ブランチで作業し、セッション側のブランチ規約が
+// スキルの固定ブランチ（`cc-ui-design-<N>`）への切り替えに勝つため、デザインPRが正しく作られても
+// head ref 一致では見つからない。exec-issue と同じ所有権判定（Issue を `#N` で参照する PR ＋ base
+// 一致 ＋ 起動時刻以降の作成）で特定し、head ブランチを固定名へ改名して、後段（apply-ui-design の
+// ワーカー preflight とスキル）の head ref 一致をそのまま成立させる。
+export async function adoptCloudDesignPr(
+  issueNumber: number,
+  branch: string,
+  ctx: { baseBranch: string; startedAt: number },
+): Promise<number | null> {
+  const candidates = await listPrsCrossReferencingIssue(issueNumber, bodyMentionsIssue);
+  const prNumber = selectOwnedClosingPr(candidates, {
+    cloud: true,
+    expectedHeadRefName: branch,
+    baseBranch: ctx.baseBranch,
+    startedAt: ctx.startedAt,
+    now: Date.now(),
+  });
+  if (prNumber === null) return null;
+  const head = candidates.find((c) => c.number === prNumber)?.headRefName ?? "";
+  if (head === "" || head === branch) return prNumber;
+  // 過去ラウンドの残骸（open PR の無い固定ブランチ）があると改名が 422 で止まるため先に消す。
+  // スキル自身も同ブランチを force-push で上書きする契約なので、消してよい。
+  await deleteRemoteBranch(branch).catch(() => {});
+  await renameRemoteBranch(head, branch);
+  console.log(`[create-ui-design] #${issueNumber}: renamed design PR #${prNumber} head ${head} -> ${branch}`);
+  return prNumber;
+}
+
 export const createUiDesignWorker = defineWorker({
   name: "create-ui-design",
   kind: "issue",
@@ -46,7 +87,7 @@ export const createUiDesignWorker = defineWorker({
       command: "/claude-task-worker:create-ui-design",
       triggerLabels: ["cc-create-ui-design"],
       excludeLabels: ["cc-ui-design-pr-created", "cc-ui-design-ready", "cc-exec-issue", "cc-pr-created"],
-      onCompleted: async (issueNumber) => {
+      onCompleted: async (issueNumber, _worktreeId, _output, ctx) => {
         // Pencil 未導入などスキルが自力で進められないケースでは cc-need-human-check が
         // 付いている。デザインPRが無いのに進行ラベルを付けないよう先に打ち切る。
         if (await hasLabel("issue", issueNumber, "cc-need-human-check")) {
@@ -66,7 +107,13 @@ export const createUiDesignWorker = defineWorker({
         const branch = designBranchName(issueNumber);
         // "open" 限定にすることで、過去ラウンドの closed/merged デザインPRを
         // 今回のセッションの成果と誤認しない（今回何も作らなくても成功扱いになるのを防ぐ）。
-        const prNumber = await findPrNumberByHeadRef(branch, "open");
+        let prNumber = await findPrNumberByHeadRef(branch, "open");
+        if (prNumber === null && ctx.cloud) {
+          prNumber = await adoptCloudDesignPr(issueNumber, branch, ctx).catch((err) => {
+            console.error(`[create-ui-design] #${issueNumber}: adoptCloudDesignPr failed: ${err}`);
+            return null;
+          });
+        }
         if (prNumber === null) {
           console.error(
             `[create-ui-design] #${issueNumber}: session exited without an open design PR (branch: ${branch}); marking cc-need-human-check`,
