@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { format } from "node:util";
+import { hasDebugFlag } from "./dispatch-args";
 import { getConfigDir } from "./user-config";
 
 export function getDisplayWidth(str: string): number {
@@ -250,8 +251,8 @@ export function pushLogLine(entry: LogTableEntry): void {
 }
 
 // 端末のテーブルは直近 LOG_DISPLAY_LIMIT 行しか残らないため、全行を日付ごとのファイルにも残す。
-// captureConsole() を呼ぶ実行（＝ワーカー/ディスパッチャー）でだけ有効にし、テストで
-// ユーザーのホームを汚さない。
+// `--debug` 指定時、かつ captureConsole() を呼ぶ実行（＝ワーカー/ディスパッチャー）でだけ
+// 有効にする（テストでユーザーのホームを汚さない）。
 let logFileEnabled = false;
 
 export function logFilePath(time: Date): string {
@@ -297,7 +298,7 @@ let consoleCaptured = false;
 export function captureConsole(): void {
   if (consoleCaptured) return;
   consoleCaptured = true;
-  logFileEnabled = true;
+  logFileEnabled = hasDebugFlag();
 
   // 描画される前にプロセスが終了しても（設定エラーで即 exit する等）ログが消えないよう、
   // 終了時に残っているログをそのまま端末へ書き出す。

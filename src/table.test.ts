@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type * as DispatchArgsModule from "./dispatch-args";
 import type * as TableModule from "./table";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
@@ -22,6 +23,7 @@ const {
   logFilePath,
   CLOUD_WORKTREE_LABEL,
 } = (await import("./table")) as typeof TableModule;
+const { resetDebugFlagCache } = (await import("./dispatch-args")) as typeof DispatchArgsModule;
 
 test("getDisplayWidth ignores ANSI escape sequences", () => {
   assert.equal(getDisplayWidth(CLOUD_WORKTREE_LABEL), getDisplayWidth("☁ running in cloud"));
@@ -521,6 +523,9 @@ test("captureConsole keeps console output in the log buffer instead of the termi
 
   const prevXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "ctw-log-"));
+  // ログファイルは --debug 指定時だけ書かれる
+  process.argv.push("--debug");
+  resetDebugFlagCache();
 
   try {
     captureConsole();
@@ -539,6 +544,8 @@ test("captureConsole keeps console output in the log buffer instead of the termi
     // 端末に残らない行もログファイルには全文残る
     assert.match(readFileSync(logFilePath(pushed[0].time), "utf-8"), /stderr \[worker\] boom happened\n$/);
   } finally {
+    process.argv.pop();
+    resetDebugFlagCache();
     if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = prevXdg;
     // captureConsole() は console.log/info/warn/error の4つを差し替えるので全て戻す。
