@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type * as DispatchArgsModule from "./dispatch-args";
 import type * as TableModule from "./table";
 
@@ -543,6 +543,9 @@ test("captureConsole keeps console output in the log buffer instead of the termi
     assert.equal(widths.size, 1);
     // 端末に残らない行もログファイルには全文残る
     assert.match(readFileSync(logFilePath(pushed[0].time), "utf-8"), /stderr \[worker\] boom happened\n$/);
+    // タスク出力の全文が残るため、本人以外は読めない権限で作る
+    assert.equal(statSync(logFilePath(pushed[0].time)).mode & 0o777, 0o600);
+    assert.equal(statSync(dirname(logFilePath(pushed[0].time))).mode & 0o777, 0o700);
   } finally {
     process.argv.pop();
     resetDebugFlagCache();

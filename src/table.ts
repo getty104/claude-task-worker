@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { format } from "node:util";
 import { hasDebugFlag } from "./dispatch-args";
@@ -267,13 +267,28 @@ export function formatLogFileLine(entry: LogTableEntry): string {
   return `${entry.time.toISOString()} ${resolve(entry.path ?? ".")} ${id} ${entry.stream} ${entry.text.replace(CONTROL_CHARS, "")}\n`;
 }
 
+// タスク出力の全文が残るため、他ユーザーから読めない権限にする。既存のパスにも効かせるため
+// mode 指定に加えて chmod する（ファイルが切り替わったときだけ）。
+let securedLogPath: string | undefined;
+let logFileErrorReported = false;
+
 function appendLogFile(entry: LogTableEntry): void {
   try {
     const path = logFilePath(entry.time);
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, formatLogFileLine(entry));
-  } catch {
-    // ログファイルの書き込み失敗でワーカーを止めない（console へ出すと自己増殖する）。
+    if (path !== securedLogPath) {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      chmodSync(dirname(path), 0o700);
+    }
+    appendFileSync(path, formatLogFileLine(entry), { mode: 0o600 });
+    if (path !== securedLogPath) {
+      chmodSync(path, 0o600);
+      securedLogPath = path;
+    }
+  } catch (err) {
+    // ログファイルの書き込み失敗でワーカーを止めない。パッチ済み console へ出すと自己増殖するため元の出力先へ一度だけ通知する。
+    if (logFileErrorReported) return;
+    logFileErrorReported = true;
+    rawError(`[log-file] failed to write debug log: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -281,6 +296,7 @@ function appendLogFile(entry: LogTableEntry): void {
 // パッチ済みの console を呼ぶと、描画結果がバッファへ流れ込んで無限に自己増殖する。
 const rawLog = console.log.bind(console);
 const rawClear = console.clear.bind(console);
+const rawError = console.error.bind(console);
 
 /** 画面全体をテーブルで差し替える。captureConsole() の影響を受けない。 */
 export function writeScreen(lines: string[]): void {
