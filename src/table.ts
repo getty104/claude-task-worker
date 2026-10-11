@@ -337,11 +337,13 @@ export function buildLogTableLines(entries: LogTableEntry[]): string[] {
   if (entries.length === 0) return [];
 
   const maxTextWidth = 100;
-  const rows = [...entries].reverse().flatMap((e) =>
-    wrapToWidth(sanitizeLogText(e.text), maxTextWidth).map((chunk, i) =>
-      i === 0 ? [formatTime(e.time), e.id === undefined ? "-" : `#${e.id}`, e.stream, chunk] : ["", "", "", chunk],
-    ),
-  );
+  const rows = [...entries]
+    .reverse()
+    .flatMap((e) =>
+      wrapToWidth(sanitizeLogText(e.text), maxTextWidth).map((chunk, i) =>
+        i === 0 ? [formatTime(e.time), e.id === undefined ? "-" : `#${e.id}`, e.stream, chunk] : ["", "", "", chunk],
+      ),
+    );
 
   return renderBoxTable(["Time", "#", "Stream", "Log"], [rows]);
 }
