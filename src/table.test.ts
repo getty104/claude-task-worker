@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type * as TableModule from "./table";
 
 // node --experimental-strip-types は .ts 拡張子付きの実ファイル解決を要求するため、
@@ -14,6 +17,9 @@ const {
   buildLogTableLines,
   captureConsole,
   logLines,
+  wrapToWidth,
+  formatLogFileLine,
+  logFilePath,
   CLOUD_WORKTREE_LABEL,
 } = (await import("./table")) as typeof TableModule;
 
@@ -463,6 +469,41 @@ test("buildLogTableLines keeps every row the same display width with wide charac
   assert.equal(widths.size, 1);
 });
 
+test("buildLogTableLines wraps long lines instead of truncating them", () => {
+  const text = "x".repeat(150) + "END";
+  const lines = buildLogTableLines([log({ id: 1, text })]);
+
+  const joined = lines.join("\n");
+  assert.ok(!joined.includes("..."));
+  assert.match(joined, /END/);
+  assert.equal(joined.match(/x/g)?.length, 150);
+  const widths = new Set(lines.map((l) => getDisplayWidth(l)));
+  assert.equal(widths.size, 1);
+});
+
+test("wrapToWidth splits by display width, counting full-width chars as 2", () => {
+  assert.deepEqual(wrapToWidth("abcde", 2), ["ab", "cd", "e"]);
+  assert.deepEqual(wrapToWidth("あいう", 4), ["あい", "う"]);
+  assert.deepEqual(wrapToWidth("", 4), [""]);
+});
+
+test("formatLogFileLine includes the timestamp, absolute path, id, stream and text", () => {
+  const line = formatLogFileLine(log({ id: 7, stream: "stderr", text: "\x1b[31mboom\x1b[0m", path: "/repo/wt" }));
+
+  assert.equal(line, `${at("2026-07-20T12:00:05").toISOString()} /repo/wt #7 stderr boom\n`);
+});
+
+test("logFilePath puts one file per local date under the config dir's logs/", () => {
+  const prev = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = "/cfg";
+  try {
+    assert.equal(logFilePath(at("2026-07-20T12:00:05")), "/cfg/claude-task-worker/logs/2026-07-20.log");
+  } finally {
+    if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prev;
+  }
+});
+
 // --- captureConsole ---
 
 // 「端末へ出さない」の検証にあたって process.stdout.write を差し替えてはいけない。
@@ -478,6 +519,9 @@ test("captureConsole keeps console output in the log buffer instead of the termi
     wroteToTerminal = true;
   }) as typeof console.error;
 
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "ctw-log-"));
+
   try {
     captureConsole();
     const start = logLines.length;
@@ -492,7 +536,11 @@ test("captureConsole keeps console output in the log buffer instead of the termi
     // id を持たない行も他の行と桁が揃う
     const widths = new Set(buildLogTableLines(pushed).map((l) => getDisplayWidth(l)));
     assert.equal(widths.size, 1);
+    // 端末に残らない行もログファイルには全文残る
+    assert.match(readFileSync(logFilePath(pushed[0].time), "utf-8"), /stderr \[worker\] boom happened\n$/);
   } finally {
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevXdg;
     // captureConsole() は console.log/info/warn/error の4つを差し替えるので全て戻す。
     Object.assign(console, original);
     // captureConsole() が登録する process.on("exit") は残ログを端末へ書き出す。

@@ -60,7 +60,7 @@ const tasks = new Map<number, TaskEntry>();
 export { logLines };
 
 function pushTaskLogLine(id: number, stream: "stdout" | "stderr", text: string): void {
-  pushLogLine({ id, stream, text: text.replace(/\r$/, ""), time: new Date() });
+  pushLogLine({ id, stream, text: text.replace(/\r$/, ""), time: new Date(), path: tasks.get(id)?.path });
 }
 
 // chunk 境界が行の途中で割れても正しく1行ずつ拾えるよう、未確定の末尾を持ち越す。

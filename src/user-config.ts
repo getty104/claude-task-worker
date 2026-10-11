@@ -52,7 +52,7 @@ export class UserConfigError extends Error {
   }
 }
 
-function getConfigDir(): string {
+export function getConfigDir(): string {
   const xdg = process.env.XDG_CONFIG_HOME;
   const configHome = xdg && xdg.length > 0 ? xdg : join(homedir(), ".config");
   return join(configHome, "claude-task-worker");

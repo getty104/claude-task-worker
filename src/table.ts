@@ -1,4 +1,7 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { format } from "node:util";
+import { getConfigDir } from "./user-config";
 
 export function getDisplayWidth(str: string): number {
   let width = 0;
@@ -40,6 +43,25 @@ export function truncateToWidth(str: string, maxWidth: number): string {
     i++;
   }
   return str;
+}
+
+/** 表示幅 maxWidth ごとに折り返す。全角は幅2として数える。 */
+export function wrapToWidth(str: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  let current = "";
+  let width = 0;
+  for (const char of str) {
+    const charWidth = getDisplayWidth(char);
+    if (width + charWidth > maxWidth && current !== "") {
+      lines.push(current);
+      current = "";
+      width = 0;
+    }
+    current += char;
+    width += charWidth;
+  }
+  lines.push(current);
+  return lines;
 }
 
 export function padToWidth(str: string, targetWidth: number): string {
@@ -208,6 +230,8 @@ export interface LogTableEntry {
   stream: string;
   text: string;
   time: Date;
+  /** ログファイルに残す出力元のパス（タスクは worktree、ワーカー自身は cwd）。 */
+  path?: string;
 }
 
 /**
@@ -218,9 +242,37 @@ export const logLines: LogTableEntry[] = [];
 
 export function pushLogLine(entry: LogTableEntry): void {
   if (entry.text.trim().length === 0) return;
+  if (logFileEnabled) appendLogFile(entry);
   logLines.push(entry);
   if (logLines.length > LOG_DISPLAY_LIMIT) {
     logLines.splice(0, logLines.length - LOG_DISPLAY_LIMIT);
+  }
+}
+
+// 端末のテーブルは直近 LOG_DISPLAY_LIMIT 行しか残らないため、全行を日付ごとのファイルにも残す。
+// captureConsole() を呼ぶ実行（＝ワーカー/ディスパッチャー）でだけ有効にし、テストで
+// ユーザーのホームを汚さない。
+let logFileEnabled = false;
+
+export function logFilePath(time: Date): string {
+  const y = time.getFullYear();
+  const m = String(time.getMonth() + 1).padStart(2, "0");
+  const d = String(time.getDate()).padStart(2, "0");
+  return join(getConfigDir(), "logs", `${y}-${m}-${d}.log`);
+}
+
+export function formatLogFileLine(entry: LogTableEntry): string {
+  const id = entry.id === undefined ? "-" : `#${entry.id}`;
+  return `${entry.time.toISOString()} ${resolve(entry.path ?? ".")} ${id} ${entry.stream} ${entry.text.replace(CONTROL_CHARS, "")}\n`;
+}
+
+function appendLogFile(entry: LogTableEntry): void {
+  try {
+    const path = logFilePath(entry.time);
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, formatLogFileLine(entry));
+  } catch {
+    // ログファイルの書き込み失敗でワーカーを止めない（console へ出すと自己増殖する）。
   }
 }
 
@@ -245,6 +297,7 @@ let consoleCaptured = false;
 export function captureConsole(): void {
   if (consoleCaptured) return;
   consoleCaptured = true;
+  logFileEnabled = true;
 
   // 描画される前にプロセスが終了しても（設定エラーで即 exit する等）ログが消えないよう、
   // 終了時に残っているログをそのまま端末へ書き出す。
@@ -277,20 +330,17 @@ function sanitizeLogText(text: string): string {
 /**
  * 実行中タスクの標準出力/エラー出力のログをテーブルに組み立てる純粋関数。
  * 新しい行ほど上に来るよう時刻の降順で並べる（テーブル下端はステータス表示に隠れやすいため）。
+ * 長い行は切り詰めずに折り返す（エラーメッセージを全文読めるようにするため）。
  */
 export function buildLogTableLines(entries: LogTableEntry[]): string[] {
   if (entries.length === 0) return [];
 
   const maxTextWidth = 100;
-  const rows = [...entries].reverse().map((e) => {
-    const text = sanitizeLogText(e.text);
-    return [
-      formatTime(e.time),
-      e.id === undefined ? "-" : `#${e.id}`,
-      e.stream,
-      getDisplayWidth(text) > maxTextWidth ? truncateToWidth(text, maxTextWidth) : text,
-    ];
-  });
+  const rows = [...entries].reverse().flatMap((e) =>
+    wrapToWidth(sanitizeLogText(e.text), maxTextWidth).map((chunk, i) =>
+      i === 0 ? [formatTime(e.time), e.id === undefined ? "-" : `#${e.id}`, e.stream, chunk] : ["", "", "", chunk],
+    ),
+  );
 
   return renderBoxTable(["Time", "#", "Stream", "Log"], [rows]);
 }
