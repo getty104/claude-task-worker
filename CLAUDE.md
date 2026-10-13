@@ -181,7 +181,7 @@ fork するスキル: `create-pr` / `check-library` / `resolve-pr-comments` / `c
 
 **`AskUserQuestion` を使うスキルは fork してはいけない**。fork したスキルは別コンテキストのサブエージェントとして走り、ユーザーと直接会話できないため同ツールが使えない。`breakdown-issues` はステップ3で不明点をユーザーへ質問する設計なので `context: fork`（および fork 前提の `model:` / `effort:`）を持たせず、呼び出し元セッションのモデルでそのまま走らせる。`create-prd` も同じ。カスタムワーカーの定義 TS を対話で生成する `build-custom-worker` も同じ理由で fork を持たない（要件を `AskUserQuestion` で全項目確定させてから `claude-task-worker/lib` のみを import する定義を書き出し、`list-workers` でロード検証する。ワーカーからは自動起動しない）。
 
-この2スキルは**成果物の文章を fable で生成する**。スキル本体にモデルを書けないため、生成工程だけをモデル指定の効く経路へ切り出す: `create-prd` は PRD 本文の起草を `Agent`（`model: "fable"`）へ委譲し、`breakdown-issues` は要件定義・TODO分解・各TODOの本文素材（説明・要件・参照情報・優先度・規模）を `requirement-todo-organizer`（`model: fable`）に生成させ、ユーザー回答を受けた更新も同エージェントへ再委譲する。メインセッションは質問・Issue 作成・番号の受け渡しだけを担い、分解結果の文章を自分で書き足さない（書き足した時点でその部分は呼び出し元のモデルの成果物になる）。
+この2スキルは**成果物の文章を opus（effort `max`）で生成する**（PRD と分解結果は後段の Issue・実装のスコープそのものになるため、`xhigh` / `max` を使わない既定方針の例外として最大の思考量を割く）。スキル本体にモデルを書けないため、生成工程だけをモデル指定の効く経路へ切り出す: `create-prd` は PRD 本文の起草を `Agent`（`model: "opus"` / `effort: "max"`）へ委譲し、`breakdown-issues` は要件定義・TODO分解・各TODOの本文素材（説明・要件・参照情報・優先度・規模）を `requirement-todo-organizer`（`model: opus` / `effort: max`）に生成させ、ユーザー回答を受けた更新も同エージェントへ再委譲する。メインセッションは質問・Issue 作成・番号の受け渡しだけを担い、分解結果の文章を自分で書き足さない（書き足した時点でその部分は呼び出し元のモデルの成果物になる）。
 
 **`context: fork` へ Skill ツール経由の args は届く**。かつて Claude Code のバグ（anthropics/claude-code#34164）で届かず argsファイルの二重チャネルで回避していたが、上流で修正済み。実運用のPRで `create-pr` に渡した Issue 番号が `Closes #<N>` とベースブランチ（`cc-epic-<N>`）の両方に正しく反映されていることを確認している。
 
@@ -241,7 +241,7 @@ effort を上げる場合は `claude-task-worker.json` の `workers.<name>.effor
 
 - **fork スキル（`check-library` / `resolve-pr-comments`）の effort は `medium`**（low にしない）。同ガイドは `low` × 長いエージェントプロンプト（Claude Code の system prompt はこれに当たる）で「検索をスキップする・早期停止して差し戻す・チェックを省く」と明記しており、`medium` で早期停止がおよそ半減する。haiku の `medium` でも sonnet の `low` より単価は下がる
 - **`explore-agent` も haiku**。読み取り専用の所在特定で、深さは呼び出し元が effort（調査が複数段に及ぶなら `high`）と徹底度で上げる。取りこぼしは下流で気づけないため、`low` は所在を1か所確かめるだけの呼び出しに限る
-- **haiku へ下げないもの**: `commit-push`（squash・履歴の再構成・force push という破壊的操作の判断を含む）、`create-pr`（PR本文の質がレビューと `triage-pr` の判断材料になる）、`general-purpose-assistant` / `create-review-fix-plan` / ワーカー全般（長いエージェント的タスク、または誤りが下流の手戻りに直結する）。opus / fable の割り当ては前節までの根拠のまま変えていない
+- **haiku へ下げないもの**: `commit-push`（squash・履歴の再構成・force push という破壊的操作の判断を含む）、`create-pr`（PR本文の質がレビューと `triage-pr` の判断材料になる）、`general-purpose-assistant` / `create-review-fix-plan` / ワーカー全般（長いエージェント的タスク、または誤りが下流の手戻りに直結する）。opus の割り当ては前節までの根拠のまま変えていない
 - 早期停止・検証省略の対策文言（ガイドの "Keep working until …" / "When you change code …"）は `lightweight-assistant` の本文に既にある（Sonnet 5.5 対策と同一文言）。`systemPromptFor()` は haiku に追補を足さないが、haiku で走るのはサブエージェント／fork スキルだけで `--append-system-prompt-file` は届かないため影響しない（ワーカーの `model` を haiku にする場合は基底のみになる点に注意）
 
 ### 汎用サブエージェントの effort は呼び出し元が決める

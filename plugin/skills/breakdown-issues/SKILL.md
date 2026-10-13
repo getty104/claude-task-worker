@@ -13,7 +13,7 @@ argument-hint: "[task-description | issue-number]"
 - **自然言語のタスク説明**: その内容を分解し、親Issueを新規作成する
 - **既存のIssue番号**（数値のみ・`#`付き数値・Issue URL）: そのIssueの description を分解対象とし、**そのIssue自身を親（Epic）にする**（`/create-prd` が作った PRD Issue を分解する経路）
 
-**モデル**: 要件定義・TODO分解・各TODOの本文素材の生成は、すべて `requirement-todo-organizer` エージェント（`model: fable`）が行う。メインセッションは質問（`AskUserQuestion`）・Issue 作成・番号の受け渡しだけを担い、**分解結果の文章を自分で書き足したり書き換えたりしない**。`create-prd` と同じく**スキル本体に `model:` は書けない**（`model:` は `context: fork` が無いと効かず、fork すると `AskUserQuestion` でユーザーへ質問できなくなる）ため、モデル指定が意味を持つ生成工程をエージェントへ切り出している。`fable` が利用できない環境では同エージェントが既定モデルで走るだけで、フローは変わらない。
+**モデル**: 要件定義・TODO分解・各TODOの本文素材の生成は、すべて `requirement-todo-organizer` エージェント（`model: opus` / `effort: max`）が行う。メインセッションは質問（`AskUserQuestion`）・Issue 作成・番号の受け渡しだけを担い、**分解結果の文章を自分で書き足したり書き換えたりしない**。`create-prd` と同じく**スキル本体に `model:` は書けない**（`model:` は `context: fork` が無いと効かず、fork すると `AskUserQuestion` でユーザーへ質問できなくなる）ため、モデル指定が意味を持つ生成工程をエージェントへ切り出している。
 
 # Instructions
 
