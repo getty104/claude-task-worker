@@ -107,7 +107,7 @@ gh issue view <Issue番号> --comments
 
 本文・コメントに画像や資料への**リンク**がある場合は、リンク先を開いて内容を確認する（テキストだけでは伝わらない仕様 — UIの見た目・エラー画面・図など — が判断に必要なことがあるため、URLを見て終わりにしない）。手段は後述の「外部リンクの参照」に従う（一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP）。
 
-**画像は Issue へ直接添付せず、Drive 等へ上げたうえでリンクを貼る運用を前提とする。** GitHub の添付ファイル（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は認証付きの実体取得が必要で、クラウドセッションからは取得手段が無い。添付が直接貼られていて内容を読めない場合は、推測で補わず「添付 `<URL>` は取得不可（Issue への直接添付のため）。Drive 等へ上げ直してリンクを貼ってほしい」と報告に明記し、確認できた範囲で処理を続行する。
+本文・コメントに**直接添付された画像**（`github.com/user-attachments/...` / `user-images.githubusercontent.com`）は、`bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue番号> "$(mktemp -d)"` でダウンロードし（出力は「保存先パス<TAB>添付元の html_url」）、保存先を `Read` で開いて内容を確認する。添付 URL を直接開かない（クラウドでは 403。詳細は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` の「画像・添付ファイル」）。取得に失敗した場合は、推測で補わず「添付は取得不可（理由）」と報告に明記し、確認できた範囲で処理を続行する。
 
 ### 2.5. 既存「依頼内容」ブロックの検出（新規作成はしない）
 

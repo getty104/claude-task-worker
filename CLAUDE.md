@@ -713,7 +713,7 @@ Issue Dependencies / sub-issue の POST（`add-blocked-by` / `add-blocking` / `a
 
 `gh pr checkout` は**ワーカー側で解決している**。PR 系ワーカーはクラウドセッション作成時に `--on-branch <PR の head ブランチ>` を渡しており（`pr-worker.ts`）、クラウド VM は最初から PR のブランチ上で作業を始めるので checkout 自体が不要。`buildCloudCheckoutInstruction()`（`src/claude-args.ts`）が PR 系タスクの起動プロンプトへ「`gh pr checkout` を実行しない」ことを明記する（Issue 系は `--ref` でベースブランチだけを指定し、クラウド側が新規作業ブランチを切るため付けない）。スキル本文の `gh pr checkout` はローカル実行用にそのまま残る。
 
-**画像は Issue へ直接添付せず Drive 等へ上げてリンクを貼る運用を前提とする**。GitHub の添付ファイルは認証付きの実体取得が必要でクラウドセッションからは読めず、従来使っていた `gh-asset`（サードパーティ拡張）はクラウド VM に導入されていない。分析系スキル（`read-github-issue` / `create-issue-from-issue-number` / `update-issue` / `answer-issue-questions`）は添付ダウンロードをやめ、**description・コメントに貼られたリンクを読む**（一般URLは `WebFetch`、Drive はドライブ用 MCP、Figma は Figma MCP）。直接添付されていて読めない場合は推測で補わず、取得不可である旨を報告に明記して確認できた範囲で続行する。
+**Issue / PR に直接添付された画像は `gh-compat.sh fetch-attachments` で読む**（分析系スキル `read-github-issue` / `create-issue-from-issue-number` / `update-issue` / `answer-issue-questions`）。`github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になる。一方 REST を `Accept: application/vnd.github.full+json` で取ると `body_html` の画像が署名付きの `private-user-images.githubusercontent.com/...?jwt=...` に置き換わり、これは認証なしでクラウドからも取得できる（実測）。署名の有効期限が5分なので、URL を返さずその場でダウンロードして保存先パスを返す形にしてある。1枚の画像は `body_html` に `<a href>` と `<img src>` の2回現れるため重複除去する。description・コメントに貼られた**リンク**（Drive / Figma / 一般URL）はこれとは別に各 MCP / `WebFetch` で読む。
 
 なお `gh pr checkout`（ローカル作業ツリーへの checkout）と `gh run` 系（REST 経由でゲートを受けない）は `gh` のまま残る。
 
