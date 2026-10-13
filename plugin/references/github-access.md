@@ -165,7 +165,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue/PR番�
 # => <保存先パス>\t<添付元（本文またはコメント）の html_url>  を画像1枚につき1行
 ```
 
-- 添付 URL を直接叩かない。`github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になる（`gh-asset` もこの URL を叩くうえ、クラウド VM へ導入できないため使わない）。REST を `full+json` で取ると `body_html` の画像が署名付き URL に置き換わり、これは認証なしで取得できる
+- **`gh-asset` はローカル・クラウドとも使わない**（実行形態で手段を分けない）。同拡張が叩く `github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になり、クラウド VM へ導入もできない。添付 URL を直接叩くこともしない。REST を `full+json` で取ると `body_html` の画像が署名付き URL に置き換わり、これは認証なしで取得できる
 - 署名付き URL の有効期限は**5分**。URL だけを控えて後で読むことはできないので、必ずこのサブコマンドでその場で保存する（再取得したければ同じコマンドを再実行する）
 - 対象は Issue / PR の本文と Issue コメント（PR の会話コメントを含む）。PR の行コメント（レビューコメント）は対象外
 - 出力が空なら直接添付は無い。非0終了（取得・ダウンロード失敗）の場合は推測で補わず「添付は取得不可（理由）」と報告・根拠に明記し、確認できた範囲で処理を続行する
