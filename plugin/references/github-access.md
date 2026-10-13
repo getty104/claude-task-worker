@@ -130,7 +130,7 @@ MCP に同等ツールが無い（または**あっても意味論が違って�
 | `close-issue <n> [reason]` | `gh issue close [--reason]` | `PATCH repos/{o}/{r}/issues/{n}` の `state=closed` / `state_reason`（reason は `completed`（既定）/ `not_planned`。クローズ済みでも200なので冪等） |
 | `add-assignee <n> <login>...` | `gh issue edit --add-assignee` / `gh pr edit --add-assignee` | `POST repos/{o}/{r}/issues/{n}/assignees`（追加専用API。`@me` はログインユーザーへ解決） |
 | `create-issue --title --body-file [--label]... [--assignee]...` | `gh issue create` | `POST repos/{o}/{r}/issues`（labels / assignees を同じ呼び出しで渡す。URL を出力）。二重起票を避けるため `gh` へはフォールバックしない |
-| `fetch-attachments <n> <dir>` | （`gh-asset`。クラウドでは導入できず、叩く `github.com/user-attachments/assets/<id>` もプロキシで 403） | `GET repos/{o}/{r}/issues/{n}` と `.../comments` を `Accept: application/vnd.github.full+json` で取得し、`body_html` 中の署名付き `private-user-images.githubusercontent.com` URL を即座にダウンロードする。「保存先パス<TAB>添付元の html_url」を出力 |
+| `fetch-attachments <n> <dir>` | （添付 URL `github.com/user-attachments/assets/<id>` の直接取得。クラウドではプロキシで 403） | `GET repos/{o}/{r}/issues/{n}` と `.../comments` を `Accept: application/vnd.github.full+json` で取得し、`body_html` 中の署名付き `private-user-images.githubusercontent.com` URL を即座にダウンロードする。「保存先パス<TAB>添付元の html_url」を出力 |
 | `create-pr --title --body-file --base [--head] [--draft] [--label]... [--assignee]...` | `gh pr create` | `POST repos/{o}/{r}/pulls` → `add-label` → `add-assignee`。URL を出力する。作成後の付与が失敗したら URL を出したうえで非0（作り直さず `add-label` / `add-assignee` を再実行する） |
 
 **Issue / PR の作成を MCP で行ってはいけない。** `create_pull_request` は labels / assignees の引数を持たず、`issue_write`（method: `create`）はモデルが渡し忘れると黙って欠落する。どちらも作成は成功するのでエラーにならず、ワーカーのポーリング条件（ラベル＋Assignee）から外れた Issue / PR が誰にも拾われないまま残る（実測: クラウド実行で作成された Issue / PR に Assignee と `cc-triage-scope` が付いていなかった）。`gh issue create` / `gh pr create` は GraphQL 経由でクラウドでは 403 になるため、作成と付与を1スクリプトに閉じた REST 経路が唯一の道になる。
@@ -165,7 +165,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue/PR番�
 # => <保存先パス>\t<添付元（本文またはコメント）の html_url>  を画像1枚につき1行
 ```
 
-- **`gh-asset` はローカル・クラウドとも使わない**（実行形態で手段を分けない）。同拡張が叩く `github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になり、クラウド VM へ導入もできない。添付 URL を直接叩くこともしない。REST を `full+json` で取ると `body_html` の画像が署名付き URL に置き換わり、これは認証なしで取得できる
+- 添付 URL（`github.com/user-attachments/assets/<id>`）を直接叩かない。クラウドのプロキシで 403 になるため、ローカル・クラウドとも本サブコマンドに揃える。REST を `full+json` で取ると `body_html` の画像が署名付き URL に置き換わり、これは認証なしで取得できる
 - 署名付き URL の有効期限は**5分**。URL だけを控えて後で読むことはできないので、必ずこのサブコマンドでその場で保存する（再取得したければ同じコマンドを再実行する）
 - 対象は Issue / PR の本文と Issue コメント（PR の会話コメントを含む）。PR の行コメント（レビューコメント）は対象外
 - 出力が空なら直接添付は無い。非0終了（取得・ダウンロード失敗）の場合は推測で補わず「添付は取得不可（理由）」と報告・根拠に明記し、確認できた範囲で処理を続行する

@@ -355,7 +355,7 @@ cmd_pr_for_branch() {
 }
 
 # Issue/PR（本文＋コメント）に直接添付された画像のダウンロード。
-# `github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になる（gh-asset もこの URL を叩くので使えない）。
+# `github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になる。
 # 一方 `Accept: application/vnd.github.full+json` で REST を叩くと、body_html の画像が署名付きの
 # `private-user-images.githubusercontent.com/...?jwt=...` に置き換わり、これは認証なしで取得できる（実測）。
 # 1枚の画像は body_html に <a href> と <img src> の2回現れるので unique で畳む。
