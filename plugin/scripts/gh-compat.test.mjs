@@ -471,6 +471,16 @@ test("fetch-attachments は body_html の署名付きURLを重複なくダウン
     "repos/acme/widget/issues/7/comments": JSON.stringify([
       { html_url: "https://github.com/acme/widget/issues/7#c1", body_html: `<img src="${img("b")}">` },
       { html_url: "https://github.com/acme/widget/issues/7#c2", body_html: null },
+      // 本文の画像を引用返信したコメント（署名だけ違う同じ画像）は再取得しない
+      {
+        html_url: "https://github.com/acme/widget/issues/7#c3",
+        body_html: `<img src="${img("a").replace("jwt=x", "jwt=z")}">`,
+      },
+      // 末尾名が同じでも別パスの画像は上書きしない
+      {
+        html_url: "https://github.com/acme/widget/issues/7#c4",
+        body_html: `<img src="${img("b").replace("/1/", "/2/")}">`,
+      },
     ]),
     "repos/acme/widget/issues/7": JSON.stringify({
       html_url: "https://github.com/acme/widget/issues/7",
@@ -486,12 +496,13 @@ test("fetch-attachments は body_html の署名付きURLを重複なくダウン
   const out = path.join(dir, "out");
   const lines = run(["fetch-attachments", "7", out], { env: stubEnv(dir, log) }).split("\n");
   assert.deepEqual(lines, [
-    `${out}/a.png\thttps://github.com/acme/widget/issues/7`,
-    `${out}/b.png\thttps://github.com/acme/widget/issues/7#c1`,
+    `${out}/1-a.png\thttps://github.com/acme/widget/issues/7`,
+    `${out}/2-b.png\thttps://github.com/acme/widget/issues/7#c1`,
+    `${out}/3-b.png\thttps://github.com/acme/widget/issues/7#c4`,
   ]);
-  assert.ok(existsSync(path.join(out, "a.png")));
+  assert.ok(existsSync(path.join(out, "1-a.png")));
   const calls = execFileSync("cat", [log], { encoding: "utf8" });
   assert.match(calls, /Accept: application\/vnd\.github\.full\+json/);
   assert.match(calls, /curl https:\/\/private-user-images\.githubusercontent\.com\/1\/a\.png\?jwt=x&y=1/);
-  assert.equal(calls.match(/^curl /gm).length, 2);
+  assert.equal(calls.match(/^curl /gm).length, 3);
 });

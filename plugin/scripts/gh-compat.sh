@@ -361,16 +361,19 @@ cmd_pr_for_branch() {
 # 1枚の画像は body_html に <a href> と <img src> の2回現れるので unique で畳む。
 # 署名の有効期限は5分なので、URL を取得したその場でダウンロードする（URL を返して後で読ませない）。
 cmd_fetch_attachments() {
-  local n="$1" dir="$2" accept="Accept: application/vnd.github.full+json" list src url file failed=0
+  local n="$1" dir="$2" accept="Accept: application/vnd.github.full+json" list src url file i=0 failed=0
   mkdir -p "$dir" || return 1
   list=$( { gh api -H "$accept" "repos/${OWNER_REPO}/issues/${n}" &&
     gh api --paginate -H "$accept" "repos/${OWNER_REPO}/issues/${n}/comments?per_page=100"; } |
     jq -r '(if type == "array" then .[] else . end) | .html_url as $src
       | [(.body_html // "") | scan("https://private-user-images\\.githubusercontent\\.com/[^\"]+")] | unique | .[]
-      | [$src, gsub("&amp;"; "&")] | @tsv') || { echo "gh-compat: failed to fetch #${n}" >&2; return 1; }
+      | [$src, gsub("&amp;"; "&")] | @tsv' |
+    # 引用返信などで同じ画像が別の本文・コメントにも現れるので、署名を除いたパスで全体を重複除去する
+    awk -F'\t' '{ k = $2; sub(/\?.*/, "", k) } !seen[k]++') || { echo "gh-compat: failed to fetch #${n}" >&2; return 1; }
   while IFS=$'\t' read -r src url; do
     [ -n "$url" ] || continue
-    file="${dir%/}/$(basename "${url%%\?*}")"
+    i=$((i + 1))
+    file="${dir%/}/${i}-$(basename "${url%%\?*}")"  # 連番で、末尾名が同じ別画像による上書きを防ぐ
     if curl -fsSL -o "$file" "$url"; then
       printf '%s\t%s\n' "$file" "$src"
     else
