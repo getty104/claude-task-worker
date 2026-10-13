@@ -461,3 +461,37 @@ test("add-assignee は追加専用の REST を使う（@me はログイン名へ
   assert.match(calls, /-X POST repos\/acme\/widget\/issues\/9\/assignees .*-f assignees\[\]=alice/);
   assert.doesNotMatch(calls, /issue edit/);
 });
+
+test("fetch-attachments は body_html の署名付きURLを重複なくダウンロードし、保存先と添付元を出力する", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  const log = path.join(dir, "log");
+  const img = (id) => `https://private-user-images.githubusercontent.com/1/${id}.png?jwt=x&amp;y=1`;
+  makeGhStub(dir, {
+    // 先勝ちでマッチするので、より長い comments を先に置く
+    "repos/acme/widget/issues/7/comments": JSON.stringify([
+      { html_url: "https://github.com/acme/widget/issues/7#c1", body_html: `<img src="${img("b")}">` },
+      { html_url: "https://github.com/acme/widget/issues/7#c2", body_html: null },
+    ]),
+    "repos/acme/widget/issues/7": JSON.stringify({
+      html_url: "https://github.com/acme/widget/issues/7",
+      body_html: `<a href="${img("a")}"><img src="${img("a")}"></a>`,
+    }),
+  });
+  // curl スタブ: 受け取った URL をログへ残し、-o の先へ書き出す
+  writeFileSync(
+    path.join(dir, "curl"),
+    `#!/usr/bin/env bash\nwhile [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done\necho "curl $url" >> "$STUB_LOG"\necho png > "$out"\n`,
+  );
+  chmodSync(path.join(dir, "curl"), 0o755);
+  const out = path.join(dir, "out");
+  const lines = run(["fetch-attachments", "7", out], { env: stubEnv(dir, log) }).split("\n");
+  assert.deepEqual(lines, [
+    `${out}/a.png\thttps://github.com/acme/widget/issues/7`,
+    `${out}/b.png\thttps://github.com/acme/widget/issues/7#c1`,
+  ]);
+  assert.ok(existsSync(path.join(out, "a.png")));
+  const calls = execFileSync("cat", [log], { encoding: "utf8" });
+  assert.match(calls, /Accept: application\/vnd\.github\.full\+json/);
+  assert.match(calls, /curl https:\/\/private-user-images\.githubusercontent\.com\/1\/a\.png\?jwt=x&y=1/);
+  assert.equal(calls.match(/^curl /gm).length, 2);
+});

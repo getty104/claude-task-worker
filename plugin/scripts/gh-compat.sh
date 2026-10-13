@@ -41,6 +41,8 @@ usage: gh-compat.sh <subcommand> [args...]
                                      Issue を作成し URL を出力する（ラベル・Assignee も同じ1回のREST呼び出しで付く）
   create-pr --title T --body-file F --base B [--head H] [--draft] [--label L]... [--assignee A]...
                                      PR を作成し URL を出力する（続けてラベル・Assignee を付ける）
+  fetch-attachments <number> <dir>   Issue/PR 本文とコメントに直接添付された画像を <dir> へ保存し、
+                                     「<保存先パス>\t<添付元の html_url>」を1行ずつ出力する
 USAGE
   exit 64
 }
@@ -352,6 +354,32 @@ cmd_pr_for_branch() {
   gh pr view "$branch" --json number --jq '.number' 2>/dev/null
 }
 
+# Issue/PR（本文＋コメント）に直接添付された画像のダウンロード。
+# `github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になる（gh-asset もこの URL を叩くので使えない）。
+# 一方 `Accept: application/vnd.github.full+json` で REST を叩くと、body_html の画像が署名付きの
+# `private-user-images.githubusercontent.com/...?jwt=...` に置き換わり、これは認証なしで取得できる（実測）。
+# 1枚の画像は body_html に <a href> と <img src> の2回現れるので unique で畳む。
+# 署名の有効期限は5分なので、URL を取得したその場でダウンロードする（URL を返して後で読ませない）。
+cmd_fetch_attachments() {
+  local n="$1" dir="$2" accept="Accept: application/vnd.github.full+json" list src url file failed=0
+  mkdir -p "$dir" || return 1
+  list=$( { gh api -H "$accept" "repos/${OWNER_REPO}/issues/${n}" &&
+    gh api --paginate -H "$accept" "repos/${OWNER_REPO}/issues/${n}/comments?per_page=100"; } |
+    jq -r '(if type == "array" then .[] else . end) | .html_url as $src
+      | [(.body_html // "") | scan("https://private-user-images\\.githubusercontent\\.com/[^\"]+")] | unique | .[]
+      | [$src, gsub("&amp;"; "&")] | @tsv') || { echo "gh-compat: failed to fetch #${n}" >&2; return 1; }
+  while IFS=$'\t' read -r src url; do
+    [ -n "$url" ] || continue
+    file="${dir%/}/$(basename "${url%%\?*}")"
+    if curl -fsSL -o "$file" "$url"; then
+      printf '%s\t%s\n' "$file" "$src"
+    else
+      echo "gh-compat: failed to download an attachment of ${src}" >&2; failed=1
+    fi
+  done <<< "$list"
+  return "$failed"
+}
+
 [ $# -ge 1 ] || usage
 sub="$1"; shift
 
@@ -382,6 +410,7 @@ case "$sub" in
       add-assignee)   [ $# -ge 2 ] || usage; cmd_add_assignee "$@" ;;
       create-issue)   cmd_create_issue "$@" ;;
       create-pr)      cmd_create_pr "$@" ;;
+      fetch-attachments) [ $# -eq 2 ] || usage; cmd_fetch_attachments "$1" "$2" ;;
       *) usage ;;
     esac ;;
 esac

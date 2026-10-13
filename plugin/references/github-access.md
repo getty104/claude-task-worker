@@ -130,6 +130,7 @@ MCP に同等ツールが無い（または**あっても意味論が違って�
 | `close-issue <n> [reason]` | `gh issue close [--reason]` | `PATCH repos/{o}/{r}/issues/{n}` の `state=closed` / `state_reason`（reason は `completed`（既定）/ `not_planned`。クローズ済みでも200なので冪等） |
 | `add-assignee <n> <login>...` | `gh issue edit --add-assignee` / `gh pr edit --add-assignee` | `POST repos/{o}/{r}/issues/{n}/assignees`（追加専用API。`@me` はログインユーザーへ解決） |
 | `create-issue --title --body-file [--label]... [--assignee]...` | `gh issue create` | `POST repos/{o}/{r}/issues`（labels / assignees を同じ呼び出しで渡す。URL を出力）。二重起票を避けるため `gh` へはフォールバックしない |
+| `fetch-attachments <n> <dir>` | （`gh-asset`。クラウドでは導入できず、叩く `github.com/user-attachments/assets/<id>` もプロキシで 403） | `GET repos/{o}/{r}/issues/{n}` と `.../comments` を `Accept: application/vnd.github.full+json` で取得し、`body_html` 中の署名付き `private-user-images.githubusercontent.com` URL を即座にダウンロードする。「保存先パス<TAB>添付元の html_url」を出力 |
 | `create-pr --title --body-file --base [--head] [--draft] [--label]... [--assignee]...` | `gh pr create` | `POST repos/{o}/{r}/pulls` → `add-label` → `add-assignee`。URL を出力する。作成後の付与が失敗したら URL を出したうえで非0（作り直さず `add-label` / `add-assignee` を再実行する） |
 
 **Issue / PR の作成を MCP で行ってはいけない。** `create_pull_request` は labels / assignees の引数を持たず、`issue_write`（method: `create`）はモデルが渡し忘れると黙って欠落する。どちらも作成は成功するのでエラーにならず、ワーカーのポーリング条件（ラベル＋Assignee）から外れた Issue / PR が誰にも拾われないまま残る（実測: クラウド実行で作成された Issue / PR に Assignee と `cc-triage-scope` が付いていなかった）。`gh issue create` / `gh pr create` は GraphQL 経由でクラウドでは 403 になるため、作成と付与を1スクリプトに閉じた REST 経路が唯一の道になる。
@@ -157,10 +158,18 @@ MCP に同等ツールが無い（または**あっても意味論が違って�
 
 ## 画像・添付ファイル
 
-**画像は Issue へ直接添付せず、Google Drive 等へ上げたうえでリンクを貼る運用を前提とする。** GitHub の添付ファイル（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は認証付きの実体取得が必要で、クラウドセッションからは取得手段が無い（かつて使っていた `gh-asset` はサードパーティ拡張で、クラウド VM に導入されていない）。
+**Issue / PR に直接添付された画像（`github.com/user-attachments/...` / `user-images.githubusercontent.com`）は `gh-compat.sh fetch-attachments` でダウンロードしてから `Read` で見る。** ローカル・クラウド共通の手段。
 
-- description・コメントに貼られた**リンクは読む**。一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP、GitHub の URL は上記対応表の MCP ツール
-- 直接添付されていて読めない場合は、推測で補わず「添付 `<URL>` は取得不可（Issue への直接添付のため）」と報告・根拠に明記し、確認できた範囲で処理を続行する
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue/PR番号> "$(mktemp -d)"
+# => <保存先パス>\t<添付元（本文またはコメント）の html_url>  を画像1枚につき1行
+```
+
+- 添付 URL を直接叩かない。`github.com/user-attachments/assets/<id>` はクラウドのプロキシで 403 になる（`gh-asset` もこの URL を叩くうえ、クラウド VM へ導入できないため使わない）。REST を `full+json` で取ると `body_html` の画像が署名付き URL に置き換わり、これは認証なしで取得できる
+- 署名付き URL の有効期限は**5分**。URL だけを控えて後で読むことはできないので、必ずこのサブコマンドでその場で保存する（再取得したければ同じコマンドを再実行する）
+- 対象は Issue / PR の本文と Issue コメント（PR の会話コメントを含む）。PR の行コメント（レビューコメント）は対象外
+- 出力が空なら直接添付は無い。非0終了（取得・ダウンロード失敗）の場合は推測で補わず「添付は取得不可（理由）」と報告・根拠に明記し、確認できた範囲で処理を続行する
+- description・コメントに貼られた**リンクは別途読む**。一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP、GitHub の URL は上記対応表の MCP ツール
 
 ## 本ドキュメントで扱わないもの
 
