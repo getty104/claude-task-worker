@@ -44,9 +44,7 @@ export function buildInstallDepsCommand(uid: number | undefined): { command: str
  */
 export async function installPlaywrightBrowsers(logPrefix: string): Promise<boolean> {
   const { runCommand } = await loadRunCommand();
-  console.log(
-    `[${logPrefix}] Installing Playwright browsers (npx ${INSTALL_BROWSER_ARGS.join(" ")})...`,
-  );
+  console.log(`[${logPrefix}] Installing Playwright browsers (npx ${INSTALL_BROWSER_ARGS.join(" ")})...`);
   try {
     await runCommand("npx", INSTALL_BROWSER_ARGS);
     console.log(`[${logPrefix}] Playwright browsers installed.`);
