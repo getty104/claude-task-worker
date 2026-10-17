@@ -138,16 +138,14 @@ git switch -c "fix-workflow-$(date +%Y%m%d%H%M%S)" "origin/$DEFAULT_BRANCH"
 1. `commit-push` skill でコミットと push を行う
 2. `create-pr` skill で PR を作成する（引数は渡さない）
 
-`create-pr` は PR 本文のテンプレート適用・ベースブランチの決定・`gh api user --jq '.login'` で取得したユーザーの Assignee 追加・`cc-triage-scope` ラベルの付与を行う。
+`create-pr` は PR 本文のテンプレート適用・ベースブランチの決定・Assignee（`@me`）の追加・`cc-triage-scope` ラベルの付与を行う。
 
-PR 作成後、Assignee とラベルが実際に付いていることを確認する。付いていなければ補う。
-
-> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
+**PR 作成後、Assignee と `cc-triage-scope` を必ず付け直す**（結果を確認せず毎回実行する。どちらも冪等）。`triage-pr` はこの2つで PR を拾うため、欠けた PR は誰にもレビュー・マージされないまま放置される。`gh pr edit --add-label` / `--add-assignee` と MCP の `issue_write`（method: `update`。`labels` を全置換する）は使わない。
 
 ```bash
 PR_NUMBER=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch)
-gh pr view "$PR_NUMBER" --json assignees,labels
-gh pr edit "$PR_NUMBER" --add-assignee "@me" --add-label cc-triage-scope
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label "$PR_NUMBER" cc-triage-scope
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-assignee "$PR_NUMBER" @me
 ```
 
 PR 本文には、対象ワークフロー・失敗した run の URL・特定した原因・修正内容を記載する。
