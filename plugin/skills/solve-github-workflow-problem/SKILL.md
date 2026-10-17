@@ -144,8 +144,10 @@ git switch -c "fix-workflow-$(date +%Y%m%d%H%M%S)" "origin/$DEFAULT_BRANCH"
 
 ```bash
 PR_NUMBER=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-for-branch)
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label "$PR_NUMBER" cc-triage-scope
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-assignee "$PR_NUMBER" @me
+status=0
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label "$PR_NUMBER" cc-triage-scope || status=1
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-assignee "$PR_NUMBER" @me || status=1
+exit "$status"
 ```
 
 PR 本文には、対象ワークフロー・失敗した run の URL・特定した原因・修正内容を記載する。
