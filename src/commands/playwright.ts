@@ -5,11 +5,16 @@ async function loadRunCommand(): Promise<typeof RunCommandModule> {
   return (await import("./run-command.ts")) as typeof RunCommandModule;
 }
 
-// ブラウザのダウンロードだけに使うパッケージ。`playwright` ではなく `playwright-core` を叩くのは、
-// `playwright` の postinstall が chromium / firefox / webkit を無条件に全部落とすため（必要なのは chromium だけ）。
-// `npm install -g` せず npx で呼ぶのは、CLI 自体を常駐させる必要がなく、MCP サーバー本体
-// （`npx -y @playwright/mcp@latest`）と同じくその都度 npx で解決される側だから。
+// `install-deps`（システムライブラリの導入）だけに使うパッケージ。`playwright` ではなく `playwright-core` を叩くのは、
+// `playwright` の postinstall が chromium / firefox / webkit を無条件に全部落とすため。
 export const PLAYWRIGHT_CORE_PACKAGE = "playwright-core";
+
+// ブラウザ本体は MCP サーバー自身の `install-browser` で取得する。@playwright/mcp は playwright-core を
+// アルファ版に固定しており、`playwright-core@latest` で落とした chromium とリビジョンがずれると
+// MCP が見つけられず起動に失敗する（実測: MCP は v1247 を要求、playwright-core@latest は v1248 を取得）。
+// `--no-shell` は headless shell を落とさないため（`--browser chromium` の MCP は通常の chromium を使う）。
+export const PLAYWRIGHT_MCP_PACKAGE = "@playwright/mcp";
+const INSTALL_BROWSER_ARGS = ["-y", `${PLAYWRIGHT_MCP_PACKAGE}@latest`, "install-browser", "--no-shell", "chromium"];
 
 /**
  * `install-deps`（chromium が要求するシステムライブラリの導入）の実行コマンドを組み立てる。
@@ -40,10 +45,10 @@ export function buildInstallDepsCommand(uid: number | undefined): { command: str
 export async function installPlaywrightBrowsers(logPrefix: string): Promise<boolean> {
   const { runCommand } = await loadRunCommand();
   console.log(
-    `[${logPrefix}] Installing Playwright browsers (npx ${PLAYWRIGHT_CORE_PACKAGE}@latest install chromium)...`,
+    `[${logPrefix}] Installing Playwright browsers (npx ${INSTALL_BROWSER_ARGS.join(" ")})...`,
   );
   try {
-    await runCommand("npx", ["-y", `${PLAYWRIGHT_CORE_PACKAGE}@latest`, "install", "chromium"]);
+    await runCommand("npx", INSTALL_BROWSER_ARGS);
     console.log(`[${logPrefix}] Playwright browsers installed.`);
   } catch (err) {
     console.error(`[${logPrefix}] Failed to install Playwright browsers: ${(err as Error).message}`);
