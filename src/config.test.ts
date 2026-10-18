@@ -97,40 +97,17 @@ test("parseUiDesignEntry falls back to the default for a non-boolean yolo", (t) 
   assert.equal(parseUiDesignEntry({ enabled: true, yolo: "true" }).yolo, false);
 });
 
-test("every worker defaults to a known model without an advisor", () => {
-  // claude 側の制約: advisor は main モデル以上の能力が必要。opus のワーカーに
-  // opus advisor を付けても意味がないため既定は空文字（＝渡さない）。sonnet へ
-  // 下げたワーカーも既定は空文字で、必要なら claude-task-worker.json で付ける。
+test("every worker defaults to opus with medium effort and no advisor", () => {
+  // 全ワーカー opus に統一（手戻り率の実測で opus の方が Issue 1件あたりの合計が安かったため）。
+  // Opus 5.5 の既定は medium で、medium が Opus 5 の high と同等以上。
+  // advisor は main モデル以上の能力が必要なため、opus に opus advisor を付ける意味はなく既定は空文字。
   assert.equal(DEFAULT_WORKER_CONFIG.model, "opus");
+  assert.equal(DEFAULT_WORKER_CONFIG.effort, "medium");
   assert.equal(DEFAULT_WORKER_CONFIG.advisorModel, "");
   for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
-    assert.ok(["opus", "sonnet"].includes(config.model), `WORKER_DEFAULTS.${name}.model=${config.model}`);
+    assert.equal(config.model, "opus", `WORKER_DEFAULTS.${name}.model`);
+    assert.equal(config.effort, "medium", `WORKER_DEFAULTS.${name}.effort`);
     assert.equal(config.advisorModel, "", `WORKER_DEFAULTS.${name}.advisorModel`);
-  }
-});
-
-test("opus workers default to medium effort; sonnet workers split by task difficulty", () => {
-  // Opus 5.5 の既定は medium で、medium が Opus 5 の high と同等以上。同じレベル名でも
-  // ターンあたりの思考量が増えるため、Opus 5 時代の high を持ち越すと長く高くなるだけ。
-  // Sonnet 5.5 は「仕様が確定したエージェント的タスクは medium から、難しい・長いものは high」。
-  // 手順が本文に書き切ってあるワーカーは medium、コード変更の判断を伴うワーカーは high。
-  assert.equal(DEFAULT_WORKER_CONFIG.effort, "medium");
-  const sonnetHigh = new Set(["resolve-conflict", "check-dependabot"]);
-  for (const [name, config] of Object.entries(WORKER_DEFAULTS)) {
-    if (config.model === "opus") {
-      assert.equal(config.effort, "medium", `WORKER_DEFAULTS.${name}.effort`);
-    } else {
-      assert.equal(config.effort, sonnetHigh.has(name) ? "high" : "medium", `WORKER_DEFAULTS.${name}.effort`);
-    }
-  }
-});
-
-test("workers on the delivery critical path stay on opus", () => {
-  // セッションログの実測（sonnet期 vs opus期）で、opus は手戻り（fix-review-point/exec-issue）が
-  // 1.16 → 0.72、PR再トリアージが 5.48 → 3.23 に減った。単セッションのコストが高くても
-  // Issue 1件あたりの合計では opus が安い。下げると手戻りが増えて逆に高くつく。
-  for (const name of ["exec-issue", "fix-review-point", "triage-pr", "create-issue"]) {
-    assert.equal(WORKER_DEFAULTS[name].model, "opus", `WORKER_DEFAULTS.${name}.model`);
   }
 });
 

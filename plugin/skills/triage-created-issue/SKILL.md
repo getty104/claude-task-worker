@@ -1,6 +1,6 @@
 ---
 name: triage-created-issue
-description: Triage a GitHub issue that already has the cc-issue-created label and is assumed ready to start. Inspect the comment history first to decide whether human confirmation is needed (cc-need-human-check, highest priority — reserved for issue-level deadlock, or for confirmation items answer-issue-questions already investigated and explicitly marked unanswerable); otherwise close the issue as not needed, delegate unanswered confirmation items in the last comment or the description to answer-issue-questions (cc-answer-issue-questions), refresh a description stale relative to settled comment-history content (cc-update-issue), or move to execution (cc-exec-issue). Any UI-changing issue is routed to the design-first flow (cc-create-ui-design) before execution; the exceptions are an issue whose description already names the .pen design to implement against, and a minor UI change that introduces no new visual decision (no new screen/section, no layout change, no new reusable component, no visual expression outside existing design tokens/components). Design files are never edited in the implementation PR. Dependency checks are out of scope.
+description: Triage a GitHub issue that already has the cc-issue-created label and is assumed ready to start. Inspect the comment history first to decide whether human confirmation is needed (cc-need-human-check, highest priority — reserved for issue-level deadlock, or for confirmation items answer-issue-questions already investigated and explicitly marked unanswerable); otherwise close the issue as not needed, delegate unanswered confirmation items in the last comment or the description to answer-issue-questions (cc-answer-issue-questions), refresh a description stale relative to settled comment-history content (cc-update-issue), turn the issue into an Epic and split it into sub-issues when its work should ship as separate PRs (cc-epic-issue), or move to execution (cc-exec-issue). Any UI-changing issue is routed to the design-first flow (cc-create-ui-design) before execution; the exceptions are an issue whose description already names the .pen design to implement against, and a minor UI change that introduces no new visual decision (no new screen/section, no layout change, no new reusable component, no visual expression outside existing design tokens/components). Design files are never edited in the implementation PR. Dependency checks are out of scope.
 argument-hint: "[Issue number]"
 hooks:
   Stop:
@@ -27,7 +27,7 @@ hooks:
 
 ## 責務
 
-後述のパターンA〜E（E-1含む）の判定と、対応する処理のみを行う: `cc-need-human-check`の付与（**確認事項が未回答であること自体は付与理由にしない**。「確認事項の委任原則」参照）／クローズ判断／`cc-answer-issue-questions`の付与／`cc-update-issue`の付与／UI変更タスクのデザイン先行フローへの振り分け（`cc-create-ui-design`の付与。デザイン参照が明示済みのIssueと、新しいビジュアル判断を含まない軽微なUI変更のみ例外として実装へ進める）／`cc-exec-issue`の付与。
+後述のパターンA〜E（E-1含む）の判定と、対応する処理のみを行う: `cc-need-human-check`の付与（**確認事項が未回答であること自体は付与理由にしない**。「確認事項の委任原則」参照）／クローズ判断／`cc-answer-issue-questions`の付与／`cc-update-issue`の付与／実装PRを分離すべきIssueのEpic化とサブIssueへの分割（`cc-epic-issue`の付与）／UI変更タスクのデザイン先行フローへの振り分け（`cc-create-ui-design`の付与。デザイン参照が明示済みのIssueと、新しいビジュアル判断を含まない軽微なUI変更のみ例外として実装へ進める）／`cc-exec-issue`の付与。
 
 ## 注意事項
 
@@ -74,9 +74,10 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
 - **コメント履歴全体から見た人間確認シグナル**（確認事項の内容とは独立に判定）に該当する場合は、他の判定に先立ってパターンAとして処理し、以降の判定はすべて打ち切る。この「最初に該当したら以降は評価しない」排他ルールは、この人間確認シグナルの判定にのみ適用される
 - 該当しない場合、パターンB（対応不要判断）を評価する。該当すればクローズして終了
 - どちらにも該当しない場合、最後のコメントおよびdescriptionの**確認事項を項目ごとに個別評価**する。反証シグナルで解消済みの項目を除外したうえで（「反証シグナルで解消した項目の『未回答』集合からの除外」参照）、**未回答の項目が1つでも残っていれば原則パターンC（`cc-answer-issue-questions`）**であり、人間判断を要しそうに見えてもパターンAには倒さない（「確認事項の委任原則」参照）。該当すればそこで終了
-- 確認事項がない、または全て回答済みなら、着手（パターンE）の前にパターンD（コメント履歴のdescription反映チェック）を評価する。未反映なら`cc-update-issue`を付与して終了し、反映済みで整合している場合に限りパターンE-1の評価へ進む
-- パターンD通過後、パターンE（`cc-exec-issue`）の前にパターンE-1（UI変更タスクの扱い）を評価する。UI変更タスクは、**新しいビジュアル判断を含まない軽微なUI変更（E-1-a-2）の場合**、**すでにデザインが作成済みでdescriptionの`## UIデザイン`にその参照（`.pen`の実パス）が明示されている場合**、または**`uiDesign.enabled` が `true` でない（デザイン先行フローが無効な）リポジトリの場合**にパターンEへ進み、それ以外は`cc-exec-issue`を付けずに`cc-create-ui-design`を付与して終了する（デザイン先行フロー一本。実装PRでの`.pen`編集経路はどのケースでも存在しない）。UI変更に該当しないIssueはそのままパターンEへ進む
-- 各トリアージ実行で付与する遷移ラベル（`cc-need-human-check` / `cc-answer-issue-questions` / `cc-update-issue` / `cc-create-ui-design` / `cc-exec-issue`）は同一Issueに複数付与しない。特に`cc-need-human-check`と`cc-answer-issue-questions`は同時に付与しない
+- 確認事項がない、または全て回答済みなら、着手（パターンE）の前にパターンD（コメント履歴のdescription反映チェック）を評価する。未反映なら`cc-update-issue`を付与して終了し、反映済みで整合している場合に限りパターンFの評価へ進む
+- パターンD通過後、パターンE-1・Eの前にパターンF（実装PRの分離＝Epic化）を評価する。該当すればIssueをEpic化してサブIssueを作成し、`cc-exec-issue`を付けずに終了する（UI変更の扱いは各サブIssueのトリアージで個別に判定される）
+- パターンF非該当の場合、パターンE（`cc-exec-issue`）の前にパターンE-1（UI変更タスクの扱い）を評価する。UI変更タスクは、**新しいビジュアル判断を含まない軽微なUI変更（E-1-a-2）の場合**、**すでにデザインが作成済みでdescriptionの`## UIデザイン`にその参照（`.pen`の実パス）が明示されている場合**、または**`uiDesign.enabled` が `true` でない（デザイン先行フローが無効な）リポジトリの場合**にパターンEへ進み、それ以外は`cc-exec-issue`を付けずに`cc-create-ui-design`を付与して終了する（デザイン先行フロー一本。実装PRでの`.pen`編集経路はどのケースでも存在しない）。UI変更に該当しないIssueはそのままパターンEへ進む
+- 各トリアージ実行で付与する遷移ラベル（`cc-need-human-check` / `cc-answer-issue-questions` / `cc-update-issue` / `cc-epic-issue` / `cc-create-ui-design` / `cc-exec-issue`）は同一Issueに複数付与しない。特に`cc-need-human-check`と`cc-answer-issue-questions`は同時に付与しない
 
 #### 判定の前提: 確認事項の委任原則（`cc-need-human-check` の濫用防止）
 
@@ -261,7 +262,7 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
    gh issue comment $0 --body "<クローズ理由の説明>"
    ```
 
-2. Issueをcloseする（`gh issue close` は GraphQL 経由でクラウドセッションのゲートに掛かるため使わない）
+2. コメント投稿の成功を確認してから、Issueをcloseする（コメントに失敗した場合はクローズしない。説明なしのクローズを残さないため）。`gh issue close` は GraphQL 経由でクラウドセッションのゲートに掛かるため使わない
    ```bash
    bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue $0 not_planned
    ```
@@ -436,6 +437,79 @@ jq -r '.uiDesign.enabled // false' claude-task-worker.json 2>/dev/null || printf
 
 - 人が `cc-create-ui-design` を直接付ければ、トリアージ判定を経ずにデザイン先行フローへ入れる
 - デザイン先行フローを通さずに実装へ進めたい場合は、descriptionの `## UIデザイン` セクションに参照する `.pen` の実パスを記入する（E-1-b の例外に該当し、そのままパターンEへ進む）。`cc-ui-design-ready` ラベルだけを手で付けても例外にはならず、分岐2により `cc-need-human-check` になる
+
+#### パターンF: 実装PRを分離すべき場合（Epic化とサブIssueへの分割）
+
+パターンD通過後（確認事項が解消し、descriptionが最新の確定内容を反映している状態）に評価する。1つのPRにまとめるべきでないIssueを、`breakdown-issues` の「既存IssueをEpicに格上げする」経路と同じ形（親Issueに `cc-epic-issue`、子をsub-issueとして紐付け）へ変換する。以降は既存のEpicフロー（サブIssueは `cc-epic-<本Issue番号>` ブランチへPRを出し、全サブIssue完了後に `epic-issue` ワーカーが Epic PR を作る）に乗る。
+
+##### 適用しない場合（該当したらパターンE-1へ進む）
+
+- 本Issueが既に parent を持つ（`gh-compat.sh issue-parent $0` が番号を返す）。Epic ブランチは1階層のみを前提にしているため、サブIssueをさらにEpic化しない
+- 本Issueに既に `cc-epic-issue` が付いている
+
+##### 判定基準
+
+次の (1) と (2) を**両方**満たす場合に該当する。規模の大小（「大きい」「重い」）だけでは該当させない。
+
+1. descriptionの `## 要件` / `## 実装プラン` が、**単独でマージしても既存の動作を壊さない変更単位**に2つ以上分けられる
+2. 次のいずれかに当てはまる
+   - 単位間に「先にマージされている必要がある」順序がある（例: スキーマ・マイグレーション → それを使うコード、API追加 → クライアント側の利用、共通基盤の導入 → 各利用箇所への適用）
+   - 単位どうしが互いに独立した機能・画面・サブシステムを対象にしており、1PRにまとめるとレビューで論点が混ざる
+   - descriptionが複数の独立した成果物（別々に完了判定できるもの）を求めている
+
+判定が割れたら**分割しない**（パターンE-1へ進み、従来どおり1PRで実装する）。分割は後から統合するより戻しにくいため。
+
+##### 処理
+
+1. 冪等性の確認: 変更単位（タイトル付き）を先に確定させ、本Issueの既存sub-issueを取得する（`gh api repos/{owner}/{repo}/issues/$0/sub_issues --jq '.[] | {number, title}'`）。既存sub-issueはタイトルで変更単位と照合し、一致したものは新規作成せず採用する。既存sub-issueがあってもステップ4へ飛ばず、ステップ2〜4を「未完了の操作だけを行う」形で順に実行する（前回の途中失敗からの再実行で、子の重複作成や `blockedBy` の設定漏れを残さないため）
+2. 照合で見つからなかった変更単位ごとにサブIssueを作成し、**作成のたびに直ちに**本Issueへ紐付ける（作成と紐付けの間で失敗すると、親を持たない子は次回の照合で見つからず重複作成されるため、その窓を1件分に狭める）。`gh-compat.sh create-issue` を使う（`gh issue create` / MCP の `issue_write` は使わない。理由は「反証シグナル4項目目該当時の後続Issue起票」と同じ）。**作成時はラベルを付けず**、Assignee は `@me` のみ指定する（`cc-triage-scope` は `create-issue` ワーカーのトリガーのため、親子関係・`blockedBy` の設定前に付けると、親なし・未ブロックのIssueとして拾われ、デフォルトブランチ起点・順序無視で処理されうる。付与はステップ4で行う）
+   ```bash
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue \
+     --title "<変更単位のタイトル>" \
+     --assignee "@me" \
+     --body-file - <<'EOF'
+   ## 概要
+   Epic #$0 の一部。<この単位で行う変更>
+
+   ## 要件
+   <親Issueの要件・実装プランのうち、この単位が担う部分を転記（親の確定内容を書き換えない）>
+
+   ## 完了条件
+   <この単位を単独でマージできる状態>
+   EOF
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-sub-issue $0 <作成した子>
+   ```
+3. 順序がある単位には blockedBy を貼る（先行単位が close されるまで後続が `exec-issue` に拾われないようにするため）。再実行時は `gh-compat.sh issue-deps <後続の子>` の `blockedBy` に先行の子が含まれていないものだけを貼る
+   ```bash
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocked-by <後続の子> <先行の子>
+   ```
+   本Issue（親）とサブIssueの間には blockedBy を貼らない（親はサブIssueが全て閉じるまで close されないため、サブIssueが永久に拾われなくなる）
+4. 全サブIssue（採用した既存の子を含む）に `cc-triage-scope` を付ける。ステップ2・3がすべて成功してから付ける（理由はステップ2のとおり）。`add-label` は冪等なので再実行で付け直してよい
+   ```bash
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <子1> cc-triage-scope
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <子2> cc-triage-scope
+   ```
+5. 本Issueに `cc-epic-issue` を付ける（sub-issue の紐付けが済んでから付ける。先に付けると、紐付け途中の部分集合だけで `epic-issue` ワーカーの完了判定が走りうる）
+   ```bash
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label $0 cc-epic-issue
+   ```
+6. 本Issueへマーカーコメントを投稿する（既に固定マーカー `## Epic化しました（サブIssueへ分割）` のコメントがあれば投稿しない）
+   ```bash
+   gh issue comment $0 --body-file - <<'EOF'
+   ## Epic化しました（サブIssueへ分割）
+
+   ## 分割した理由
+   <判定基準のどれに該当したか、変更単位の切り方>
+
+   ## サブIssue
+   - #<子1>: <タイトル>
+   - #<子2>: <タイトル>（#<子1> の完了後に着手）
+
+   各サブIssueは通常のフロー（分析 → トリアージ → 実装）で処理され、全て完了すると Epic PR が作成されます。
+   EOF
+   ```
+
+`cc-exec-issue` は付与しない（本Issue自体は実装しない）。ステップ2〜6のいずれかが失敗した場合は、作成済みのサブIssueは残したまま（ステップ1の冪等性確認で再採用される。紐付け前に失敗した子は再採用されないため、その番号も理由に明記する）、パターンAの「該当する場合の処理」に従い、失敗した操作とエラーを「自動で進められない理由」に明記して `cc-need-human-check` を付与する。
 
 #### パターンE: 着手準備が整っている場合
 
