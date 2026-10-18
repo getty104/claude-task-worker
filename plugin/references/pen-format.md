@@ -54,7 +54,7 @@
 
 ## `execute` で渡すときのルール（pen CLI 0.3.12 で実測）
 
-- **`id` は指定しない**。`Insert` の戻り値（`btn = Insert(...)`）と、レスポンス末尾の `## Created nodes by name`（`"Button": "q2OqL"`）で生成IDを受け取る。コンポーネントを作って同じ呼び出し内で `ref` するときは戻り値の変数を渡す（`{ type: "ref", ref: btn }`）
+- **`id` は指定しない**（末尾スキーマの `Entity.id` が必須なのは保存済みファイルの形で、`Insert` / `Replace` に渡す入力では省略すると自動採番される。同スキーマの注記 "Auto-generated if omitted" のとおり）。`Insert` の戻り値（`btn = Insert(...)`）と、レスポンス末尾の `## Created nodes by name`（`"Button": "q2OqL"`）で生成IDを受け取る。コンポーネントを作って同じ呼び出し内で `ref` するときは戻り値の変数を渡す（`{ type: "ref", ref: btn }`）
 - 人間可読な `name` を全Nodeに付ける（生成IDとの対応表がそのまま編集Nodeの特定になる）
 - `ref` の参照先・`descendants` のキー・`slot` の要素は実在する `id` でなければならない
 - 変数は `SetVariables({ "color.primary": { type: "color", value: "#2563EB" } })` で定義してから `fill: "$color.primary"` のように参照する

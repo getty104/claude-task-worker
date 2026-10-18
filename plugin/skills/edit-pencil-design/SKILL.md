@@ -339,7 +339,7 @@ EOF
 
 # トラブルシューティング
 
-- **`pencil: command not found` / 認証エラー**: 前提条件の確認どおり `npm install -g @pen.dev/cli`（Node.js 18以上）／`pencil login` または `PEN_CLI_KEY` を案内
+- **`pencil: command not found` / 認証エラー**: 前提条件の確認どおり `npm install -g @pen.dev/cli`（Node.js 22.19以上）／`pencil login` または `PEN_CLI_KEY` を案内
 - **`Unknown tool: get_screenshot` / `export_nodes` / `export_html` / `get_guidelines` / `spawn_agents` / `batch_design` / `batch_get` / `get_editor_state`**: 廃止済み。早見表の「廃止済み」の読み替え表に従う（多くは `execute` の中の関数へ移動している）。`pencil version` が 0.3.5 未満なら入れ直す
 - **`get_app_state({ include_schema: true, ... })` が効かない / スキーマが返らない**: 0.3.5 の `get_app_state` は引数を取らず、スキーマと `execute` APIドキュメントは `read_skill({ path: "pen-schema.md" })` / `read_skill({ path: "execute.md" })` から取る
 - **`Invalid syntax. Expected: tool_name({ key: value })`**: `execute` の `input` をダブルクォートで囲んだ中にダブルクォート文字列を注入して入れ子が壊れている。ルール2の原則2（`input` はシングルクォート囲み）を適用する
