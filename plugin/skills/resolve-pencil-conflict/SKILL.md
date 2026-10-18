@@ -1,6 +1,6 @@
 ---
 name: resolve-pencil-conflict
-description: gitコンフリクト状態になった.penファイル（Pencilで作成されたデザインファイル）を、Pencil CLI（`pencil`コマンド）とgitだけで解消するスキル。.penは暗号化バイナリでテキストマージが不可能なため、コンフリクトマーカーの手編集や`git mergetool`は絶対に使わず、「片側採用 → もう一方の変更をPencilで再適用」のフローで解消する。ユーザーが.penファイルのコンフリクト解消、rebase/merge中に`UU`/`AA`状態になった.penの解消、テキストマージで破損した.penの復旧などを依頼した場合に必ずこのスキルを使用する。通常の.penの編集・新規作成は`edit-pencil-design`スキル、PR全体のコンフリクト解消フロー（rebase起点・force-push）は`resolve-pr-conflict`スキルの担当。
+description: gitコンフリクト状態になった.penファイル（Pencilで作成されたデザインファイル）を、Pencil CLI（`pencil`コマンド）とgitだけで解消するスキル。.penは平文JSONだがテキストマージするとNode IDの重複・参照切れ・JSON構文の破損を起こすため、コンフリクトマーカーの手編集や`git mergetool`は絶対に使わず、「片側採用 → もう一方の変更をPencilで再適用」のフローで解消する。ユーザーが.penファイルのコンフリクト解消、rebase/merge中に`UU`/`AA`状態になった.penの解消、テキストマージで破損した.penの復旧などを依頼した場合に必ずこのスキルを使用する。通常の.penの編集・新規作成は`edit-pencil-design`スキル、PR全体のコンフリクト解消フロー（rebase起点・force-push）は`resolve-pr-conflict`スキルの担当。
 model: opus
 effort: medium
 context: fork
@@ -20,9 +20,9 @@ gitコンフリクト状態になった `.pen` デザインファイルを「**�
 
 # 重要な前提
 
-- **テキストマージは絶対禁止**: `.pen` は暗号化バイナリのため、コンフリクトマーカー（`<<<<<<<` 等）の手編集や `git mergetool` によるテキストマージはファイルを破損させ、開けなくする
+- **テキストマージは絶対禁止**: `.pen` は平文JSONだが、コンフリクトマーカー（`<<<<<<<` 等）の手編集や `git mergetool` によるテキストマージは Node ID の重複・`ref` の参照切れ・JSON構文の破損を起こし、ファイルを開けなくする
 - **両側の変更を1ファイルに機械的にマージする手段は存在しない**: 解消は必ず「どちらか一方のバージョンをそのまま採用し、採用しなかった側の変更内容をPencilの編集として再適用する」方針で行う
-- `.pen` は `Read` / `Grep` では読めない。中身の確認はすべて `pencil interactive` 経由（`execute` の `Get` によるツリーダンプ、`execute` の `TakeScreenshot` / `Export` による画像）で行う。**CLI 0.3.5 のシェル内ツールは `browser` / `execute` / `get_app_state` / `get_style` / `read_skill` の5つだけ**で、Nodeの読み書きも画像出力も `execute` に一本化されている（旧 `get_screenshot` / `export_nodes` / `get_editor_state` / `batch_get` / `batch_design` は廃止）
+- コンフリクト中の `.pen` はマーカー混入で JSON として壊れていることがあるため、中身の確認は `git show :2:<path>` 等で取り出した各版を `pencil interactive` で開く（`execute` の `Get` によるツリーダンプ、`execute` の `TakeScreenshot` / `Export` による画像）で行う。**CLI 0.3.5 のシェル内ツールは `browser` / `execute` / `get_app_state` / `get_style` / `read_skill` の5つだけ**で、Nodeの読み書きも画像出力も `execute` に一本化されている（旧 `get_screenshot` / `export_nodes` / `get_editor_state` / `batch_get` / `batch_design` は廃止）
 
 # 前提条件の確認
 
@@ -103,7 +103,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/ours-shot.txt" | sed 's/.*: "//; s/"$//'
 
 ## ステップ4: ベースの選択と採用
 
-Node差分が大きい・プロンプトでの再現が難しい側をベースとして採用する（目安: 変更Node数が多い側。同程度なら自分のデザイン変更側をベースにし、相手側の変更を再適用する方が意図の取りこぼしが少ない）。
+Node差分が大きい・`execute` での再現が難しい側をベースとして採用する（目安: 変更Node数が多い側。同程度なら自分のデザイン変更側をベースにし、相手側の変更を再適用する方が意図の取りこぼしが少ない）。
 
 ```bash
 git checkout --ours -- path/to/design.pen    # または --theirs（ステップ2の反転注意を再確認）
@@ -112,7 +112,7 @@ git add path/to/design.pen
 
 ## ステップ5: 採用しなかった側の変更を再適用する
 
-ステップ3で特定した「採用しなかった側のNode差分」を具体的な編集指示に落とし込み、**`edit-pencil-design` スキルの手順**（エージェントモード `--prompt`、または heredoc 安全規則に従った `execute` の `Insert` / `Update` / `Delete` ＋ `save()`）で再適用する。編集前スナップショットは採用したベースのツリーになる。
+ステップ3で特定した「採用しなかった側のNode差分」を具体的な編集指示に落とし込み、**`edit-pencil-design` スキルの手順**（heredoc 安全規則に従った `execute` の `Insert` / `Update` / `Delete` ＋ `save()`。有料の `--prompt` は使わない）で再適用する。編集前スナップショットは採用したベースのツリーになる。
 
 ## ステップ6: 両側の変更が揃ったことの検証とスクリーンショット
 
@@ -126,17 +126,19 @@ git add path/to/design.pen
 
 # 予防策
 
-`.gitattributes` に `.pen` をバイナリとして明示しておくと、gitがテキストマージを試みてコンフリクトマーカーを埋め込みファイルを破損させる事故を防げる（コンフリクト自体は発生するが、常に本スキルのフローで安全に解消できる）:
+`.gitattributes` で `.pen` のテキストマージを止めておくと、gitがコンフリクトマーカーを埋め込んでファイルを破損させる事故を防げる。両側が変更していれば、行が重なっていなくても自動マージせずマーカー無しのコンフリクト（`UU`）になり、常に本スキルのフローで安全に解消できる:
 
 ```
-*.pen binary
+*.pen -merge
 ```
+
+`binary`（= `-diff -merge -text`）は使わない。`.pen` は平文JSONなので、`-diff` まで付けると `git diff` / PRの差分で変更プロパティが読めなくなる（`triage-pr` や `update-design-md` は差分を読む）。既に `*.pen binary` が書かれていれば `*.pen -merge` へ置き換える。
 
 リポジトリに `.gitattributes` の指定が無い場合は、コンフリクト解消のついでに追加を提案する。
 
 # トラブルシューティング
 
-- **コンフリクトマーカーの混入等で `.pen` が破損して開けない**: テキストマージを実行してしまった典型的な事故。破損ファイルの修復は不可能なので、`git checkout --ours -- <path>` / `--theirs` で正常な側のバージョンに戻す（コンフリクト状態からやり直したい場合は `git checkout -m -- <path>` で3-way状態を復元できる）。その後、本スキルの手順で解消し直し、`.gitattributes` への `*.pen binary` 追加を提案する
+- **コンフリクトマーカーの混入等で `.pen` が破損して開けない**: テキストマージを実行してしまった典型的な事故。破損ファイルの修復は不可能なので、`git checkout --ours -- <path>` / `--theirs` で正常な側のバージョンに戻す（コンフリクト状態からやり直したい場合は `git checkout -m -- <path>` で3-way状態を復元できる）。その後、本スキルの手順で解消し直し、`.gitattributes` への `*.pen -merge` 追加を提案する
 - **`AA`（両側追加）コンフリクトで `git show :1:` が失敗する**: 共通祖先が存在しないため想定内。ステップ2〜3のガードにより自動的に base 無し（ours/theirs 直接比較）として扱われるため、そのままステップ4以降を進めてよい
 - **どちらの変更か判別できない**: `git log --oneline -- <path>` で両ブランチの該当コミットとメッセージを確認し、変更の出所を特定する。それでも判断できなければ無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、確認した事実（両側のコミット・スクリーンショット）を添えて報告して終了する
 - **`pencil` コマンドが使えない環境**: 本スキルのフローは実行不可。「前提条件の確認」どおり `git rebase --abort` / `git merge --abort` で中断し、セットアップと認証を案内する

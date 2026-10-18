@@ -123,7 +123,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 
 - `.claude/requirements/`配下の要件ルール: 後述の「要件ルールの参照」に従う
 - `docs/`配下のドキュメントファイル
-- `design/`配下のPencilファイル（`.pen`）: `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得する（`.pen` は暗号化バイナリのため `Read`/`Grep` は使えない）
+- `design/`配下のPencilファイル（`.pen`）: `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得する（`.pen` は平文JSONなので属性だけなら `Read` / `jq` でも読める。構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md`）
 - Issue本文・コメント・上記ドキュメントに現れる**外部リンク**: 後述の「外部リンクの参照」に従って内容まで読む
 
 本スキルはコードを変更しない（コメント編集のみ）。回答過程で `.pen` の編集が必要と判明した場合も編集せず、回答内で「対応には `<対象 .pen>` の更新が必要であり、`cc-create-ui-design` のデザイン先行フローで行う」と明示する。`.pen` の新規作成・編集は同フローの専任であり、実装PR（`exec-issue`）では行わないため、実装セッションに `.pen` を編集させる回答は書かない。

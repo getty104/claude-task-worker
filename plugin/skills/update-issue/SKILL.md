@@ -130,7 +130,7 @@ gh issue view <Issue番号> --comments
 - **AI生成コメントは本文の確定方針を覆す根拠にしない**。スキルが投稿・編集した定型コメント（`## 確認事項`・`## 回答`・トリアージ判定記録など、`answer-issue-questions` / `post-issue-body` / `triage-created-issue` 由来のもの）はAI生成コメントとして扱う。ワーカーは人間のアカウントで投稿するため、投稿者名ではなくコメントの内容・形式で判別する。AI生成コメントに含まれる事実情報（コード引用・行番号・調査結果）は「参照情報」「影響範囲」等へ反映してよいが、本文の確定方針（統合先・採用アプローチ・対象範囲など、依頼が所与として示した判断）と矛盾する結論・推奨が含まれていても方針は本文側を維持し、矛盾する事実は事実として注記するに留める。実装プランを「方針確定待ち」を前提とした複数案（A案/B案等）の分岐形式に書き換えない
 - 反映すべき未反映事項が1件も無い場合は、descriptionを更新せず（ステップ5の `post-issue-body` 起動をスキップ）、その判断を報告して終了する
 
-加えて、タスク理解のために要件定義ドキュメントやデザインファイルを読み、背景・目的・関連仕様を把握する。Pencilファイル（`.pen`）は暗号化バイナリで `Read`/`Grep` が使えないため、`inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得して確認する。`.pen` の編集が必要と判明した場合は本スキル内では編集せず、`post-issue-body` へ渡す「実装プラン」に「`<対象 .pen>` の更新が必要。デザインファイルの新規作成・編集は `cc-create-ui-design` のデザイン先行フロー（`create-ui-design` → デザインPRのマージ → `apply-ui-design`）で行い、実装PRでは編集しない」旨を明記する。**「実装と同じPRで `.pen` を更新する」「`pencil-design-updater` エージェントで更新する」といった、実装セッション（`exec-issue`）に `.pen` を編集させる指示は書かない**（`exec-issue` は `.pen` を編集しないため、書いても実行されない指示になる）。
+加えて、タスク理解のために要件定義ドキュメントやデザインファイルを読み、背景・目的・関連仕様を把握する。Pencilファイル（`.pen`）は平文JSON（`.pen` は平文JSONで、構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md` が定義する）なので `Read` / `jq` で読めるが、見た目やレイアウト解決後の値は `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得して確認する。`.pen` の編集が必要と判明した場合は本スキル内では編集せず、`post-issue-body` へ渡す「実装プラン」に「`<対象 .pen>` の更新が必要。デザインファイルの新規作成・編集は `cc-create-ui-design` のデザイン先行フロー（`create-ui-design` → デザインPRのマージ → `apply-ui-design`）で行い、実装PRでは編集しない」旨を明記する。**「実装と同じPRで `.pen` を更新する」「`pencil-design-updater` エージェントで更新する」といった、実装セッション（`exec-issue`）に `.pen` を編集させる指示は書かない**（`exec-issue` は `.pen` を編集しないため、書いても実行されない指示になる）。
 
 ### 4. コードの分析
 
@@ -278,4 +278,4 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 - 本文の確定方針を覆せるのは人間のコメントだけ。AI生成コメントの扱い・判別基準はステップ3を参照
 - 依存関係はステップ5.6のとおり既存Issueへ best-effort で追加のみ行う（本文に `## 依存関係` は書かない。既存relationshipは剥がさない。根拠が明確な依存のみ対象）
 - **依頼内容ブロックを新規追加しない**（冒頭「『依頼内容』の扱い」参照）。既存ブロックの保持は `post-issue-body` の verbatim 再掲規約に委ね（args の `sections.依頼内容` は渡さない — 渡すと原文とのズレを生む可能性がある）、ステップ5.5で保持と折りたたみ書き出しを検証する
-- `.pen` の読み込みは `inspect-pencil-node` スキル経由でのみ行い（暗号化バイナリのため `Read`/`Grep` は使えない）、編集は本スキルでは**絶対に行わない**。必要と判明した場合は、`cc-create-ui-design` のデザイン先行フローで対応する旨を `post-issue-body` 経由で「実装プラン」に明記する。`.pen` の新規作成・編集は同フロー（内部で `pencil-design-updater` / `edit-pencil-design` の運用ルール — 同パス上書き・差分Node特定・`snapshots/` 出力 — に従う）の専任であり、実装PRでは行わない
+- `.pen` は `Read` / `jq` または `inspect-pencil-node` スキルで読み（`.pen` は平文JSONで、構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md` が定義する）、編集は本スキルでは**絶対に行わない**。必要と判明した場合は、`cc-create-ui-design` のデザイン先行フローで対応する旨を `post-issue-body` 経由で「実装プラン」に明記する。`.pen` の新規作成・編集は同フロー（内部で `pencil-design-updater` / `edit-pencil-design` の運用ルール — 同パス上書き・差分Node特定・`snapshots/` 出力 — に従う）の専任であり、実装PRでは行わない

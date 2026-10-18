@@ -91,7 +91,7 @@ gh pr diff <デザインPR番号> --name-only
 
 ### 実装時の進め方
 
-1. `.pen` は暗号化バイナリのため直接読まない。`inspect-pencil-node` スキルで対象Nodeの構造・スタイルを取得する
+1. `inspect-pencil-node` スキルで対象Nodeの構造・スタイル（レイアウト解決後の値を含む）を取得する。`.pen` は平文JSONなので `Read` / `jq` で属性を直接読んでもよい（構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md`）
 2. UIのマークアップ（デザインをマークアップ・スタイルへ変換する部分）は `frontend-implementer` エージェントに委譲し、上記デザインを参照元として実装する。状態管理・データ取得・ロジックは同エージェントの担当外なので、別タスクとして分離する
 3. デザイン側の修正が必要になった場合は `.pen` を実装PRで直接編集せず、Issueにコメントを残す
 ```

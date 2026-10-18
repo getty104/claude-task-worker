@@ -15,7 +15,7 @@ set -euo pipefail
 #   呼び出し側が jq で必要なPRだけを取り出せるようにしている。
 #
 # 変更ファイルは3種類に仕分けて返す:
-#   - pen_files:      `.pen`（暗号化バイナリなので Read できない。Pencil MCP / CLI 経由で調べる）
+#   - pen_files:      `.pen`（平文JSON。レイアウト解決後の値は Pencil CLI 経由で調べる）
 #   - snapshot_files: パスに `snapshots/` ディレクトリを含む `.png` / `.jpg` 等の画像
 #                     （`.pen` と同階層の `snapshots/` に出る Pencil のエクスポート結果のみを対象にし、
 #                      README/docs 配下等の無関係な画像を混入させない）
