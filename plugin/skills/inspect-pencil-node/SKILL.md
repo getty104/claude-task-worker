@@ -21,7 +21,7 @@ Nodeの指定方法は5系統に対応し、併用も可能。`Get` の第1引�
 
 本スキルで使うのは**インタラクティブモード**（`pencil interactive -i -o`）のみ。`read_skill` / `get_app_state` / `execute` / `exit` を heredoc で呼ぶ。エージェントモード（`pencil --in --out --prompt`）はAI編集用なので使わない。
 
-`.pen` は暗号化バイナリで `Read` / `Grep` では読めないため、Node属性の取得・スクリーンショット出力はすべてインタラクティブモード経由で行う。
+`.pen` は平文JSON（構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md`）なので書かれた属性だけなら `Read` / `jq` でも読めるが、本スキルはインタラクティブモード経由で、pen.dev がレイアウトを解決した後のサイズ（`ctx.bounds`）・はみ出し（`ctx.problems`）・コンポーネント展開後の属性とスクリーンショットを取得する。
 
 **CLI 0.3.5 でシェル内ツールが5つに整理された**。現在あるのは `browser` / `execute` / `get_app_state` / `get_style` / `read_skill` のみで、**Node属性の取得も画像出力も `execute` の中で `Get` / `Print` / `Export` / `TakeScreenshot` を呼ぶ形に一本化**されている。
 
@@ -229,7 +229,7 @@ grep -o '"image": "[^"]*"' "${WORK_DIR}/shot.txt" | sed 's/.*: "//; s/"$//' | ba
 
 ## ルール7: 実行結果をユーザーに伝える
 
-`.pen` の中身は直接確認できないため、最終報告に含める:
+取得したNodeの見た目は `.pen` のJSONからは分からないため、最終報告に含める:
 
 - 何をクエリしたか（Node ID指定 / 名前Regex / type / reusable / サブツリー / トップレベル のいずれか）
 - ヒットしたNode一覧（id / name / type を簡潔に。検索の場合は件数も）

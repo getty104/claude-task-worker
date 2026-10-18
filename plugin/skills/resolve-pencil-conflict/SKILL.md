@@ -1,6 +1,6 @@
 ---
 name: resolve-pencil-conflict
-description: gitコンフリクト状態になった.penファイル（Pencilで作成されたデザインファイル）を、Pencil CLI（`pencil`コマンド）とgitだけで解消するスキル。.penは暗号化バイナリでテキストマージが不可能なため、コンフリクトマーカーの手編集や`git mergetool`は絶対に使わず、「片側採用 → もう一方の変更をPencilで再適用」のフローで解消する。ユーザーが.penファイルのコンフリクト解消、rebase/merge中に`UU`/`AA`状態になった.penの解消、テキストマージで破損した.penの復旧などを依頼した場合に必ずこのスキルを使用する。通常の.penの編集・新規作成は`edit-pencil-design`スキル、PR全体のコンフリクト解消フロー（rebase起点・force-push）は`resolve-pr-conflict`スキルの担当。
+description: gitコンフリクト状態になった.penファイル（Pencilで作成されたデザインファイル）を、Pencil CLI（`pencil`コマンド）とgitだけで解消するスキル。.penは平文JSONだがテキストマージするとNode IDの重複・参照切れ・JSON構文の破損を起こすため、コンフリクトマーカーの手編集や`git mergetool`は絶対に使わず、「片側採用 → もう一方の変更をPencilで再適用」のフローで解消する。ユーザーが.penファイルのコンフリクト解消、rebase/merge中に`UU`/`AA`状態になった.penの解消、テキストマージで破損した.penの復旧などを依頼した場合に必ずこのスキルを使用する。通常の.penの編集・新規作成は`edit-pencil-design`スキル、PR全体のコンフリクト解消フロー（rebase起点・force-push）は`resolve-pr-conflict`スキルの担当。
 model: opus
 effort: medium
 context: fork
@@ -20,9 +20,9 @@ gitコンフリクト状態になった `.pen` デザインファイルを「**�
 
 # 重要な前提
 
-- **テキストマージは絶対禁止**: `.pen` は暗号化バイナリのため、コンフリクトマーカー（`<<<<<<<` 等）の手編集や `git mergetool` によるテキストマージはファイルを破損させ、開けなくする
+- **テキストマージは絶対禁止**: `.pen` は平文JSONだが、コンフリクトマーカー（`<<<<<<<` 等）の手編集や `git mergetool` によるテキストマージは Node ID の重複・`ref` の参照切れ・JSON構文の破損を起こし、ファイルを開けなくする
 - **両側の変更を1ファイルに機械的にマージする手段は存在しない**: 解消は必ず「どちらか一方のバージョンをそのまま採用し、採用しなかった側の変更内容をPencilの編集として再適用する」方針で行う
-- `.pen` は `Read` / `Grep` では読めない。中身の確認はすべて `pencil interactive` 経由（`execute` の `Get` によるツリーダンプ、`execute` の `TakeScreenshot` / `Export` による画像）で行う。**CLI 0.3.5 のシェル内ツールは `browser` / `execute` / `get_app_state` / `get_style` / `read_skill` の5つだけ**で、Nodeの読み書きも画像出力も `execute` に一本化されている（旧 `get_screenshot` / `export_nodes` / `get_editor_state` / `batch_get` / `batch_design` は廃止）
+- コンフリクト中の `.pen` はマーカー混入で JSON として壊れていることがあるため、中身の確認は `git show :2:<path>` 等で取り出した各版を `pencil interactive` で開く（`execute` の `Get` によるツリーダンプ、`execute` の `TakeScreenshot` / `Export` による画像）で行う。**CLI 0.3.5 のシェル内ツールは `browser` / `execute` / `get_app_state` / `get_style` / `read_skill` の5つだけ**で、Nodeの読み書きも画像出力も `execute` に一本化されている（旧 `get_screenshot` / `export_nodes` / `get_editor_state` / `batch_get` / `batch_design` は廃止）
 
 # 前提条件の確認
 

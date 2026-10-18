@@ -614,7 +614,7 @@ PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリン
    - **根拠はCI失敗に限る＋理由コメントを必ず残す（C-2）**: PR body の「`terraform apply` 未実施」のような作者の人間ゲート・承認待ちを根拠に付けない（CI以外の保留はラベルなしの「保留」報告で終える）。付与時は `gh pr comment` で失敗チェック名・失敗内容・差分では直せないと判断した根拠・ラベルを外せば再開する旨を投稿する。同ラベルはPRをポーリング対象から恒久的に外すため、GitHub上に根拠が残らないと「理由なくPRが止まった」ようにしか見えない
 2. **`resolve-conflict` ワーカーの `onCompleted`**: `resolve-pr-conflict` は解消困難（人間の仕様判断が必要・Pencil CLI 不在など）の場合 `git rebase --abort` して「判定: `aborted`」を報告し**正常終了**する。`pr-worker` はこれを完了とみなして `cc-resolve-conflict` を外し `cc-triage-scope` を戻すため、そのままだと `triage-pr` が同じコンフリクトを再検知してラベルを付け直し、解けないコンフリクトを永久にリトライする（毎周Slack通知＋2セッション分のトークンを焼く）。`onCompleted` は出力が `aborted` かつ `getPrMergeable()` が **`CONFLICTING` を返した場合だけ** `cc-need-human-check` を付けてループを断つ（`shouldFlagUnresolvedConflict()`）。`UNKNOWN`（GitHub が再計算中）では付けない。判定にスキルの報告本文だけを使わないのは、abort 後に別経路で解消済みの可能性を排除できないため。この検証のため `PrWorkerConfig.onCompleted` はスキルの stdout を第2引数で受け取る
 
-`.pen` のコンフリクトを `triage-pr` が判別する必要はない（`.pen` は暗号化バイナリで差分から中身が読めないうえ、`resolve-pr-conflict` が `git status` で検出して `resolve-pencil-conflict` スキルへ内部委譲するため）。PR側の `cc-need-human-check` を外すと `triage-pr` のポーリングが再開する。
+`.pen` のコンフリクトを `triage-pr` が判別する必要はない（`resolve-pr-conflict` が `git status` で検出して `resolve-pencil-conflict` スキルへ内部委譲するため）。PR側の `cc-need-human-check` を外すと `triage-pr` のポーリングが再開する。
 
 ### UIデザイン先行ワークフロー（`uiDesign`）
 
@@ -680,7 +680,7 @@ UI実装Issueについて、実装の前に Pencil（`.pen`）でデザインを
 
 - **書き手**: `update-design-md`（`update-design-md` ワーカーから24時間おきに自動起動。`uiDesign.enabled` が `true` のリポジトリのみ。手動起動も可）。引数の期間（既定7日）で `cc-ui-design` ラベル付きの**マージ済み**PRを収集し（`scripts/fetch-recent-ui-design-prs.sh`）、レビューコメントと `.pen` の実データからトークン・原則を抽出して `DESIGN.md` を更新、`designmd lint` を通してから `commit-push` → `create-pr` でPRを作る（`cc-triage-scope` ラベル + 自分自身をAssignee。`update-requirement-rules` / `update-coding-guidelines` と同じ経路）
 - **読み手**: `pencil-design-updater` エージェント。作業プロセスのステップ1で `DESIGN.md` を読み、色・フォント・余白・角丸を定義済みトークンの値で指定する（Pencil はトークン参照を解決しないため、`{colors.primary}` ではなく `#1A1C1E` のように実値まで落として `execute` の編集スニペットに渡す）
-- **`.pen` の中身は diff から読めない**。暗号化バイナリのため `Read` / `Grep` が効かず、変更ファイル一覧だけでは何が変わったか分からない。そこで収集スクリプトは変更ファイルを `pen_files` / `snapshot_files`（`snapshots/` のPNG）/ `other_files` に仕分けて返し、スキルは (1) スナップショット画像を `Read` で見て傾向を掴み、(2) `inspect-pencil-node`（読み取り専用）で Node 属性から正確なトークン値を取る、の2経路で実データに当たる。**推測値は書かない** — 一度書くと次のデザインがそれに合わせて作られ、事後的に「正」になってしまうため
+- **`.pen` の見た目は diff だけでは分からない**。`.pen` は平文JSONなので変更されたプロパティは diff で読めるが、コンポーネント展開・レイアウト解決後の見た目は分からない。そこで収集スクリプトは変更ファイルを `pen_files` / `snapshot_files`（`snapshots/` のPNG）/ `other_files` に仕分けて返し、スキルは (1) スナップショット画像を `Read` で見て傾向を掴み、(2) `inspect-pencil-node`（読み取り専用）で Node 属性から正確なトークン値を取る、の2経路で実データに当たる。**推測値は書かない** — 一度書くと次のデザインがそれに合わせて作られ、事後的に「正」になってしまうため
 - **収集対象はマージ済みPRのみ**。マージ後なら `.pen` もスナップショットも現在のワークツリーに存在するので、head ブランチが削除済みでも実データを読める（未マージPRを含めると、後で却下された値をトークン化しうる）
 - **自分が作るPRに `cc-ui-design` を付けない**。付けると次回実行時に自分自身を収集対象にする（`DESIGN.md` 更新PRはデザインPRではない）
 - **採用基準**: 2つ以上のデザインPRまたは2つ以上の独立した画面での反復／「今後は〜」のような適用範囲の明示／`primary` カラー・本文タイポグラフィのような基盤トークン（欠けると後続のデザインが判断できなくなるもの）。いずれにも当てはまらなければ採用しない

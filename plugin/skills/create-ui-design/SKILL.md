@@ -172,7 +172,7 @@ git ls-files '*.pen'
   決めたファイルは `inspect-pencil-node` スキルで現状の構造・スタイルを取得してからフェーズ3へ渡す
 - **0件の場合のみ → 新規作成**
 
-`.pen` は暗号化バイナリのため `Read` / `Grep` で開かない。構造の把握は必ず `inspect-pencil-node` スキル経由で行う。
+`.pen` は平文JSON（`.pen` は平文JSONで、構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md` が定義する）なので `Read` / `jq` で読めるが、レイアウト解決後のサイズやスクリーンショットが必要な構造の把握は `inspect-pencil-node` スキル経由で行う。編集は手でJSONを書き換えず `edit-pencil-design` の `execute` で行う。
 
 **完了条件**: 「更新する既存パス」または「新規作成するパス」のいずれかが確定していること。
 
