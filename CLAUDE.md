@@ -578,7 +578,7 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 ### トリアージでの Epic 化（`triage-created-issue` のパターンF）
 
-`triage-created-issue` は、確認事項が解消し description が最新になった（パターンD通過後の）Issueのうち、**単独でマージしても壊れない変更単位に2つ以上分けられ、かつ単位間に先行マージの順序がある・独立した機能を跨ぐ・複数の独立した成果物を求めている**ものを Epic 化する（規模の大小だけでは分けない。判定が割れたら分けない）。形は `breakdown-issues` の「既存IssueをEpicに格上げ」と同じで、本Issueに `cc-epic-issue`、サブIssueは `cc-triage-scope` のみで作成して sub-issue として紐付け、順序がある単位どうしだけ blockedBy を貼る（親子間には貼らない。親はサブIssueが全て閉じるまで閉じないため）。parent 持ちのIssueは Epic ブランチが1階層前提なので対象外。Epic 化した Issue はトリガーラベル（`cc-issue-created` + `cc-triage-scope`）が残るため、`triage-created-issue` ワーカーの `excludeLabels` に `cc-epic-issue` を入れて再トリアージを止めている。
+`triage-created-issue` は、確認事項が解消し description が最新になった（パターンD通過後の）Issueのうち、**単独でマージしても壊れない変更単位に2つ以上分けられ、かつ単位間に先行マージの順序がある・独立した機能を跨ぐ・複数の独立した成果物を求めている**ものを Epic 化する（規模の大小だけでは分けない。判定が割れたら分けない）。形は `breakdown-issues` の「既存IssueをEpicに格上げ」と同じで、本Issueに `cc-epic-issue`、サブIssueはラベル無しで作成して直ちに sub-issue として紐付け、順序がある単位どうしだけ blockedBy を貼ってから `cc-triage-scope` を付ける（先に付けると `create-issue` ワーカーが親なし・未ブロックのまま拾う）。再実行時は既存sub-issueをタイトルで照合し、作成・紐付け・blockedBy・ラベルの未完了分だけを行う（親子間には貼らない。親はサブIssueが全て閉じるまで閉じないため）。parent 持ちのIssueは Epic ブランチが1階層前提なので対象外。Epic 化した Issue はトリガーラベル（`cc-issue-created` + `cc-triage-scope`）が残るため、`triage-created-issue` ワーカーの `excludeLabels` に `cc-epic-issue` を入れて再トリアージを止めている。
 
 対応不要の判断は `triage-created-issue`（パターンB）と `exec-issue`（フェーズ1の着手前判定・フェーズ6）の両方にあり、いずれも理由をコメントしてから `gh-compat.sh close-issue <N> not_planned` で閉じる（コメントに失敗したら閉じない）。`exec-issue` の `onCompleted` は Issue が CLOSED なら `cc-pr-created` を付けずに正常完了とする。
 
