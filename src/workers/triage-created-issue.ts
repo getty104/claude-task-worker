@@ -19,6 +19,8 @@ export const triageCreatedIssueWorker = createIssuePollingWorker({
     "cc-exec-issue",
     "cc-create-ui-design",
     "cc-ui-design-pr-created",
+    // パターンFで Epic 化した Issue はサブIssueの完了待ちで、トリガーラベルが残るため除外しないと毎回再トリアージされる。
+    "cc-epic-issue",
   ],
   // トリガーラベルはどちらも STICKY_LABELS なのでワーカーが外さない。
   // 完了時に付け直す必要はない。

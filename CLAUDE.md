@@ -577,6 +577,12 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 除去してしまうと、`triage-created-issue`（両ラベルをANDトリガーにする）のタスクが失敗したときにマーカーごと失われる。`cc-issue-created` が消えた Issue は `create-issue` の `excludeLabels` をすり抜けるため、分析済みの Issue が再分析され → `cc-issue-created` 再付与 → 再トリアージ → 失敗、の高コストなループに入る。以前は「除去してから完了時に付け直す」実装だったが、付け直しが成功パス（`onCompleted`）にしか無く、失敗時に片道で失われていた。
 
+### トリアージでの Epic 化（`triage-created-issue` のパターンF）
+
+`triage-created-issue` は、確認事項が解消し description が最新になった（パターンD通過後の）Issueのうち、**単独でマージしても壊れない変更単位に2つ以上分けられ、かつ単位間に先行マージの順序がある・独立した機能を跨ぐ・複数の独立した成果物を求めている**ものを Epic 化する（規模の大小だけでは分けない。判定が割れたら分けない）。形は `breakdown-issues` の「既存IssueをEpicに格上げ」と同じで、本Issueに `cc-epic-issue`、サブIssueは `cc-triage-scope` のみで作成して sub-issue として紐付け、順序がある単位どうしだけ blockedBy を貼る（親子間には貼らない。親はサブIssueが全て閉じるまで閉じないため）。parent 持ちのIssueは Epic ブランチが1階層前提なので対象外。Epic 化した Issue はトリガーラベル（`cc-issue-created` + `cc-triage-scope`）が残るため、`triage-created-issue` ワーカーの `excludeLabels` に `cc-epic-issue` を入れて再トリアージを止めている。
+
+対応不要の判断は `triage-created-issue`（パターンB）と `exec-issue`（フェーズ1の着手前判定・フェーズ6）の両方にあり、いずれも理由をコメントしてから `gh-compat.sh close-issue <N> not_planned` で閉じる（コメントに失敗したら閉じない）。`exec-issue` の `onCompleted` は Issue が CLOSED なら `cc-pr-created` を付けずに正常完了とする。
+
 ### Epic PR のマージゲート（`cc-epic-issue`）
 
 `cc-epic-issue` の付いたPRをデフォルトブランチへマージする＝リリースなので、**PRをマージしうるスキルはすべて Epic PR 判定を持ち、マージの代わりに `cc-release-ready` を付けて終える**。対象は `triage-pr`（ステップ3）と `fix-review-point`（フェーズ1の「修正点がない場合」）の2箇所。`fix-review-point` 側にゲートが無かったため、`cc-fix-onetime` を経由した Epic PR が人の判断を挟まずマージされていた。判定に使うラベル一覧はステップ0の `gh pr view --json ...,labels` で取得したものを使い回す。

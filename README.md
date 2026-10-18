@@ -402,6 +402,8 @@ UI実装 Issue について、実装の前に Pencil（`.pen`）でデザイン�
 
 ```text
 triage-created-issue（ルーティング）
+  ├─ 対応不要           → 理由をコメントしてクローズ
+  ├─ PRを分離すべき     → Epic化（cc-epic-issue）＋ サブIssue（cc-triage-scope）を作成
   ├─ UI実装タスクでない → cc-exec-issue
   └─ UI実装タスク       → cc-create-ui-design
         → create-ui-design: .pen + snapshots を作り、デザインPR（cc-ui-design）を作成
