@@ -119,6 +119,7 @@ MCP に同等ツールが無い（または**あっても意味論が違って�
 | `default-branch` | `gh repo view --json defaultBranchRef` | `git symbolic-ref refs/remotes/origin/HEAD` → `GET repos/{o}/{r}` の `.default_branch`（クラウド VM の作業ツリーには `origin/HEAD` が無いため） |
 | `owner-repo` | `gh repo view --json nameWithOwner` | `git remote get-url origin` |
 | `issue-parent <n>` | `gh issue view --json parent` | `GET repos/{o}/{r}/issues/{n}/parent` |
+| `base-branch <n> [--strict]` | スキルごとの parent → upstream → デフォルトの導出 bash | `issue-parent` ＋ git のローカル導出（parent 取得失敗時は `--strict` で非0、無指定なら倒した値を exit 3 で返す） |
 | `issue-deps <n>` | `gh issue view --json blockedBy,blocking` | `GET repos/{o}/{r}/issues/{n}/dependencies/{blocked_by,blocking}` |
 | `add-blocked-by <n> <num>...` | `gh issue edit --add-blocked-by` | `POST .../dependencies/blocked_by`（body は番号ではなく `issue_id`） |
 | `add-blocking <n> <num>...` | `gh issue edit --add-blocking` | 同上を**相手側から**貼る（REST に `blocking` の POST が無いため） |

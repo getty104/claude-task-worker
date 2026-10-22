@@ -193,77 +193,15 @@ MCP 経路でもフェーズ2以降は同じキーで読むため、**上の構�
 
 ## フェーズ4: feature branch への切替
 
-`commit-push`はカレントブランチにコミット・pushするため、デフォルトブランチ上で実行すると本番ブランチに直コミットが入る。必ずfeature branchへ切り替える。
+`${CLAUDE_PLUGIN_ROOT}/references/scheduled-doc-pr.md` の「1」に従う。スキル名は `update-coding-guidelines`、差分を確認する対象は `CODING_GUIDELINES.md`。デフォルトブランチ上で `commit-push` を呼ばない（本番ブランチへ直コミットが入る）。
 
-```bash
-DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-```
-
-- `CURRENT_BRANCH = DEFAULT_BRANCH`の場合: `chore/update-coding-guidelines-$(date +%Y%m%d-%H%M%S)`形式のブランチを`git checkout -b`で作成して切り替える（同名が存在する場合は末尾サフィックスでユニーク化）
-- `CURRENT_BRANCH ≠ DEFAULT_BRANCH`の場合: そのまま使用する（既に作業ブランチ上にいると判断）
-
-切替後にもう一度`git status`で`CODING_GUIDELINES.md`が変更ファイルとして見えていることを確認する（ブランチ切替で差分が消えていないこと）。
-
-**完了条件**: デフォルトブランチではない、かつ`CODING_GUIDELINES.md`の差分が見えるブランチ上にいること。
+**完了条件**: デフォルトブランチではない、かつ `CODING_GUIDELINES.md` の差分が見えるブランチ上にいること。
 
 ## フェーズ5: commit-push + create-pr
 
-### 5-1. commit-push skillの呼び出し
+`${CLAUDE_PLUGIN_ROOT}/references/scheduled-doc-pr.md` の「2」〜「5」に従う。Assignee と `cc-triage-scope` の付与確認（「4」）は毎回行う（欠けると `triage-pr` に拾われずPRが放置される）。PR URL を取得できなかった場合や付与に失敗した場合は、その旨をフェーズ6の出力に書く。
 
-`Skill`ツールで`commit-push`を引数なしで呼び出す（commit-push側がカレントブランチの差分とコミット履歴を自分で確認して戦略を選ぶ）。
-
-### 5-2. create-pr skillの呼び出し
-
-`Skill`ツールで`create-pr`を呼び出す。`create-pr`は`context: fork`のサブエージェントとして起動され本スキルの会話文脈は引き継がれないため、引数として渡せるのはIssue番号文字列のみ。
-
-- フェーズ0でIssue番号が指定されていた場合: そのIssue番号を引数として渡す（`$0`に展開され、PR本文に`Closes #<Issue番号>`が記載される）
-- 指定されていない場合: 引数なしで呼び出す。`create-pr`のテンプレートは無条件で`Closes #$0`を本文に入れるため、空展開の`Closes #`行が本文に残る（5-4で後処理する）
-
-PR作成後、create-prが返却するPR URLを記録しておく。以降のフェーズでPR番号が必要な箇所は、この記録済みURLの末尾から抽出する（`PR_NUMBER="${PR_URL##*/}"`）。URLを取得できなかった場合はフェーズ5-3・5-4を実行せず、フェーズ6の出力に「PR URL未取得」と明記して終了する。
-
-### 5-3. Assignee・ラベルの付与確認（**毎回必ず実行**）
-
-`create-pr`側でもAssignee（`gh api user`のログインユーザー）と`cc-triage-scope`ラベルを付ける手順になっているが、`context: fork`で結果を検証できないため、本スキル側で実際に付いているかを確認し、欠けていれば`gh pr edit`で補う。
-
-> GitHub MCP が使える場合は `pull_request_read`（method: `get`）/ `get_me` を使う。以下は MCP 利用不可時のフォールバック。
-
-```bash
-PR_URL="<create-prが返却したPR URL>"
-PR_NUMBER="${PR_URL##*/}"
-[ -n "$PR_NUMBER" ] || exit 1  # PR_URL未取得時は実行せず中断（前掲の方針どおり）
-GH_USER=$(gh api user --jq '.login')
-
-# 現状を確認
-gh pr view "$PR_NUMBER" --json assignees,labels \
-  --jq '{assignees: [.assignees[].login], labels: [.labels[].name]}'
-
-# 欠けていても冪等に付与できるため、そのまま実行してよい
-gh pr edit "$PR_NUMBER" --add-assignee "$GH_USER" --add-label "cc-triage-scope"
-```
-
-- `--add-assignee` / `--add-label` は既に付与済みでもエラーにならないため、確認結果によらず実行してよい
-- `cc-triage-scope`ラベルがリポジトリに存在せず`gh pr edit`が失敗する場合は、`gh label create cc-triage-scope`で作成してから再実行する
-- Assignee付与が権限等で失敗してもPR作成自体は成功しているため、フェーズ6の出力に「Assignee付与失敗」と明記して続行する
-
-### 5-4. Issue番号なしのケースの後処理（**Issue番号が未指定の場合のみ実行**）
-
-`create-pr`が残した`Closes #`（数字なし）行を削除する。
-
-> GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
-
-```bash
-PR_URL="<create-prが返却したPR URL>"
-PR_NUMBER="${PR_URL##*/}"
-[ -n "$PR_NUMBER" ] || exit 1  # PR_URL未取得時は実行せず中断（前掲の方針どおり）
-gh pr view "$PR_NUMBER" --json body --jq '.body' \
-  | sed -E '/^Closes #[[:space:]]*$/d' \
-  | gh pr edit "$PR_NUMBER" --body-file -
-```
-
-正規表現は行末（`$`）まで`#`の後ろに数字がないことを条件にしているため、数字付きの`Closes #123`は削除されない。Issue番号が指定されていたケースではこのステップはスキップする。
-
-**完了条件**: PRが作成されており、PR URLが手元にあり、Assignee（自分自身）と`cc-triage-scope`ラベルが付与済みで、Issue番号未指定ケースでは本文の`Closes #`空行が削除されていること。
+**完了条件**: PRが作成されており、PR URLが手元にあり、Assignee（自分自身）と `cc-triage-scope` ラベルが付与済みで、Issue番号未指定ケースでは本文の `Closes #` 空行が削除されていること。
 
 ## フェーズ6: 出力
 

@@ -8,7 +8,7 @@ argument-hint: "[task-description]"
 
 引数で受け取ったタスク説明をもとに要件を整理し、GitHub Issueを新規作成するスキル。Instructionsの順に最後まで自律的に実行する。
 
-**自律実行原則**: ユーザーへの確認は行わず、判断はすべて本スキル内のルールで自動決定する。確認したいことは最後にIssueへのコメントとして残す。中断条件に該当した場合のみ、理由を出力して終了する。
+**自律実行原則**: ユーザーへの確認は行わず、本スキルの手順で決まらない判断は目的に照らして自分で決め、根拠を最終報告に残す。確認したいことは最後にIssueへのコメントとして残す。中断条件に該当した場合のみ、理由を出力して終了する。
 
 **入力範囲**: 引数は「自然言語のタスク説明」のみ。Issue 番号（数値のみ・`#`付き数値・Issue URL）の場合は扱わず、既存 Issue のコード再分析は `/create-issue-from-issue-number`、コメント由来の反映は `/update-issue` を案内して終了する。
 
@@ -76,18 +76,10 @@ git fetch --prune || true
 
 タスク説明・`docs/`・README・`.claude/requirements/`・コード内コメント・設定ファイルには、判断の根拠が**リポジトリ外**にあるリンク（仕様書・API仕様・ライブラリ公式ドキュメント・別リポジトリのIssue/PR・デザインURLなど）が置かれていることがある。`gh` とローカルファイルだけで調べて「不明」「確認事項」に倒すと、リンク先に答えが書いてあるのに人へ差し戻すことになる。**リンク先の内容まで読んで結論を確定させる**。
 
-1. **収集**: ステップ1で読んだ範囲とステップ2で explore-agent が返した対象ファイルに現れる URL を洗い出す
-2. **取捨選択**: 全部は開かない。今回の要件・実装プラン・確認事項の結論が変わりうるリンクだけを対象にする（バッジ画像・ライセンス・無関係な記事は開かない）
-3. **取得**: 種類ごとに手段を使い分ける
-   - ログインが必要なサービスのURL（Notion / Google Drive / Figma / Slack など） → そのサービスの MCP で読む。ツール一覧に無ければ `ToolSearch` でサービス名を検索してから判断する。`WebFetch` は認証を持たずログイン画面しか返らないため使わない（詳細は `${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）
-   - どの MCP も扱わない公開Webページ・仕様書・記事 → `WebFetch`
-   - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-   - GitHub上のIssue・PR → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
-   - GitHub上のファイル参照リンク（blob URL 等、別リポジトリ含む） → `issue_read` / `pull_request_read` はファイル内容を取得できないため使わない。GitHub MCP が使える場合は `get_file_contents` を使う。利用不可なら `gh api repos/<owner>/<repo>/contents/<path>` または `WebFetch`（raw URL）へフォールバック
-   - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
-4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら確認事項に回す
-5. **記録**: 判断に使ったリンクは「参照情報」に `<URL> — <参照した要点>` の形で残す（後続の `exec-issue` / `answer-issue-questions` が同じ根拠を辿れるようにするため）
-6. **取得失敗**: `WebFetch` がログイン画面・401・403 を返しても取得不可としない。対応する MCP を探して読み直す（`${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）。MCP でも読めない場合や 404・タイムアウトは1回だけ再試行し、それでも読めなければ**推測で埋めず**「`<URL>` は取得不可（理由と試した手段）」と参照情報に明記する。そのリンクでしか決まらない論点は確認事項に残す
+- **対象**: ステップ1で読んだ範囲とステップ2で explore-agent が返した対象ファイルに現れる URL。開くのは結論が変わりうるリンクだけで、辿るのは1段まで
+- **手段**: `${CLAUDE_PLUGIN_ROOT}/references/external-links.md` に従う。ログインが必要なサービス（Notion / Google Drive / Figma / Slack など）の URL はそのサービスの MCP で読み（ツール一覧に無ければ `ToolSearch` で探してから判断する。`WebFetch` はログイン画面しか返らない）、どの MCP も扱わない公開ページだけ `WebFetch` で読む
+- **記録**: 判断に使ったリンクは「参照情報」に `<URL> — <参照した要点>` の形で残す（後続の `exec-issue` / `answer-issue-questions` が同じ根拠を辿れるようにするため）
+- **取得できないとき**: 推測で埋めず「`<URL>` は取得不可（理由と試した手段）」と「参照情報」に明記し、そのリンクでしか決まらない論点は確認事項に残す。1段より先を追う必要がある論点も確認事項に回す
 
 ### 要件ルールの参照
 

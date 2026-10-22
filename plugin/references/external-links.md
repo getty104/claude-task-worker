@@ -11,6 +11,21 @@ Issue・コメント・ドキュメントに現れる外部リンクを読むと
 3. **MCP があればそれで読む**。本文だけでなく、MCP で取れるコメント・添付・子ページ・プロパティなど、判断に効く部分まで読む
 4. **どの MCP も扱わない公開Webページ**（仕様書・記事を含む）だけ `WebFetch` で読む。ライブラリの公式ドキュメントは `check-library` スキル（または context7 MCP）、GitHub の URL は `github-access.md` の対応表を使う
 
+## 種類別の手段
+
+上の原則に加えて、次の種類は専用の手段で読む。
+
+- ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
+- GitHub 上の Issue・PR → `github-access.md` の判定と対応表に従う（ローカルは `gh issue view` / `gh pr view`、クラウドは GitHub MCP の `issue_read` / `pull_request_read` が第一手段。GitHub の URL は `WebFetch` より確実）
+- GitHub 上のファイル参照リンク（blob URL 等、別リポジトリ含む） → GitHub MCP の `get_file_contents`（`issue_read` / `pull_request_read` はファイル内容を取れない）。利用不可なら `gh api "repos/<owner>/<repo>/contents/<path>?ref=<ref>"` か raw URL を `WebFetch`。どの手段でも URL の `blob/<ref>/` にある ref を渡す（省くとデフォルトブランチの内容を読み、リンクが指すリビジョンと食い違う）
+- Issue に**直接添付された画像**（`user-images.githubusercontent.com` / `github.com/user-attachments/...`） → `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403）
+- リンク切れ・URL が古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
+
+## 範囲
+
+- 全部は開かない。結論（要件・実装プラン・確認事項・回答）が変わりうるリンクだけを開く。バッジ画像・ライセンス・無関係な記事は開かない
+- リンク先からさらに辿るのは1段まで
+
 ## 取得に失敗したとき
 
 - `WebFetch` がログイン画面・401・403 を返したら、それは「取得不可」の根拠にならない。まず上記2で対応する MCP を探し、見つかれば MCP で読み直す

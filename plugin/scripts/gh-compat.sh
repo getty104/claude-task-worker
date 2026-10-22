@@ -27,6 +27,7 @@ usage: gh-compat.sh <subcommand> [args...]
   owner-repo                         <owner>/<repo> を出力する
   parse-owner-repo <remote-url>      リモートURLから <owner>/<repo> を切り出す（純粋関数・テスト用）
   issue-parent <issue-number>        parent Issue の番号を出力する（parent 無しなら空・exit 0）
+  base-branch <issue> [--strict]     Issue の作業のベースブランチを出力する（parent の cc-epic-<N> → upstream → デフォルト）
   issue-deps <issue-number>          {"blockedBy":[..],"blocking":[..]} を出力する
   add-blocked-by <issue> <num>...    <issue> をブロックする Issue を追加する
   add-blocking <issue> <num>...      <issue> がブロックする Issue を追加する
@@ -106,6 +107,35 @@ cmd_issue_parent() {
     *" 404 "*) printf '\n'; return 0 ;;
   esac
   gh issue view "$n" --json parent --jq '.parent.number // empty' 2>/dev/null
+}
+
+# Issue の作業のベースブランチを、parent の cc-epic-<N> → worktree の upstream → デフォルトブランチの順で決める
+# （ワーカーが worktree を作るときと同じ順。スキルごとに同じ bash を持たせると書き写しの差で導出がずれるため1か所に置く）。
+# parent の取得に失敗したとき、--strict なら非0で終える。無ければ upstream/デフォルトへ倒して出力し、exit 3 で知らせる。
+cmd_base_branch() {
+  local n="$1" strict="${2:-}" parent up cur d fallback=0
+  if parent=$(cmd_issue_parent "$n"); then
+    if [ -n "$parent" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${parent}" >/dev/null; then
+      printf 'cc-epic-%s\n' "$parent"; return 0
+    fi
+  else
+    if [ "$strict" = "--strict" ]; then
+      echo "gh-compat: failed to resolve the parent of #${n}" >&2; return 1
+    fi
+    echo "gh-compat: failed to resolve the parent of #${n}; falling back to upstream/default" >&2
+    fallback=1
+  fi
+  cur=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  up=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  up=${up#origin/}
+  if [ -n "$up" ] && [ "$up" != "$cur" ] && git rev-parse --verify --quiet "refs/remotes/origin/${up}" >/dev/null; then
+    d="$up"
+  else
+    d=$(resolve_default_branch)
+    [ -n "$d" ] || { echo "gh-compat: failed to resolve the default branch" >&2; return 1; }
+  fi
+  printf '%s\n' "$d"
+  [ "$fallback" -eq 0 ] || return 3
 }
 
 cmd_issue_deps() {
@@ -402,6 +432,7 @@ case "$sub" in
     case "$sub" in
       issue-parent)   [ $# -eq 1 ] || usage; cmd_issue_parent "$1" ;;
       issue-deps)     [ $# -eq 1 ] || usage; cmd_issue_deps "$1" ;;
+      base-branch)    [ $# -ge 1 ] && [ $# -le 2 ] || usage; cmd_base_branch "$1" "${2:-}" ;;
       add-blocked-by) [ $# -ge 2 ] || usage; cmd_add_blocked_by "$@" ;;
       add-blocking)   [ $# -ge 2 ] || usage; cmd_add_blocking "$@" ;;
       add-sub-issue)  [ $# -ge 2 ] || usage; cmd_add_sub_issue "$@" ;;

@@ -143,66 +143,11 @@ gh pr view <参照先のPR番号> --json state,title,mergedAt
 反証シグナルに該当し事実確認で解消可能と判定した項目は、以降のパターンC・D・Eの判定で数える「未回答の確認事項」の集合に含めない（以降「未回答の確認事項」は常にこの除外後の集合を指す）。
 
 - 反証シグナル1〜3項目目に該当した項目は、判定した時点で直ちに「解消済み」として扱う
-- 反証シグナル4項目目（carve-out）に該当した項目は、後続Issue起票の手順（起票・本文相互参照・重複検出用マーカー記録）が**すべて完了して初めて**「解消済み」として扱う。手順が未完了・いずれかのステップが失敗した場合は解消済みとみなさず、ステップ6の規定に従ってその場でパターンA（`cc-need-human-check`）の人間確認フローに委ね、パターンC・D・Eの判定には進めない
+- 反証シグナル4項目目（carve-out）に該当した項目は、後続Issue起票の手順（起票・本文相互参照・重複検出用マーカー記録）が**すべて完了して初めて**「解消済み」として扱う。手順が未完了・いずれかのステップが失敗した場合は解消済みとみなさず、`carve-out.md` のステップ6に従ってその場でパターンA（`cc-need-human-check`）の人間確認フローに委ね、パターンC・D・Eの判定には進めない
 
 ##### 反証シグナル4項目目該当時の後続Issue起票
 
-反証シグナル4項目目に該当し、後回し対象の不具合を追跡する後続Issueがまだ無い場合、本スキル自身が以下の手順で起票する。
-
-トリガーラベルはAND条件であり競合しない: 後続Issueには`cc-triage-scope`のみを付与し`cc-issue-created`は付けない。`triage-created-issue`ワーカーは両ラベルが揃って初めてマッチする（`src/workers/triage-created-issue.ts`、`--label`複数指定のAND一致）ため、`cc-issue-created`が無い間は後続Issueが同ワーカーに拾われず、`create-issue`ワーカー（トリガーラベル`cc-triage-scope`単独）との競合は起きない。
-
-1. 起票前に、分離元Issueのコメント履歴を固定マーカー `## 後続Issue起票済み（carve-out）` で走査する。ヒットした場合は起票をスキップし、記載されている既存の後続Issue番号を再利用する。
-2. ヒットしない場合、`gh-compat.sh create-issue` で起票する（`gh issue create` と GitHub MCP の `issue_write` は使わない。前者は GraphQL 経由でクラウドでは 403 になり、後者は labels / assignees の渡し忘れで黙って欠落する）。初期ラベルは`cc-triage-scope`のみ（`cc-issue-created`を付けると`create-issue`ワーカーの分析フェーズをスキップし、実装プランのない素のdescriptionのまま`triage-created-issue`→`exec-issue`に流れてしまう）。Assignee には実行中のユーザー（`@me`）を付ける（ワーカーはラベルと Assignee の両方で Issue を拾うため、欠けると後続Issueが放置される）。`blockedBy`関係は付与しない（`-is:blocked`によりワーカーの検索クエリから除外され、分離元Issueがクローズするまで放置されるため）。
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue \
-     --title "<後回しにした不具合のタイトル>" \
-     --label "cc-triage-scope" \
-     --assignee "@me" \
-     --body-file - <<'EOF'
-   <不具合の内容。分離元Issue #$0 を参照する旨を明記>
-   EOF
-   ```
-3. 起票直後・分離元Issueへのコメント投稿前に、もう一度同じ固定マーカーで分離元Issueのコメント履歴を走査する（並行実行で他プロセスが同じ起票を行っていないかの再確認）。既存の後続Issue番号がすでに記録されていた場合、直前に自分が作成した後続Issueは重複とみなし`gh-compat.sh close-issue <番号> not_planned`でクローズしたうえで、既存番号を採用してステップ4に進む。
-4. 分離元Issue・後続Issueそれぞれの本文（description）に相手のIssue番号を明記して相互参照する。本文更新とマーカーコメント投稿の2段階で行う：
-   - 後続Issue側はステップ2の`--body`で参照済み
-   - 分離元Issue側は既存descriptionを保持したまま末尾に参照を追記する。`exec-issue`など後続処理はdescriptionのみを読むため、コメントだけでは本文に参照が残らない
-
-   固定パス（例: `/tmp/issue-$0-body.md`）は同一Issueへの並行実行で衝突しうるため`mktemp`で一意な一時ファイルを確保する。`view`と`edit`の間の外部更新に備え、`edit`直前に本文を再取得し、(a) 追記予定の参照文言がすでに含まれていないか、(b) このステップ開始時点の内容と一致しているかを検証してから書き戻す：
-
-   > GitHub MCP が使える場合は本文取得に `issue_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
-
-   ```bash
-   BODY_FILE="$(mktemp -t issue-$0-body-XXXXXX.md)"
-   trap 'rm -f "$BODY_FILE"' EXIT
-
-   ORIGINAL_BODY="$(gh issue view $0 --json body --jq .body)"
-   REFERENCE_LINE='既知の不具合の分離・後回し（carve-out）として、後続Issue #<後続Issue番号> を起票済み。'
-   printf '%s\n\n---\n\n%s\n' "$ORIGINAL_BODY" "$REFERENCE_LINE" > "$BODY_FILE"
-
-   # edit直前に最新本文を再取得し、無条件の上書き（ロスト・アップデート）を避ける
-   LATEST_BODY="$(gh issue view $0 --json body --jq .body)"
-   if grep -qF '既知の不具合の分離・後回し（carve-out）として、後続Issue #' <<<"$LATEST_BODY"; then
-     : # 他プロセスが既に参照を追記済み。重複追記せずステップ5へ進む
-   elif [ "$LATEST_BODY" != "$ORIGINAL_BODY" ]; then
-     : # ステップ1〜3で確認した内容と矛盾する外部変更を検知。carve-outとしての進行を中止し、ステップ6のパターンAへフォールバックする
-   else
-     gh issue edit $0 --body-file "$BODY_FILE"
-   fi
-   ```
-   いずれの分岐でも「参照文言が本文に反映されている」（既存分含む）ことを確認できて初めて次に進んでよい。矛盾検知の分岐に入った場合はステップ6に従う。
-5. 本文更新に続けて、重複検出・通知用の固定マーカー（後続Issue番号入り）を分離元Issueへコメント投稿する。
-   ```bash
-   gh issue comment $0 --body-file - <<'EOF'
-   ## 後続Issue起票済み（carve-out）
-
-   既知の不具合の分離・後回しとして、以下の後続Issueを起票しました。
-
-   - 後続Issue: #<後続Issue番号>
-
-   本Issueは推奨案のとおり進行します。
-   EOF
-   ```
-6. ステップ2〜5（起票・本文更新・マーカーコメント投稿）のいずれかが失敗した場合、carve-outとして進行する前提が欠けたことになるため、この項目を事実確認で解消可能な項目として扱うのを中止する。パターンA本来の人間確認フロー（「該当する場合の処理」節）に戻り、失敗した操作の内容とエラーを「自動で進められない理由」に明記して`cc-need-human-check`を付与する。ステップ4の本文再取得で検知した外部変更との矛盾も、本文更新が完了しなかった＝ステップ4の失敗として同じくパターンAへフォールバックする。
+反証シグナル4項目目に該当し、後回しにした不具合を追跡する後続Issueがまだ無い場合は、`${CLAUDE_SKILL_DIR}/carve-out.md` の手順で本スキル自身が起票する（重複検出用マーカーの走査 → `cc-triage-scope` のみ付けて起票 → 双方の description で相互参照 → マーカーコメント）。後続Issueに `cc-issue-created` と `blockedBy` を付けないこと、手順のどこかが失敗したらこの項目を解消済みとせずパターンAへ戻すことは、同ファイルに理由とともに書いてある。
 
 ##### 該当する場合の処理
 
@@ -461,55 +406,7 @@ jq -r '.uiDesign.enabled // false' claude-task-worker.json 2>/dev/null || printf
 
 ##### 処理
 
-1. 冪等性の確認: 変更単位（タイトル付き）を先に確定させ、本Issueの既存sub-issueを取得する（`gh api repos/{owner}/{repo}/issues/$0/sub_issues --jq '.[] | {number, title}'`）。既存sub-issueはタイトルで変更単位と照合し、一致したものは新規作成せず採用する。既存sub-issueがあってもステップ4へ飛ばず、ステップ2〜4を「未完了の操作だけを行う」形で順に実行する（前回の途中失敗からの再実行で、子の重複作成や `blockedBy` の設定漏れを残さないため）
-2. 照合で見つからなかった変更単位ごとにサブIssueを作成し、**作成のたびに直ちに**本Issueへ紐付ける（作成と紐付けの間で失敗すると、親を持たない子は次回の照合で見つからず重複作成されるため、その窓を1件分に狭める）。`gh-compat.sh create-issue` を使う（`gh issue create` / MCP の `issue_write` は使わない。理由は「反証シグナル4項目目該当時の後続Issue起票」と同じ）。**作成時はラベルを付けず**、Assignee は `@me` のみ指定する（`cc-triage-scope` は `create-issue` ワーカーのトリガーのため、親子関係・`blockedBy` の設定前に付けると、親なし・未ブロックのIssueとして拾われ、デフォルトブランチ起点・順序無視で処理されうる。付与はステップ4で行う）
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue \
-     --title "<変更単位のタイトル>" \
-     --assignee "@me" \
-     --body-file - <<'EOF'
-   ## 概要
-   Epic #$0 の一部。<この単位で行う変更>
-
-   ## 要件
-   <親Issueの要件・実装プランのうち、この単位が担う部分を転記（親の確定内容を書き換えない）>
-
-   ## 完了条件
-   <この単位を単独でマージできる状態>
-   EOF
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-sub-issue $0 <作成した子>
-   ```
-3. 順序がある単位には blockedBy を貼る（先行単位が close されるまで後続が `exec-issue` に拾われないようにするため）。再実行時は `gh-compat.sh issue-deps <後続の子>` の `blockedBy` に先行の子が含まれていないものだけを貼る
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-blocked-by <後続の子> <先行の子>
-   ```
-   本Issue（親）とサブIssueの間には blockedBy を貼らない（親はサブIssueが全て閉じるまで close されないため、サブIssueが永久に拾われなくなる）
-4. 全サブIssue（採用した既存の子を含む）に `cc-triage-scope` を付ける。ステップ2・3がすべて成功してから付ける（理由はステップ2のとおり）。`add-label` は冪等なので再実行で付け直してよい
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <子1> cc-triage-scope
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label <子2> cc-triage-scope
-   ```
-5. 本Issueに `cc-epic-issue` を付ける（sub-issue の紐付けが済んでから付ける。先に付けると、紐付け途中の部分集合だけで `epic-issue` ワーカーの完了判定が走りうる）
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label $0 cc-epic-issue
-   ```
-6. 本Issueへマーカーコメントを投稿する（既に固定マーカー `## Epic化しました（サブIssueへ分割）` のコメントがあれば投稿しない）
-   ```bash
-   gh issue comment $0 --body-file - <<'EOF'
-   ## Epic化しました（サブIssueへ分割）
-
-   ## 分割した理由
-   <判定基準のどれに該当したか、変更単位の切り方>
-
-   ## サブIssue
-   - #<子1>: <タイトル>
-   - #<子2>: <タイトル>（#<子1> の完了後に着手）
-
-   各サブIssueは通常のフロー（分析 → トリアージ → 実装）で処理され、全て完了すると Epic PR が作成されます。
-   EOF
-   ```
-
-`cc-exec-issue` は付与しない（本Issue自体は実装しない）。ステップ2〜6のいずれかが失敗した場合は、作成済みのサブIssueは残したまま（ステップ1の冪等性確認で再採用される。紐付け前に失敗した子は再採用されないため、その番号も理由に明記する）、パターンAの「該当する場合の処理」に従い、失敗した操作とエラーを「自動で進められない理由」に明記して `cc-need-human-check` を付与する。
+`${CLAUDE_SKILL_DIR}/epic-split.md` の手順で行う。順序が契約になっている（サブIssueはラベル無しで作成して直ちに sub-issue として紐付け → 順序がある単位どうしだけ blockedBy → 全サブIssueに `cc-triage-scope` → 本Issueに `cc-epic-issue` → マーカーコメント）。先に `cc-triage-scope` を付けると `create-issue` ワーカーが親なし・未ブロックのまま拾い、先に `cc-epic-issue` を付けると紐付け途中で Epic の完了判定が走りうるため。親子間には blockedBy を貼らない。`cc-exec-issue` は付与しない（本Issue自体は実装しない）。いずれかが失敗したら、作成済みのサブIssueは残したままパターンAの「該当する場合の処理」で `cc-need-human-check` を付与する。
 
 #### パターンE: 着手準備が整っている場合
 

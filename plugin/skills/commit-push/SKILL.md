@@ -154,13 +154,12 @@ git push origin "HEAD:${CURRENT_BRANCH}"
 
 ## 重要な注意事項
 
-1. **コメントは残さない**: コード内の説明コメントは削除する
-2. **原子的なgitコミット**: 各gitコミットは独立して意味を持たせる
-3. **一貫性**: プロジェクトの既存のgitコミットスタイルに従う
-4. **作業ディレクトリを動かさない**: ステップ0の判定に従う
-5. **デフォルトブランチ上では履歴を書き換えない**: ステップ1のモード判定に従い、新規コミットの追加とforce無しのfast-forward pushに限定する
-6. **push 先は現在ブランチ以外にしない**: upstream・分岐元・epic ブランチ（`cc-epic-<N>`）など、`CURRENT_BRANCH` 以外を宛先にする refspec は使わない
-7. **分岐元のgitコミットを書き換えない**: `--amend` / interactive rebase の対象は `origin/${BASE_BRANCH}..HEAD` に現れるgitコミットに限る
+1. **原子的なgitコミット**: 各gitコミットは独立して意味を持たせる
+2. **一貫性**: プロジェクトの既存のgitコミットスタイルに従う
+3. **作業ディレクトリを動かさない**: ステップ0の判定に従う
+4. **デフォルトブランチ上では履歴を書き換えない**: ステップ1のモード判定に従い、新規コミットの追加とforce無しのfast-forward pushに限定する
+5. **push 先は現在ブランチ以外にしない**: upstream・分岐元・epic ブランチ（`cc-epic-<N>`）など、`CURRENT_BRANCH` 以外を宛先にする refspec は使わない
+6. **分岐元のgitコミットを書き換えない**: `--amend` / interactive rebase の対象は `origin/${BASE_BRANCH}..HEAD` に現れるgitコミットに限る
 
 ## 戦略選択のフローチャート
 
