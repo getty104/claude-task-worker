@@ -40,7 +40,7 @@ gh issue view <issue番号> --json number,title,state,labels,assignees,milestone
 
 以下も併せて確認：
 
-- **画像/資料へのリンク**: 本文にリンクがある場合はリンク先を開いて内容を読む（一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP）。**直接添付された画像**は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403。詳細は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` の「画像・添付ファイル」）。取得に失敗した場合は、その旨を明記して確認できた範囲で続行する
+- **画像/資料へのリンク**: 本文にリンクがある場合はリンク先を開いて内容を読む（そのサービスの MCP があれば MCP で読み、どの MCP も扱わない公開URLだけ `WebFetch`。詳細は `${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）。**直接添付された画像**は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403。詳細は `${CLAUDE_PLUGIN_ROOT}/references/github-access.md` の「画像・添付ファイル」）。取得に失敗した場合は、その旨を明記して確認できた範囲で続行する
 - **リンクされたIssue/PR**: `#123` 形式や URL での参照は依存関係の手がかり。必要に応じて GitHub MCP の `issue_read`（method: `get`）/ `pull_request_read`（method: `get`）を優先し、利用不可なら `gh issue view <num>` / `gh pr view <num>` へフォールバックして内容を確認
 - **コード参照**: 本文に登場するファイルパス・関数名は対象範囲特定の起点。実際の所在・周辺実装の確認は手順2で `explore-agent` に委譲する
 

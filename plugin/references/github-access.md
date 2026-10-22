@@ -169,7 +169,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue/PR番�
 - 署名付き URL の有効期限は**5分**。URL だけを控えて後で読むことはできないので、必ずこのサブコマンドでその場で保存する（再取得したければ同じコマンドを再実行する）
 - 対象は Issue / PR の本文と Issue コメント（PR の会話コメントを含む）。PR の行コメント（レビューコメント）は対象外
 - 出力が空なら直接添付は無い。非0終了（取得・ダウンロード失敗）の場合は推測で補わず「添付は取得不可（理由）」と報告・根拠に明記し、確認できた範囲で処理を続行する
-- description・コメントに貼られた**リンクは別途読む**。一般URLは `WebFetch`、Google Drive はドライブ用の MCP、Figma は Figma MCP、GitHub の URL は上記対応表の MCP ツール
+- description・コメントに貼られた**リンクは別途読む**。GitHub の URL は本ドキュメントのアクセス方針（ローカルは `gh` 優先 / クラウドは GitHub MCP 優先）に従い、それ以外は `external-links.md` に従い、そのサービスの MCP があれば MCP で読み、どの MCP も扱わない公開URLだけ `WebFetch`
 
 ## 本ドキュメントで扱わないもの
 
