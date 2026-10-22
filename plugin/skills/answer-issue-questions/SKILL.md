@@ -135,15 +135,15 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 1. **収集**: Issue本文・確認事項を含む全コメント・ステップ2で読んだドキュメント・ステップ3で調査したコードに現れる URL を洗い出す
 2. **取捨選択**: 全部は開かない。確認事項への結論が変わりうるリンクだけを対象にする（バッジ画像・ライセンス・無関係な記事は開かない）
 3. **取得**: 種類ごとに手段を使い分ける
-   - 一般のWebページ・仕様書・記事 → `WebFetch`
+   - ログインが必要なサービスのURL（Notion / Google Drive / Figma / Slack など） → そのサービスの MCP で読む。ツール一覧に無ければ `ToolSearch` でサービス名を検索してから判断する。`WebFetch` は認証を持たずログイン画面しか返らないため使わない（詳細は `${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）
+   - どの MCP も扱わない公開Webページ・仕様書・記事 → `WebFetch`
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
    - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
-   - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
-   - 画像・資料へのリンク → リンク先を開いて内容を確認する（Google Drive はドライブ用の MCP、それ以外は `WebFetch`。URLを見て終わりにしない）。Issue に**直接添付された画像**（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403）。取得に失敗した場合は推測で埋めず「添付は取得不可（理由）」と根拠に明記する
+   - 画像・資料へのリンク → リンク先を開いて内容を確認する（手段は上記と同じく対応する MCP を優先し、どの MCP も扱わない公開URLだけ `WebFetch`。URLを見て終わりにしない）。Issue に**直接添付された画像**（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403）。取得に失敗した場合は推測で埋めず「添付は取得不可（理由）」と根拠に明記する
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら「確信度と追加調査の必要性」として回答に明示する
 5. **記録**: 判断に使ったリンクは回答の「根拠」に `<URL> — <参照した要点>` の形で残す（`path:line` の引用と同格の根拠として扱う）
-6. **取得失敗**: 認証必須・404・タイムアウトは1回だけ再試行し、それでも読めなければ**推測で埋めず**「`<URL>` は取得不可（理由）」と根拠に明記したうえで、確認済みの範囲で答えられる分を回答する
+6. **取得失敗**: `WebFetch` がログイン画面・401・403 を返しても取得不可としない。対応する MCP を探して読み直す（`${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）。MCP でも読めない場合や 404・タイムアウトは1回だけ再試行し、それでも読めなければ**推測で埋めず**「`<URL>` は取得不可（理由と試した手段）」と根拠に明記したうえで、確認済みの範囲で答えられる分を回答する
 
 #### 要件ルールの参照
 

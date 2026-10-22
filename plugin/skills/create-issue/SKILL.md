@@ -79,15 +79,15 @@ git fetch --prune || true
 1. **収集**: ステップ1で読んだ範囲とステップ2で explore-agent が返した対象ファイルに現れる URL を洗い出す
 2. **取捨選択**: 全部は開かない。今回の要件・実装プラン・確認事項の結論が変わりうるリンクだけを対象にする（バッジ画像・ライセンス・無関係な記事は開かない）
 3. **取得**: 種類ごとに手段を使い分ける
-   - 一般のWebページ・仕様書・記事 → `WebFetch`
+   - ログインが必要なサービスのURL（Notion / Google Drive / Figma / Slack など） → そのサービスの MCP で読む。ツール一覧に無ければ `ToolSearch` でサービス名を検索してから判断する。`WebFetch` は認証を持たずログイン画面しか返らないため使わない（詳細は `${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）
+   - どの MCP も扱わない公開Webページ・仕様書・記事 → `WebFetch`
    - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
    - GitHub上のIssue・PR → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
    - GitHub上のファイル参照リンク（blob URL 等、別リポジトリ含む） → `issue_read` / `pull_request_read` はファイル内容を取得できないため使わない。GitHub MCP が使える場合は `get_file_contents` を使う。利用不可なら `gh api repos/<owner>/<repo>/contents/<path>` または `WebFetch`（raw URL）へフォールバック
-   - Figma URL → Figma MCP（`mcp__claude_ai_Figma__*`）
    - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら確認事項に回す
 5. **記録**: 判断に使ったリンクは「参照情報」に `<URL> — <参照した要点>` の形で残す（後続の `exec-issue` / `answer-issue-questions` が同じ根拠を辿れるようにするため）
-6. **取得失敗**: 認証必須・404・タイムアウトは1回だけ再試行し、それでも読めなければ**推測で埋めず**「`<URL>` は取得不可（理由）」と参照情報に明記する。そのリンクでしか決まらない論点は確認事項に残す
+6. **取得失敗**: `WebFetch` がログイン画面・401・403 を返しても取得不可としない。対応する MCP を探して読み直す（`${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）。MCP でも読めない場合や 404・タイムアウトは1回だけ再試行し、それでも読めなければ**推測で埋めず**「`<URL>` は取得不可（理由と試した手段）」と参照情報に明記する。そのリンクでしか決まらない論点は確認事項に残す
 
 ### 要件ルールの参照
 
@@ -118,7 +118,7 @@ explore-agent サブエージェントを起動し、以下を取得する。Age
 - E2Eテスト基盤の有無と所在（`playwright.config.*` / `cypress.config.*` / `wdio.conf.*` / `nightwatch.conf.*` 等の設定ファイル、`e2e/` / `tests/e2e/` / `cypress/` 等のディレクトリ、`package.json` の `test:e2e` / `e2e` 系 scripts のいずれかが存在すれば「あり」と判定。関連する既存E2Eテストのパスも特定する）
 - 不確実性・確認事項の候補リスト（推測で埋めない。ただしこのリストはそのまま Issue に載せず、後述の「確認事項の取捨選択」で絞り込む）
 
-サブエージェントへのプロンプトには「ユーザーには質問せず、調査結果を返却して終了する」ことと、上記の出力フォーマットに加えて、**対象コード・ドキュメント中に外部URLが現れ、それが結論を左右する場合は `WebFetch` 等でリンク先の内容まで確認し、URLと参照した要点を返す**ことを明示する。
+サブエージェントへのプロンプトには「ユーザーには質問せず、調査結果を返却して終了する」ことと、上記の出力フォーマットに加えて、**対象コード・ドキュメント中に外部URLが現れ、それが結論を左右する場合はリンク先の内容まで確認し（ログインが必要なサービスはその MCP で読み、`WebFetch` は MCP の無い公開ページだけに使う）、URLと参照した要点を返す**ことを明示する。
 
 ### 確認事項の取捨選択（自明なものは載せない）
 
