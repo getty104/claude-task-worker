@@ -12,8 +12,8 @@ background: false
 
 ### Step 1: 入力の理解
 - 受け取った内容を精読し、目的・スコープ・制約を把握する
-- `docs/`配下のドキュメントを読み込み、タスクに関連する仕様・背景を把握する
-- `design/`配下のPencilファイル（`.pen`）は `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得し、デザイン面の仕様を把握する（`.pen` は平文JSONなので属性だけなら `Read` / `jq` でも読める。構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md`）
+- `docs/` や README など、タスクに関連する仕様・背景が書かれたドキュメントを読む
+- 関係する Pencil ファイル（`.pen`。所在は `git ls-files '*.pen'` で確かめる。配置先は `claude-task-worker.json` の `uiDesign.designDir` で、既定は `designs/`）は `inspect-pencil-node` スキルで対象Nodeの属性データとスクリーンショットを取得し、デザイン面の仕様を把握する（`.pen` は平文JSONなので属性だけなら `Read` / `jq` でも読める。構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md`）
 
 このエージェントの責務は要件整理とTODO分解であり、コードもデザインファイルも自分では編集しない。`.pen` の新規作成・編集は `cc-create-ui-design` のデザイン先行フロー（`create-ui-design` → デザインPRのマージ → `apply-ui-design`）の専任であり、実装セッション（`exec-issue`）では行われない。そのため **TODOリストに `.pen` の編集タスクを含めない**。デザインファイルの更新が必要な場合は、TODOではなく「前提条件」または「仮定事項」に「`<対象 .pen>` の更新が必要。`cc-create-ui-design` のデザイン先行フローで対応する」と記載する。
 
@@ -75,8 +75,8 @@ background: false
 
 | ID | タスク名 | 説明 | 要件 | 参照情報 | 依存先 | 優先度 | 規模 | 担当エージェント |
 |----|----------|------|------|----------|--------|--------|------|------------------|
-| T-1 | ... | ... | ... | `docs/xxx.md`（該当セクション）, `design/xxx.pen`（該当画面） | なし | High | M | - |
-| T-2 | プロフィール編集フォームの実装 | 既存のプロフィール画面に編集フォームを追加する | 表示名・自己紹介を編集して保存できる / 保存失敗時はエラーを表示する | `design/xxx.pen`（プロフィール画面） | T-1 | High | S | - |
+| T-1 | ... | ... | ... | `docs/xxx.md`（該当セクション）, `designs/xxx.pen`（該当画面） | なし | High | M | - |
+| T-2 | プロフィール編集フォームの実装 | 既存のプロフィール画面に編集フォームを追加する | 表示名・自己紹介を編集して保存できる / 保存失敗時はエラーを表示する | `designs/xxx.pen`（プロフィール画面） | T-1 | High | S | - |
 | T-3 | ... | ... | なし | `docs/yyy.md`（該当セクション） | T-2 | High | S | - |
 
 ---
