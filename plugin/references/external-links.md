@@ -16,8 +16,8 @@ Issue・コメント・ドキュメントに現れる外部リンクを読むと
 上の原則に加えて、次の種類は専用の手段で読む。
 
 - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-- GitHub 上の Issue・PR → GitHub MCP の `issue_read` / `pull_request_read`（method: `get`）。利用不可なら `gh issue view` / `gh pr view` / `gh api`（GitHub の URL は `WebFetch` より確実）
-- GitHub 上のファイル参照リンク（blob URL 等、別リポジトリ含む） → GitHub MCP の `get_file_contents`（`issue_read` / `pull_request_read` はファイル内容を取れない）。利用不可なら `gh api repos/<owner>/<repo>/contents/<path>` か raw URL を `WebFetch`
+- GitHub 上の Issue・PR → `github-access.md` の判定と対応表に従う（ローカルは `gh issue view` / `gh pr view`、クラウドは GitHub MCP の `issue_read` / `pull_request_read` が第一手段。GitHub の URL は `WebFetch` より確実）
+- GitHub 上のファイル参照リンク（blob URL 等、別リポジトリ含む） → GitHub MCP の `get_file_contents`（`issue_read` / `pull_request_read` はファイル内容を取れない）。利用不可なら `gh api "repos/<owner>/<repo>/contents/<path>?ref=<ref>"` か raw URL を `WebFetch`。どの手段でも URL の `blob/<ref>/` にある ref を渡す（省くとデフォルトブランチの内容を読み、リンクが指すリビジョンと食い違う）
 - Issue に**直接添付された画像**（`user-images.githubusercontent.com` / `github.com/user-attachments/...`） → `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403）
 - リンク切れ・URL が古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
 

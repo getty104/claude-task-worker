@@ -36,7 +36,7 @@
 
    # edit直前に最新本文を再取得し、無条件の上書き（ロスト・アップデート）を避ける
    LATEST_BODY="$(gh issue view $0 --json body --jq .body)"
-   if grep -qF '既知の不具合の分離・後回し（carve-out）として、後続Issue #' <<<"$LATEST_BODY"; then
+   if grep -qF "$REFERENCE_LINE" <<<"$LATEST_BODY"; then
      : # 他プロセスが既に参照を追記済み。重複追記せずステップ5へ進む
    elif [ "$LATEST_BODY" != "$ORIGINAL_BODY" ]; then
      : # ステップ1〜3で確認した内容と矛盾する外部変更を検知。carve-outとしての進行を中止し、ステップ6のパターンAへフォールバックする

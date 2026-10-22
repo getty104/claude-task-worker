@@ -7,12 +7,14 @@
 `commit-push` はカレントブランチにコミット・pushするため、デフォルトブランチ上で呼ぶと本番ブランチへ直コミットが入る。
 
 ```bash
-DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch)
+DEFAULT_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh default-branch) \
+  && [ -n "$DEFAULT_BRANCH" ] || { echo "failed to resolve the default branch" >&2; exit 1; }
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ```
 
 - `CURRENT_BRANCH = DEFAULT_BRANCH` なら `chore/<スキル名>-$(date +%Y%m%d-%H%M%S)` を `git checkout -b` で作って切り替える（同名があればサフィックスで一意にする）
 - 違うならそのまま使う（既に作業ブランチ上にいる）
+- デフォルトブランチ名を取得できなかった場合は、ここで中断する（比較が成り立たず、デフォルトブランチ上のまま `commit-push` へ進んでしまうため）
 
 切替後に `git status` で対象ファイルの差分が残っていることを確認する。
 
@@ -49,10 +51,11 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-assignee "$PR_NUMBER" @me
 `create-pr` が残した `Closes #`（数字なし）の行を消す。GitHub MCP が使える場合は `pull_request_read`（method: `get`）で本文を取り、`update_pull_request` で `body` だけを更新する。以下は MCP 利用不可時のフォールバック。
 
 ```bash
-gh pr view "$PR_NUMBER" --json body --jq '.body' \
-  | sed -E '/^Closes #[[:space:]]*$/d' \
-  | gh pr edit "$PR_NUMBER" --body-file -
+BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body') || { echo "failed to read the PR body" >&2; exit 1; }
+printf '%s\n' "$BODY" | sed -E '/^Closes #[[:space:]]*$/d' | gh pr edit "$PR_NUMBER" --body-file -
 ```
+
+本文の取得に失敗したまま編集へ進まない（空の本文で上書きされる）。
 
 正規表現は `#` の後ろに数字が無い行だけに一致するので、`Closes #123` は消えない。
 

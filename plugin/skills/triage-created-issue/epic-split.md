@@ -2,7 +2,7 @@
 
 パターンFの判定基準に該当したときに読む。手順の順序はそれぞれ理由のある契約なので入れ替えない。
 
-1. 冪等性の確認: 変更単位（タイトル付き）を先に確定させ、本Issueの既存sub-issueを取得する（`gh api repos/{owner}/{repo}/issues/$0/sub_issues --jq '.[] | {number, title}'`）。既存sub-issueはタイトルで変更単位と照合し、一致したものは新規作成せず採用する。既存sub-issueがあってもステップ4へ飛ばず、ステップ2〜4を「未完了の操作だけを行う」形で順に実行する（前回の途中失敗からの再実行で、子の重複作成や `blockedBy` の設定漏れを残さないため）
+1. 冪等性の確認: 変更単位（タイトル付き）を先に確定させ、本Issueの既存sub-issueを取得する（`gh api --paginate repos/{owner}/{repo}/issues/$0/sub_issues --jq '.[] | {number, title}'`。既定は1ページ30件のため `--paginate` で全件を取る）。既存sub-issueはタイトルで変更単位と照合し、一致したものは新規作成せず採用する。既存sub-issueがあってもステップ4へ飛ばず、ステップ2〜4を「未完了の操作だけを行う」形で順に実行する（前回の途中失敗からの再実行で、子の重複作成や `blockedBy` の設定漏れを残さないため）
 2. 照合で見つからなかった変更単位ごとにサブIssueを作成し、**作成のたびに直ちに**本Issueへ紐付ける（作成と紐付けの間で失敗すると、親を持たない子は次回の照合で見つからず重複作成されるため、その窓を1件分に狭める）。`gh-compat.sh create-issue` を使う（`gh issue create` は GraphQL 経由でクラウドでは 403 になり、MCP の `issue_write` は labels / assignees の渡し忘れで黙って欠落するため使わない）。**作成時はラベルを付けず**、Assignee は `@me` のみ指定する（`cc-triage-scope` は `create-issue` ワーカーのトリガーのため、親子関係・`blockedBy` の設定前に付けると、親なし・未ブロックのIssueとして拾われ、デフォルトブランチ起点・順序無視で処理されうる。付与はステップ4で行う）
    ```bash
    bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh create-issue \
