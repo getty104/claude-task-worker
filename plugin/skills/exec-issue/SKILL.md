@@ -229,32 +229,11 @@ UI変更を含むタスクは、`read-github-issue` の返却で「デザイン�
 
 まず差分の基準ブランチ（`BASE_BRANCH`）を決定する。Issue `$0` が parent（Epic Issue）を持つ場合、worktree は `cc-epic-<parent番号>` ブランチ派生のため epic ブランチを基準にする。デフォルトブランチを基準にすると、epic ブランチへマージ済みの**他サブIssueの差分が混ざり**、コード変更の有無を誤判定する（create-pr スキルのベースブランチ決定と同じ確定的導出を用いる）。
 
-`parent` は Issue Dependencies（sub-issue）系のフィールドで、`gh issue view --json parent` は GraphQL 経由のためクラウドセッションでは 403 になり、クラウド VM の gh 2.45.0 はそもそもこのフィールドを知らない。`gh-compat.sh issue-parent` は REST（`repos/{o}/{r}/issues/{n}/parent`）を第一手段にし、失敗時のみ `gh` へフォールバックする。
+`gh-compat.sh base-branch` が parent の `cc-epic-<N>` → worktree の upstream → デフォルトブランチの順で決める。`--strict` を付け、parent を取得できないときは中断する（誤った基準で「コード変更なし」と判定すると、実装が必要なIssueを閉じてしまうため）。
 
 ```bash
-BASE_BRANCH=""
-if ! PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0"); then
-  echo "failed to resolve issue parent" >&2
-  exit 1
-fi
-if [ -n "${PARENT}" ] && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
-  BASE_BRANCH="cc-epic-${PARENT}"
-fi
-
-# parent が無い場合は upstream（ワーカーが worktree 作成時に --track で記録した分岐元）を使う
-if [ -z "${BASE_BRANCH}" ]; then
-  CURRENT=$(git rev-parse --abbrev-ref HEAD)
-  UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
-  UPSTREAM=${UPSTREAM#origin/}
-  if [ -n "${UPSTREAM}" ] && [ "${UPSTREAM}" != "${CURRENT}" ] \
-    && git rev-parse --verify --quiet "refs/remotes/origin/${UPSTREAM}" >/dev/null; then
-    BASE_BRANCH="${UPSTREAM}"
-  fi
-fi
-
-if [ -z "${BASE_BRANCH}" ]; then
-  BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-fi
+BASE_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh base-branch "$0" --strict) \
+  || { echo "failed to resolve the base branch" >&2; exit 1; }
 
 git status --short
 git diff "origin/${BASE_BRANCH}..HEAD" --stat

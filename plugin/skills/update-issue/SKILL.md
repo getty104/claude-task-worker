@@ -47,33 +47,13 @@ description は人間がレビューし、後続の `exec-issue` が実装スコ
 
 続いて分析の基準となるベースブランチ（`BASE_BRANCH`）を確定する。サブIssue（parent を持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生し、実装PRもそこへ向くため、**デフォルトブランチではなく epic ブランチが分析のターゲット**になる。デフォルトブランチをターゲットと見なすと、epic ブランチへマージ済みの兄弟サブIssueの変更が「未反映」に見え、「Epic PR が未マージだがどう扱うか」といった本来不要な検討事項・確認事項が混入する（`exec-issue` / `create-pr` のベースブランチ決定と同じ確定的導出を用いる）。
 
-`parent` は Issue Dependencies（sub-issue）系のフィールドで、`gh issue view --json parent` は GraphQL 経由のためクラウドセッションでは 403 になり、クラウド VM の gh 2.45.0 はそもそもこのフィールドを知らない。`gh-compat.sh issue-parent` は REST（`repos/{o}/{r}/issues/{n}/parent`）を第一手段にし、失敗時のみ `gh` へフォールバックする。
+導出は `gh-compat.sh base-branch` が parent の `cc-epic-<N>` → worktree の upstream → デフォルトブランチの順で行う（`exec-issue` / `create-pr` と同じ順）。
 
 ```bash
 git fetch --prune || true
 
-BASE_BRANCH=""
-PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "<Issue番号>") || PARENT="__unresolved__"
-if [ "${PARENT}" != "__unresolved__" ] && [ -n "${PARENT}" ] \
-  && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
-  BASE_BRANCH="cc-epic-${PARENT}"
-fi
-
-# parent が無い場合は upstream（ワーカーが worktree 作成時に --track で記録した分岐元）を使う
-if [ -z "${BASE_BRANCH}" ]; then
-  CURRENT=$(git rev-parse --abbrev-ref HEAD)
-  UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
-  UPSTREAM=${UPSTREAM#origin/}
-  if [ -n "${UPSTREAM}" ] && [ "${UPSTREAM}" != "${CURRENT}" ] \
-    && git rev-parse --verify --quiet "refs/remotes/origin/${UPSTREAM}" >/dev/null; then
-    BASE_BRANCH="${UPSTREAM}"
-  fi
-fi
-
-if [ -z "${BASE_BRANCH}" ]; then
-  BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-fi
-echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
+BASE_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh base-branch "<Issue番号>"); BASE_RC=$?
+echo "BASE_BRANCH=${BASE_BRANCH} (exit ${BASE_RC})"
 ```
 
 以降のすべてのステップ（ステップ3の未反映事項の抽出・ステップ4のコード分析・ステップ4.5の確認事項の洗い出し）は `BASE_BRANCH` を分析のターゲットブランチとして扱う。
@@ -81,7 +61,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - 現在の作業ディレクトリのコード状態（＝`BASE_BRANCH` 由来）が分析対象。「この変更はデフォルトブランチにまだ入っていない」ことを問題として扱わない
 - `BASE_BRANCH` が `cc-epic-<N>` の場合、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであることは Epic フローの正常状態**。これを根拠とした確認事項・リスク・検討事項（「先に Epic PR をマージすべきか」等）を一切生成しない
 - epic ブランチへマージ済みの兄弟サブIssueの変更は「既に存在するコード」として扱い、実装プランで再実装しない
-- parent の取得に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした確認事項は生成しない**（epic フローの正常状態を誤って確認事項化しないための安全側の倒し方）。その旨は最終報告に1行残す
+- parent の取得に失敗した場合（`BASE_RC=3`。upstream / デフォルトへ倒した値が返る）は parent 不明として続行するが、**未マージPRを根拠とした確認事項は生成しない**（epic フローの正常状態を誤って確認事項化しないための安全側の倒し方）。その旨は最終報告に1行残す
 
 ### 2. 既存Issueの取得
 
@@ -274,7 +254,7 @@ Skill tool 呼び出しは `Skill(skill='post-issue-body', args=<上記YAML文�
 ## 注意事項
 
 - このスキルは**コードを一切変更しない**。Issue の更新・コメントは原則 `post-issue-body` 経由で行う（本スキル内で直接 `gh issue edit` を呼ぶのはステップ5.5のフォールバック用途に限る）
-- 途中でユーザーに質問しない。確認したいことは `confirmation_items` として渡し、`## 確認事項` コメントに一本化する
+- 確認したいことは `confirmation_items` として渡し、`## 確認事項` コメントに一本化する
 - 本文の確定方針を覆せるのは人間のコメントだけ。AI生成コメントの扱い・判別基準はステップ3を参照
 - 依存関係はステップ5.6のとおり既存Issueへ best-effort で追加のみ行う（本文に `## 依存関係` は書かない。既存relationshipは剥がさない。根拠が明確な依存のみ対象）
 - **依頼内容ブロックを新規追加しない**（冒頭「『依頼内容』の扱い」参照）。既存ブロックの保持は `post-issue-body` の verbatim 再掲規約に委ね（args の `sections.依頼内容` は渡さない — 渡すと原文とのズレを生む可能性がある）、ステップ5.5で保持と折りたたみ書き出しを検証する

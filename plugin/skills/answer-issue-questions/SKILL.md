@@ -78,33 +78,13 @@ gh issue view $0 --json comments --jq '.comments[] | select(.body | test("## 確
 
 回答の基準となるベースブランチ（`BASE_BRANCH`）を確定する。サブIssue（parent を持つIssue）の作業ブランチは `cc-epic-<parent番号>` から派生し実装PRもそこへ向くため、**デフォルトブランチではなく epic ブランチが調査のターゲット**になる。デフォルトブランチ基準では、epic ブランチへマージ済みの兄弟サブIssueの実装が「未実装」に見え、「Epic PR が未マージだがどうするか」といった本来不要な検討事項が回答へ混入する（`exec-issue` / `create-pr` と同じ確定的導出を用いる）。
 
-`parent` の取得は Issue Dependencies（sub-issue）系のフィールドであり、MCP 側の対応が不定のため `gh` に据え置く（対応表の「`gh` のまま残す操作」参照）。
+導出は `gh-compat.sh base-branch` が parent の `cc-epic-<N>` → worktree の upstream → デフォルトブランチの順で行う（`exec-issue` / `create-pr` と同じ順）。
 
 ```bash
 git fetch --prune || true
 
-BASE_BRANCH=""
-PARENT=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh issue-parent "$0") || PARENT="__unresolved__"
-if [ "${PARENT}" != "__unresolved__" ] && [ -n "${PARENT}" ] \
-  && git rev-parse --verify --quiet "refs/remotes/origin/cc-epic-${PARENT}" >/dev/null; then
-  BASE_BRANCH="cc-epic-${PARENT}"
-fi
-
-# parent が無い場合は upstream（ワーカーが worktree 作成時に --track で記録した分岐元）を使う
-if [ -z "${BASE_BRANCH}" ]; then
-  CURRENT=$(git rev-parse --abbrev-ref HEAD)
-  UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
-  UPSTREAM=${UPSTREAM#origin/}
-  if [ -n "${UPSTREAM}" ] && [ "${UPSTREAM}" != "${CURRENT}" ] \
-    && git rev-parse --verify --quiet "refs/remotes/origin/${UPSTREAM}" >/dev/null; then
-    BASE_BRANCH="${UPSTREAM}"
-  fi
-fi
-
-if [ -z "${BASE_BRANCH}" ]; then
-  BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-fi
-echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
+BASE_BRANCH=$(bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh base-branch "$0"); BASE_RC=$?
+echo "BASE_BRANCH=${BASE_BRANCH} (exit ${BASE_RC})"
 ```
 
 `git rebase` / `git pull` は実行しない（本スキルはコードを変更しないため、同期に失敗しても中断せず続行する）。
@@ -115,7 +95,7 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 - `BASE_BRANCH` が `cc-epic-<N>` の場合、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであることは Epic フローの正常状態**。これを根拠としたリスク・注意点・推奨アクション（「先に Epic PR をマージすべき」等）を回答に含めない
 - epic ブランチへマージ済みの兄弟サブIssueの実装は「既に存在するコード」として扱い、根拠として引用してよい
 - 未マージPRに言及する場合は **base が `BASE_BRANCH` のPRだけ**を対象にする（GitHub MCP が使える場合は `list_pull_requests` / `search_pull_requests` を使う。利用不可時のフォールバックは `gh pr list --state open --json number,title,baseRefName --jq ".[] | select(.baseRefName == \"${BASE_BRANCH}\")"`）。base が異なるPR（Epic PR 自身など）は回答対象外
-- parent の取得に失敗した場合（`PARENT=__unresolved__`）は parent 不明として続行するが、**未マージPRを根拠とした回答・注意点は書かない**（安全側の倒し方）。その旨は最終報告に1行残す
+- parent の取得に失敗した場合（`BASE_RC=3`。upstream / デフォルトへ倒した値が返る）は parent 不明として続行するが、**未マージPRを根拠とした回答・注意点は書かない**（安全側の倒し方）。その旨は最終報告に1行残す
 
 ### ステップ2: タスクの分析
 
@@ -132,18 +112,10 @@ echo "BASE_BRANCH=${BASE_BRANCH} PARENT=${PARENT}"
 
 確認事項の答えがリポジトリの外（仕様書・API仕様・ライブラリ公式ドキュメント・別リポジトリのIssue/PR・デザインURLなど）にあることがある。`gh` とローカルファイルだけで調べて「確認できなかった」と返すと、リンク先に書いてある答えを人へ差し戻すことになる。**リンク先の内容まで読んで回答を確定させる**。
 
-1. **収集**: Issue本文・確認事項を含む全コメント・ステップ2で読んだドキュメント・ステップ3で調査したコードに現れる URL を洗い出す
-2. **取捨選択**: 全部は開かない。確認事項への結論が変わりうるリンクだけを対象にする（バッジ画像・ライセンス・無関係な記事は開かない）
-3. **取得**: 種類ごとに手段を使い分ける
-   - ログインが必要なサービスのURL（Notion / Google Drive / Figma / Slack など） → そのサービスの MCP で読む。ツール一覧に無ければ `ToolSearch` でサービス名を検索してから判断する。`WebFetch` は認証を持たずログイン画面しか返らないため使わない（詳細は `${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）
-   - どの MCP も扱わない公開Webページ・仕様書・記事 → `WebFetch`
-   - ライブラリ/フレームワークの公式ドキュメント → `check-library` スキル（Next.js / shadcn / context7 MCP を使い分ける）。バージョン差のあるAPI仕様を検索結果の要約で代用しない
-   - GitHub上のIssue・PR・ファイル（別リポジトリ含む） → GitHub MCP が使える場合は `issue_read` / `pull_request_read`（method: `get`）を使う。利用不可なら `gh issue view` / `gh pr view` / `gh api` へフォールバック（GitHubのURLは `WebFetch` より確実）
-   - 画像・資料へのリンク → リンク先を開いて内容を確認する（手段は上記と同じく対応する MCP を優先し、どの MCP も扱わない公開URLだけ `WebFetch`。URLを見て終わりにしない）。Issue に**直接添付された画像**（`user-images.githubusercontent.com` / `github.com/user-attachments/...`）は `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh fetch-attachments <Issue番号> "$(mktemp -d)"` でダウンロードしてから `Read` で見る（添付 URL を直接開かない。クラウドでは 403）。取得に失敗した場合は推測で埋めず「添付は取得不可（理由）」と根拠に明記する
-   - リンク切れ・URLが古い → `WebSearch` で現行の一次情報を探す（見つからなければ深追いしない）
-4. **深さの上限**: リンク先からさらに辿るのは**1段まで**。それ以上は追わず、必要なら「確信度と追加調査の必要性」として回答に明示する
-5. **記録**: 判断に使ったリンクは回答の「根拠」に `<URL> — <参照した要点>` の形で残す（`path:line` の引用と同格の根拠として扱う）
-6. **取得失敗**: `WebFetch` がログイン画面・401・403 を返しても取得不可としない。対応する MCP を探して読み直す（`${CLAUDE_PLUGIN_ROOT}/references/external-links.md`）。MCP でも読めない場合や 404・タイムアウトは1回だけ再試行し、それでも読めなければ**推測で埋めず**「`<URL>` は取得不可（理由と試した手段）」と根拠に明記したうえで、確認済みの範囲で答えられる分を回答する
+- **対象**: Issue本文・確認事項を含む全コメント・ステップ2で読んだドキュメント・ステップ3で調査したコードに現れる URL。開くのは結論が変わりうるリンクだけで、辿るのは1段まで
+- **手段**: `${CLAUDE_PLUGIN_ROOT}/references/external-links.md` に従う。ログインが必要なサービス（Notion / Google Drive / Figma / Slack など）の URL はそのサービスの MCP で読み（ツール一覧に無ければ `ToolSearch` で探してから判断する。`WebFetch` はログイン画面しか返らない）、どの MCP も扱わない公開ページだけ `WebFetch` で読む
+- **記録**: 判断に使ったリンクは回答の「根拠」に `<URL> — <参照した要点>` の形で残す（`path:line` の引用と同格の根拠として扱う）
+- **取得できないとき**: 推測で埋めず「`<URL>` は取得不可（理由と試した手段）」と回答の「根拠」に明記したうえで、確認済みの範囲で答えられる分を回答する。1段より先を追う必要がある場合は「確信度と追加調査の必要性」として回答に明示する
 
 #### 要件ルールの参照
 

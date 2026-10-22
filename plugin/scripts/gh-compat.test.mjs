@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, chmodSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -505,4 +505,52 @@ test("fetch-attachments は body_html の署名付きURLを重複なくダウン
   assert.match(calls, /Accept: application\/vnd\.github\.full\+json/);
   assert.match(calls, /curl https:\/\/private-user-images\.githubusercontent\.com\/1\/a\.png\?jwt=x&y=1/);
   assert.equal(calls.match(/^curl /gm).length, 3);
+});
+
+// origin/main をデフォルト、origin/cc-epic-7 を Epic ブランチとして持つ作業リポジトリを作る
+function makeRepo() {
+  const repo = mkdtempSync(path.join(tmpdir(), "gh-compat-repo-"));
+  const git = (...a) => execFileSync("git", a, { cwd: repo, encoding: "utf8" });
+  git("init", "-q", "-b", "work");
+  git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("update-ref", "refs/remotes/origin/cc-epic-7", "HEAD");
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  return repo;
+}
+
+function runBaseBranch(responses, extra = []) {
+  const dir = mkdtempSync(path.join(tmpdir(), "gh-compat-"));
+  makeGhStub(dir, responses);
+  return spawnSync("bash", [scriptPath, "base-branch", "12", ...extra], {
+    encoding: "utf8",
+    cwd: makeRepo(),
+    env: {
+      ...process.env,
+      PATH: `${dir}:${process.env.PATH}`,
+      STUB_LOG: path.join(dir, "log"),
+      GH_COMPAT_OWNER_REPO: "acme/widget",
+    },
+  });
+}
+
+test("base-branch は parent の Epic ブランチがあればそれを返す", () => {
+  const r = runBaseBranch({ "issues/12/parent": "7\n" });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), "cc-epic-7");
+});
+
+test("base-branch は parent が無ければデフォルトブランチを返す", () => {
+  const r = runBaseBranch({ "issues/12/parent -i": "HTTP/2.0 404 Not Found\n\n{}\n" });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), "main");
+});
+
+test("base-branch は parent を取得できないとき、既定では倒した先を exit 3 で返し、--strict では失敗する", () => {
+  const loose = runBaseBranch({});
+  assert.equal(loose.status, 3);
+  assert.equal(loose.stdout.trim(), "main");
+  const strict = runBaseBranch({}, ["--strict"]);
+  assert.equal(strict.status, 1);
+  assert.equal(strict.stdout.trim(), "");
 });

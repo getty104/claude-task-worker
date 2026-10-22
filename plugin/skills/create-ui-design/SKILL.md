@@ -348,5 +348,4 @@ gh pr list --head "cc-ui-design-$0" --state open --json number,url
 - **コードを実装しない**: 差分は `.pen` とスナップショット PNG のみ
 - **`.pen` を直接編集しない**: 編集は `pencil-design-updater` エージェント（`edit-pencil-design` スキル）経由、読み取りは `inspect-pencil-node` スキルに限る
 - **closing keyword を使わない**: PR本文の Issue 参照は `Refs #$0` のみ
-- **未完の処理を残したまま完了報告してターンを終えない**: ワーカーがデザインPR未作成のまま完了扱いでラベル遷移を進めてしまう
 - **判断に迷ったときの安全側**: デザインを作らず `cc-need-human-check` に落とす側。根拠を最終報告に明記する

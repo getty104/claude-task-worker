@@ -179,4 +179,3 @@ gh issue view $0 --json body --jq .body | grep -F '.pen'
 - **既存の description を消さない**: 追記・置換のいずれでも、`## UIデザイン` セクション以外の本文は完全に保持する
 - **ラベルを操作しない**: `cc-ui-design-ready` / `cc-exec-issue` の付与はワーカーの責務
 - **`.pen` を読まない・編集しない**: パスの取得は `gh pr diff --name-only` で行い、ファイル自体には触れない
-- **未完の処理を残したまま完了報告してターンを終えない**: description 未更新のまま終了すると、デザインなしで実装が始まる状態壊れにつながる
