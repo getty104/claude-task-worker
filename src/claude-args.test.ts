@@ -84,6 +84,14 @@ test("SYSTEM_PROMPT_BASE also carries the subagent rules", () => {
   assert.ok(SYSTEM_PROMPT_BASE.includes("完了報告は鵜呑みにしない"));
 });
 
+test("SYSTEM_PROMPT_BASE separates fixed guardrails from default procedures", () => {
+  assert.ok(SYSTEM_PROMPT_BASE.includes("目的に沿って判断してよい"));
+  assert.ok(SYSTEM_PROMPT_BASE.includes("何をなぜ変えたかを最終報告"));
+  assert.ok(SYSTEM_PROMPT_BASE.includes("状況によらず守る"));
+  assert.ok(SYSTEM_PROMPT_BASE.includes("ラベルの付け外し"));
+  assert.ok(SYSTEM_PROMPT_BASE.includes("不可逆な操作"));
+});
+
 test("SYSTEM_PROMPT_BASE tells the agent to prefer CodeGraph over text search", () => {
   // explore-agent has the detailed procedure, but the main agent (and any other
   // subagent it delegates to) only learns the preference from here.
