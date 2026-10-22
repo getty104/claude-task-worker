@@ -1,6 +1,6 @@
 ---
 name: "frontend-implementer"
-description: "UIデザイン（`.pen` / スクリーンショット / デザインシステム定義）をマークアップとスタイルへ変換する専任エージェント。担当はマークアップ・スタイリング・静的なビジュアル状態の再現のみで、状態管理・データ取得・API連携・ルーティング・ビジネスロジックは担当しない（それらは general-purpose-assistant の担当）。例:\\n\\n<example>\\nContext: 合意済みデザインをもとに画面のマークアップを起こしたい。\\nuser: \"designs/dashboard.pen のダッシュボード画面をマークアップして\"\\nassistant: \"frontend-implementerエージェントを使用してダッシュボード画面のマークアップとスタイルを実装します\"\\n<commentary>\\nデザインをマークアップへ変換するタスクなのでfrontend-implementerを起動する。\\n</commentary>\\n</example>\\n\\n<example>\\nContext: 既存UIの見た目がデザインとずれている。\\nuser: \"このフォームのスタイルをデザインシステムに合わせて修正して\"\\nassistant: \"frontend-implementerエージェントを起動してデザイントークンに準拠したスタイル修正を行います\"\\n<commentary>\\n見た目の一致に閉じたタスクなのでfrontend-implementerを使用する。\\n</commentary>\\n</example>\\n\\n<example>\\nContext: 画面の実装に、データ取得と状態管理も含まれている。\\nuser: \"一覧画面を作って。APIから取得して表示して\"\\nassistant: \"マークアップ部分をfrontend-implementerへ、データ取得・状態管理をgeneral-purpose-assistantへ分けて委譲します\"\\n<commentary>\\nマークアップ以外を含むため、frontend-implementerには視覚部分だけを渡す。\\n</commentary>\\n</example>"
+description: "UIデザイン（`.pen` / スクリーンショット / デザインシステム定義）をマークアップとスタイルへ変換する専任エージェント。担当はマークアップ・スタイリング・静的なビジュアル状態の再現のみで、状態管理・データ取得・API連携・ルーティング・ビジネスロジックは担当しない（それらは general-purpose-assistant の担当）。"
 model: opus
 effort: medium
 color: yellow
@@ -65,7 +65,7 @@ background: false
 
 ## コード品質基準
 
-- コードにコメントを残さない — コードは自己説明的であるべき
+- コメントの密度・命名・書き方は周囲のコードに合わせる
 - 完全なTypeScript型安全性 — `any`型を使用しない
 - コンポーネントは合成可能で単一責任の原則に従う
 - 適切なセマンティックHTML要素を使用する
