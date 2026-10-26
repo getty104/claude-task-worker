@@ -12,12 +12,12 @@ description: ".penファイル（pen.devで作成されたデザインファイ�
 | 欲しいもの | 手段 |
 |---|---|
 | ファイルに**書かれた**属性・構造・Node検索 | `jq` |
-| `"$変数"` を値に解決し、`ref` を展開した後の属性（インスタンス内の子は `"<インスタンスID>/<子ID>"`） | `$PEN resolve <file> <id\|パス> [--theme mode=dark]` |
-| **レイアウト解決後**の矩形（canvas 座標の `x` / `y` / `width` / `height`）と、親からのはみ出し（`problem`: `"partially clipped"` / `"fully clipped"`） | `$PEN layout <file> [id\|パス]` |
-| 画像 | `$PEN render <file> --out <dir> [id\|パス\|document ...]` |
+| `"$変数"` を値に解決し、`ref` を展開した後の属性（インスタンス内の子は `"<インスタンスID>/<子ID>"`） | `"${PEN[@]}" resolve <file> <id\|パス> [--theme mode=dark]` |
+| **レイアウト解決後**の矩形（canvas 座標の `x` / `y` / `width` / `height`）と、親からのはみ出し（`problem`: `"partially clipped"` / `"fully clipped"`） | `"${PEN[@]}" layout <file> [id\|パス]` |
+| 画像 | `"${PEN[@]}" render <file> --out <dir> [id\|パス\|document ...]` |
 
 ```bash
-PEN="node ${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs"
+PEN=(node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs")
 ```
 
 `layout` / `render` は Chromium で描画するので数秒かかる。構造・値の確認は `jq` / `resolve`、サイズ・はみ出しは `layout`、色・字形・整列など見た目でしか分からないものだけ `render` を使う。
@@ -39,7 +39,7 @@ jq --arg id header-01 "$NODES | map(select(.id == \$id)) | .[0] | [.. | objects 
 jq '.variables, .themes' design.pen                                                # 変数・テーマ
 ```
 
-- **インスタンス（`type: "ref"`）の中身はファイルに書かれていない**（参照先コンポーネントの子＋`descendants` の上書き）。中身や上書き後の値は `$PEN resolve design.pen <インスタンスID>` で見る
+- **インスタンス（`type: "ref"`）の中身はファイルに書かれていない**（参照先コンポーネントの子＋`descendants` の上書き）。中身や上書き後の値は `"${PEN[@]}" resolve design.pen <インスタンスID>` で見る
 - 指定が曖昧なら、トップレベル一覧から候補を提示する
 
 # 画像
@@ -50,7 +50,7 @@ WORK_DIR="$(mktemp -d -t pen-inspect-XXXXXX)"; trap 'rm -rf "$WORK_DIR"' EXIT
 SNAP_DIR="$(dirname "$DESIGN")/snapshots"
 STEM="$(basename "$DESIGN" .pen)"
 TS="$(date +%Y%m%d-%H%M%S)"
-$PEN render "$DESIGN" --out "${WORK_DIR}/img" header-01 footer-01 > "${WORK_DIR}/render.json"
+"${PEN[@]}" render "$DESIGN" --out "${WORK_DIR}/img" header-01 footer-01 > "${WORK_DIR}/render.json"
 mkdir -p "$SNAP_DIR"
 for f in $(jq -r '.images[].file' "${WORK_DIR}/render.json"); do
   mv "$f" "${SNAP_DIR}/${STEM}-$(basename "$f" .png)-${TS}.png"

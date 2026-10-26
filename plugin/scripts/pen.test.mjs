@@ -92,6 +92,15 @@ test("resolveDocument expands refs, applies descendants and theme-aware variable
   assert.equal(findByPath(roots, "card").gap, 16);
 });
 
+test("resolveDocument applies the component's own theme under ref instances, ref theme winning", () => {
+  const d = doc();
+  d.children[0].theme = { mode: "dark" };
+  const roots = resolveDocument(d);
+  assert.equal(findByPath(roots, "go").fill, "#60A5FA");
+  d.children[1].children[0].theme = { mode: "light" };
+  assert.equal(findByPath(resolveDocument(d), "go").fill, "#2563EB");
+});
+
 test("resolveDocument routes slash keys into nested instances", () => {
   const d = doc();
   d.children.unshift({

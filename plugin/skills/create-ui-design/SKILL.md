@@ -50,10 +50,10 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 `.pen` の編集は JSON の直接編集、スナップショットは `scripts/pen.mjs render`（Playwright の Chromium で描画）で作る。pen.dev CLI は使わない。描画できる環境かを先に確かめる:
 
 ```bash
-PEN="node ${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs"
+PEN=(node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs")
 PROBE_DIR="$(mktemp -d -t pen-probe-XXXXXX)"
 printf '%s' '{"version":"2.21","children":[{"id":"probe","type":"rectangle","width":4,"height":4,"fill":"#000000"}]}' > "${PROBE_DIR}/probe.pen"
-$PEN render "${PROBE_DIR}/probe.pen" --out "${PROBE_DIR}/img"
+"${PEN[@]}" render "${PROBE_DIR}/probe.pen" --out "${PROBE_DIR}/img"
 ```
 
 失敗する（Playwright / Chromium が無いなど）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**

@@ -13,7 +13,7 @@ description: .penファイル（pen.devで作成されたデザインファイ�
 - **検査・ID採番・描画**: `node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs" <validate|new-id|resolve|layout|render>`（以下 `PEN` と書く）
 
 ```bash
-PEN="node ${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs"
+PEN=(node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs")
 ```
 
 # 重要な前提
@@ -39,11 +39,11 @@ pen.dev CLI が担っていたスキーマ検証・ID採番・参照解決を、
 # 標準ワークフロー
 
 1. **作業ディレクトリ確保**: `WORK_DIR="$(mktemp -d -t pen-edit-XXXXXX)"; trap 'rm -rf "$WORK_DIR"' EXIT`（同時実行で中間ファイルが衝突しないように）
-2. **編集前の状態を控える**（編集のみ）: `cp path/to/design.pen "${WORK_DIR}/before.pen"`、`$PEN validate path/to/design.pen` で**編集前から**壊れていないかを見る（壊れていれば、自分の編集の失敗と取り違えないよう報告に書いてから進める）
+2. **編集前の状態を控える**（編集のみ）: `cp path/to/design.pen "${WORK_DIR}/before.pen"`、`"${PEN[@]}" validate path/to/design.pen` で**編集前から**壊れていないかを見る（壊れていれば、自分の編集の失敗と取り違えないよう報告に書いてから進める）
 3. **構造の把握**: `inspect-pencil-node` スキルの手順（`jq` / `PEN resolve` / `PEN layout`）で対象Nodeと周辺の構造・使われている変数・コンポーネントを確認する。`DESIGN.md` があればトークンも確認する
 4. **ID採番 → 編集**（上記ルール）
-5. **検査**: `$PEN validate path/to/design.pen --base "${WORK_DIR}/before.pen"`（新規作成は `--base` なし）。エラーが1件でもあれば直して再実行する。**エラーが残ったまま次へ進まない**
-6. **レイアウト確認**: `$PEN layout path/to/design.pen <対象ID>` で解決後のサイズ・位置と `problem`（`"partially clipped"` / `"fully clipped"`＝親からのはみ出し）を確認する。画像より安いので、サイズ・配置の確認はこちらで済ませる
+5. **検査**: `"${PEN[@]}" validate path/to/design.pen --base "${WORK_DIR}/before.pen"`（新規作成は `--base` なし）。エラーが1件でもあれば直して再実行する。**エラーが残ったまま次へ進まない**
+6. **レイアウト確認**: `"${PEN[@]}" layout path/to/design.pen <対象ID>` で解決後のサイズ・位置と `problem`（`"partially clipped"` / `"fully clipped"`＝親からのはみ出し）を確認する。画像より安いので、サイズ・配置の確認はこちらで済ませる
 7. **編集Nodeのスクリーンショット**（下記）
 8. **報告**
 
@@ -54,7 +54,7 @@ DESIGN="designs/login.pen"
 SNAP_DIR="$(dirname "$DESIGN")/snapshots"
 STEM="$(basename "$DESIGN" .pen)"
 TS="$(date +%Y%m%d-%H%M%S)"
-$PEN render "$DESIGN" --out "${WORK_DIR}/img" <編集Node1 ID> <編集Node2 ID> > "${WORK_DIR}/render.json"
+"${PEN[@]}" render "$DESIGN" --out "${WORK_DIR}/img" <編集Node1 ID> <編集Node2 ID> > "${WORK_DIR}/render.json"
 jq -r '.images[] | "\(.file)\t\(.target)"' "${WORK_DIR}/render.json" | while IFS=$'\t' read -r f target; do
   mkdir -p "$SNAP_DIR"
   mv "$f" "${SNAP_DIR}/${STEM}-$(basename "$f" .png)-${TS}.png"

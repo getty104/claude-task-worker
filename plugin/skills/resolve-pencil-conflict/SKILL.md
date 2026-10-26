@@ -25,7 +25,7 @@ gitコンフリクト状態になった `.pen` デザインファイルを「**�
 - コンフリクト中の `.pen` はマーカー混入で JSON として壊れていることがあるため、中身の確認は `git show :2:<path>` 等で取り出した各版に対して行う
 
 ```bash
-PEN="node ${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs"
+PEN=(node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs")
 ```
 
 # 解消手順
@@ -61,7 +61,7 @@ git show :3:path/to/design.pen > "${WORK_DIR}/theirs.pen"  # theirs 側
 ```bash
 FLAT='[paths(objects and has("id") and has("type")) as $p | getpath($p) as $n
   | ($p | .[:-2]) as $pp
-  | {parent: (if ($pp | length) > 0 then getpath($pp).id else null end)} + ($n | del(.children))]
+  | {parent: (if ($pp | length) > 0 then getpath($pp).id else null end), order: ($p | last)} + ($n | del(.children))]
   | sort_by(.id) | .[]'
 for v in base ours theirs; do
   [ -s "${WORK_DIR}/${v}.pen" ] || continue   # AA: 共通祖先なしはスキップ
@@ -77,13 +77,13 @@ else
 fi
 ```
 
-1行が1 Node なので、diff の行がそのまま「どの Node が追加・削除・変更されたか」になる（`parent` の変化は移動、最終行は変数・テーマの変更）。
+1行が1 Node なので、diff の行がそのまま「どの Node が追加・削除・変更されたか」になる（`parent` の変化は移動、`order`（親の `children` 内の位置）の変化は並べ替え＝表示順・重なり順の変更、最終行は変数・テーマの変更）。
 
 必要に応じて両側の見た目も確認する（画像は `${WORK_DIR}` 配下でよい。描画の警告が出た部分は近似なので、判断は上の差分を正とする）。
 
 ```bash
-$PEN render "${WORK_DIR}/ours.pen" --out "${WORK_DIR}/ours-img" document
-$PEN render "${WORK_DIR}/theirs.pen" --out "${WORK_DIR}/theirs-img" document
+"${PEN[@]}" render "${WORK_DIR}/ours.pen" --out "${WORK_DIR}/ours-img" document
+"${PEN[@]}" render "${WORK_DIR}/theirs.pen" --out "${WORK_DIR}/theirs-img" document
 ```
 
 ## ステップ4: ベースの選択と採用
@@ -96,15 +96,15 @@ git checkout --ours -- path/to/design.pen    # または --theirs（ステップ
 
 ## ステップ5: 採用しなかった側の変更を再適用する
 
-ステップ3で特定した「採用しなかった側のNode差分」を、**`edit-pencil-design` スキルの手順**（JSON の直接編集 ＋ `$PEN validate`）で再適用する。採用しなかった側で追加された Node は、その側の JSON から Node オブジェクトをそのまま持ってきてよい（`id` が採用側と重複していないことは `validate` が確かめる）。
+ステップ3で特定した「採用しなかった側のNode差分」を、**`edit-pencil-design` スキルの手順**（JSON の直接編集 ＋ `"${PEN[@]}" validate`）で再適用する。採用しなかった側で追加された Node は、その側の JSON から Node オブジェクトをそのまま持ってきてよい（`id` が採用側と重複していないことは `validate` が確かめる）。
 
 ## ステップ6: 両側の変更が揃ったことの検証とスクリーンショット
 
-`$PEN validate path/to/design.pen` が通ること、再適用後のツリー（ステップ3と同じ `jq`）に「ours側の変更Node」「theirs側の変更Node」の両方が反映されていることを確認し、`edit-pencil-design` の手順どおり影響Nodeのスクリーンショットを `.pen` と同階層の `snapshots/` に残す。検証の基準は、base があるケースはステップ3の base.norm.json との差分、base が無い（AA）ケースは ours.norm.json と theirs.norm.json の直接比較で洗い出した差分が、両方反映されているか。
+`"${PEN[@]}" validate path/to/design.pen` が通ること、再適用後のツリー（ステップ3と同じ `jq`）に「ours側の変更Node」「theirs側の変更Node」の両方が反映されていることを確認し、`edit-pencil-design` の手順どおり影響Nodeのスクリーンショットを `.pen` と同階層の `snapshots/` に残す。検証の基準は、base があるケースはステップ3の base.norm.json との差分、base が無い（AA）ケースは ours.norm.json と theirs.norm.json の直接比較で洗い出した差分が、両方反映されているか。
 
 ## ステップ7: git操作の続行
 
-`git add path/to/design.pen` して `git rebase --continue` / `git merge --continue` で続行する。
+`git add path/to/design.pen` に加え、ステップ6で `snapshots/` に保存したスクリーンショットも `git status --short` で対象を確認してから `git add` し、`git rebase --continue` / `git merge --continue` で続行する（画像をステージしないと続行後のコミットに入らない）。
 
 両側の変更意図が両立できない（同じNodeを異なる方針で変更している等）と判明した場合は、無理に解消せず `git rebase --abort` / `git merge --abort` で中断し、両側のスクリーンショットのパスと両立できない理由（対象Node・双方の変更内容）を報告して終了する（呼び出し元・人間がその報告を基に判断する）。
 

@@ -300,7 +300,7 @@ function applyDescendants(root, descendants) {
 export function resolveNode(doc, node, opts = {}) {
   const ids = opts.ids ?? indexById(doc);
   const warn = opts.warn ?? (() => {});
-  const theme = { ...(opts.theme ?? defaultTheme(doc)), ...(node.theme ?? {}) };
+  let theme = { ...(opts.theme ?? defaultTheme(doc)), ...(node.theme ?? {}) };
   const prefix = opts.prefix ?? "";
   const depth = opts.depth ?? 0;
   const pathId = prefix + node.id;
@@ -329,6 +329,8 @@ export function resolveNode(doc, node, opts = {}) {
     const { ref: _ref, descendants, type: _type, ...overrides } = n;
     Object.assign(inst, clone(overrides));
     applyDescendants(inst, descendants);
+    // コンポーネント自身の theme も配下に効く（ref インスタンスの theme が優先）
+    theme = { ...(opts.theme ?? defaultTheme(doc)), ...(comp.theme ?? {}), ...(node.theme ?? {}) };
     n = inst;
     childPrefix = `${pathId}/`;
   }
@@ -396,7 +398,26 @@ function fillLayers(fills, baseDir, warn, where) {
       else layers.push(`conic-gradient(from ${-(f.rotation ?? 0)}deg at ${cx}% ${cy}%,${stops})`);
       if (f.opacity !== undefined && f.opacity !== 1) warn(`${where}: グラデーションの opacity は描画に反映していない`);
     } else if (f.type === "image") {
-      const url = /^[a-z]+:/i.test(f.url ?? "") ? f.url : pathToFileURL(path.resolve(baseDir, f.url ?? "")).href;
+      let url = f.url ?? "";
+      // setContent したページからは file:// を読めないことがあるため、ローカル画像は data URL で埋め込む
+      if (!/^[a-z]+:/i.test(url)) {
+        const file = path.resolve(baseDir, url);
+        const mime =
+          {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+          }[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+        try {
+          url = `data:${mime};base64,${fs.readFileSync(file).toString("base64")}`;
+        } catch (e) {
+          warn(`${where}: image fill "${f.url}" を読めない（${e.message}）`);
+          continue;
+        }
+      }
       const size = { contain: "contain", stretch: "100% 100%" }[f.mode] ?? "cover";
       layers.push(`url("${url}") center/${size} no-repeat`);
       if (f.transform) warn(`${where}: image fill の transform（切り抜き）は描画に反映していない`);
@@ -630,9 +651,11 @@ export function nodeHtml(n, ctx, parentFlex = null) {
     if (lib.startsWith("Material Symbols")) {
       ctx.materialFonts.add(lib);
       const size = Math.min(typeof n.width === "number" ? n.width : 24, typeof n.height === "number" ? n.height : 24);
-      inner = `<span style="font-family:'${lib}';font-size:${size}px;line-height:1;font-variation-settings:'wght' ${n.weight ?? 400}" data-pen-material="${esc(n.icon)}">${esc(n.icon)}</span>`;
+      const wght = Number(n.weight ?? 400) || 400;
+      const style = `font-family:'${String(lib).replace(/['"\\]/g, "")}';font-size:${size}px;line-height:1;font-variation-settings:'wght' ${wght}`;
+      inner = `<span style="${esc(style)}" data-pen-material="${esc(n.icon)}">${esc(n.icon)}</span>`;
     } else {
-      inner = `<span data-pen-icon="${esc(lib)}|${esc(n.icon)}|${n.weight ?? ""}" style="display:block;width:100%;height:100%"></span>`;
+      inner = `<span data-pen-icon="${esc(lib)}|${esc(n.icon)}|${esc(n.weight ?? "")}" style="display:block;width:100%;height:100%"></span>`;
       ctx.icons.add(`${lib}|${n.icon}`);
     }
     return `<div ${attrs} style="${esc(css.join(";"))}">${inner}</div>`;
@@ -646,7 +669,7 @@ export function nodeHtml(n, ctx, parentFlex = null) {
     const strokeColor = n.stroke !== undefined ? firstColor(n.stroke) : null;
     const sw = typeof n.strokeWidth === "number" ? n.strokeWidth : 1;
     const strokeAttrs = strokeColor
-      ? ` stroke="${strokeColor}" stroke-width="${sw}" stroke-linecap="${n.strokeLinecap ?? "butt"}" stroke-linejoin="${n.strokeLinejoin ?? "miter"}" vector-effect="non-scaling-stroke"`
+      ? ` stroke="${esc(strokeColor)}" stroke-width="${sw}" stroke-linecap="${esc(n.strokeLinecap ?? "butt")}" stroke-linejoin="${esc(n.strokeLinejoin ?? "miter")}" vector-effect="non-scaling-stroke"`
       : "";
     if (fx.shadows.length)
       css.push(
@@ -662,10 +685,10 @@ export function nodeHtml(n, ctx, parentFlex = null) {
         return `${50 + 50 * Math.cos(a)},${50 + 50 * Math.sin(a)}`;
       }).join(" ");
       if (n.cornerRadius) warn(`${where}: polygon の cornerRadius は描画に反映していない`);
-      inner = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%" style="display:block;overflow:visible"><polygon points="${pts}" fill="${fillColor}"${strokeAttrs}/></svg>`;
+      inner = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%" style="display:block;overflow:visible"><polygon points="${pts}" fill="${esc(fillColor)}"${strokeAttrs}/></svg>`;
     } else {
-      const vb = Array.isArray(n.viewBox) ? ` viewBox="${n.viewBox.join(" ")}"` : "";
-      inner = `<svg${vb} data-pen-autoviewbox="${vb ? "" : "1"}" preserveAspectRatio="none" width="100%" height="100%" style="display:block;overflow:visible"><path d="${esc(n.geometry ?? "")}" fill="${fillColor}" fill-rule="${n.fillRule ?? "nonzero"}"${strokeAttrs}/></svg>`;
+      const vb = Array.isArray(n.viewBox) ? ` viewBox="${esc(n.viewBox.map(Number).join(" "))}"` : "";
+      inner = `<svg${vb} data-pen-autoviewbox="${vb ? "" : "1"}" preserveAspectRatio="none" width="100%" height="100%" style="display:block;overflow:visible"><path d="${esc(n.geometry ?? "")}" fill="${esc(fillColor)}" fill-rule="${esc(n.fillRule ?? "nonzero")}"${strokeAttrs}/></svg>`;
     }
     return `<div ${attrs} style="${esc(css.join(";"))}">${inner}</div>`;
   }
@@ -987,8 +1010,13 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--base" || a === "--out" || a === "--scale") flags[a.slice(2)] = argv[++i];
     else if (a === "--theme") {
-      const [k, v] = (argv[++i] ?? "").split("=");
-      flags.theme[k] = v;
+      const arg = argv[++i] ?? "";
+      const eq = arg.indexOf("=");
+      if (eq <= 0) {
+        console.error(`--theme は 軸=値 で指定する（"${arg}"）`);
+        process.exit(2);
+      }
+      flags.theme[arg.slice(0, eq)] = arg.slice(eq + 1);
     } else positional.push(a);
   }
   return { positional, flags };
@@ -1022,7 +1050,12 @@ async function main() {
     if (errors.length) process.exit(1);
     console.log("ok");
   } else if (cmd === "new-id") {
-    console.log(newIds(doc, Number(positional[1] ?? 1)).join("\n"));
+    const count = Number(positional[1] ?? 1);
+    if (!Number.isInteger(count) || count <= 0) {
+      console.error(`個数は正の整数で指定する（"${positional[1]}"）`);
+      process.exit(2);
+    }
+    console.log(newIds(doc, count).join("\n"));
   } else if (cmd === "resolve") {
     const warnings = [];
     const node = findByPath(resolveDocument(doc, { theme, warn: (m) => warnings.push(m) }), positional[1]);
@@ -1048,12 +1081,17 @@ async function main() {
       console.error("--out <dir> が必要");
       process.exit(2);
     }
+    const scale = Number(flags.scale ?? 2);
+    if (!Number.isFinite(scale) || scale <= 0) {
+      console.error(`--scale は正の数で指定する（"${flags.scale}"）`);
+      process.exit(2);
+    }
     const outDir = path.resolve(flags.out);
     const result = await render(doc, {
       baseDir: path.dirname(path.resolve(file)),
       outDir,
       targets: positional.slice(1),
-      scale: Number(flags.scale ?? 2),
+      scale,
       theme,
     });
     // ボックスは画像と同じ場所に置くと snapshots/ のコミット対象に紛れるため一時ディレクトリへ
