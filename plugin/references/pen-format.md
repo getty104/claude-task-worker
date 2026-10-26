@@ -1,19 +1,19 @@
-# `.pen` ファイルフォーマット（`execute` 編集用リファレンス）
+# `.pen` ファイルフォーマット（直接編集用リファレンス）
 
-`pencil interactive` の `execute` で `.pen` を編集するときに、`Insert(parent, nodeData)` / `Update(id, props)` / `Replace(id, nodeData)` / `SetVariables(vars)` へ渡すデータのインターフェース定義。**Nodeデータは .pen ファイル内のオブジェクトと同じ形**（`children` に子Nodeを入れ子で書ける。`ref` には `Insert` が返したIDや既存コンポーネントのIDを渡す）。出典は pen.dev 公式の [The .pen Format](https://docs.pen.dev/for-developers/the-pen-format)（2026-10 時点、`version: "2.21"`）。末尾の TypeScript スキーマは同ページの「TypeScript Schema」の写し。公式は「破壊的変更がありうるライブドキュメント」としているため、手元の CLI と食い違う疑いがあるときは `pencil interactive` の `read_skill({ path: "pen-schema.md" })` が返すスキーマ（インストール済み CLI のバージョンに一致する）を正とする。
+`.pen` を JSON として直接編集するときの、Nodeデータのインターフェース定義。出典は pen.dev 公式の [The .pen Format](https://docs.pen.dev/for-developers/the-pen-format)（2026-10 時点、`version: "2.21"`）。末尾の TypeScript スキーマは同ページの「TypeScript Schema」の写し。公式は「破壊的変更がありうるライブドキュメント」としているため、扱う `.pen` の `version` がこれと違う場合は公式ページを確認する。
 
-`--prompt`（エージェントモード）は有料になったため使わない。編集・新規作成はこのフォーマットに沿ったNodeデータを `execute` に渡して行う（手順は `edit-pencil-design` スキル）。
+pen.dev CLI（`pencil interactive` の `execute`、`--prompt`）は使わない（無料プランでは利用日数に上限があり、上限に達すると読み書きとも止まるため）。編集は `edit-pencil-design` スキルの手順で JSON を直接書き換え、整合性は `scripts/pen.mjs validate`、画像は `scripts/pen.mjs render` で扱う。
 
 ## ファイルの実体
 
-- **平文の JSON**（2スペースインデント）。読むだけなら `jq` でも読めるが、**書き換えは `execute` 経由で行い、手でJSONを編集しない**（スキーマ検証・ID採番・巻き戻しが効かなくなる）
+- **平文の JSON**（2スペースインデント）
 - ルートは `Document`: `{ "version": "2.21", "themes"?, "imports"?, "variables"?, "children": [...] }`
 - pen.dev が保存すると `fileToken`（UUID）がルートに付く。スキーマ外のキーだが**変更・削除しない**
 - `version` は書き換えない（別バージョンの pen.dev で開くと保存時に変換される）
 
 ## オブジェクトツリー
 
-- 各オブジェクトは `id`（文書内で一意。**`/` を含めない**。`execute` では指定せず pen.dev に採番させる）と `type` を持つ。`type` は `frame` / `group` / `rectangle` / `ellipse` / `polygon` / `path` / `text` / `note` / `prompt` / `context` / `icon` / `script` / `browser` / `ref`
+- 各オブジェクトは `id`（文書内で一意。**`/` を含めない**。`scripts/pen.mjs new-id` で採番する）と `type` を持つ。`type` は `frame` / `group` / `rectangle` / `ellipse` / `polygon` / `path` / `text` / `note` / `prompt` / `context` / `icon` / `script` / `browser` / `ref`
 - 子は `children` 配列に入れる（`frame` / `group` のみ）。配列の順序が描画順（後ろが手前）
 - 人間可読な `name` を必ず付ける（スクリーンショットのファイル名・報告に使う）
 
@@ -52,15 +52,13 @@
 - オブジェクトの `theme: { "mode": "dark" }` は、そのオブジェクト配下すべてに効く
 - 文書に同じ役割の変数が既にあれば、hex を直書きせず変数を参照する
 
-## `execute` で渡すときのルール（pen CLI 0.3.12 で実測）
+## 直接編集するときのルール
 
-- **`id` は指定しない**（末尾スキーマの `Entity.id` が必須なのは保存済みファイルの形で、`Insert` / `Replace` に渡す入力では省略すると自動採番される。同スキーマの注記 "Auto-generated if omitted" のとおり）。`Insert` の戻り値（`btn = Insert(...)`）と、レスポンス末尾の `## Created nodes by name`（`"Button": "q2OqL"`）で生成IDを受け取る。コンポーネントを作って同じ呼び出し内で `ref` するときは戻り値の変数を渡す（`{ type: "ref", ref: btn }`）
-- 人間可読な `name` を全Nodeに付ける（生成IDとの対応表がそのまま編集Nodeの特定になる）
-- `ref` の参照先・`descendants` のキー・`slot` の要素は実在する `id` でなければならない
-- 変数は `SetVariables({ "color.primary": { type: "color", value: "#2563EB" } })` で定義してから `fill: "$color.primary"` のように参照する
-- スキーマ外のプロパティ・不正な値は `Invalid properties: - /<プロパティ> unexpected property` の schema-validation エラーになり、**その `execute` 呼び出し全体が巻き戻る**。`editId` + `edits` で直して再実行する
-- **`execute` が失敗しても後続の `save()` は走る**（前の成功した呼び出し分だけが保存される）。`save()` の前にレスポンスの `Error` / `[ERROR]` を必ず確認する
-- 既存の `.pen` を開いたときに pen.dev が検出した不整合は起動時に `[ERROR] Document is not valid:` / `[ERROR] Document had duplicate IDs` / `[ERROR] Invalid ref '<id>'` として出る（`pencil` の終了コードは0のまま）。編集前から壊れているファイルなので、編集の失敗と取り違えない
+- **`id` は `scripts/pen.mjs new-id <file> <個数>` で採番する**（文書内で一意な5文字の英数字）。手で考えた `id` は使わない
+- 人間可読な `name` を全Nodeに付ける（スクリーンショットのファイル名・報告に使う）
+- `ref` の参照先・`descendants` のキー・`slot` の要素は実在する `id` でなければならない。`ref` の参照先は `reusable: true`
+- 変数はルートの `variables` に定義してから `fill: "$color.primary"` のように参照する
+- スキーマ外のプロパティ・不正な値を書かない。編集のたびに `scripts/pen.mjs validate <file> --base <編集前のファイル>` を通す（ID重複・`/` 入りID・未知の type / プロパティ・不正な色やサイズ・未定義の変数・参照切れ・`version` / `fileToken` の変更を検出する）
 
 ## TypeScript スキーマ
 

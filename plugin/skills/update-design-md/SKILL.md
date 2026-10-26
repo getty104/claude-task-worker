@@ -3,7 +3,7 @@ name: update-design-md
 description: 直近N日（デフォルト1日）にマージされた `cc-ui-design` ラベル付きPR（UIデザインPR）から確定したビジュアルアイデンティティ（カラー・タイポグラフィ・スペーシング・コンポーネント）をリポジトリルートの `DESIGN.md`（google-labs-code/design.md フォーマット）へ集約・更新し、`design.md` CLI の lint を通してから commit-push + create-pr でPRを作成する（`cc-triage-scope` ラベル + 自分自身をAssignee）。`DESIGN.md` は pencil-design-updater がデザイン時の前提として読み込む。
 disable-model-invocation: true
 argument-hint: "[期間（日数、省略時は1）] [関連Issue番号（任意）]"
-allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(pencil:*), Bash(claude-task-worker:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
+allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(bash:*), Bash(claude-task-worker:*), Bash(designmd:*), Bash(npx:*), Bash(pwd), Bash(ls:*), Bash(date:*), Bash(wc:*), Bash(mkdir:*), Bash(find:*), Read, Write, Edit, Glob, Grep, Agent, Skill
 hooks:
   Stop:
     - matcher: ""
@@ -27,7 +27,7 @@ hooks:
 **絶対にやらないこと**:
 - **収集対象の** PR / Issue への書き込み（コメント・ラベル・再オープンなど。収集は読み取りのみ。フェーズ7で自分が作成したPRへラベル・Assigneeを付けるのはこの制限の対象外）
 - `DESIGN.md` 以外のファイルの編集（`.pen`・ソースコード・`CODING_GUIDELINES.md`・`.claude/requirements/` を含む。`claude-task-worker.json` は `uiDesign.designDir` の読み取りだけに使い、`lastRun` は `claude-task-worker` ワーカーが別PRで更新するため書き換えない）
-- **`.pen` の編集**（`save()` を呼ぶ操作）。調査は `inspect-pencil-node` の読み取り専用手順のみ。デザイン側の修正が必要と判断した場合も、報告に1行挙げるだけにする
+- **`.pen` の編集**。調査は `inspect-pencil-node` の読み取り専用手順のみ。デザイン側の修正が必要と判断した場合も、報告に1行挙げるだけにする
 - 実データの裏付けがない値の記載（「よくある値」で埋めない。読み取れなかった項目は書かない。推測値は、次のデザインがそれに合わせて作られた時点で「正」になってしまう）
 - 1つのPRでしか使われていない画面固有の装飾のトークン化（後述の採用基準）
 - デフォルトブランチ上での直接コミット（必ずfeature branchに切り替えてから `commit-push` を呼ぶ）
@@ -163,19 +163,20 @@ git show "<merge_commit>:<path>" > "$TMPDIR_DESIGN/<pr_number>/$(basename <path>
 
 ### 2-1. スナップショット画像（まず最初に見る）
 
-2-0 で復元した `snapshot_files`（Pencilのエクスポート結果PNG）を `Read` で**画像として**開き、全体の配色・タイポグラフィの雰囲気・レイアウトの粒度を把握する。ここで得られるのは「傾向」であり、正確なトークン値は 2-2 で取る。
+2-0 で復元した `snapshot_files`（`.pen` を描画したPNG）を `Read` で**画像として**開き、全体の配色・タイポグラフィの雰囲気・レイアウトの粒度を把握する。ここで得られるのは「傾向」であり、正確なトークン値は 2-2 で取る。
 
 ### 2-2. Node属性の読み取り（正確なトークン値の取得元）
 
-2-0 で復元した `pen_files` を対象に、`Skill` ツールで `inspect-pencil-node` を起動して読み取り専用で属性を取得する（`merge_commit` 時点の内容をそのまま復元しているだけなので Pencil CLI で通常どおり開ける）。
+2-0 で復元した `pen_files` を対象に、`Skill` ツールで `inspect-pencil-node` を起動して読み取り専用で属性を取得する（`merge_commit` 時点の内容をそのまま復元しているだけなので通常どおり読める）。
 
-取得すべきもの（`inspect-pencil-node` の `execute` + `Get` visitor の指定方法を使い分ける。CLI 0.3.5 では読み取りも画像出力も `execute` に一本化されている）:
+取得すべきもの（`inspect-pencil-node` の `jq` の指定方法を使い分ける。`"$変数"` やコンポーネントのインスタンスは `scripts/pen.mjs resolve` で値へ解決する）:
 
-- **再利用可能コンポーネント**（`Get(n => n.reusable && Print(...))`）— デザインシステムのコンポーネント定義そのもの。最優先
-- **テキストNode**（`Get(n => n.type === "text" && Print(...))`）— `fontFamily` / `fontSize` / `fontWeight` / `lineHeight` / `letterSpacing` の実値
-- **トップレベル / フレーム**（`Get((n, c) => { c.skipChildren(); Print(...) })`、または `Get(n => n.type === "frame" && Print(...))`）— 背景色・枠線・角丸（`rounded`）・パディング（`spacing`）の実値
+- **再利用可能コンポーネント**（`reusable == true` の Node）— デザインシステムのコンポーネント定義そのもの。最優先
+- **変数**（ルートの `variables` / `themes`）— 色・数値トークンの実値（テーマ別の値を含む）
+- **テキストNode**（`type == "text"`）— `fontFamily` / `fontSize` / `fontWeight` / `lineHeight` / `letterSpacing` の実値
+- **トップレベル / フレーム**（`.children` 直下、または `type == "frame"`）— 背景色・枠線・角丸（`rounded`）・パディング（`spacing`）の実値
 
-`pencil` CLI が未インストール・未認証で調査できない場合は、そこで打ち切って 2-1 のスナップショットから読み取れた範囲だけを使い、**「`.pen` の属性値は未取得」であることを報告に明記する**（推測値でトークンを埋めない）。
+スナップショットは自前レンダラーの描画（近似）なので、トークン値は画像から読まず必ず `.pen` の値を使う。`.pen` が JSON として読めない場合は、そこで打ち切って 2-1 のスナップショットから読み取れた範囲だけを使い、**「`.pen` の属性値は未取得」であることを報告に明記する**（推測値でトークンを埋めない）。
 
 **完了条件**: 実データに基づく色・タイポグラフィ・スペーシング・角丸・コンポーネントの候補値が、出典（PR番号 / `merge_commit` / `.pen` パス / Node名）付きで手元にあること。一時ディレクトリは調査完了後（`trap` により正常終了・異常終了のいずれでも）削除される。
 
