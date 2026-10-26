@@ -60,8 +60,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) | タスク実行エンジン |
 | [Git](https://git-scm.com/) / [jq](https://jqlang.org/) | worktree 操作 / スキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス（任意。未導入ならテキスト検索に落ちる） |
-| [Pen CLI](https://docs.pen.dev/for-developers/pen-cli) | `.pen` の編集・参照。UIデザイン先行ワークフロー使用時のみ（要ログイン） |
-| [Playwright](https://playwright.dev/) のブラウザ | Playwright MCP でのブラウザ確認 |
+| [Playwright](https://playwright.dev/) のブラウザ | Playwright MCP でのブラウザ確認、`.pen` のスナップショット描画 |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（未導入でも動く） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は herdr に依存しない） |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避（任意。Claude 側のコネクタで有効化） |
@@ -194,7 +193,6 @@ claude-task-worker all --cloud
 | 対象リポジトリの GitHub App 連携 | クラウド VM から push / PR 作成を行うため |
 | claude.ai の「プルリクエストを自動的に作成する」「プルリクエストの自動修正」が **OFF** | 下記 |
 | VM 側のセットアップスクリプト | 下記 |
-| `PEN_CLI_KEY` 環境変数 | UIデザイン先行ワークフローを使う場合のみ（下記「Pen CLI のログイン」） |
 
 claude.ai の設定にある **「プルリクエストを自動的に作成する」「プルリクエストの自動修正」は必ず OFF にする**。どちらもタスクワーカーの制御と競合する。前者はスキルの `create-pr`（`Closes #<N>`・ベースブランチ・ラベル付与）とは別に PR を作るため PR が重複し、後者はセッションが PR 作成後に終了せずレビューを待って修正を続けるため、`cc-cloud-done` による完了検知が 4 時間のタイムアウトまで効かない。
 
@@ -250,16 +248,16 @@ claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ�
 
 設定・カスタムワーカー・スキルを1つのリポジトリにまとめて配る手順は [`docs/config-package.md`](./docs/config-package.md) を参照。
 
-### Pen CLI のログイン
+### `.pen` の扱い
 
-`.pen` を扱うスキルは Pen CLI の認証を必要とする。UIデザイン先行ワークフローを使うなら一度ログインしておく。
+`.pen`（pen.dev のデザインファイル）は平文JSONなので、スキルは pen.dev CLI を使わずに直接編集する（pen.dev CLI の `interactive` は無料プランでは利用日数に上限があるため）。整合性の検査・ID採番・画像出力はプラグイン同梱の `plugin/scripts/pen.mjs` が担う。
 
 ```bash
-pencil login    # メールアドレス + パスワード、またはメールアドレス + OTP コード
-pencil status   # 認証状態の確認
+node plugin/scripts/pen.mjs validate design.pen            # ID重複・参照切れ・未知プロパティなどの検査
+node plugin/scripts/pen.mjs render design.pen --out out/   # Chromium で描画して PNG 出力
 ```
 
-CI やクラウド VM など対話ログインできない環境では、環境変数 `PEN_CLI_KEY`（pen.dev の組織設定 > Developer Keys で発行）を使う。保存済みトークンより優先される。
+画像は pen.dev 本体ではなく HTML/CSS へ変換して描画した近似で、描画しきれない表現（取得できなかったフォント・アイコン、shader など）は警告として出る。フォントは Google Fonts、アイコンは unpkg から取得する。
 
 ## 設定ファイル
 

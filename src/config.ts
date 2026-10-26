@@ -269,8 +269,8 @@ export const CLOUD_DONE_LABEL = "cc-cloud-done";
 // 成立しうるかどうかと、実際に有用かどうかは別。`gh ... --json`（GraphQL）がクラウドの
 // プロキシで 403 になる制約は残っているため、PR 詳細・CI 結果を大量に読むワーカー
 // （triage-pr / check-dependabot / resolve-conflict）は GitHub MCP で代替できない操作に
-// 当たると空振りしうる。`.pen` を編集するワーカー（create-ui-design / apply-ui-design）は
-// クラウド VM 側に `pencil` CLI と認証（PEN_CLI_KEY）が要る。どのワーカーをクラウドへ
+// 当たると空振りしうる。`.pen` のスナップショットを描画するワーカー（create-ui-design）は
+// クラウド VM 側に Playwright の Chromium が要る。どのワーカーをクラウドへ
 // 振るかは実行のたびに --cloud の付け外しで選ぶ。
 export function isCloudWorker(_name: string): boolean {
   return hasCloudFlag();

@@ -1,6 +1,5 @@
 import { CODEGRAPH_PACKAGE, installCodegraphCli } from "./codegraph";
 import { DESIGN_MD_PACKAGE, installDesignMdCli } from "./design-md";
-import { PEN_PACKAGE, installPenCli } from "./pen";
 import { installPlaywrightBrowsers } from "./playwright";
 import { npmInstallGlobalLatest, runCommand } from "./run-command";
 
@@ -9,7 +8,7 @@ export const MARKETPLACE_NAME = "claude-task-worker";
 export const MARKETPLACE_SOURCE = "getty104/claude-task-worker";
 
 /** `npm install -g` で入れるパッケージ一覧（インストール後にバージョンを表示する対象）。 */
-export const GLOBAL_NPM_PACKAGES = [PLUGIN_NAME, CODEGRAPH_PACKAGE, DESIGN_MD_PACKAGE, PEN_PACKAGE];
+export const GLOBAL_NPM_PACKAGES = [PLUGIN_NAME, CODEGRAPH_PACKAGE, DESIGN_MD_PACKAGE];
 
 /**
  * `npm install -g` したパッケージのバージョンを表示する。
@@ -71,10 +70,9 @@ export async function install(): Promise<void> {
   const cliOk = await installCli();
   const codegraphOk = await installCodegraphCli("install");
   const designMdOk = await installDesignMdCli("install");
-  const penOk = await installPenCli("install");
   const playwrightOk = await installPlaywrightBrowsers("install");
   await printGlobalPackageVersions("install");
-  if (!pluginOk || !cliOk || !codegraphOk || !designMdOk || !penOk || !playwrightOk) {
+  if (!pluginOk || !cliOk || !codegraphOk || !designMdOk || !playwrightOk) {
     process.exitCode = 1;
   }
   console.log("[install] Done.");

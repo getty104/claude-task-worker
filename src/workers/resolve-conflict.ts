@@ -3,7 +3,7 @@ import { createPrPollingWorker } from "./pr-worker";
 
 const LABEL_NEED_HUMAN_CHECK = "cc-need-human-check";
 
-// resolve-pr-conflict は解消困難（人間の仕様判断が必要・Pencil CLI 不在など）の場合、`git rebase --abort` して
+// resolve-pr-conflict は解消困難（人間の仕様判断が必要・`.pen` の両側の変更が両立しないなど）の場合、`git rebase --abort` して
 // 「判定: aborted」を報告し、正常終了する。ワーカーはこれを完了とみなして `cc-resolve-conflict` を外し
 // `cc-triage-scope` を戻すため、そのままだと triage-pr が再びコンフリクトを検知して同じラベルを付け直し、
 // 解けないコンフリクトを永久にリトライし続ける。出力が aborted かつ実際にまだ CONFLICTING の場合だけ

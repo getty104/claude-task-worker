@@ -46,8 +46,6 @@ npx claude-task-worker cloud-setup
 
 [4章](./config-package.md) のパックのようにほかのプラグインのスキルを使う場合は、その `claude plugin marketplace add` / `claude plugin install` もここへ追記する。
 
-UI デザイン先行ワークフローを使う場合は、環境変数 `PEN_CLI_KEY` も設定する。
-
 ### 3. 環境の指定（任意）
 
 使うクラウド環境を固定したい場合は、`claude-task-worker.local.json` に環境 ID を書く（人ごとに違う値なのでコミットしない）。
@@ -74,7 +72,7 @@ UI デザイン先行ワークフローを使う場合は、環境変数 `PEN_CL
 |---|---|
 | `exec-issue` / `fix-review-point` | 向いている（動作確認済み） |
 | Issue 分析系（`create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue`）、`epic-issue`、`triage-pr`、`check-dependabot`、`resolve-conflict`、定期ワーカー | 動く想定だが運用実績が少ない |
-| `create-ui-design` / `apply-ui-design` | VM に Pen CLI と `PEN_CLI_KEY` が必要 |
+| `create-ui-design` / `apply-ui-design` | 動く想定だが運用実績が少ない。`create-ui-design` はスナップショットの描画に Chromium を使う（セットアップスクリプトの `install` が取得する） |
 
 プロセス単位のフラグなので、向いているワーカーだけクラウドで動かすなら別プロセスに分ける。
 

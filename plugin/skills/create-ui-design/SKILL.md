@@ -45,21 +45,25 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 - `gh issue view $0 --json number,title,body,state,labels,comments` でIssueが `OPEN` であることを確認する（GitHub MCP が使える場合は `issue_read`（method: `get`。コメント取得は `get_comments`）を使う。以下はフォールバック）。CLOSEDなら **中断**
 - `git status --short` で未コミット変更があれば `git stash push -u -m "create-ui-design auto-stash $0"` で自動退避し、その旨を最終報告に明記する
 
-### 0-2. Pencil の疎通確認
+### 0-2. 描画環境の確認
+
+`.pen` の編集は JSON の直接編集、スナップショットは `scripts/pen.mjs render`（Playwright の Chromium で描画）で作る。pen.dev CLI は使わない。描画できる環境かを先に確かめる:
 
 ```bash
-pencil version
-pencil status
+PEN="node ${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs"
+PROBE_DIR="$(mktemp -d -t pen-probe-XXXXXX)"
+printf '%s' '{"version":"2.21","children":[{"id":"probe","type":"rectangle","width":4,"height":4,"fill":"#000000"}]}' > "${PROBE_DIR}/probe.pen"
+$PEN render "${PROBE_DIR}/probe.pen" --out "${PROBE_DIR}/img"
 ```
 
-いずれかが失敗する（未インストール・未認証など）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**
+失敗する（Playwright / Chromium が無いなど）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**
 
 1. Issue に理由（実行したコマンドとエラー出力の要約）をコメントする
    ```bash
    gh issue comment $0 --body-file - <<'EOF'
-   ## Pencil を利用できないためデザインを作成できません（要人手確認）
+   ## デザインのスナップショットを描画できないためデザインを作成できません（要人手確認）
 
-   `create-ui-design` は Pencil CLI が必要ですが、実行環境で利用できませんでした。
+   `create-ui-design` はスナップショットの描画に Playwright の Chromium が必要ですが、実行環境で利用できませんでした。
 
    ## 実行したコマンドとエラー
 
@@ -69,12 +73,12 @@ pencil status
 
    ## 対応後の進め方
 
-   - Pencil をインストール・認証したうえで、`cc-need-human-check` ラベルを外し `cc-create-ui-design` ラベルを付け直してください
+   - `npx -y @playwright/mcp@latest install-browser --no-shell chromium`（または `claude-task-worker install`）でブラウザを取得したうえで、`cc-need-human-check` ラベルを外し `cc-create-ui-design` ラベルを付け直してください
    - デザインなしで実装へ進める場合は、`cc-need-human-check` ラベルを外し `cc-ui-design-ready` と `cc-exec-issue` ラベルを付けてください
    EOF
    ```
 2. `gh issue edit $0 --add-label "cc-need-human-check"` を実行する
-3. 最終報告に「Pencil 利用不可・`cc-need-human-check` 付与済み」と原因を明記して終了する
+3. 最終報告に「描画環境なし・`cc-need-human-check` 付与済み」と原因を明記して終了する
 
 ### 0-3. デザイン配置先の解決
 
@@ -94,7 +98,7 @@ fi
 
 `DESIGN_DIR` が空文字列のまま（=上記の `jq` 失敗）の場合は、デザインを作らずフェーズ0-2と同じ手順（Issueへの理由コメント + `cc-need-human-check` 付与。デザインPRは作らない）でスキルを終了する。以降「フェーズ0-2と同じ手順」はこの手順を指す。
 
-**完了条件**: worktree内・Issue OPEN・`pencil` 疎通OK・`DESIGN_DIR` が空文字列でなく確定していること。
+**完了条件**: worktree内・Issue OPEN・描画環境OK・`DESIGN_DIR` が空文字列でなく確定していること。
 
 ## フェーズ1: デザイン要件の抽出
 
@@ -172,7 +176,7 @@ git ls-files '*.pen'
   決めたファイルは `inspect-pencil-node` スキルで現状の構造・スタイルを取得してからフェーズ3へ渡す
 - **0件の場合のみ → 新規作成**
 
-`.pen` は平文JSON（`.pen` は平文JSONで、構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md` が定義する）なので `Read` / `jq` で読めるが、レイアウト解決後のサイズやスクリーンショットが必要な構造の把握は `inspect-pencil-node` スキル経由で行う。編集は手でJSONを書き換えず `edit-pencil-design` の `execute` で行う。
+`.pen` は平文JSONで、構造は `${CLAUDE_PLUGIN_ROOT}/references/pen-format.md` が定義する。構造の把握は `inspect-pencil-node` スキル（`jq` と `scripts/pen.mjs`）、編集は `edit-pencil-design` スキルの手順（直接編集 ＋ `scripts/pen.mjs validate`）で行う。
 
 **完了条件**: 「更新する既存パス」または「新規作成するパス」のいずれかが確定していること。
 
@@ -181,7 +185,7 @@ git ls-files '*.pen'
 
 ## フェーズ3: デザインの作成・更新
 
-`pencil-design-updater` エージェントに委譲する（`.pen` の編集は `edit-pencil-design` スキル経由でのみ行う。直接編集は禁止）。
+`pencil-design-updater` エージェントに委譲する（`.pen` の編集は `edit-pencil-design` スキルの手順でのみ行う。検査を通さない編集をしない）。
 
 ブリーフィングには以下をすべて含める（サブエージェントは会話履歴を持たないため）:
 
@@ -200,10 +204,10 @@ git ls-files '*.pen'
 <更新の場合は inspect-pencil-node で把握した現状構造の要約。新規なら「新規作成」>
 
 【完了条件】
-- `edit-pencil-design` スキル経由で `.pen` を作成/更新すること（直接編集は禁止）
-- 編集・作成したNodeのスクリーンショットを `<DESIGN_DIR>/snapshots/` に PNG 出力すること
+- `edit-pencil-design` スキルの手順で `.pen` を作成/更新し、`scripts/pen.mjs validate` がエラーなしで通ること
+- 編集・作成したNodeのスクリーンショットを `<DESIGN_DIR>/snapshots/` に PNG 出力し、描画の警告（どのNodeの何が近似か）を報告すること
 - `.pen` とスナップショット PNG 以外のファイルを変更しないこと
-- 更新の場合は対象ファイルを `--in` / `--out` 同パスで上書きし、別名の `.pen` を新規作成しないこと（新しい画面は対象ファイル内のフレームとして追加する）
+- 更新の場合は対象ファイルをその場で上書きし、別名の `.pen` を新規作成しないこと（新しい画面は対象ファイル内のフレームとして追加する）
 
 【作業ディレクトリ】
 <worktreeの絶対パス>
@@ -305,11 +309,16 @@ Issue #$0「<Issueタイトル>」のUIデザインです。実装は含まず�
 ## スナップショット
 - `<DESIGN_DIR>/snapshots/<node>.png`
 
+## 描画上の注意
+- <Node名>: <描画の警告の要約（例: アイコン lucide/xxx を取得できずプレースホルダー）>。この部分は画像ではなく `.pen` の値が正
+
 Refs #$0
 EOF
 ```
 
 **`Closes #$0` / `Fixes #$0` などの closing keyword は絶対に使わない。** デザインPRのマージで実装Issueが閉じてしまい、実装フェーズへ進めなくなるため。参照は必ず `Refs #$0` にする。
+
+「描画上の注意」には `pencil-design-updater` が報告した描画の警告を書く（無ければ「なし」）。スナップショットは pen.dev 本体ではなく自前レンダラーの描画なので、近似の部分を明示しないと、レビューと後段の実装が近似の見た目を正として扱ってしまう。
 
 ラベルは付与しない（`cc-ui-design` はワーカーが `onCompleted` で付与する。`cc-triage-scope` も同様にワーカー側の担当で、`claude-task-worker.json` の `uiDesign.yolo` が `true` の場合のみ付与される）。
 
@@ -346,6 +355,6 @@ gh pr list --head "cc-ui-design-$0" --state open --json number,url
 ## 注意事項
 
 - **コードを実装しない**: 差分は `.pen` とスナップショット PNG のみ
-- **`.pen` を直接編集しない**: 編集は `pencil-design-updater` エージェント（`edit-pencil-design` スキル）経由、読み取りは `inspect-pencil-node` スキルに限る
+- **`.pen` を自分で編集しない**: 編集は `pencil-design-updater` エージェント（`edit-pencil-design` スキル）経由、読み取りは `inspect-pencil-node` スキルに限る
 - **closing keyword を使わない**: PR本文の Issue 参照は `Refs #$0` のみ
 - **判断に迷ったときの安全側**: デザインを作らず、フェーズ0-2と同じ手順（Issueへの理由コメント → `cc-need-human-check` 付与）で終える側。ワーカーは同ラベルが付いていると自分のコメントを出さないため、理由はスキル側のコメントでしか Issue に残らない。根拠は最終報告にも書く
