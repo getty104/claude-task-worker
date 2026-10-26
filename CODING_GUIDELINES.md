@@ -122,6 +122,14 @@ truthiness だけでなく、配列であること・要素が `null` でない�
 
 参考: [PR#439 `--project` 時にカスタムワーカーが未知コマンドになる](https://github.com/getty104/claude-task-worker/pull/439#discussion_r4173531830), [PR#447 転送先の設定を起動元で事前検査しない](https://github.com/getty104/claude-task-worker/pull/447#discussion_r4176766838)
 
+### 外部データを HTML・属性へ埋め込むときは全箇所でエスケープする
+
+ファイルから読んだ値を HTML 文字列へ組み立てるときは、本文だけでなく `style` / `fill` / `viewBox` などの
+属性値もすべて `esc()` を通すか、検証済みの値（数値・列挙）だけを埋め込む。1か所でも生値が残ると `"` で
+属性が閉じ、指定が黙って外れるうえ、描画するブラウザ上で任意のスクリプトが動く。
+
+参考: [PR#512 SVG 属性へ .pen の生値を埋め込む](https://github.com/getty104/claude-task-worker/pull/512#discussion_r4376665841), [PR#512 Material Symbols の style 属性が未エスケープ](https://github.com/getty104/claude-task-worker/pull/512#discussion_r4376602178)
+
 ## 非同期処理
 
 ### 完了判定は実際の終端状態を待って行う
