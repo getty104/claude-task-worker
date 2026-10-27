@@ -190,6 +190,8 @@ E2Eテストが存在し、かつタスクがユーザー操作フロー（画�
 mode: create
 title: <タスクの目的が分かる簡潔なタイトル>
 sections:
+  依頼内容: |
+    <引数 `$ARGUMENTS` の原文を verbatim>
   概要: |
     （1-3行）
   要件: |
@@ -224,6 +226,8 @@ confirmation_items:  # 「確認事項の取捨選択」を通過した項目の
 blocked_by: [<この新Issueをブロックする＝先に片付けるべき既存Issue番号>, ...]   # 省略可
 blocking: [<この新Issueがブロックする＝後続で待たせる既存Issue番号>, ...]        # 省略可
 ```
+
+`sections.依頼内容` には引数のタスク説明をそのまま渡す。改行を含む場合も YAML の `|` ブロックスカラーで表現し、要約・整形しないこと（`answer-issue-questions` は範囲の問いをこの原文でしか決着させず、`概要` 以下は AI が書いた仮置きとして扱うため）。
 
 `labels` には `cc-triage-scope` と `cc-issue-created` の2つを必ず入れる（このスキルで作成する Issue は「explore-agent 分析済み（`cc-issue-created`）」かつ「人間の triage 待ち（`cc-triage-scope`）」の両方の性質を持つため、後続スキルが両方のラベルで拾えるようにする）。assignee は `post-issue-body` が `gh api user --jq '.login'` で取得した gh ログインユーザーを自動で紐づけるため、本スキルから渡す必要はない。
 
