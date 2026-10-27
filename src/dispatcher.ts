@@ -136,9 +136,12 @@ export async function waitForPaneReady(
 }
 
 // 送信したコマンドが実際に実行され、ワーカープロセスが立ち上がったことを確認する。
-// フォアグラウンドがシェルのままなら未実行とみなしタイムアウトまで待つ（"shell"）が、
-// シェルでもワーカーでもない無関係なプロセス（ユーザーの別コマンド等）を検出した場合は、
-// それが実行中のコマンドの標準入力である可能性があるため、待たずに区別して返す（"other"）。
+// タイムアウト時点でフォアグラウンドがシェルのままなら未実行とみなし "shell" を返し、
+// シェルでもワーカーでもない無関係なプロセス（ユーザーの別コマンド等）なら、それが実行中の
+// コマンドの標準入力である可能性があるため区別して返す（"other"）。"other" を観測しても即座には
+// 返さない。プロンプトのフック（git / direnv 等）やワーカー起動途中のラッパーは一瞬だけ
+// フォアグラウンドに現れるため、複数プロジェクトを同時に立ち上げて負荷が高いとそれを掴んで
+// 誤って打ち切ってしまう。
 export type WorkerStartupResult = "started" | "shell" | "other";
 
 export async function waitForWorkerStartup(
@@ -152,8 +155,9 @@ export async function waitForWorkerStartup(
   for (;;) {
     const { foregroundProcesses } = await herdr.paneProcessInfo(paneId);
     if (foregroundProcesses.some(isWorkerProcess)) return "started";
-    if (foregroundProcesses.length > 0 && !foregroundProcesses.every(isShellProcess)) return "other";
-    if (Date.now() >= deadline) return "shell";
+    if (Date.now() >= deadline) {
+      return foregroundProcesses.length > 0 && !foregroundProcesses.every(isShellProcess) ? "other" : "shell";
+    }
     await sleep(pollIntervalMs);
   }
 }
