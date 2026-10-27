@@ -15,6 +15,7 @@ import {
   hasLabel,
   listOpenPrsByBase,
 } from "../gh";
+import { ensureEpicBranch } from "../git";
 import { selectOwnedClosingPr } from "./exec-issue";
 import { createIssuePollingWorker } from "./issue-worker";
 import { defineWorker } from "./worker-definition";
@@ -45,9 +46,9 @@ export function designPrLabelingFailedComment(
   ].join("\n");
 }
 
-// クラウドセッションは `--ref` 起点の `claude/<...>` ブランチで作業し、セッション側のブランチ規約が
-// スキルの固定ブランチ（`cc-ui-design-<N>`）への切り替えに勝つため、デザインPRが正しく作られても
-// head ref 一致では見つからない。exec-issue と同じ所有権判定（Issue を `#N` で参照する PR ＋ base
+// クラウド実行は `--on-branch cc-ui-design-<N>` で起動する（cloudOnBranch）ため通常は head ref 一致で
+// 見つかる。これはセッションが別ブランチから PR を作った場合の保険（セッション側のブランチ規約が
+// スキルの固定ブランチへの切り替えに勝つと、デザインPRが正しく作られても head ref 一致では見つからない）。exec-issue と同じ所有権判定（Issue を `#N` で参照する PR ＋ base
 // 一致 ＋ 起動時刻以降の作成）で特定し、固定名ブランチから同じ内容のPRを作り直して元のPRを閉じる。
 // 後段（apply-ui-design のワーカー preflight とスキル）の head ref 一致をそのまま成立させるため。
 // 元の head を改名しないのは、GitHub が改名された head を持つ open PR を閉じるから。
@@ -112,6 +113,13 @@ export const createUiDesignWorker = defineWorker({
       command: "/claude-task-worker:create-ui-design",
       triggerLabels: ["cc-create-ui-design"],
       excludeLabels: ["cc-ui-design-pr-created", "cc-ui-design-ready", "cc-exec-issue", "cc-pr-created"],
+      // セッションの作業ブランチをスキルの固定ブランチに揃え、デザインPRの作り直しを不要にする。
+      // 既にある場合（デザインのやり直し）は作り直さず、スキルのフェーズ4と同じく既存先端から始める。
+      cloudOnBranch: async (issue, baseBranch) => {
+        const branch = designBranchName(issue.number);
+        await ensureEpicBranch(branch, baseBranch);
+        return branch;
+      },
       onCompleted: async (issueNumber, _worktreeId, _output, ctx) => {
         // Pencil 未導入などスキルが自力で進められないケースでは cc-need-human-check が
         // 付いている。デザインPRが無いのに進行ラベルを付けないよう先に打ち切る。

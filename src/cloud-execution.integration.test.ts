@@ -388,6 +388,41 @@ test("B: fix-review-point のクラウド実行が --on-branch を付け、--ref
   assert.ok(!create.argv.includes("--ref"), "PR系ワーカーは --ref を付けてはいけない");
 });
 
+// create-ui-design はクラウドでも作業ブランチをスキルの固定ブランチに揃えるため、
+// cc-ui-design-<N> をベースから用意して --on-branch で起動する（--ref は付けない）。
+test(
+  "T: create-ui-design のクラウド実行が cc-ui-design-<N> を用意して --on-branch で起動する",
+  { timeout: 60_000 },
+  async (t) => {
+    const stubs = installCliStubs({
+      gh: { ...ISSUE_GH_SCENARIO, issues: [{ ...BASE_ISSUE, labels: [{ name: "cc-create-ui-design" }] }] },
+      claude: { cloudOutput: CLEAN_CLOUD_OUTPUT },
+    });
+    const handle = await startWorker({
+      worker: "create-ui-design",
+      workerConfig: {
+        uiDesign: { enabled: true },
+        workers: { "create-ui-design": { pollingIntervalSeconds: 3600 } },
+      },
+      userConfig: { mode: "default" },
+      records: stubs.records,
+      extraArgs: ["--cloud"],
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    await handle.waitFor((records) => findCreateRecord(records) !== undefined);
+
+    const create = findCreateRecord(stubs.records())!;
+    assert.equal(argValue(create.argv, "--on-branch"), "cc-ui-design-501");
+    assert.ok(!create.argv.includes("--ref"), "--on-branch と排他の --ref を付けてはいけない");
+    const { stdout } = await execFileAsync("git", ["ls-remote", "--heads", handle.originDir, "cc-ui-design-501"]);
+    assert.ok(stdout.includes("refs/heads/cc-ui-design-501"), "cc-ui-design-501 がリモートに作られていない");
+  },
+);
+
 // ============================================================
 // C. 定期ワーカーのクラウド起動（update-coding-guidelines, herdr, --cloud）
 // ============================================================

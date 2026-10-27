@@ -52,6 +52,9 @@ export interface IssueWorkerConfig {
     output: string,
     ctx: { cloud: boolean; baseBranch: string; startedAt: number },
   ) => Promise<boolean | void>;
+  // クラウド実行時に `--ref <baseBranch>` の代わりに `--on-branch` で起動するブランチを用意して返す。
+  // 指定したワーカーだけセッションの作業ブランチを固定できる（create-ui-design の cc-ui-design-<N>）。
+  cloudOnBranch?: (issue: Issue, baseBranch: string) => Promise<string>;
 }
 
 export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefinition {
@@ -139,6 +142,8 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefin
               await ensureEpicBranch(baseBranch, defaultBranch);
             }
 
+            const onBranch = cloud && config.cloudOnBranch ? await config.cloudOnBranch(issue, baseBranch) : undefined;
+
             const execution = buildClaudeExecution({
               mode,
               prompt: `${command} ${issue.number}`,
@@ -147,13 +152,19 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefin
               // config.json の advisor が false なら advisorModel の指定に関わらず渡さない。
               advisorModel: isAdvisorEnabled() ? advisorModel : "",
               permissionMode: getPermissionMode(),
-              ...(cloud ? { cloud: true, baseRef: baseBranch, remoteEnvId: getRemoteEnvId() ?? "" } : {}),
+              ...(cloud
+                ? {
+                    cloud: true,
+                    ...(onBranch ? { onBranch } : { baseRef: baseBranch }),
+                    remoteEnvId: getRemoteEnvId() ?? "",
+                  }
+                : {}),
             });
 
             let cwd: string | undefined;
             if (cloud) {
               console.log(
-                `[${config.name}] #${issue.number}: cloud execution, running without worktree on ${baseBranch}`,
+                `[${config.name}] #${issue.number}: cloud execution, running without worktree on ${onBranch ?? baseBranch}`,
               );
             } else {
               // claude CLI の --worktree は locked な worktree を作り、異常終了時に
