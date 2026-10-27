@@ -499,6 +499,23 @@ test("waitForWorkerStartup returns true once a claude-task-worker process appear
   assert.ok(polls >= 3);
 });
 
+test("waitForWorkerStartup keeps waiting through a transient non-shell process until the worker appears", async (t) => {
+  let polls = 0;
+  t.mock.method(childProcess, "execFile", (_c: string, _a: string[], _o: unknown, callback: ExecFileCallback) => {
+    polls += 1;
+    const foreground =
+      polls < 3
+        ? { name: "git", argv: ["status"], cmdline: "git status --porcelain", pid: 1 }
+        : { name: "node", argv: [], cmdline: "claude-task-worker all", pid: 2 };
+    callback(null, JSON.stringify({ result: { process_info: { foreground_processes: [foreground] } } }), "");
+  });
+
+  const herdr = (await import("./herdr")) as typeof HerdrModule;
+  const result = await waitForWorkerStartup("pane-my-app", herdr, { timeoutMs: 500, pollIntervalMs: 1 });
+
+  assert.equal(result, "started");
+});
+
 test("waitForWorkerStartup returns other when the foreground process is neither a shell nor the worker", async (t) => {
   t.mock.method(childProcess, "execFile", (_c: string, _a: string[], _o: unknown, callback: ExecFileCallback) => {
     callback(
@@ -520,7 +537,7 @@ test("waitForWorkerStartup returns other when the foreground process is neither 
   assert.equal(result, "other");
 });
 
-test("gives up immediately without resending when the foreground process is neither a shell nor the worker", async (t) => {
+test("gives up without resending when the foreground process is neither a shell nor the worker", async (t) => {
   const sendTextCount = { value: 0 };
   t.mock.method(
     childProcess,
