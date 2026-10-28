@@ -98,7 +98,29 @@ fi
 
 `DESIGN_DIR` が空文字列のまま（=上記の `jq` 失敗）の場合は、デザインを作らずフェーズ0-2と同じ手順（Issueへの理由コメント + `cc-need-human-check` 付与。デザインPRは作らない）でスキルを終了する。以降「フェーズ0-2と同じ手順」はこの手順を指す。
 
-**完了条件**: worktree内・Issue OPEN・描画環境OK・`DESIGN_DIR` が空文字列でなく確定していること。
+### 0-4. やり直しの扱い
+
+本スキルが起動された（`cc-create-ui-design` が付いた）時点で、デザインの作成またはやり直しが依頼されている。`cc-ui-design-$0` を head とするマージ済みのデザインPRがある、description に `## UIデザイン` の参照がある、といった「デザインは作成済み」に見える状態は**中断・終了の理由にならない**。やり直しは同じブランチを再利用して新しいデザインPRを作る通常の手順で、後段の `apply-ui-design` は最も新しくマージされたPRを参照元にする。Issue のコメントからやり直しの理由（検収NG・要件変更など）を拾い、フェーズ1の要件に含める。
+
+編集はこのブランチ上で行うため、`.pen` に触る前に作業ブランチを決める。起点は「`cc-ui-design-$0` を head とする **OPEN** のデザインPRがあるか」で分ける。
+
+- **OPEN のPRがある**（レビュー中のデザインの修正）: `origin/${BRANCH}` の先端に積み、そのPRを更新する
+- **OPEN のPRが無い**（初回、またはマージ済み・クローズ済みの後のやり直し）: いまの HEAD（ローカルは worktree のベースブランチ、クラウドはワーカーが用意した `cc-ui-design-$0`）から作る。マージ済みの古い先端に積むと、新しいPRの差分に前回の変更が混ざり、ベース側で進んだ `.pen` とコンフリクトする。また未コミットの `.pen` を持ったまま古い先端へ `git switch` すると、内容の違うファイルがあると切り替え自体が失敗する
+
+> GitHub MCP が使える場合は OPEN のPRの確認に `list_pull_requests`（`state: open`、`head` は `<owner>:cc-ui-design-$0`。オーナー名は `gh-compat.sh owner-repo` から取る）を使う。以下は MCP 利用不可時のフォールバック。
+
+```bash
+BRANCH="cc-ui-design-$0"
+git fetch origin "${BRANCH}" 2>/dev/null || true
+OPEN_PR=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
+if [ -n "${OPEN_PR}" ] && git rev-parse --verify --quiet "refs/remotes/origin/${BRANCH}" >/dev/null; then
+  git switch -C "${BRANCH}" "origin/${BRANCH}"
+else
+  git switch -C "${BRANCH}"
+fi
+```
+
+**完了条件**: worktree内・Issue OPEN・描画環境OK・`DESIGN_DIR` が空文字列でなく確定し、`cc-ui-design-$0` に切り替え済みであること。
 
 ## フェーズ1: デザイン要件の抽出
 
@@ -219,18 +241,10 @@ git ls-files '*.pen'
 
 ## フェーズ4: デザインブランチの作成とpush
 
-再実行時に既存ブランチが残っていても失敗しないよう、先に存在確認してから作成/切り替えを分岐する。
+フェーズ0-4で `cc-ui-design-$0` に切り替え済みの状態で、成果物だけをステージする。
 
 ```bash
 BRANCH="cc-ui-design-$0"
-git fetch origin "${BRANCH}" 2>/dev/null || true
-if git rev-parse --verify --quiet "refs/remotes/origin/${BRANCH}" >/dev/null; then
-  git switch -C "${BRANCH}" "origin/${BRANCH}"
-elif git rev-parse --verify --quiet "refs/heads/${BRANCH}" >/dev/null; then
-  git switch "${BRANCH}"
-else
-  git switch -c "${BRANCH}"
-fi
 git status --short | awk '{print $2}' | grep -E '\.pen$|/snapshots/.+\.png$' | xargs -r git add --
 git status --short
 ```

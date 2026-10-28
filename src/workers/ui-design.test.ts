@@ -10,6 +10,7 @@ const {
   designReferenceMissingComment,
   designFileMissingComment,
   shouldVerifyDesignFileExists,
+  shouldRestartDesignBranch,
 } = (await import("./ui-design.ts")) as typeof UiDesignModule;
 
 test("designBranchName uses the fixed cc-ui-design-<N> naming", () => {
@@ -154,4 +155,17 @@ test("the two apply-ui-design failure comments are distinguishable", () => {
   // 復旧手順は共通なので、どちらの文面にも残っていること。
   assert.ok(missing.includes("cc-ui-design-pr-created"));
   assert.ok(badPath.includes("cc-ui-design-pr-created"));
+});
+
+test("shouldRestartDesignBranch restarts only when the tip is the head of a merged design PR", () => {
+  const merged = { state: "MERGED", mergedAt: "2026-10-01T00:00:00Z", headRefOid: "aaa" };
+  assert.equal(shouldRestartDesignBranch([merged], "aaa"), true);
+  // REST 経路ではマージ済みでも CLOSED が返る
+  assert.equal(shouldRestartDesignBranch([{ ...merged, state: "CLOSED" }], "aaa"), true);
+  // マージ後に push された未マージのコミットは消さない
+  assert.equal(shouldRestartDesignBranch([merged], "bbb"), false);
+  // 進行中のデザインPRがあればそのブランチを続ける
+  assert.equal(shouldRestartDesignBranch([merged, { state: "OPEN", mergedAt: null, headRefOid: "aaa" }], "aaa"), false);
+  assert.equal(shouldRestartDesignBranch([{ state: "CLOSED", mergedAt: null, headRefOid: "aaa" }], "aaa"), false);
+  assert.equal(shouldRestartDesignBranch([], "aaa"), false);
 });

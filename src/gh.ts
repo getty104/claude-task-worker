@@ -186,6 +186,29 @@ export async function findPrStateByHeadRef(headRefName: string): Promise<PullReq
   return { number: prs[0].number, state: prs[0].state, mergedAt: prs[0].mergedAt ?? null };
 }
 
+export interface HeadRefPr extends PullRequestStateInfo {
+  headRefOid: string;
+}
+
+// head ref を持つ PR を状態に関わらず全件取得する。デザインのやり直しでは同じ固定ブランチから
+// 複数のデザインPRが作られるため、先頭1件だけでは過去ラウンドのマージ済みPRを判別できない。
+export async function listPrsByHeadRef(headRefName: string): Promise<HeadRefPr[]> {
+  const output = await execGh([
+    "pr",
+    "list",
+    "--state",
+    "all",
+    "--head",
+    headRefName,
+    "--json",
+    "number,state,mergedAt,headRefOid",
+    "--limit",
+    "100",
+  ]);
+  const prs: { number: number; state: string; mergedAt: string | null; headRefOid: string }[] = JSON.parse(output);
+  return prs.map((pr) => ({ ...pr, mergedAt: pr.mergedAt ?? null }));
+}
+
 // PR のマージ可能性（MERGEABLE / CONFLICTING / UNKNOWN）を取得する。GitHub 側が再計算中は UNKNOWN を返すため、
 // 呼び出し側は CONFLICTING だけを「コンフリクトあり」として扱うこと。判定基準は triage-pr / resolve-pr-conflict の
 // 両スキルと揃えてある（食い違うとラベルの付与・除去が繰り返される）。
