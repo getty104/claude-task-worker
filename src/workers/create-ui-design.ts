@@ -14,12 +14,13 @@ import {
   getRepoInfo,
   hasLabel,
   listOpenPrsByBase,
+  listPrsByHeadRef,
 } from "../gh";
-import { ensureEpicBranch } from "../git";
+import { ensureEpicBranch, remoteTrackingSha, restartBranchFromBase } from "../git";
 import { selectOwnedClosingPr } from "./exec-issue";
 import { createIssuePollingWorker } from "./issue-worker";
 import { defineWorker } from "./worker-definition";
-import { designBranchName, designPrNotCreatedComment } from "./ui-design";
+import { designBranchName, designPrNotCreatedComment, shouldRestartDesignBranch } from "./ui-design";
 
 export function designPrLabelingFailedComment(
   issueNumber: number,
@@ -114,10 +115,20 @@ export const createUiDesignWorker = defineWorker({
       triggerLabels: ["cc-create-ui-design"],
       excludeLabels: ["cc-ui-design-pr-created", "cc-ui-design-ready", "cc-exec-issue", "cc-pr-created"],
       // セッションの作業ブランチをスキルの固定ブランチに揃え、デザインPRの作り直しを不要にする。
-      // 既にある場合（デザインのやり直し）は作り直さず、スキルのフェーズ4と同じく既存先端から始める。
+      // 既にある場合は既存先端から始めるが、先端が前回ラウンドでマージ済みのままならベースから作り直す
+      // （スキルのフェーズ4と同じ判断。クラウドではセッションが最初からこのブランチ上にいるため、ここで揃える）。
       cloudOnBranch: async (issue, baseBranch) => {
         const branch = designBranchName(issue.number);
         await ensureEpicBranch(branch, baseBranch);
+        // 判定できないまま起動すると、マージ済みの古い先端から作り始めてしまう。throw すると issue-worker が
+        // cc-in-progress を外してトリガーラベルを残すため、次のポーリングで再試行される。
+        const [prs, tip] = await Promise.all([listPrsByHeadRef(branch), remoteTrackingSha(branch)]);
+        if (shouldRestartDesignBranch(prs, tip)) {
+          await restartBranchFromBase(branch, baseBranch, tip);
+          console.log(
+            `[create-ui-design] #${issue.number}: ${branch} was already merged, restarted it from ${baseBranch}`,
+          );
+        }
         return branch;
       },
       onCompleted: async (issueNumber, _worktreeId, _output, ctx) => {

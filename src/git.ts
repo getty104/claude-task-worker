@@ -48,6 +48,27 @@ export async function ensureEpicBranch(epicBranch: string, defaultBranch: string
   await assertRemoteTrackingExists(epicBranch);
 }
 
+/** refs/remotes/origin/<branch> が指すコミット。 */
+export async function remoteTrackingSha(branch: string): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["rev-parse", `refs/remotes/origin/${branch}`]);
+  return stdout.trim();
+}
+
+/**
+ * リモートの <branch> を <baseBranch> の先端へ付け替える。呼び出し側が上書きしてよいと確かめた先端
+ * （expectedSha）から動いていれば push を拒否させ、確認後に届いたコミットを消さない。
+ */
+export async function restartBranchFromBase(branch: string, baseBranch: string, expectedSha: string): Promise<void> {
+  await fetchRemoteTracking(baseBranch);
+  await execFileAsync("git", [
+    "push",
+    `--force-with-lease=refs/heads/${branch}:${expectedSha}`,
+    "origin",
+    `refs/remotes/origin/${baseBranch}:refs/heads/${branch}`,
+  ]);
+  await fetchRemoteTracking(branch);
+}
+
 /**
  * origin/<branch> を refs/remotes/origin/<branch> に force で取り込む（標準の remote-tracking と同じ挙動）。
  * fetch.prune=true 環境で短縮形 src はリモート広告 ref（完全名）とリテラル比較され

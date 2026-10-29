@@ -65,6 +65,18 @@ export function classifyDesignPr(pr: { state: string; mergedAt: string | null } 
   return "needs-human";
 }
 
+// デザインのやり直しで固定ブランチを再利用するとき、先端が前回ラウンドでマージ済みのコミットのままなら
+// ベースの先端から作り直すべきか。squash マージ後のブランチを起点にすると、新しいデザインPRの差分に
+// 前回ラウンドの変更が混ざり、ベース側で進んだ `.pen` とコンフリクトする。未マージのコミット
+// （PR作成前に落ちた試行の push）を消さないよう、先端が「マージ済みPRの head そのもの」の場合に限る。
+export function shouldRestartDesignBranch(
+  prs: { state: string; mergedAt: string | null; headRefOid: string }[],
+  tipSha: string,
+): boolean {
+  if (prs.some((pr) => pr.state === "OPEN")) return false;
+  return prs.some((pr) => (pr.state === "MERGED" || pr.mergedAt !== null) && pr.headRefOid === tipSha);
+}
+
 export function designPrMissingComment(issueNumber: number): string {
   return [
     "## デザインPRを確認できません（要人手確認）",
@@ -107,7 +119,14 @@ function designReferenceFailureComment(heading: string, cause: string): string {
     "",
     "## 対応後の進め方",
     "- 自動実行をやり直す場合: `cc-need-human-check` ラベルを外し、`cc-ui-design-pr-created` ラベルを付け直してください",
-    "- 手動で description に参照を追記した場合: `cc-need-human-check` ラベルを外し、`cc-ui-design-ready` と `cc-exec-issue` ラベルを付けてください",
+    "- 手動で description に参照を追記した場合: `cc-need-human-check` ラベルを外し、`cc-ui-design-ready` と `cc-exec-issue` ラベルを付けてください。参照は次の形で書いてください（`デザインファイル:` の行が無い、または値が `.pen` で終わらないと `exec-issue` が止まります）",
+    "",
+    "```markdown",
+    DESIGN_REFERENCE_HEADING,
+    "",
+    "- デザインファイル: `<.pen のパス>`",
+    "- デザインPR: #<デザインPR番号>（マージ済み）",
+    "```",
   ].join("\n");
 }
 
