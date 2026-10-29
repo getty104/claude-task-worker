@@ -120,14 +120,11 @@ export const createUiDesignWorker = defineWorker({
       cloudOnBranch: async (issue, baseBranch) => {
         const branch = designBranchName(issue.number);
         await ensureEpicBranch(branch, baseBranch);
-        const restart = await Promise.all([listPrsByHeadRef(branch), remoteTrackingSha(branch)])
-          .then(([prs, tip]) => shouldRestartDesignBranch(prs, tip))
-          .catch((err) => {
-            console.error(`[create-ui-design] #${issue.number}: could not inspect ${branch}, keeping its tip: ${err}`);
-            return false;
-          });
-        if (restart) {
-          await restartBranchFromBase(branch, baseBranch);
+        // 判定できないまま起動すると、マージ済みの古い先端から作り始めてしまう。throw すると issue-worker が
+        // cc-in-progress を外してトリガーラベルを残すため、次のポーリングで再試行される。
+        const [prs, tip] = await Promise.all([listPrsByHeadRef(branch), remoteTrackingSha(branch)]);
+        if (shouldRestartDesignBranch(prs, tip)) {
+          await restartBranchFromBase(branch, baseBranch, tip);
           console.log(
             `[create-ui-design] #${issue.number}: ${branch} was already merged, restarted it from ${baseBranch}`,
           );

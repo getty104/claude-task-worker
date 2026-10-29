@@ -102,23 +102,38 @@ fi
 
 本スキルが起動された（`cc-create-ui-design` が付いた）時点で、デザインの作成またはやり直しが依頼されている。`cc-ui-design-$0` を head とするマージ済みのデザインPRがある、description に `## UIデザイン` の参照がある、といった「デザインは作成済み」に見える状態は**中断・終了の理由にならない**。やり直しは同じブランチを再利用して新しいデザインPRを作る通常の手順で、後段の `apply-ui-design` は最も新しくマージされたPRを参照元にする。Issue のコメントからやり直しの理由（検収NG・要件変更など）を拾い、フェーズ1の要件に含める。
 
-編集はこのブランチ上で行うため、`.pen` に触る前に作業ブランチを決める。起点は「`cc-ui-design-$0` を head とする **OPEN** のデザインPRがあるか」で分ける。
+編集はこのブランチ上で行うため、`.pen` に触る前に作業ブランチを決める。起点は `origin/cc-ui-design-$0` の先端の扱いで分ける。
 
-- **OPEN のPRがある**（レビュー中のデザインの修正）: `origin/${BRANCH}` の先端に積み、そのPRを更新する
-- **OPEN のPRが無い**（初回、またはマージ済み・クローズ済みの後のやり直し）: いまの HEAD（ローカルは worktree のベースブランチ、クラウドはワーカーが用意した `cc-ui-design-$0`）から作る。マージ済みの古い先端に積むと、新しいPRの差分に前回の変更が混ざり、ベース側で進んだ `.pen` とコンフリクトする。また未コミットの `.pen` を持ったまま古い先端へ `git switch` すると、内容の違うファイルがあると切り替え自体が失敗する
+- **先端がマージ済みデザインPRの head そのもの、またはリモートにブランチが無い**: いまの HEAD（ローカルは worktree のベースブランチ、クラウドはワーカーが用意した `cc-ui-design-$0`）から作る。マージ済みの古い先端に積むと、新しいPRの差分に前回の変更が混ざり、ベース側で進んだ `.pen` とコンフリクトする
+- **それ以外**（OPEN のデザインPRの先端、またはPR作成前に落ちた試行が push したコミット）: `origin/cc-ui-design-$0` の先端から続ける。フェーズ4の push で上書きして失わないため
 
-> GitHub MCP が使える場合は OPEN のPRの確認に `list_pull_requests`（`state: open`、`head` は `<owner>:cc-ui-design-$0`。オーナー名は `gh-compat.sh owner-repo` から取る）を使う。以下は MCP 利用不可時のフォールバック。
+**ブランチ・PRの取得に失敗したら判定を推測で埋めず**、フェーズ0-2と同じ手順で終了する（失敗を「PRなし」と読むと、OPEN のPRのコミットを force push で上書きする）。
+
+> GitHub MCP が使える場合は PR 一覧に `list_pull_requests`（`state: all`、`head` は `<owner>:cc-ui-design-$0`。オーナー名は `gh-compat.sh owner-repo` から取る）を使い、マージ済みは `merged_at` が非null のもの、先端の比較は `head.sha` で行う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 BRANCH="cc-ui-design-$0"
-git fetch origin "${BRANCH}" 2>/dev/null || true
-OPEN_PR=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
-if [ -n "${OPEN_PR}" ] && git rev-parse --verify --quiet "refs/remotes/origin/${BRANCH}" >/dev/null; then
+git ls-remote --exit-code origin "refs/heads/${BRANCH}" >/dev/null 2>&1
+LS_REMOTE_STATUS=$?
+TIP=""
+if [ "${LS_REMOTE_STATUS}" -eq 0 ]; then
+  git fetch origin "${BRANCH}" || { echo "failed to fetch ${BRANCH}" >&2; exit 1; }
+  TIP=$(git rev-parse "refs/remotes/origin/${BRANCH}")
+elif [ "${LS_REMOTE_STATUS}" -ne 2 ]; then
+  echo "failed to check remote branch (exit ${LS_REMOTE_STATUS})" >&2; exit 1
+fi
+if [ -n "${TIP}" ]; then
+  PRS=$(gh pr list --head "${BRANCH}" --state all --json state,headRefOid) || { echo "failed to list PRs for ${BRANCH}" >&2; exit 1; }
+  MERGED_TIP=$(printf '%s' "${PRS}" | jq -r --arg tip "${TIP}" 'map(select(.state == "MERGED" and .headRefOid == $tip)) | length')
+fi
+if [ -n "${TIP}" ] && [ "${MERGED_TIP}" = "0" ]; then
   git switch -C "${BRANCH}" "origin/${BRANCH}"
 else
   git switch -C "${BRANCH}"
 fi
 ```
+
+上記のどれかが `exit 1` で止まった場合は、フェーズ0-2と同じ手順（理由コメント + `cc-need-human-check`）で終了する。
 
 **完了条件**: worktree内・Issue OPEN・描画環境OK・`DESIGN_DIR` が空文字列でなく確定し、`cc-ui-design-$0` に切り替え済みであること。
 
@@ -299,6 +314,8 @@ else
   BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
 fi
 ```
+
+`cc-ui-design-$0` を head とする OPEN のデザインPRが既にある場合（フェーズ0-4でその先端から続けた場合）は、push でそのPRが更新されているので **PRを作らず**「PR作成の検証」へ進む（同じ head の PR は二重に作れない）。
 
 PR の作成は `gh-compat.sh create-pr` だけで行う（`gh pr create` は GraphQL 経由でクラウドでは 403 になり、GitHub MCP の `create_pull_request` は assignees の引数を持たない）。PR本文は `--body-file -` + heredoc（`<<'EOF'` クォート版）で渡す。プレースホルダは heredoc に渡す前に実値へ置換しておくこと。
 

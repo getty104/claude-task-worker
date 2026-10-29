@@ -54,10 +54,18 @@ export async function remoteTrackingSha(branch: string): Promise<string> {
   return stdout.trim();
 }
 
-/** リモートの <branch> を <baseBranch> の先端へ付け替える（force push）。呼び出し側で上書きしてよいことを確かめてから使う。 */
-export async function restartBranchFromBase(branch: string, baseBranch: string): Promise<void> {
+/**
+ * リモートの <branch> を <baseBranch> の先端へ付け替える。呼び出し側が上書きしてよいと確かめた先端
+ * （expectedSha）から動いていれば push を拒否させ、確認後に届いたコミットを消さない。
+ */
+export async function restartBranchFromBase(branch: string, baseBranch: string, expectedSha: string): Promise<void> {
   await fetchRemoteTracking(baseBranch);
-  await execFileAsync("git", ["push", "--force", "origin", `refs/remotes/origin/${baseBranch}:refs/heads/${branch}`]);
+  await execFileAsync("git", [
+    "push",
+    `--force-with-lease=refs/heads/${branch}:${expectedSha}`,
+    "origin",
+    `refs/remotes/origin/${baseBranch}:refs/heads/${branch}`,
+  ]);
   await fetchRemoteTracking(branch);
 }
 
