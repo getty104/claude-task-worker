@@ -15,7 +15,8 @@ import type * as ClaudeArgsModule from "./claude-args";
 // .ts 拡張子付きのリテラル文字列で動的importする（既存テストと同じパターン）。
 const { installCliStubs } = (await import("./test-support/cli-stub.ts")) as typeof CliStubModule;
 const { startWorker } = (await import("./test-support/worker-harness.ts")) as typeof WorkerHarnessModule;
-const { CLOUD_REPORT_HEADING, ORPHANED_CLOUD_SESSION_HEADING } = (await import("./claude-args")) as typeof ClaudeArgsModule;
+const { CLOUD_REPORT_HEADING, ORPHANED_CLOUD_SESSION_HEADING } =
+  (await import("./claude-args")) as typeof ClaudeArgsModule;
 
 // テスト内で使い捨ての HTTP サーバを立て、Slack Webhook 宛の POST 本文（text）を集める。
 async function startSlackCapture(): Promise<{ url: string; texts: () => string[]; close: () => Promise<void> }> {

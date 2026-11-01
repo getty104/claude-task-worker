@@ -522,7 +522,9 @@ test("appendCloudDoneInstruction asks to clear cc-need-human-check left by an ab
   assert.ok(result.includes("gh-compat.sh remove-label 7 cc-need-human-check"));
   // 後始末は cc-cloud-done の付与（最後の操作）より前に置く。
   assert.ok(result.indexOf("remove-label 7") < result.indexOf("add-label 7"));
-  assert.ok(!appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }).includes(ORPHANED_CLOUD_SESSION_HEADING));
+  assert.ok(
+    !appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }).includes(ORPHANED_CLOUD_SESSION_HEADING),
+  );
 });
 
 // MCP の create_pull_request は labels / assignees を持たず、MCP のコミットでは CI が起動しない
