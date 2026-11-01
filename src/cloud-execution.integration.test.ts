@@ -15,7 +15,7 @@ import type * as ClaudeArgsModule from "./claude-args";
 // .ts 拡張子付きのリテラル文字列で動的importする（既存テストと同じパターン）。
 const { installCliStubs } = (await import("./test-support/cli-stub.ts")) as typeof CliStubModule;
 const { startWorker } = (await import("./test-support/worker-harness.ts")) as typeof WorkerHarnessModule;
-const { CLOUD_REPORT_HEADING } = (await import("./claude-args")) as typeof ClaudeArgsModule;
+const { CLOUD_REPORT_HEADING, ORPHANED_CLOUD_SESSION_HEADING } = (await import("./claude-args")) as typeof ClaudeArgsModule;
 
 // テスト内で使い捨ての HTTP サーバを立て、Slack Webhook 宛の POST 本文（text）を集める。
 async function startSlackCapture(): Promise<{ url: string; texts: () => string[]; close: () => Promise<void> }> {
@@ -1062,6 +1062,72 @@ test(
     // finishTask() 経由の失敗通知（notifyTaskFailed）はシャットダウン中でも抑止されないため、
     // Slack 側でも aborted 経路の文言を確認できる。
     await handle.waitFor(() => slack.texts().some((text) => text.includes("The session may still be running")), 20_000);
+  },
+);
+
+// ============================================================
+// J2. 前回のポーリング後に cc-cloud-done が付いたタスクは、シャットダウンでも完了扱いにする
+// ============================================================
+test(
+  "J2: 完了済み（cc-cloud-done 付与済み）のクラウドタスクはシャットダウンで cc-need-human-check を付けない",
+  { timeout: 60_000 },
+  async (t) => {
+    const stubs = installCliStubs({
+      gh: ISSUE_GH_SCENARIO,
+      claude: {
+        cloudOutput: "Created cloud session: ctw:demo:#501\nView: https://claude.ai/code/session_stubJ2?from=cli&m=0",
+      },
+    });
+    const handle = await startWorker({
+      worker: "exec-issue",
+      workerConfig: { workers: { "exec-issue": { pollingIntervalSeconds: 3600 } } },
+      userConfig: { mode: "herdr" },
+      records: stubs.records,
+      extraArgs: ["--cloud"],
+    });
+    t.after(async () => {
+      await handle.cleanup();
+      stubs.cleanup();
+    });
+
+    // 最初の cc-cloud-done ポーリング（未付与）を待ってから、次のポーリング（30秒後）より前に
+    // セッションの完了（cc-cloud-done 付与）を模倣する。
+    const isDonePoll = (r: StubRecord) =>
+      r.command === "gh" && r.argv[0] === "issue" && r.argv[1] === "list" && r.argv.includes("cc-cloud-done");
+    await handle.waitFor((records) => records.some(isDonePoll));
+    const stateFile = `${stubs.recordFile}.gh-state.json`;
+    const state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, "utf8")) : { labels: {}, comments: {} };
+    state.labels = { ...state.labels, "issue:501": [...(state.labels?.["issue:501"] ?? []), "cc-cloud-done"] };
+    writeFileSync(stateFile, JSON.stringify(state));
+
+    handle.child.kill("SIGINT");
+    await waitForStdout(handle, (out) => out.includes("Stopping new tasks"));
+    handle.child.kill("SIGINT");
+
+    // 完了経路（cc-cloud-done の除去 → onCompleted）を通り終えてプロセスが終わるのを待つ。
+    // onCompleted 自体は PR が無いため別理由で cc-need-human-check を付けうるので、ラベルではなく
+    // 孤立セッションのコメントと aborted 経路のログが無いことで判定する。
+    await handle.waitForExit(30_000);
+    const records = stubs.records();
+    assert.ok(
+      records.some(
+        (r) =>
+          r.command === "gh" &&
+          r.argv[0] === "issue" &&
+          r.argv[1] === "edit" &&
+          r.argv.includes("--remove-label") &&
+          r.argv.includes("cc-cloud-done"),
+      ),
+      "完了経路（cc-cloud-done の除去）を通っていない",
+    );
+    const orphanComments = records.filter(
+      (r) =>
+        r.command === "gh" &&
+        r.argv[1] === "comment" &&
+        (argValue(r.argv, "--body") ?? "").includes(ORPHANED_CLOUD_SESSION_HEADING),
+    );
+    assert.equal(orphanComments.length, 0, "完了済みのタスクに孤立セッションのコメントが投稿されている");
+    assert.ok(!handle.stdout().includes("shutdown aborted the wait"), "aborted 経路に入っている");
   },
 );
 

@@ -469,6 +469,8 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 - **`CLOUD_TASK_TIMEOUT_MS`（4時間）で打ち切る**。`AskUserQuestion` で停止したセッション・VM 側クラッシュ・プラグイン未導入による空振り・ラベル付与自体の失敗はすべてここへ落ちる。打ち切り時は `cc-need-human-check` を付けて failed とし、セッション URL 付きの Slack 失敗通知を送る。**`cc-need-human-check` の付与を `runViaCloud()` 側で行っている**のは、ワーカーの `onComplete` の失敗経路が同ラベルを付けないため（付けないと打ち切られたタスクが誰にも拾われない）
 - 人が手動で `cc-cloud-done` を付けても同じ経路で完了扱いになる（張り付いたタスクの救済手段）。シャットダウン時は `herdrAbortSignal` で待機ループを抜ける（1秒刻みで確認するため30秒の間隔待ちに引きずられない）
 - **セッションID抽出失敗（catch 経路）と `aborted`（シャットダウン）も `runViaCloud()` 側で `cc-need-human-check` を付け、対象 Issue/PR へ孤立セッション（クラウド側は生き残っている可能性がある）である旨とセッションURL（不明なら「セッションURL不明（ID抽出に失敗）」）をコメントする**（`cloudTarget` を解決できなかったタスクは対象外）。`cc-in-progress` を残す案は採らない — 無条件に外す `finally` へ分岐が要るうえ「実行中に見えるが実行していない」状態を作るため
+- **シャットダウンで正常完了を aborted に倒さない**。強制終了（2回目の Ctrl-C。`--project` ではディスパッチャーが `SHUTDOWN_TIMEOUT_MS`（10分）後に ctrl-c を再送するので1回押しただけでもここへ入る）で `pollCloudWaiters()` が待機を打ち切る際、打ち切る前に `cc-cloud-done` を1回だけ確認し、付いていれば `completed` として通常の完了経路へ流す（前回ポーリング（30秒間隔）後に完了したタスクに `cc-need-human-check` が付くのを防ぐ）
+- **打ち切り後に完走したセッションは自分で `cc-need-human-check` を外す**。ワーカーが止まった後の完走はワーカーからは観測できないため、`buildCloudOrphanCleanupInstruction()` が初期プロンプトへ「`cc-cloud-done` を付ける直前に、`cc-need-human-check` が付いていて、かつ起動時刻より後に孤立コメント（`ORPHANED_CLOUD_SESSION_HEADING`）があれば外す」を足す。起動時刻より後の孤立コメントに限るのは、スキル自身の判断や4時間タイムアウトで付いたラベルを外さないため。この経路ではワーカーの `onCompleted`（`cc-pr-created` 付与など）は走らない
 
 #### ワーカー別の適合性
 
