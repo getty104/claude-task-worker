@@ -7,6 +7,7 @@ import {
   buildCloudPrompt,
   buildScriptCommand,
   CLOUD_REPORT_HEADING,
+  ORPHANED_CLOUD_SESSION_HEADING,
   type CloudPromptTarget,
 } from "./claude-args";
 import { CLOUD_DONE_LABEL, getWorkerConfig } from "./config";
@@ -312,26 +313,37 @@ function ensureCloudPollLoop(): void {
   })();
 }
 
+async function fetchCloudDoneNumbers(): Promise<Map<CloudTargetType, Set<number>>> {
+  const pendingTypes = new Set<CloudTargetType>();
+  for (const waiter of cloudWaiters.values()) pendingTypes.add(waiter.type);
+
+  const doneKeys = new Map<CloudTargetType, Set<number>>();
+  for (const type of pendingTypes) {
+    try {
+      const numbers = await listNumbersWithLabel(type, CLOUD_DONE_LABEL);
+      doneKeys.set(type, new Set(numbers));
+    } catch (err) {
+      console.error(`[worker] failed to poll ${CLOUD_DONE_LABEL} for ${type}: ${err}`);
+    }
+  }
+  return doneKeys;
+}
+
 async function pollCloudWaiters(): Promise<void> {
   while (cloudWaiters.size > 0) {
     if (herdrAbortSignal.aborted) {
-      for (const waiter of cloudWaiters.values()) waiter.settle("aborted");
+      // 前回のポーリング後に cc-cloud-done が付いた（＝既に完了した）タスクを aborted に
+      // 倒さないよう、打ち切る前に1回だけ確認する。倒すと正常完了したタスクに
+      // cc-need-human-check が付く。
+      const doneKeys = await fetchCloudDoneNumbers();
+      for (const waiter of cloudWaiters.values()) {
+        waiter.settle(doneKeys.get(waiter.type)?.has(waiter.number) ? "completed" : "aborted");
+      }
       cloudWaiters.clear();
       break;
     }
 
-    const pendingTypes = new Set<CloudTargetType>();
-    for (const waiter of cloudWaiters.values()) pendingTypes.add(waiter.type);
-
-    const doneKeys = new Map<CloudTargetType, Set<number>>();
-    for (const type of pendingTypes) {
-      try {
-        const numbers = await listNumbersWithLabel(type, CLOUD_DONE_LABEL);
-        doneKeys.set(type, new Set(numbers));
-      } catch (err) {
-        console.error(`[worker] failed to poll ${CLOUD_DONE_LABEL} for ${type}: ${err}`);
-      }
-    }
+    const doneKeys = await fetchCloudDoneNumbers();
 
     const now = Date.now();
     for (const [key, waiter] of [...cloudWaiters.entries()]) {
@@ -389,7 +401,7 @@ async function flagOrphanedCloudSession(
       : "ワーカーのシャットダウンで待機を打ち切りました。クラウドセッションは継続している可能性が高いです。";
   const sessionLine = cloudSessionId ? `https://claude.ai/code/${cloudSessionId}` : "セッションURL不明（ID抽出に失敗）";
   const body =
-    `## 孤立クラウドセッションの可能性\n\n` +
+    `${ORPHANED_CLOUD_SESSION_HEADING}\n\n` +
     `**原因**: ${causeLine}\n\n` +
     `**セッションURL**: ${sessionLine}\n\n` +
     `**再開方法**: 孤立セッションの成果物が届いていないか確認したうえで、\`cc-need-human-check\` ラベルを外すとポーリング対象に戻ります。`;
@@ -489,7 +501,7 @@ async function runViaCloud(
   // システムプロンプト・ツール制限もここへ本文として含めておく（渡した瞬間に実行される
   // ため、後から追加投函する余地は無い）。
   const debug = hasDebugFlag();
-  const initialPrompt = buildCloudPrompt(prompt, model ?? "", cloudTarget, debug);
+  const initialPrompt = buildCloudPrompt(prompt, model ?? "", cloudTarget, debug, tasks.get(id)?.startedAt);
   let result: TaskResult;
   let cloudSessionId: string | undefined;
 

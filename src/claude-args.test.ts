@@ -23,6 +23,7 @@ const {
   buildCloudCheckoutInstruction,
   buildCloudWorktreeInstruction,
   CLOUD_REPORT_HEADING,
+  ORPHANED_CLOUD_SESSION_HEADING,
   shellQuote,
   buildScriptCommand,
   isOpusModel,
@@ -509,6 +510,21 @@ test("appendCloudDoneInstruction forbids the label-replacing MCP write", () => {
   assert.ok(result.includes("issue_write"));
   assert.ok(result.includes("使わないこと"));
   assert.ok(!/`issue_write`（method: `update`）を優先/.test(result));
+});
+
+// ワーカーが待機を打ち切った後にセッションが完走した場合、残った cc-need-human-check を
+// セッション自身に外させる。起動時刻より後の孤立コメントがあるときだけに絞る。
+test("appendCloudDoneInstruction asks to clear cc-need-human-check left by an abandoned wait", () => {
+  const startedAt = new Date("2026-11-01T00:00:00.000Z");
+  const result = appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }, false, startedAt);
+  assert.ok(result.includes(ORPHANED_CLOUD_SESSION_HEADING));
+  assert.ok(result.includes(startedAt.toISOString()));
+  assert.ok(result.includes("gh-compat.sh remove-label 7 cc-need-human-check"));
+  // 後始末は cc-cloud-done の付与（最後の操作）より前に置く。
+  assert.ok(result.indexOf("remove-label 7") < result.indexOf("add-label 7"));
+  assert.ok(
+    !appendCloudDoneInstruction("/skill 1", { type: "issue", number: 7 }).includes(ORPHANED_CLOUD_SESSION_HEADING),
+  );
 });
 
 // MCP の create_pull_request は labels / assignees を持たず、MCP のコミットでは CI が起動しない

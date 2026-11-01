@@ -8,6 +8,10 @@ import { DEFAULT_PERMISSION_MODE, type PermissionMode, type RunMode } from "./us
 // 文言を共有し、どちらかだけ変更して取得が黙って壊れる事故を防ぐ。
 export const CLOUD_REPORT_HEADING = "## claude-task-worker 実行結果";
 
+// ワーカーがクラウドタスクの待機を打ち切ったときに投稿するコメントの見出し。生成側
+// （process-manager.ts）と、完走したセッションに後始末させる指示（appendCloudDoneInstruction）で共有する。
+export const ORPHANED_CLOUD_SESSION_HEADING = "## 孤立クラウドセッションの可能性";
+
 // ワーカーは各スキルを自律実行モードで起動する（default モードは `claude -p`、
 // herdr モードは herdr タブ内の TUI セッション。どちらも応答するユーザーは常駐しない）。
 // 以下のツールはこの実行形態では原理的に使い道がない（または有害）なため、CLI の
@@ -380,7 +384,12 @@ export interface CloudPromptTarget {
 // 最終報告コメント（CLOUD_REPORT_HEADING）の投稿指示は `debug`（CLI の `--debug`）が
 // 立っているときだけ付ける。通常運用ではワーカーが Slack へ通知するので十分で、
 // 毎タスク投稿すると Issue/PR が実行ログで埋まるため。
-export function appendCloudDoneInstruction(prompt: string, target: CloudPromptTarget, debug = false): string {
+export function appendCloudDoneInstruction(
+  prompt: string,
+  target: CloudPromptTarget,
+  debug = false,
+  startedAt?: Date,
+): string {
   const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
   const checkoutInstruction = buildCloudCheckoutInstruction(target);
   const worktreeInstruction = buildCloudWorktreeInstruction(prompt);
@@ -388,9 +397,21 @@ export function appendCloudDoneInstruction(prompt: string, target: CloudPromptTa
     ? `\`${CLOUD_DONE_LABEL}\` ラベルを付ける直前に、${targetLabel} へ \`${CLOUD_REPORT_HEADING}\` を見出しとするコメントを1件投稿し、本文に最終報告（完了・中断にかかわらず）を書くこと。GitHub MCP（\`add_issue_comment\`）を優先し、失敗した場合のみ \`gh ${target.type} comment ${target.number} --body-file -\` へフォールバックすること（フォールバックは1回まで）。ワーカーはこのコメントを最終レポートとして回収し Slack 通知に載せる。`
     : "";
   const labelInstruction = `${debug ? "上記コメントの投稿後、" : ""}このセッションの最後の操作として ${targetLabel} に \`${CLOUD_DONE_LABEL}\` ラベルを付与すること。付与は \`bash \${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh add-label ${target.number} ${CLOUD_DONE_LABEL}\` で行い、失敗した場合のみ \`gh api -X POST repos/{owner}/{repo}/issues/${target.number}/labels -f "labels[]=${CLOUD_DONE_LABEL}"\` へフォールバックすること（フォールバックは1回まで）。**GitHub MCP の \`issue_write\` / \`pull_request_write\`（method: \`update\`）は使わないこと** — 同ツールの \`labels\` は全置換で、\`${CLOUD_DONE_LABEL}\` を足すつもりの呼び出しが既存ラベル（\`cc-triage-scope\` / \`cc-in-progress\` 等）を巻き添えで消し、その Issue/PR がワーカーのポーリング対象から外れる。ワーカーはこのラベルでタスクの終了を検知しており、付与されないとタイムアウトまで完了扱いにならない。`;
-  return [prompt, checkoutInstruction, worktreeInstruction, reportInstruction, labelInstruction]
+  const orphanInstruction = startedAt ? buildCloudOrphanCleanupInstruction(target, startedAt) : "";
+  return [prompt, checkoutInstruction, worktreeInstruction, reportInstruction, orphanInstruction, labelInstruction]
     .filter((part) => part !== "")
     .join("\n\n");
+}
+
+// ワーカーがシャットダウン等で待機を打ち切ると、セッションが動いている最中に
+// cc-need-human-check と孤立コメント（ORPHANED_CLOUD_SESSION_HEADING）が付く。セッションが
+// その後に完走しても、ワーカーはもう見ていないためラベルが残り、正しく完了したタスクが
+// 人手確認待ちで止まる。完走を知っているのはセッション自身だけなので、ここで外させる。
+// 孤立コメントが今回の起動時刻より後にある場合に限るのは、それ以外の理由（スキル自身の判断や
+// 4時間のタイムアウト）で付いたラベルまで外さないため。
+export function buildCloudOrphanCleanupInstruction(target: CloudPromptTarget, startedAt: Date): string {
+  const targetLabel = target.type === "issue" ? `Issue #${target.number}` : `PR #${target.number}`;
+  return `\`${CLOUD_DONE_LABEL}\` を付ける直前に、${targetLabel} に \`cc-need-human-check\` ラベルが付いているかを確認すること。付いていて、かつ ${startedAt.toISOString()} より後に \`${ORPHANED_CLOUD_SESSION_HEADING}\` を見出しとするコメントが投稿されている場合は、ワーカーがこのセッションの完了を待たずに停止したことを示すので、\`bash \${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh remove-label ${target.number} cc-need-human-check\` で外すこと（MCP の \`issue_write\` / \`pull_request_write\` は使わない）。ただし、このセッション自身がスキルの手順として \`cc-need-human-check\` を付けた場合、およびタスクを完遂できなかった場合は外さないこと。`;
 }
 
 // Issue 系・PR 系の両方へ付与する worktree ガードの免除指示。
@@ -481,10 +502,16 @@ export function buildCloudToolRestriction(): string {
 // スラッシュコマンドのみをスキル起動として解釈するため。原則・ツール制限を先に
 // 連結すると本来先頭にあるべきスラッシュコマンドが本文中ほどへずれ、リテラル
 // 文字列として扱われて SKILL.md がロードされなくなる。
-export function buildCloudPrompt(prompt: string, model: string, target?: CloudPromptTarget, debug = false): string {
+export function buildCloudPrompt(
+  prompt: string,
+  model: string,
+  target?: CloudPromptTarget,
+  debug = false,
+  startedAt?: Date,
+): string {
   const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}`;
   const withPrinciples = `${prompt}\n\n${principles}`;
-  return target ? appendCloudDoneInstruction(withPrinciples, target, debug) : withPrinciples;
+  return target ? appendCloudDoneInstruction(withPrinciples, target, debug, startedAt) : withPrinciples;
 }
 
 // POSIX シェル向けのシングルクォート引用。herdr の `pane send-text` はシェルへ
