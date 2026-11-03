@@ -471,8 +471,8 @@ if (hasProjectFilter()) {
   // RunCat 用スナップショットを更新し続ける（Slack 送信は起動時のみ。毎回送ると通知が埋まるため）
   const pollUsage = async (notify: boolean): Promise<void> => {
     // buildTokenLimitText は取得した利用状況で RunCat 用スナップショットも更新する
-    const text = await buildTokenLimitText();
-    if (!text) {
+    const text = await buildTokenLimitText(true);
+    if (text === null) {
       console.error(`[usage] ${new Date().toISOString()} Failed to fetch usage info`);
       return;
     }

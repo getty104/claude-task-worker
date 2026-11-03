@@ -13,8 +13,7 @@ const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 /** `usage` コマンドが利用状況をポーリングする間隔 */
 export const USAGE_POLL_INTERVAL_SECONDS = 360;
-// ポーリングのたびに API から取り直せるよう、TTL は間隔より少し短くする
-const USAGE_CACHE_TTL_SECONDS = USAGE_POLL_INTERVAL_SECONDS - 10;
+const USAGE_CACHE_TTL_SECONDS = 360;
 
 export async function send(payload: Record<string, unknown>): Promise<void> {
   if (!WEBHOOK_URL) return;
@@ -98,8 +97,9 @@ function writeUsageCache(data: UsageInfo): void {
   }
 }
 
-async function fetchUsageInfo(): Promise<UsageInfo | null> {
-  const cached = readUsageCache();
+async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
+  // fresh は `usage` の定期取得用。キャッシュの経過時間（取得完了時刻）に左右されず毎回取り直す
+  const cached = fresh ? null : readUsageCache();
   if (cached) return cached;
 
   try {
@@ -161,10 +161,11 @@ export function formatTokenLimitText(usage: UsageInfo): string {
  * 現在の利用状況を取得し、RunCat Neo 用スナップショットを更新したうえで通知に添えるテキストを返す。
  * ワーカーの完了/失敗通知はすべてここを通るため、タスクが終わるたびに RunCat 側も最新化される
  * （Slack webhook 未設定でも通知が no-op になるだけで、スナップショットの更新は行われる）。
+ * 取得に失敗したときだけ null を返す（どの枠も返らない正常応答は空文字）。
  */
-export async function buildTokenLimitText(): Promise<string> {
-  const usage = await fetchUsageInfo();
-  if (!usage) return "";
+export async function buildTokenLimitText(fresh = false): Promise<string | null> {
+  const usage = await fetchUsageInfo(fresh);
+  if (!usage) return null;
   writeRuncatUsage(usage);
   return formatTokenLimitText(usage);
 }
@@ -225,7 +226,7 @@ export async function notifyTaskCompleted(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = await buildTokenLimitText();
+  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "completed",
@@ -250,7 +251,7 @@ export async function notifyTaskFailed(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = await buildTokenLimitText();
+  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "failed",
