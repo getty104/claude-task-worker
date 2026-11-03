@@ -6,8 +6,14 @@ import type * as GhModule from "./gh";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
-const { hasLabel, hasOpenBlockers, findPrNumberClosingIssue, findCommentSince, parseClosingIssueNumbers } =
-  (await import("./gh")) as typeof GhModule;
+const {
+  hasLabel,
+  hasOpenBlockers,
+  findPrNumberClosingIssue,
+  findCommentSince,
+  parseClosingIssueNumbers,
+  excludePrsByLabels,
+} = (await import("./gh")) as typeof GhModule;
 
 const REPO_INFO_STDOUT = JSON.stringify({
   owner: { login: "getty104" },
@@ -224,4 +230,16 @@ test("parseClosingIssueNumbers picks up every closing keyword form and de-duplic
 
 test("parseClosingIssueNumbers returns an empty list when no closing keyword is present", () => {
   assert.deepEqual(parseClosingIssueNumbers("## What\n関連 #123 に触れるだけで closing keyword は無い"), []);
+});
+
+test("excludePrsByLabels drops PRs carrying any excluded label, judged from their actual labels", () => {
+  const prs = [
+    { number: 1, labels: [{ name: "cc-triage-scope" }] },
+    { number: 2, labels: [{ name: "cc-triage-scope" }, { name: "cc-in-progress" }] },
+    { number: 3, labels: [] },
+  ];
+  assert.deepEqual(
+    excludePrsByLabels(prs, ["cc-in-progress", "cc-need-human-check"]).map((pr) => pr.number),
+    [1, 3],
+  );
 });

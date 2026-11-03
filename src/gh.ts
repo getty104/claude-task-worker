@@ -530,16 +530,25 @@ async function fetchPRChecks(prNumber: number): Promise<PRCheck[]> {
   return JSON.parse(output) as PRCheck[];
 }
 
+// 除外ラベルの判定は検索クエリ（`-label:`）に入れず、返ってきた PR の実ラベルで行う。
+// 検索インデックスはラベルの付け外しが短時間に続くと古い状態のまま止まることがあり、
+// 外したはずの cc-in-progress が残っているとみなされて PR が恒久的に拾われなくなる
+// （実測: ラベルが実際には整っていたのに12時間拾われず、次の更新で解消した）。
+export function excludePrsByLabels<T extends { labels: { name: string }[] }>(prs: T[], excludeLabels: string[]): T[] {
+  return prs.filter((pr) => !pr.labels.some((l) => excludeLabels.includes(l.name)));
+}
+
 // CI 未完了の PR が古い順の先頭を占めると isCICompleted フィルタで除外され、
-// 後続の完了済み PR が取得枠から溢れて飢餓する。取得件数は同時実行数とは
-// 切り離し、フィルタ前に十分な件数を確保するため既定値を 5 とする。
+// 後続の完了済み PR が取得枠から溢れて飢餓する。CI 確認の対象は同時実行数とは切り離して
+// 最大 `limit` 件確保する。除外ラベル付きの PR も取得枠を食うため、取得は FETCH_LIMIT 件まで広げる。
+const PR_LIST_FETCH_LIMIT = 50;
+
 export async function listPullRequestsWithChecks(
   assignee?: string,
   label?: string,
   excludeLabels: string[] = [],
   limit = 5,
 ): Promise<PullRequestWithChecks[]> {
-  const search = ["sort:created-asc", ...excludeLabels.map((l) => `-label:"${l}"`)].join(" ");
   const args = [
     "pr",
     "list",
@@ -548,9 +557,9 @@ export async function listPullRequestsWithChecks(
     "--json",
     "number,title,labels,headRefName",
     "--search",
-    search,
+    "sort:created-asc",
     "--limit",
-    String(limit),
+    String(PR_LIST_FETCH_LIMIT),
   ];
   if (assignee) {
     args.push("--assignee", assignee);
@@ -559,7 +568,7 @@ export async function listPullRequestsWithChecks(
     args.push("--label", label);
   }
   const output = await execGh(args);
-  const prs: PullRequest[] = JSON.parse(output);
+  const prs = excludePrsByLabels(JSON.parse(output) as PullRequest[], excludeLabels).slice(0, limit);
   const withChecks = await Promise.all(prs.map(async (pr) => ({ ...pr, checks: await fetchPRChecks(pr.number) })));
   return withChecks.filter((pr) => isCICompleted(pr.checks));
 }
