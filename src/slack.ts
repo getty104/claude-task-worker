@@ -44,7 +44,10 @@ interface UsageWindow {
 }
 
 /** usage API のレスポンスを UsageInfo へ。欠けている窓は null にする（throw しない） */
-export function parseUsageResponse(body: { five_hour?: UsageWindow | null; seven_day?: UsageWindow | null }): UsageInfo {
+export function parseUsageResponse(body: {
+  five_hour?: UsageWindow | null;
+  seven_day?: UsageWindow | null;
+}): UsageInfo {
   return {
     fiveHourUtilization: body.five_hour?.utilization ?? null,
     fiveHourResetsAt: body.five_hour?.resets_at ?? null,

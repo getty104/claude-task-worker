@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import type * as SlackModule from "./slack";
 import { appendCloudFailureGuidance } from "./task-result";
 
-const { buildTaskNotificationText, formatTokenLimitText, parseUsageResponse } = (await import("./slack")) as typeof SlackModule;
+const { buildTaskNotificationText, formatTokenLimitText, parseUsageResponse } =
+  (await import("./slack")) as typeof SlackModule;
 
 const base = {
   workerName: "exec-issue",
@@ -110,7 +111,10 @@ test("tokenText is included in the body", () => {
 });
 
 test("parseUsageResponse tolerates a missing five_hour window (e.g. Ultra plan)", () => {
-  const usage = parseUsageResponse({ five_hour: null, seven_day: { utilization: 12, resets_at: "2026-07-22T01:30:00Z" } });
+  const usage = parseUsageResponse({
+    five_hour: null,
+    seven_day: { utilization: 12, resets_at: "2026-07-22T01:30:00Z" },
+  });
   assert.equal(usage.fiveHourUtilization, null);
   assert.equal(usage.sevenDayUtilization, 12);
   const text = formatTokenLimitText(usage);
