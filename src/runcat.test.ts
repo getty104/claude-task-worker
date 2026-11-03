@@ -87,3 +87,9 @@ test("writeRuncatUsage writes the snapshot and leaves no temp file behind", () =
   assert.equal(written.metrics.length, 2);
   assert.deepEqual(readdirSync(join(dir, "nested")), ["runcat-usage.json"]);
 });
+
+test("buildRuncatSnapshot omits a missing five-hour window", () => {
+  const snapshot = buildRuncatSnapshot({ ...usage, fiveHourUtilization: null, fiveHourResetsAt: null }, NOW);
+  assert.deepEqual(snapshot.metrics.map((m) => m.title), ["7d"]);
+  assert.equal(snapshot.metricsBarValue, "34.5678 ↻10");
+});

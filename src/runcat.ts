@@ -49,13 +49,14 @@ function ceilToMinute(date: Date): Date {
   return remainder === 0 ? date : new Date(date.getTime() + (MINUTE_MS - remainder));
 }
 
-function parseResetsAt(isoString: string): Date | null {
+function parseResetsAt(isoString: string | null): Date | null {
+  if (!isoString) return null;
   const date = new Date(isoString);
   return Number.isNaN(date.getTime()) ? null : ceilToMinute(date);
 }
 
 /** 'HH:MM' 形式。日を跨ぐ場合は 'MM/DD HH:MM' として日付も付ける。不正値は空文字。 */
-export function resetStamp(isoString: string, now: Date = new Date()): string {
+export function resetStamp(isoString: string | null, now: Date = new Date()): string {
   const date = parseResetsAt(isoString);
   if (!date) return "";
   const reset = jstFields(date);
@@ -66,12 +67,12 @@ export function resetStamp(isoString: string, now: Date = new Date()): string {
 }
 
 /** 'HH' のみ。バーのように幅が限られる用途向け。不正値は空文字。 */
-export function resetHour(isoString: string): string {
+export function resetHour(isoString: string | null): string {
   const date = parseResetsAt(isoString);
   return date ? jstFields(date).hour : "";
 }
 
-function metric(title: string, pct: number, resetsAt: string, now: Date): RuncatMetric {
+function metric(title: string, pct: number, resetsAt: string | null, now: Date): RuncatMetric {
   const stamp = resetStamp(resetsAt, now);
   return {
     title,
@@ -81,16 +82,19 @@ function metric(title: string, pct: number, resetsAt: string, now: Date): Runcat
 }
 
 export function buildRuncatSnapshot(usage: UsageInfo, now: Date = new Date()): RuncatSnapshot {
-  // バーは狭いので % は省き、5h のリセットを時 (HH) だけ添える
-  const bar = `${formatG(usage.fiveHourUtilization)}/${formatG(usage.sevenDayUtilization)}`;
-  const stamp = resetHour(usage.fiveHourResetsAt);
+  // プランによっては 5h / 7d が返らないので、返った窓だけを載せる
+  const windows: Array<[string, number | null, string | null]> = [
+    ["5h", usage.fiveHourUtilization, usage.fiveHourResetsAt],
+    ["7d", usage.sevenDayUtilization, usage.sevenDayResetsAt],
+  ];
+  const present = windows.filter((w): w is [string, number, string | null] => w[1] !== null);
+  // バーは狭いので % は省き、先頭の窓（通常は 5h）のリセットを時 (HH) だけ添える
+  const bar = present.map(([, pct]) => formatG(pct)).join("/");
+  const stamp = present.length > 0 ? resetHour(present[0][2]) : "";
   return {
     title: "Claude Code",
     symbol: "staroflife",
-    metrics: [
-      metric("5h", usage.fiveHourUtilization, usage.fiveHourResetsAt, now),
-      metric("7d", usage.sevenDayUtilization, usage.sevenDayResetsAt, now),
-    ],
+    metrics: present.map(([title, pct, resetsAt]) => metric(title, pct, resetsAt, now)),
     metricsBarValue: stamp ? `${bar} ↻${stamp}` : bar,
     lastUpdatedDate: now.toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
