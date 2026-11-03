@@ -96,3 +96,10 @@ test("buildRuncatSnapshot omits a missing five-hour window", () => {
   );
   assert.equal(snapshot.metricsBarValue, "34.5678 ↻10");
 });
+
+test("writeRuncatUsage does not throw when the output directory cannot be created", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runcat-"));
+  const file = join(dir, "file");
+  writeRuncatUsage(usage, file); // 通常ファイルを作る
+  assert.doesNotThrow(() => writeRuncatUsage(usage, join(file, "out.json")));
+});

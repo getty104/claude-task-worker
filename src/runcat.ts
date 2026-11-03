@@ -113,7 +113,12 @@ export function writeRuncatUsage(usage: UsageInfo, outFile: string = RUNCAT_OUT_
     writeFileSync(tmp, JSON.stringify(snapshot), "utf-8");
     renameSync(tmp, outFile);
   } catch (err) {
-    rmSync(tmp, { force: true });
+    // 掃除の失敗（ENOTDIR / EACCES）まで投げると常駐中の usage が unhandled rejection で落ちる
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // ignore
+    }
     console.error(`[runcat] Failed to write ${outFile}: ${err}`);
   }
 }
