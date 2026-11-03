@@ -17,7 +17,7 @@ import { install } from "./commands/install";
 import { cloudSetup } from "./commands/cloud-setup";
 import { update } from "./commands/update";
 import { version, notifyIfOutdated } from "./commands/version";
-import { buildTokenLimitText, send } from "./slack";
+import { buildTokenLimitText, send, USAGE_POLL_INTERVAL_SECONDS } from "./slack";
 import {
   hasProjectFilter,
   parseProjectFilters,
@@ -467,16 +467,21 @@ if (hasProjectFilter()) {
     await cloudSetup({ force: process.argv.slice(3).includes("--force") });
   })();
 } else if (workerType === "usage") {
-  (async () => {
+  // 起動時に1回取得して Slack へ送り、以降は USAGE_POLL_INTERVAL_SECONDS ごとに取得して
+  // RunCat 用スナップショットを更新し続ける（Slack 送信は起動時のみ。毎回送ると通知が埋まるため）
+  const pollUsage = async (notify: boolean): Promise<void> => {
     // buildTokenLimitText は取得した利用状況で RunCat 用スナップショットも更新する
-    const text = await buildTokenLimitText();
-    if (!text) {
-      console.error("Failed to fetch usage info");
-      process.exit(1);
+    const text = await buildTokenLimitText(true);
+    if (text === null) {
+      console.error(`[usage] ${new Date().toISOString()} Failed to fetch usage info`);
+      return;
     }
-    console.log(text.trim());
-    await send({ text: `📊 Usage${text}` });
-  })();
+    console.log(`[usage] ${new Date().toISOString()}${text}`);
+    if (notify) await send({ text: `📊 Usage${text}` });
+  };
+  void pollUsage(true);
+  setInterval(() => void pollUsage(false), USAGE_POLL_INTERVAL_SECONDS * 1000);
+  console.log(`[usage] polling every ${USAGE_POLL_INTERVAL_SECONDS}s (Ctrl-C to stop)`);
 } else if (workerType === "list-workers") {
   for (const e of PRESET_WORKERS) printWorkerRow(e.definition.name, "preset", "preset");
   for (const c of customWorkers) printWorkerRow(c.definition.name, "custom", c.source);

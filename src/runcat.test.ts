@@ -87,3 +87,19 @@ test("writeRuncatUsage writes the snapshot and leaves no temp file behind", () =
   assert.equal(written.metrics.length, 2);
   assert.deepEqual(readdirSync(join(dir, "nested")), ["runcat-usage.json"]);
 });
+
+test("buildRuncatSnapshot omits a missing five-hour window", () => {
+  const snapshot = buildRuncatSnapshot({ ...usage, fiveHourUtilization: null, fiveHourResetsAt: null }, NOW);
+  assert.deepEqual(
+    snapshot.metrics.map((m) => m.title),
+    ["7d"],
+  );
+  assert.equal(snapshot.metricsBarValue, "34.5678 ↻10");
+});
+
+test("writeRuncatUsage does not throw when the output directory cannot be created", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runcat-"));
+  const file = join(dir, "file");
+  writeRuncatUsage(usage, file); // 通常ファイルを作る
+  assert.doesNotThrow(() => writeRuncatUsage(usage, join(file, "out.json")));
+});

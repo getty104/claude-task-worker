@@ -11,6 +11,8 @@ const execAsync = promisify(exec);
 
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
+/** `usage` コマンドが利用状況をポーリングする間隔 */
+export const USAGE_POLL_INTERVAL_SECONDS = 360;
 const USAGE_CACHE_TTL_SECONDS = 360;
 
 export async function send(payload: Record<string, unknown>): Promise<void> {
@@ -27,11 +29,30 @@ export async function send(payload: Record<string, unknown>): Promise<void> {
   }
 }
 
+// プラン（Ultra 等）によっては API が five_hour / seven_day を null で返す。その窓は null として扱う
 export interface UsageInfo {
-  fiveHourUtilization: number;
-  fiveHourResetsAt: string;
-  sevenDayUtilization: number;
-  sevenDayResetsAt: string;
+  fiveHourUtilization: number | null;
+  fiveHourResetsAt: string | null;
+  sevenDayUtilization: number | null;
+  sevenDayResetsAt: string | null;
+}
+
+interface UsageWindow {
+  utilization?: number | null;
+  resets_at?: string | null;
+}
+
+/** usage API のレスポンスを UsageInfo へ。欠けている窓は null にする（throw しない） */
+export function parseUsageResponse(body: {
+  five_hour?: UsageWindow | null;
+  seven_day?: UsageWindow | null;
+}): UsageInfo {
+  return {
+    fiveHourUtilization: body.five_hour?.utilization ?? null,
+    fiveHourResetsAt: body.five_hour?.resets_at ?? null,
+    sevenDayUtilization: body.seven_day?.utilization ?? null,
+    sevenDayResetsAt: body.seven_day?.resets_at ?? null,
+  };
 }
 
 interface CredentialPayload {
@@ -76,8 +97,9 @@ function writeUsageCache(data: UsageInfo): void {
   }
 }
 
-async function fetchUsageInfo(): Promise<UsageInfo | null> {
-  const cached = readUsageCache();
+async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
+  // fresh は `usage` の定期取得用。キャッシュの経過時間（取得完了時刻）に左右されず毎回取り直す
+  const cached = fresh ? null : readUsageCache();
   if (cached) return cached;
 
   try {
@@ -92,13 +114,7 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
       console.error(`[slack] Usage API returned ${res.status}`);
       return null;
     }
-    const body = await res.json();
-    const data: UsageInfo = {
-      fiveHourUtilization: body.five_hour.utilization,
-      fiveHourResetsAt: body.five_hour.resets_at,
-      sevenDayUtilization: body.seven_day.utilization,
-      sevenDayResetsAt: body.seven_day.resets_at,
-    };
+    const data = parseUsageResponse(await res.json());
     writeUsageCache(data);
     return data;
   } catch (err) {
@@ -124,23 +140,32 @@ function formatResetTimeJST(isoString: string): string {
   });
 }
 
-function formatTokenLimitText(usage: UsageInfo): string {
-  const fiveH = usage.fiveHourUtilization.toFixed(1);
-  const sevenD = usage.sevenDayUtilization.toFixed(1);
-  const emoji = utilizationEmoji(Math.max(usage.fiveHourUtilization, usage.sevenDayUtilization));
-  const fiveHReset = formatResetTimeJST(usage.fiveHourResetsAt);
-  const sevenDReset = formatResetTimeJST(usage.sevenDayResetsAt);
-  return ` | ${emoji} 5h: ${fiveH}% (reset: ${fiveHReset}) / 7d: ${sevenD}% (reset: ${sevenDReset})`;
+function formatWindow(label: string, utilization: number | null, resetsAt: string | null): string | null {
+  if (utilization === null) return null;
+  const reset = resetsAt ? ` (reset: ${formatResetTimeJST(resetsAt)})` : "";
+  return `${label}: ${utilization.toFixed(1)}%${reset}`;
+}
+
+/** 返ってきた窓だけを並べる。どちらも無ければ空文字 */
+export function formatTokenLimitText(usage: UsageInfo): string {
+  const parts = [
+    formatWindow("5h", usage.fiveHourUtilization, usage.fiveHourResetsAt),
+    formatWindow("7d", usage.sevenDayUtilization, usage.sevenDayResetsAt),
+  ].filter((p): p is string => p !== null);
+  if (parts.length === 0) return "";
+  const values = [usage.fiveHourUtilization, usage.sevenDayUtilization].filter((v): v is number => v !== null);
+  return ` | ${utilizationEmoji(Math.max(...values))} ${parts.join(" / ")}`;
 }
 
 /**
  * 現在の利用状況を取得し、RunCat Neo 用スナップショットを更新したうえで通知に添えるテキストを返す。
  * ワーカーの完了/失敗通知はすべてここを通るため、タスクが終わるたびに RunCat 側も最新化される
  * （Slack webhook 未設定でも通知が no-op になるだけで、スナップショットの更新は行われる）。
+ * 取得に失敗したときだけ null を返す（どの枠も返らない正常応答は空文字）。
  */
-export async function buildTokenLimitText(): Promise<string> {
-  const usage = await fetchUsageInfo();
-  if (!usage) return "";
+export async function buildTokenLimitText(fresh = false): Promise<string | null> {
+  const usage = await fetchUsageInfo(fresh);
+  if (!usage) return null;
   writeRuncatUsage(usage);
   return formatTokenLimitText(usage);
 }
@@ -201,7 +226,7 @@ export async function notifyTaskCompleted(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = await buildTokenLimitText();
+  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "completed",
@@ -226,7 +251,7 @@ export async function notifyTaskFailed(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = await buildTokenLimitText();
+  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "failed",
