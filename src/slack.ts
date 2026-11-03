@@ -12,7 +12,7 @@ const execAsync = promisify(exec);
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 /** `usage` コマンドが利用状況をポーリングする間隔 */
-export const USAGE_POLL_INTERVAL_SECONDS = 180;
+export const USAGE_POLL_INTERVAL_SECONDS = 360;
 // ポーリングのたびに API から取り直せるよう、TTL は間隔より少し短くする
 const USAGE_CACHE_TTL_SECONDS = USAGE_POLL_INTERVAL_SECONDS - 10;
 

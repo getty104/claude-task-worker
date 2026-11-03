@@ -139,7 +139,7 @@ claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--
 | `install` / `update` | 上記「セットアップ」を参照 |
 | `cloud-setup [--force]` | クラウド VM 側の準備（下記「`--cloud`」を参照） |
 | `list-workers` | プリセットとカスタムの全ワーカーを名前・種別・有効/無効・ロード元で表示（`workerFiles` のロード失敗時は exit 1） |
-| `usage` | Claude API 使用状況（5時間/7日間の利用率とリセット時刻）を表示し、Slack にも通知。以降は180秒ごとに取得し直して表示・RunCat 用スナップショットを更新し続ける（Ctrl-C で終了。Slack 通知は起動時のみ）。プランによって返らない窓（Ultra の5時間枠など）は省いて表示する |
+| `usage` | Claude API 使用状況（5時間/7日間の利用率とリセット時刻）を表示し、Slack にも通知。以降は360秒（6分）ごとに取得し直して表示・RunCat 用スナップショットを更新し続ける（Ctrl-C で終了。Slack 通知は起動時のみ）。プランによって返らない窓（Ultra の5時間枠など）は省いて表示する |
 | `version` | CLI のバージョンを表示（`--version` / `-v` も可） |
 
 ### `--epic <issue-number>`
