@@ -217,6 +217,8 @@ jobs:
           # endpoints reject as an unknown field; send no extra body as before.
           llm_extra_body: "{}"
           language: Japanese
+          # The action defaults to 300s per LLM request, which the configured model exceeds on this repo's diffs.
+          llm_timeout: 600
           background: ${{ steps.background.outputs.text }}
           base_ref: ${{ steps.pr-context.outputs.base_ref }}
           head_sha: ${{ steps.pr-context.outputs.head_sha }}
