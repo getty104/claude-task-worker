@@ -487,6 +487,18 @@ export function buildCloudToolRestriction(): string {
   return `クラウド実行では \`--disallowedTools\` フラグによるツール制限が反映されないため、以下のツールを使わないこと: ${DISALLOWED_TOOLS.join(", ")}`;
 }
 
+// クラウドセッションの最終メッセージの書き方。
+//
+// claude.ai はターン終了後に最終メッセージを要約し、読み手への依頼文（「〜を判断する必要が
+// あります」「〜してください」）があると `needs_action` を立ててセッションを「返信待ち」に
+// 分類する。ワーカーのセッションは完走して `cc-cloud-done` を付けているのに UI 上は返信待ちで
+// 残り、本当に止まったセッションと見分けがつかなくなる。人への引き継ぎは GitHub のラベルと
+// コメントが担うため、最終メッセージは事実の報告にとどめさせる。分類は claude.ai 側の要約で
+// 決まるので、この指示で確実に防げるわけではない。
+export function buildCloudFinalMessageInstruction(): string {
+  return "このセッションの最終メッセージ（ターンを終えるときの最後の発言）は、何をしたか・どこで止まったかの事実の報告にとどめること。このセッションに返信する人はいないため、読み手への依頼・質問・判断の要求（「〜を判断する必要があります」「〜してください」「〜しますか」）で締めないこと。人の判断が必要な事項は、スキルの手順どおり GitHub のラベルとコメントで引き継ぎ、最終メッセージには「`cc-need-human-check` を付けて PR #N に理由をコメントした」のように、引き継いだ事実だけを書くこと。";
+}
+
 // クラウドセッションの初期プロンプト本文を組み立てる。
 //
 // クラウド実行（Claude Code on the web）は `--append-system-prompt-file` /
@@ -509,7 +521,7 @@ export function buildCloudPrompt(
   debug = false,
   startedAt?: Date,
 ): string {
-  const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}`;
+  const principles = `以下はこのセッションの実行原則である。クラウド実行ではシステムプロンプトによる注入が反映されないため、プロンプト本文として渡している。\n\n${systemPromptFor(model)}\n\n${buildCloudToolRestriction()}\n\n${buildCloudGitHubAccessInstruction()}\n\n${buildCloudFinalMessageInstruction()}`;
   const withPrinciples = `${prompt}\n\n${principles}`;
   return target ? appendCloudDoneInstruction(withPrinciples, target, debug, startedAt) : withPrinciples;
 }

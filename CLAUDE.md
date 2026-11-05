@@ -452,6 +452,10 @@ claude CLI 側の既定解決（2.1.251 のバンドル実測）は次の順。`
 - `buildClaudeEnv(mode, cloud)` は `cloud` のときのみ `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を注入する。GitHub App 連携済みのリポジトリでも `--ref` / `--on-branch` が `the GitHub App is not set up for this repository` として誤って拒否される Claude Code 側のバグ（[anthropics/claude-code#81776](https://github.com/anthropics/claude-code/issues/81776)、2026-08-29時点 OPEN）の回避策。`createCloudSession()` の `spawn()` に渡す env へ直接設定するため、作成コマンドの起動プロセスに自動的に効く
 - **最終レポートはドライバ経路には乗らないため、Issue/PR コメント経由で回収する**（実測 `docs/cloud-session-launch-flags.md`（削除済み。git 履歴を参照） の M-1 / M-3 / M-6 / M-8、Issue #285）。クラウドセッションにアタッチし続けるローカルプロセスが存在せず（`claude --cloud "<desc>"` は実TTYでも作成後に即 exit、対話アタッチはアカウント単位で無効、`--teleport` はローカル実行に化ける）、クラウド VM で実行されたターンは transcript にもペイン内容にも現れない。そこで **`--debug` フラグ指定時のみ**、`appendCloudDoneInstruction()`（`src/claude-args.ts`）が `cc-cloud-done` を付ける直前に、固定見出し `CLOUD_REPORT_HEADING`（生成側・取得側で共有する定数）を持つコメントへ最終報告を投稿させ、ワーカーは完了検知（次節）後に1回だけ `findCommentSince()`（`src/gh.ts`）でその本文を取得して `TaskResult.output` にする。取得できない・例外の場合は従来どおりの定型文へフォールバックし、通知自体は落とさない。**`--debug`（`hasDebugFlag()`、`src/dispatch-args.ts`）が無い既定ではコメントを投稿させず、回収もしない** — 通常運用の最終報告は Slack 通知で足りる一方、毎タスク投稿すると Issue/PR がワーカーの実行ログで埋まるため。投稿指示だけを落とし、完了検知の `cc-cloud-done` 付与指示は常に付ける（落とすとタイムアウトまで完了を検知できない）。**セッションIDを得られるのは起動コマンドの stdout だけ**で、`extractCloudSessionId()`（`src/herdr-runner.ts`）が `Created cloud session: <id>` / `https://claude.ai/code/<id>` をパースし、Slack 通知の先頭にセッション URL を1行入れる（`src/slack.ts`）。取得できなければ URL を省くだけで通知自体は落とさない。**完了検知だけは同じ制約下で別チャネル（GitHub ラベル）へ逃がしてある**（次節）
 
+#### 最終メッセージを依頼文で締めさせない（「返信待ち」表示の回避）
+
+claude.ai はクラウドセッションのターン終了後に最終メッセージを要約し、読み手への依頼文（「〜を判断する必要があります」等）があると `needs_action` を立てて「返信待ち」（`status_bucket: BLOCKED`）に分類する。セッションは完走して `cc-cloud-done` も付けているのに UI 上は返信待ちで残るため、`buildCloudPrompt()` が `buildCloudFinalMessageInstruction()` で「最終メッセージは事実の報告にとどめ、人への引き継ぎはラベルとコメントで行う」と伝える。分類は claude.ai 側の要約が決めるので、確実には防げない。
+
 #### 完了検知（`cc-cloud-done` ラベルのポーリング）
 
 クラウドをドライブし続けるローカル TUI が存在しない（M-1）ため、herdr の agent ステータスではクラウド側の完了を検知できない。代わりに**セッション自身が最後の操作として対象 Issue/PR へ `cc-cloud-done` ラベルを付け、ワーカーがそれをポーリングする**（`src/process-manager.ts` の `waitForCloudTask()`）。
@@ -623,12 +627,14 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 ### `cc-need-human-check`（PR側）と解けないコンフリクトのループ遮断
 
-PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリング候補から除外する（`src/workers/triage-pr.ts` の `excludeLabels`）。同ラベルが付く経路は2つ:
+PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリング候補から除外する（`src/workers/triage-pr.ts` の `excludeLabels`）。同ラベルが付く経路は3つ:
 
 1. **`triage-pr` のパターンC**: CI失敗の原因が**このPRの差分をどう変更しても解消しない種類**（APIコスト/使用量の上限超過、クレジット枯渇、外部サービス障害・レート制限、シークレット/権限不足、CIランナー障害）の場合のみ。型チェック・テスト・Lint・ビルドの失敗や、ベースブランチ由来のテスト失敗は**リポジトリ内の変更（コード・`.pen`・リベース）で直せる余地がある**のでパターンA（`cc-fix-onetime`）へ倒す。デザインPR（`cc-ui-design`）でも基準は同じで、CI失敗を理由に `cc-fix-onetime` を回避しない。あわせて2つの制約がある:
    - **一過性の失敗は先に再実行で切り分ける（C-1）**: ネットワーク到達不能・レート制限・イメージ取得失敗・CIキャッシュ破損・同一run内の他ジョブが同じコードで成功しているのに特定ジョブだけ落ちている、といった失敗は再実行で解消しうる。`gh run view <run-id> --json attempt` が `1` の場合に限り `gh run rerun --failed` を1回だけ実行し、ラベルを付けずに「保留（CI再実行）」で終える（結果の評価は次のポーリングに任せる）。`attempt` を見ずに再実行すると、直らない失敗を毎ポーリングで再実行し続けるループになる。クレジット枯渇・シークレット欠落のような恒久的な失敗は再実行せず直接付与する。実運用では GitHub Actions のキャッシュ破損（`TypeError: __turbopack_context__.a is not a function`）で複数PRが恒久停止していた
    - **根拠はCI失敗に限る＋理由コメントを必ず残す（C-2）**: PR body の「`terraform apply` 未実施」のような作者の人間ゲート・承認待ちを根拠に付けない（CI以外の保留はラベルなしの「保留」報告で終える）。付与時は `gh pr comment` で失敗チェック名・失敗内容・差分では直せないと判断した根拠・ラベルを外せば再開する旨を投稿する。同ラベルはPRをポーリング対象から恒久的に外すため、GitHub上に根拠が残らないと「理由なくPRが止まった」ようにしか見えない
 2. **`resolve-conflict` ワーカーの `onCompleted`**: `resolve-pr-conflict` は解消困難（人間の仕様判断が必要・`.pen` の両側の変更が両立しないなど）の場合 `git rebase --abort` して「判定: `aborted`」を報告し**正常終了**する。`pr-worker` はこれを完了とみなして `cc-resolve-conflict` を外し `cc-triage-scope` を戻すため、そのままだと `triage-pr` が同じコンフリクトを再検知してラベルを付け直し、解けないコンフリクトを永久にリトライする（毎周Slack通知＋2セッション分のトークンを焼く）。`onCompleted` は出力が `aborted` かつ `getPrMergeable()` が **`CONFLICTING` を返した場合だけ** `cc-need-human-check` を付けてループを断つ（`shouldFlagUnresolvedConflict()`）。`UNKNOWN`（GitHub が再計算中）では付けない。判定にスキルの報告本文だけを使わないのは、abort 後に別経路で解消済みの可能性を排除できないため。この検証のため `PrWorkerConfig.onCompleted` はスキルの stdout を第2引数で受け取る
+
+3. **`fix-review-point` の「修正点がないのにCIが失敗している場合」**: 修正タスクが0件なのにCIが落ちている＝失敗の原因が指摘の外（ベースブランチ由来・時刻依存のテスト等）にある。ラベルを付けずに終えると `triage-pr` がパターンA（`cc-fix-onetime`）を付け直し、両スキルが数分おきに空振りし続ける（実測で数十往復）。同ラベルと理由コメントを付けたうえで、CI修正のIssueを `create-issue` で起票する（同じ失敗を扱う open なIssueがあれば再利用する。ベース由来の失敗は複数PRで同時に起きるため）
 
 `.pen` のコンフリクトを `triage-pr` が判別する必要はない（`resolve-pr-conflict` が `git status` で検出して `resolve-pencil-conflict` スキルへ内部委譲するため）。PR側の `cc-need-human-check` を外すと `triage-pr` のポーリングが再開する。
 
