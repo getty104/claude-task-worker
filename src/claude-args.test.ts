@@ -16,6 +16,7 @@ const {
   buildClaudeEnv,
   buildClaudeExecution,
   buildCloudCreateArgs,
+  buildCloudFinalMessageInstruction,
   buildCloudPrompt,
   buildCloudToolRestriction,
   buildCloudGitHubAccessInstruction,
@@ -647,6 +648,11 @@ test("buildCloudPrompt appends the addendum matching the model family", () => {
   assert.ok(!sonnetResult.includes(OPUS_SYSTEM_PROMPT_ADDENDUM));
   assert.ok(sonnetResult.includes(SONNET_SYSTEM_PROMPT_ADDENDUM));
   assert.ok(!opusResult.includes(SONNET_SYSTEM_PROMPT_ADDENDUM));
+});
+
+test("buildCloudPrompt tells the session not to end on a request to the reader", () => {
+  // 依頼文で締めると claude.ai が完走したセッションを「返信待ち」に分類するため。
+  assert.ok(buildCloudPrompt("/skill 1", "opus").includes(buildCloudFinalMessageInstruction()));
 });
 
 test("buildCloudPrompt includes the tool restriction text", () => {
