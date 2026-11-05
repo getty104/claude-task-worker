@@ -88,9 +88,9 @@ export function buildRuncatSnapshot(usage: UsageInfo, now: Date = new Date()): R
     ["7d", usage.sevenDayUtilization, usage.sevenDayResetsAt],
   ];
   const present = windows.filter((w): w is [string, number, string | null] => w[1] !== null);
-  // バーは狭いので % は省き、先頭の窓（通常は 5h）のリセットを時 (HH) だけ添える
+  // バーは狭いので % は省き、5h のリセットを時 (HH) だけ添える（5h が無ければ時刻は出さない）
   const bar = present.map(([, pct]) => formatG(pct)).join("/");
-  const stamp = present.length > 0 ? resetHour(present[0][2]) : "";
+  const stamp = usage.fiveHourUtilization !== null ? resetHour(usage.fiveHourResetsAt) : "";
   return {
     title: "Claude Code",
     symbol: "staroflife",
