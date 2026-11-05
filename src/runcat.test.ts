@@ -94,7 +94,7 @@ test("buildRuncatSnapshot omits a missing five-hour window", () => {
     snapshot.metrics.map((m) => m.title),
     ["7d"],
   );
-  assert.equal(snapshot.metricsBarValue, "34.5678 ↻10");
+  assert.equal(snapshot.metricsBarValue, "34.5678");
 });
 
 test("writeRuncatUsage does not throw when the output directory cannot be created", () => {
