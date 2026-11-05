@@ -215,15 +215,15 @@ jobs:
           llm_use_anthropic: ${{ secrets.OCR_LLM_USE_ANTHROPIC || 'false' }}
           # The action defaults to {"thinking":{"type":"disabled"}}, which some OpenAI-compatible
           # endpoints reject as an unknown field; send no extra body as before.
-          llm_extra_body: '{}'
+          llm_extra_body: "{}"
           language: Japanese
           background: ${{ steps.background.outputs.text }}
           base_ref: ${{ steps.pr-context.outputs.base_ref }}
           head_sha: ${{ steps.pr-context.outputs.head_sha }}
           # Findings below "high" go to the summary comment instead of inline.
           route_severity_below: medium
-          sticky_summary: 'true'
-          upload_artifacts: 'true'
+          sticky_summary: "true"
+          upload_artifacts: "true"
 
       # Upstream posts "✅ <message>" whenever OCR exits 0 with no findings, even when some
       # files failed to review, and posts nothing when OCR exits non-zero. Never let either read as LGTM.
