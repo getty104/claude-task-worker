@@ -60,7 +60,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) | タスク実行エンジン |
 | [Git](https://git-scm.com/) / [jq](https://jqlang.org/) | worktree 操作 / スキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス（任意。未導入ならテキスト検索に落ちる） |
-| [Playwright](https://playwright.dev/) のブラウザ | Playwright MCP でのブラウザ確認、`.pen` のスナップショット描画 |
+| [Playwright](https://playwright.dev/) のブラウザ（Google Chrome） | Playwright MCP でのブラウザ確認（起動済みの Chrome に CDP `http://localhost:9222` で接続する。Chrome を `--remote-debugging-port=9222 --user-data-dir=<任意のディレクトリ>` 付きで起動しておく）、`.pen` のスナップショット描画 |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（未導入でも動く） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は herdr に依存しない） |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避（任意。Claude 側のコネクタで有効化） |
@@ -254,7 +254,7 @@ claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ�
 
 ```bash
 node plugin/scripts/pen.mjs validate design.pen            # ID重複・参照切れ・未知プロパティなどの検査
-node plugin/scripts/pen.mjs render design.pen --out out/   # Chromium で描画して PNG 出力
+node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画して PNG 出力
 ```
 
 画像は pen.dev 本体ではなく HTML/CSS へ変換して描画した近似で、描画しきれない表現（取得できなかったフォント・アイコン、shader など）は警告として出る。フォントは Google Fonts、アイコンは unpkg から取得する。

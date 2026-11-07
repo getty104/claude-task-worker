@@ -270,7 +270,7 @@ export const CLOUD_DONE_LABEL = "cc-cloud-done";
 // プロキシで 403 になる制約は残っているため、PR 詳細・CI 結果を大量に読むワーカー
 // （triage-pr / check-dependabot / resolve-conflict）は GitHub MCP で代替できない操作に
 // 当たると空振りしうる。`.pen` のスナップショットを描画するワーカー（create-ui-design）は
-// クラウド VM 側に Playwright の Chromium が要る。どのワーカーをクラウドへ
+// クラウド VM 側に Playwright の Chrome が要る。どのワーカーをクラウドへ
 // 振るかは実行のたびに --cloud の付け外しで選ぶ。
 export function isCloudWorker(_name: string): boolean {
   return hasCloudFlag();
