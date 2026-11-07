@@ -60,7 +60,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [Claude Code (`claude`)](https://docs.anthropic.com/en/docs/claude-code) | タスク実行エンジン |
 | [Git](https://git-scm.com/) / [jq](https://jqlang.org/) | worktree 操作 / スキル内での JSON 加工 |
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス（任意。未導入ならテキスト検索に落ちる） |
-| [Playwright](https://playwright.dev/) のブラウザ | Playwright MCP でのブラウザ確認、`.pen` のスナップショット描画 |
+| [Playwright](https://playwright.dev/) のブラウザ（Google Chrome） | Playwright MCP でのブラウザ確認（起動済みの Chrome に CDP `http://localhost:9222` で接続する。Chrome を `--remote-debugging-port=9222 --user-data-dir=<任意のディレクトリ>` 付きで起動しておく）、`.pen` のスナップショット描画 |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（未導入でも動く） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は herdr に依存しない） |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避（任意。Claude 側のコネクタで有効化） |
