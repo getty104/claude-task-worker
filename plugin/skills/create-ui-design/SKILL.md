@@ -47,7 +47,7 @@ UI実装Issue `$0` に対して、実装に先立って Pencil のデザイン�
 
 ### 0-2. 描画環境の確認
 
-`.pen` の編集は JSON の直接編集、スナップショットは `scripts/pen.mjs render`（Playwright の Chromium で描画）で作る。pen.dev CLI は使わない。描画できる環境かを先に確かめる:
+`.pen` の編集は JSON の直接編集、スナップショットは `scripts/pen.mjs render`（Playwright の Chrome で描画）で作る。pen.dev CLI は使わない。描画できる環境かを先に確かめる:
 
 ```bash
 PEN=(node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs")
@@ -56,14 +56,14 @@ printf '%s' '{"version":"2.21","children":[{"id":"probe","type":"rectangle","wid
 "${PEN[@]}" render "${PROBE_DIR}/probe.pen" --out "${PROBE_DIR}/img"
 ```
 
-失敗する（Playwright / Chromium が無いなど）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**
+失敗する（Playwright / Chrome が無いなど）場合は、デザインを作らずに以下を実行して終了する。**この場合デザインPRは作らない。**
 
 1. Issue に理由（実行したコマンドとエラー出力の要約）をコメントする
    ```bash
    gh issue comment $0 --body-file - <<'EOF'
    ## デザインのスナップショットを描画できないためデザインを作成できません（要人手確認）
 
-   `create-ui-design` はスナップショットの描画に Playwright の Chromium が必要ですが、実行環境で利用できませんでした。
+   `create-ui-design` はスナップショットの描画に Playwright の Chrome が必要ですが、実行環境で利用できませんでした。
 
    ## 実行したコマンドとエラー
 
@@ -73,7 +73,7 @@ printf '%s' '{"version":"2.21","children":[{"id":"probe","type":"rectangle","wid
 
    ## 対応後の進め方
 
-   - `npx -y @playwright/mcp@latest install-browser --no-shell chromium`（または `claude-task-worker install`）でブラウザを取得したうえで、`cc-need-human-check` ラベルを外し `cc-create-ui-design` ラベルを付け直してください
+   - `npx -y @playwright/mcp@latest install-browser chrome`（または `claude-task-worker install`）でブラウザを取得したうえで、`cc-need-human-check` ラベルを外し `cc-create-ui-design` ラベルを付け直してください
    - デザインなしで実装へ進める場合は、`cc-need-human-check` ラベルを外し `cc-ui-design-ready` と `cc-exec-issue` ラベルを付けてください
    EOF
    ```

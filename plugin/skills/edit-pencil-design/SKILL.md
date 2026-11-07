@@ -1,6 +1,6 @@
 ---
 name: edit-pencil-design
-description: .penファイル（pen.devで作成されたデザインファイル。平文JSON）を**JSONの直接編集**で修正・更新・新規作成し、編集・作成したNodeだけを自前レンダラー（`scripts/pen.mjs render`。Chromiumで描画）でPNG出力して`.pen`と同階層の`snapshots/`に保存するスキル。.penファイルの編集、ボタン追加、レイアウト変更、UIデザインの調整、pen.devデザインの更新、新しい.penデザインの作成などの依頼で必ず使用する。pen.dev CLI（`pencil interactive`）は使わない。Nodeデータは`references/pen-format.md`の.penフォーマット定義に従って書き、編集のたびに`scripts/pen.mjs validate`で整合性（ID重複・参照切れ・未知プロパティ・未定義変数など）を検査する。.penファイルのgitコンフリクト解消・破損復旧は本スキルではなく`resolve-pencil-conflict`スキルの担当。
+description: .penファイル（pen.devで作成されたデザインファイル。平文JSON）を**JSONの直接編集**で修正・更新・新規作成し、編集・作成したNodeだけを自前レンダラー（`scripts/pen.mjs render`。Chromeで描画）でPNG出力して`.pen`と同階層の`snapshots/`に保存するスキル。.penファイルの編集、ボタン追加、レイアウト変更、UIデザインの調整、pen.devデザインの更新、新しい.penデザインの作成などの依頼で必ず使用する。pen.dev CLI（`pencil interactive`）は使わない。Nodeデータは`references/pen-format.md`の.penフォーマット定義に従って書き、編集のたびに`scripts/pen.mjs validate`で整合性（ID重複・参照切れ・未知プロパティ・未定義変数など）を検査する。.penファイルのgitコンフリクト解消・破損復旧は本スキルではなく`resolve-pencil-conflict`スキルの担当。
 ---
 
 # Edit Pencil Design
@@ -70,7 +70,7 @@ jq '.images[] | {target, warnings}' "${WORK_DIR}/render.json"
 
 ## 描画の限界（警告を必ず読む）
 
-レンダラーは pen.dev 本体ではなく、`.pen` を HTML/CSS に変換して Chromium で描画している。**描画しきれない表現は省かずに `warnings` に出す**（プレースホルダーや近似で描いたもの）。代表例: 取得できなかったフォント・アイコン、`mesh_gradient` / shader、`script` / `browser` Node、`imports` のライブラリへの `ref`、楕円の円弧、image fill の切り抜き。
+レンダラーは pen.dev 本体ではなく、`.pen` を HTML/CSS に変換して Chrome で描画している。**描画しきれない表現は省かずに `warnings` に出す**（プレースホルダーや近似で描いたもの）。代表例: 取得できなかったフォント・アイコン、`mesh_gradient` / shader、`script` / `browser` Node、`imports` のライブラリへの `ref`、楕円の円弧、image fill の切り抜き。
 
 警告が出た画像は**その部分が参考扱い**であることを報告に書く（どのNodeの何が近似か）。警告の対象部分は画像ではなく JSON の値が正であり、後段（実装・レビュー）もそう扱う。警告を消すために、デザインを描画できる表現へ勝手に変えない。
 
@@ -85,4 +85,4 @@ jq '.images[] | {target, warnings}' "${WORK_DIR}/render.json"
 - **`JSON として読めない`**: 直前の `Edit` でカンマ・括弧を崩した。`${WORK_DIR}/before.pen` と比べて直す
 - **`ref の参照先 "<id>" が reusable:true ではない`**: コンポーネント側に `"reusable": true` を付けるか、参照先を見直す
 - **`<type> に無いプロパティ`**: スキーマ外のキー。`pen-format.md` で正しい名前を確認する（例: `text` の色は `color` ではなく `fill`）
-- **`playwright を読み込めない`**: `npx -y @playwright/mcp@latest install-browser --no-shell chromium`（`claude-task-worker install` も同じことをする）
+- **`playwright を読み込めない`**: `npx -y @playwright/mcp@latest install-browser chrome`（`claude-task-worker install` も同じことをする）

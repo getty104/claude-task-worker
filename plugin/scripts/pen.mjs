@@ -10,7 +10,7 @@
 //   node pen.mjs render <file.pen> --out <dir> [id|パス|document ...] [--scale N] [--theme 軸=値 ...]
 //
 // validate は問題があれば1行1件で stderr に出して exit 1。
-// render は Chromium で HTML として描画し、PNG と各Nodeの解決後ボックスを書き出す。
+// render は Chrome で HTML として描画し、PNG と各Nodeの解決後ボックスを書き出す。
 // stdout には { images, boxesFile, warnings } の JSON を出す。描画しきれない表現は
 // warnings に出す（黙って省かない）。
 
@@ -797,14 +797,13 @@ async function fetchFontCss(ctx, text, warn) {
 
 // ---------- Playwright ----------
 
-async function loadChromium() {
+async function loadChrome() {
   try {
     return (await import("playwright")).chromium;
   } catch {
     // 未導入なら Playwright MCP の playwright-core を探す
   }
-  // Playwright MCP（plugin/.mcp.json）と同じ playwright-core を使えば、install が取得した
-  // chromium のリビジョンと必ず一致する（playwright-core@latest だとずれる）
+  // Playwright MCP（plugin/.mcp.json）と同じ playwright-core を使う
   const out = execFileSync("npx", ["-y", "-p", "@playwright/mcp@latest", "-c", 'printf %s "$PATH"'], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
@@ -812,7 +811,7 @@ async function loadChromium() {
   const bin = out.split(path.delimiter).find((p) => p.includes(`${path.sep}_npx${path.sep}`));
   if (!bin)
     throw new Error(
-      "playwright を読み込めない（npx -y @playwright/mcp@latest install-browser --no-shell chromium を実行して取得する）",
+      "playwright を読み込めない（npx -y @playwright/mcp@latest install-browser chrome を実行して取得する）",
     );
   return createRequire(path.join(bin, "..", "noop.js"))("playwright-core").chromium;
 }
@@ -835,9 +834,9 @@ export async function render(doc, { baseDir, outDir, targets = [], scale = 2, th
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>${fontCss}html,body{margin:0;background:transparent}#canvas{position:relative}</style></head><body><div id="canvas">${body}</div></body></html>`;
   if (process.env.PEN_DEBUG_HTML) fs.writeFileSync(process.env.PEN_DEBUG_HTML, html);
 
-  const chromium = await loadChromium();
-  // install は --no-shell で headless shell を取得しないため、通常の chromium を使う
-  const browser = await chromium.launch({ channel: "chromium" });
+  const chromium = await loadChrome();
+  // install が取得する Google Chrome（stable channel）で描画する
+  const browser = await chromium.launch({ channel: "chrome" });
   try {
     const page = await browser.newPage({ deviceScaleFactor: scale, viewport: { width: 1280, height: 800 } });
     await page

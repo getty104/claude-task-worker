@@ -1,6 +1,6 @@
 ---
 name: inspect-pencil-node
-description: ".penファイル（pen.devで作成されたデザインファイル。平文JSON）の中のNodeのデザインデータ（属性・構造・レイアウト解決後のサイズ）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / icon など）、再利用可能コンポーネント、特定Node配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。属性は`jq`、変数解決・コンポーネント展開後の値は`scripts/pen.mjs resolve`、レイアウト解決後の矩形とはみ出しは`scripts/pen.mjs layout`、画像は`scripts/pen.mjs render`（Chromiumで描画）で取得し、画像は`.pen`と同階層の`snapshots/`にPNG出力する。`.pen`は一切書き換えない。pen.dev CLI（`pencil interactive`）は使わない。"
+description: ".penファイル（pen.devで作成されたデザインファイル。平文JSON）の中のNodeのデザインデータ（属性・構造・レイアウト解決後のサイズ）とスクリーンショット画像を読み取り専用で取得するスキル。Node ID指定に加え、名前の正規表現（例: 「ヘッダー」「.*Button」）、Nodeタイプ（frame / text / icon など）、再利用可能コンポーネント、特定Node配下、ドキュメント全体のトップレベルなど、**ID以外の指定方法**にも対応する。ユーザーが「.penのこのNodeの中身を見せて」「特定コンポーネントのデザインデータを取り出して」「Nodeのスクリーンショットだけ欲しい」「ヘッダーの構造を確認したい」「ボタンのスタイルをコピーしたい」「再利用可能コンポーネント一覧を見せて」「ドキュメント全体の構造を覗きたい」「全てのテキストNodeを取得して」のように.pen内の要素の調査・参照・確認・抜き出しを依頼した場合に必ずこのスキルを使う。属性は`jq`、変数解決・コンポーネント展開後の値は`scripts/pen.mjs resolve`、レイアウト解決後の矩形とはみ出しは`scripts/pen.mjs layout`、画像は`scripts/pen.mjs render`（Chromeで描画）で取得し、画像は`.pen`と同階層の`snapshots/`にPNG出力する。`.pen`は一切書き換えない。pen.dev CLI（`pencil interactive`）は使わない。"
 ---
 
 # Inspect Pencil Node
@@ -20,7 +20,7 @@ description: ".penファイル（pen.devで作成されたデザインファイ�
 PEN=(node "${CLAUDE_PLUGIN_ROOT}/scripts/pen.mjs")
 ```
 
-`layout` / `render` は Chromium で描画するので数秒かかる。構造・値の確認は `jq` / `resolve`、サイズ・はみ出しは `layout`、色・字形・整列など見た目でしか分からないものだけ `render` を使う。
+`layout` / `render` は Chrome で描画するので数秒かかる。構造・値の確認は `jq` / `resolve`、サイズ・はみ出しは `layout`、色・字形・整列など見た目でしか分からないものだけ `render` を使う。
 
 # Nodeの指定方法（`jq`）
 
@@ -60,7 +60,7 @@ jq '.images[] | {target, warnings}' "${WORK_DIR}/render.json"
 
 - ファイル名: `<.penのステム>-<Node名>-<YYYYMMDD-HHMMSS>.png`（タイムスタンプで同時実行・繰り返し実行でも衝突しない）。既定は2倍解像度
 - 呼び出し元が「見るだけ」で永続化を求めていなければ、`snapshots/` へ移さず `${WORK_DIR}` のまま `Read` で見てよい
-- レンダラーは pen.dev 本体ではなく、HTML/CSS へ変換して Chromium で描画している。**描画しきれない表現（取得できなかったフォント・アイコン、`mesh_gradient` / shader、`script` / `browser` Node、ライブラリへの `ref` など）は `warnings` に出る**。警告の対象部分は近似なので、その部分の値は画像ではなく `resolve` / `layout` の値を正として報告する
+- レンダラーは pen.dev 本体ではなく、HTML/CSS へ変換して Chrome で描画している。**描画しきれない表現（取得できなかったフォント・アイコン、`mesh_gradient` / shader、`script` / `browser` Node、ライブラリへの `ref` など）は `warnings` に出る**。警告の対象部分は近似なので、その部分の値は画像ではなく `resolve` / `layout` の値を正として報告する
 
 # 実行結果の報告
 
@@ -72,4 +72,4 @@ jq '.images[] | {target, warnings}' "${WORK_DIR}/render.json"
 
 - **`JSON として読めない` / `コンフリクトマーカーが残っている`**: コンフリクト中か破損している。中身は `git show :2:<path>` などで各版を取り出して読む（解消は `resolve-pencil-conflict`）
 - **`resolve` で `"<id>" が見つからない`**: インスタンス内の子は `"<インスタンスID>/<子ID>"` で指す
-- **`playwright を読み込めない`**: `npx -y @playwright/mcp@latest install-browser --no-shell chromium`（`claude-task-worker install` も同じことをする）
+- **`playwright を読み込めない`**: `npx -y @playwright/mcp@latest install-browser chrome`（`claude-task-worker install` も同じことをする）

@@ -254,7 +254,7 @@ claude-task-worker init --inherit-config ~/ctw/shared.json   # 指定パスへ�
 
 ```bash
 node plugin/scripts/pen.mjs validate design.pen            # ID重複・参照切れ・未知プロパティなどの検査
-node plugin/scripts/pen.mjs render design.pen --out out/   # Chromium で描画して PNG 出力
+node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画して PNG 出力
 ```
 
 画像は pen.dev 本体ではなく HTML/CSS へ変換して描画した近似で、描画しきれない表現（取得できなかったフォント・アイコン、shader など）は警告として出る。フォントは Google Fonts、アイコンは unpkg から取得する。
