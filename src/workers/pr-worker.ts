@@ -60,11 +60,13 @@ export function createPrPollingWorker(config: PrWorkerConfig): WorkerDefinition 
       if (isShuttingDown()) return;
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
-        const excludeLabels = [LABEL_IN_PROGRESS, ...(config.excludeLabels ?? []), ...(opts.excludeLabelFilters ?? [])];
+        const excludeLabels = [LABEL_IN_PROGRESS, ...(config.excludeLabels ?? [])];
         const candidates = await listPullRequestsWithChecks(
           user,
           [config.triggerLabel, ...(opts.labelFilters ?? [])],
           excludeLabels,
+          undefined,
+          opts.excludeLabelFilters ?? [],
         );
 
         for (const pr of candidates) {

@@ -549,6 +549,10 @@ export async function listPullRequestsWithChecks(
   label?: string | string[],
   excludeLabels: string[] = [],
   limit = 5,
+  // 検索クエリにも `-label:` で入れる除外ラベル（--exclude-label など、短時間に付け外しされないもの）。
+  // 実ラベルでの除外だけだと、除外対象が取得枠（PR_LIST_FETCH_LIMIT）を埋めて後続の PR が拾えなくなる。
+  // cc-in-progress のように頻繁に付け外しされるラベルは上の理由で入れない。
+  searchExcludeLabels: string[] = [],
 ): Promise<PullRequestWithChecks[]> {
   const args = [
     "pr",
@@ -558,7 +562,7 @@ export async function listPullRequestsWithChecks(
     "--json",
     "number,title,labels,headRefName",
     "--search",
-    "sort:created-asc",
+    ["sort:created-asc", ...searchExcludeLabels.map((l) => `-label:"${l}"`)].join(" "),
     "--limit",
     String(PR_LIST_FETCH_LIMIT),
   ];
@@ -569,7 +573,10 @@ export async function listPullRequestsWithChecks(
     args.push("--label", l);
   }
   const output = await execGh(args);
-  const prs = excludePrsByLabels(JSON.parse(output) as PullRequest[], excludeLabels).slice(0, limit);
+  const prs = excludePrsByLabels(JSON.parse(output) as PullRequest[], [...excludeLabels, ...searchExcludeLabels]).slice(
+    0,
+    limit,
+  );
   const withChecks = await Promise.all(prs.map(async (pr) => ({ ...pr, checks: await fetchPRChecks(pr.number) })));
   return withChecks.filter((pr) => isCICompleted(pr.checks));
 }
