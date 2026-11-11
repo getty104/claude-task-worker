@@ -6,7 +6,7 @@ import {
   getCurrentUser,
   getIssueSubIssuesSummary,
 } from "../gh";
-import { createIssuePollingWorker } from "./issue-worker";
+import { carryLabelFiltersToPr, createIssuePollingWorker } from "./issue-worker";
 
 export function epicPrMissingComment(issueNumber: number): string {
   return [
@@ -34,7 +34,7 @@ export const epicIssueWorker = createIssuePollingWorker({
     if (summary.completed !== summary.total) return "skip";
     return "proceed";
   },
-  onCompleted: async (issueNumber) => {
+  onCompleted: async (issueNumber, _worktreeId, _output, ctx) => {
     // create-epic-pr が作成した Epic PR を epic ブランチ名で特定する。
     // exit 0 はPR作成の保証にならないため、実在を確認してから cc-pr-created を付与する
     // （確認前に付与すると、PR不在でも完了扱いになり Epic が停滞する）。
@@ -52,6 +52,7 @@ export const epicIssueWorker = createIssuePollingWorker({
     // cc-triage-scope（triage 投入）を付与する。
     await addLabel("pr", prNumber, "cc-epic-issue");
     await addLabel("pr", prNumber, "cc-triage-scope");
+    await carryLabelFiltersToPr("epic-issue", prNumber, ctx.labelFilters);
     // triage-pr は Assignee でも絞るため付け直す（クラウドの MCP 作成経路では欠落しうる。冪等）。
     await getCurrentUser()
       .then((user) => addAssignee("pr", prNumber, user))

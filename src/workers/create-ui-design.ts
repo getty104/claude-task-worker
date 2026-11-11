@@ -18,7 +18,7 @@ import {
 } from "../gh";
 import { ensureEpicBranch, remoteTrackingSha, restartBranchFromBase } from "../git";
 import { selectOwnedClosingPr } from "./exec-issue";
-import { createIssuePollingWorker } from "./issue-worker";
+import { carryLabelFiltersToPr, createIssuePollingWorker } from "./issue-worker";
 import { defineWorker } from "./worker-definition";
 import { designBranchName, designPrNotCreatedComment, shouldRestartDesignBranch } from "./ui-design";
 
@@ -171,6 +171,7 @@ export const createUiDesignWorker = defineWorker({
         try {
           // レビュー観点を切り替えられるよう cc-ui-design（デザインPRのマーカー）を付ける。
           await addLabel("pr", prNumber, "cc-ui-design");
+          await carryLabelFiltersToPr("create-ui-design", prNumber, ctx.labelFilters);
           // cc-triage-scope は triage-pr の自動レビュー・自動マージ入口なので、
           // uiDesign.yolo が true のときだけ付ける。false（既定）ではデザインPRを
           // 人がレビュー・マージするまで止め、デザインへの人の介在を担保する。

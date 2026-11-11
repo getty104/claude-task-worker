@@ -154,7 +154,7 @@ claude-task-worker all --epic 100 --epic 200
 
 ### `--label <label>`
 
-トリガーラベルに加えて指定ラベルが付いた Issue・PR のみに絞る（Issue 系・PR 系ワーカーの両方に効く）。複数指定は AND。`--epic` と併用可能。
+トリガーラベルに加えて指定ラベルが付いた Issue・PR のみに絞る（Issue 系・PR 系ワーカーの両方に効く）。`exec-issue` / `epic-issue` / `create-ui-design` が Issue から作った PR にも同じラベルを付けるので、後続の PR 系ワーカーが拾える。複数指定は AND。`--epic` と併用可能。
 
 ```bash
 claude-task-worker all --label priority-high --label needs-design
