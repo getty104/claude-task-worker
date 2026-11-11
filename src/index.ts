@@ -25,7 +25,13 @@ import {
   hasCloudFlag,
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
-import { findProjectLabelFilters, loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import {
+  findProjectLabelFilters,
+  loadUserConfig,
+  resolveTargetProjects,
+  UserConfigError,
+  getRunMode,
+} from "./user-config";
 import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
 import {
   CONFIG_PATH,
