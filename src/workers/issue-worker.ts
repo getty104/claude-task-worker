@@ -77,7 +77,12 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefin
       if (isShuttingDown()) return;
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
-        const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
+        const excludeLabels = [
+          "cc-in-progress",
+          "cc-need-human-check",
+          ...(config.excludeLabels ?? []),
+          ...(opts.excludeLabelFilters ?? []),
+        ];
         const epicFilter =
           config.epicFilterTarget !== "self" && epicFilters && epicFilters.length > 0
             ? { owner, repo: name, numbers: epicFilters }

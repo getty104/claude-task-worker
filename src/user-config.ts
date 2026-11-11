@@ -38,6 +38,14 @@ export interface UserConfig {
   permission: PermissionMode;
   projects: Record<string, string>;
   projectGroups: Record<string, string[]>;
+  // projects の値をオブジェクト形式（{ path, label, excludeLabel }）で書いたプロジェクトのラベル絞り込み。
+  projectLabelFilters: Record<string, ProjectLabelFilters>;
+}
+
+// --label / --exclude-label と同じ意味（複数指定は AND）。CLI の指定に足し込まれる。
+export interface ProjectLabelFilters {
+  label: string[];
+  excludeLabel: string[];
 }
 
 export interface ResolvedProject {
@@ -171,10 +179,13 @@ export function loadUserConfig(): UserConfig {
   }
 
   const projects: Record<string, string> = {};
-  for (const [name, value] of Object.entries(rawProjects)) {
+  const projectLabelFilters: Record<string, ProjectLabelFilters> = {};
+  for (const [name, entry] of Object.entries(rawProjects)) {
     if (name === "__proto__") {
       throw new UserConfigError(`"__proto__" cannot be used as a key in "projects": ${path}`);
     }
+    const isObjectEntry = typeof entry === "object" && entry !== null && !Array.isArray(entry);
+    const value = isObjectEntry ? (entry as Record<string, unknown>)["path"] : entry;
     if (typeof value !== "string" || !isAbsolute(value)) {
       console.warn(`[config] invalid projects.${name}: expected an absolute path, skipping`);
       continue;
@@ -184,6 +195,13 @@ export function loadUserConfig(): UserConfig {
       continue;
     }
     projects[name] = value;
+    if (isObjectEntry) {
+      const obj = entry as Record<string, unknown>;
+      projectLabelFilters[name] = {
+        label: parseLabelList(obj["label"], `projects.${name}.label`),
+        excludeLabel: parseLabelList(obj["excludeLabel"], `projects.${name}.excludeLabel`),
+      };
+    }
   }
 
   const projectGroups: Record<string, string[]> = {};
@@ -206,7 +224,14 @@ export function loadUserConfig(): UserConfig {
     projectGroups[groupName] = members;
   }
 
-  return { mode, advisor, permission, projects, projectGroups };
+  return { mode, advisor, permission, projects, projectGroups, projectLabelFilters };
+}
+
+function parseLabelList(value: unknown, key: string): string[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string" && v.length > 0)) return value as string[];
+  console.warn(`[config] invalid ${key}: expected an array of non-empty strings, ignoring`);
+  return [];
 }
 
 // mode はプロセス起動時に確定させる。実行中に設定ファイルが書き換わっても、
@@ -298,6 +323,23 @@ export function findProjectNameByPath(path: string): string | undefined {
     if (resolve(projectPath) === target) return name;
   }
   return undefined;
+}
+
+// cwd に一致するプロジェクトのラベル絞り込み。--project 経由の転送先も各プロジェクトの cwd で
+// 起動するため、単体起動と同じ経路で効く。設定ファイルが無い・壊れている場合は絞り込みなし。
+export function findProjectLabelFiltersByPath(path: string): ProjectLabelFilters {
+  const empty = { label: [], excludeLabel: [] };
+  let config: UserConfig;
+  try {
+    config = loadUserConfig();
+  } catch {
+    return empty;
+  }
+  const target = resolve(path);
+  for (const [name, projectPath] of Object.entries(config.projects)) {
+    if (resolve(projectPath) === target) return config.projectLabelFilters[name] ?? empty;
+  }
+  return empty;
 }
 
 export function resolveTargetProjects(requested: string[], config: UserConfig): ResolvedProject[] {
