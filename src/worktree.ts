@@ -1,10 +1,9 @@
 import { createRequire } from "node:module";
 import type * as ChildProcess from "node:child_process";
 import { promisify } from "node:util";
-import { readdir, rm, stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { basename, resolve, sep } from "node:path";
 import { isWorktreeInUse } from "./process-manager";
-import { isGeneratedWorktreeName } from "./random-name";
 
 const childProcess = createRequire(import.meta.url)("node:child_process") as typeof ChildProcess;
 
@@ -204,38 +203,5 @@ export async function removeWorktreeByBranch(branchName: string): Promise<void> 
     }
   } catch (error) {
     console.error(`[worktree] Failed to remove worktree for branch ${branchName}:`, error);
-  }
-}
-
-/**
- * 前回のクラッシュ・強制終了などで残った worktree を起動時に一括回収する。
- * generateWorktreeName() 形式（adj-noun-4桁）の名前だけを対象にすることで、
- * ユーザーが対話セッションで使用中の claude worktree を誤って削除しない。
- */
-export async function removeStaleWorktrees(): Promise<void> {
-  const worktreeIds = new Set<string>();
-
-  try {
-    for (const name of await readdir(WORKTREES_DIR)) {
-      if (isGeneratedWorktreeName(name)) worktreeIds.add(name);
-    }
-  } catch {
-    // ディレクトリが無ければディスク上の残骸は無い
-  }
-
-  try {
-    for (const entry of await listWorktreeEntries()) {
-      if (!isManagedWorktreePath(entry.path)) continue;
-      const worktreeId = basename(entry.path);
-      if (isGeneratedWorktreeName(worktreeId)) worktreeIds.add(worktreeId);
-    }
-  } catch (error) {
-    console.error(`[worktree] Failed to list worktrees:`, error);
-  }
-
-  for (const worktreeId of worktreeIds) {
-    if (isWorktreeInUse(worktreeId)) continue;
-    console.log(`[worktree] Removing stale worktree: ${worktreeId}`);
-    await removeWorktree(worktreeId);
   }
 }

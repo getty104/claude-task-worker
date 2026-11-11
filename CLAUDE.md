@@ -90,7 +90,7 @@ claude-task-worker all             # Run all workers concurrently
 
 サブIssue（`parent` を持つIssue）の worktree は `cc-epic-<parent番号>` から作られる（`issue-worker.ts`）。**分析系スキルもこのベースブランチを「ターゲットブランチ」として明示的に導出する**（`create-issue-from-issue-number` / `update-issue` / `answer-issue-questions` の冒頭ステップ。導出は `exec-issue` と共通の `gh-compat.sh base-branch`（parent → upstream → default の順）で、かつて各スキルが書き写していた bash は書き写しの差で parent 取得失敗時の扱いが3通りに分かれていた。`exec-issue` は `--strict`（取得失敗で中断）、分析系は無指定（倒した値を exit 3 で受けて続行））。worktree 自体は正しく epic ブランチ由来なのに、スキル本文がベースブランチの概念を持たないと、モデルが暗黙にデフォルトブランチをターゲットと見なし、**Epic PR（`cc-epic-<N>` → デフォルトブランチ）が未マージであること**を「マージされていないがどうするか」という本来不要な検討事項・確認事項として description や回答コメントへ書き込む。同ステップでは (1) デフォルトブランチとの差分を論点にしない、(2) Epic PR の未マージは正常状態として確認事項化しない、(3) `gh pr list` の関連PRは `baseRefName == BASE_BRANCH` のものだけを対象にする（Epic PR 自身を除外する）、の3点を規定している。
 
-ワーカー起動時には `removeStaleWorktrees()` が前回の異常終了で残ったworktree（`adj-noun-4桁` の生成名パターンのみ対象）を回収する。実行中タスクのworktree・lockedな対話セッションのworktreeは削除対象から保護される。
+ワーカー起動時に前回の異常終了で残った worktree を回収する処理（旧 `removeStaleWorktrees()`）は撤去した。同じ path のプロジェクトを `--project` で並走させると、後から起動したプロセスが他プロセスの作業中 worktree を削除してしまうため（プロセス内の実行中判定は他プロセスのタスクを知らない）。異常終了の残骸は `.claude/worktrees/` に残るので、必要なら手動で `git worktree remove` する。
 
 #### blockedBy ガードの二重化（検索インデックス経由では取りこぼす）
 
@@ -296,7 +296,7 @@ Resolve の実体は GitHub MCP の `pull_request_review_write`（method: `resol
 `claude-task-worker.json`（および `claude-task-worker.local.json`。既存の `mergeConfigRaw()` の規則でローカル側が勝つ）の `workers.<name>.enabled`（boolean、既定はプリセット・カスタムとも `true`）でワーカーを無効化できる。非 boolean は警告して既定へ倒す（`parseWorkerEntry()`）。既定 `true` なので、未指定のリポジトリの起動集合・挙動は導入前と同一。
 
 - **`all` / `yolo`**: `inAll` / `inYolo` で絞った候補から `enabled: false` を除外して起動し、除外が1件以上なら `[worker] skipped disabled workers: a, b` を1行出す。振り分けは純粋関数 `partitionEnabledWorkers(names, isEnabled)`（`src/config.ts`）で、ワーカー名の一覧を受け取るのでカスタムワーカーも同じ判定を通せる
-- **個別起動**: 無効なら有効化方法（`workers.<name>.enabled` を `true` にする／キーを消す）を含むメッセージを出して exit 1。タスクを1件も起動しないよう `removeStaleWorktrees()` / `start()` より前、さらに **`assertRunPrerequisites()`（console キャプチャ）より前**で判定する。キャプチャ後に出すとログテーブルの列幅でメッセージが切り詰められ、肝心の有効化方法が読めなくなるため
+- **個別起動**: 無効なら有効化方法（`workers.<name>.enabled` を `true` にする／キーを消す）を含むメッセージを出して exit 1。タスクを1件も起動しないよう `start()` より前、さらに **`assertRunPrerequisites()`（console キャプチャ）より前**で判定する。キャプチャ後に出すとログテーブルの列幅でメッセージが切り詰められ、肝心の有効化方法が読めなくなるため
 - 設定ファイルが読めない場合は `isWorkerEnabled()` が有効側へ倒す（変更前と同じ起動集合を保つ）
 - **`--project`** ではディスパッチャー側で設定を読まない。転送先プロセスが各プロジェクトのディレクトリで通常の起動経路を通るため、プロジェクトごとの `claude-task-worker.json` で判定される
 

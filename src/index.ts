@@ -11,7 +11,6 @@ import {
   renderTable,
 } from "./process-manager";
 import { captureConsole } from "./table";
-import { removeStaleWorktrees } from "./worktree";
 import { init, applyLabels } from "./commands/init";
 import { install } from "./commands/install";
 import { cloudSetup } from "./commands/cloud-setup";
@@ -499,8 +498,6 @@ if (hasProjectFilter()) {
   const labelOptions = parseLabelOptions();
   (async () => {
     await assertRunPrerequisites();
-    // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
-    await removeStaleWorktrees();
     await Promise.all(
       startEnabledWorkers(
         candidateNames((e) => e.inAll),
@@ -513,7 +510,6 @@ if (hasProjectFilter()) {
   const labelOptions = parseLabelOptions();
   (async () => {
     await assertRunPrerequisites();
-    await removeStaleWorktrees();
     await Promise.all(
       startEnabledWorkers(
         candidateNames((e) => e.inYolo),
@@ -531,7 +527,6 @@ if (hasProjectFilter()) {
       process.exit(1);
     }
     await assertRunPrerequisites();
-    await removeStaleWorktrees();
     await WORKERS[workerType].start({ epicFilters, ...labelOptions });
   })();
 }
