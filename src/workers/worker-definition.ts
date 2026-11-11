@@ -3,6 +3,8 @@ export type WorkerKind = "issue" | "pr" | "scheduled";
 export interface WorkerStartOptions {
   epicFilters?: number[];
   labelFilters?: string[];
+  // このラベルのいずれかが付いた Issue/PR を対象から外す（定期ワーカーは対象を持たないため無視する）。
+  excludeLabelFilters?: string[];
 }
 
 // Symbol.for にするのは、別バンドルの lib から作られた定義もロード時に判別できるようにするため。

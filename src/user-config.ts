@@ -38,6 +38,14 @@ export interface UserConfig {
   permission: PermissionMode;
   projects: Record<string, string>;
   projectGroups: Record<string, string[]>;
+  // projects の値をオブジェクト形式（{ path, label, excludeLabel }）で書いたプロジェクトのラベル絞り込み。
+  projectLabelFilters: Record<string, ProjectLabelFilters>;
+}
+
+// --label / --exclude-label と同じ意味（複数指定は AND）。CLI の指定に足し込まれる。
+export interface ProjectLabelFilters {
+  label: string[];
+  excludeLabel: string[];
 }
 
 export interface ResolvedProject {
@@ -171,10 +179,13 @@ export function loadUserConfig(): UserConfig {
   }
 
   const projects: Record<string, string> = {};
-  for (const [name, value] of Object.entries(rawProjects)) {
+  const projectLabelFilters: Record<string, ProjectLabelFilters> = {};
+  for (const [name, entry] of Object.entries(rawProjects)) {
     if (name === "__proto__") {
       throw new UserConfigError(`"__proto__" cannot be used as a key in "projects": ${path}`);
     }
+    const isObjectEntry = typeof entry === "object" && entry !== null && !Array.isArray(entry);
+    const value = isObjectEntry ? (entry as Record<string, unknown>)["path"] : entry;
     if (typeof value !== "string" || !isAbsolute(value)) {
       console.warn(`[config] invalid projects.${name}: expected an absolute path, skipping`);
       continue;
@@ -184,6 +195,19 @@ export function loadUserConfig(): UserConfig {
       continue;
     }
     projects[name] = value;
+    if (isObjectEntry) {
+      const obj = entry as Record<string, unknown>;
+      // タイプミス（exludeLabel など）で絞り込みが黙って効かなくならないよう、未知のキーは警告する
+      for (const key of Object.keys(obj)) {
+        if (!PROJECT_ENTRY_KEYS.includes(key)) {
+          console.warn(`[config] unknown key "${key}" in projects.${name}, ignoring`);
+        }
+      }
+      projectLabelFilters[name] = {
+        label: parseLabelList(obj["label"], `projects.${name}.label`),
+        excludeLabel: parseLabelList(obj["excludeLabel"], `projects.${name}.excludeLabel`),
+      };
+    }
   }
 
   const projectGroups: Record<string, string[]> = {};
@@ -206,7 +230,18 @@ export function loadUserConfig(): UserConfig {
     projectGroups[groupName] = members;
   }
 
-  return { mode, advisor, permission, projects, projectGroups };
+  return { mode, advisor, permission, projects, projectGroups, projectLabelFilters };
+}
+
+const PROJECT_ENTRY_KEYS = ["path", "label", "excludeLabel"];
+
+function parseLabelList(value: unknown, key: string): string[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string" && v.length > 0)) return value as string[];
+  console.warn(
+    `[config] invalid ${key}: expected an array of non-empty strings, got ${JSON.stringify(value)}, ignoring`,
+  );
+  return [];
 }
 
 // mode はプロセス起動時に確定させる。実行中に設定ファイルが書き換わっても、
@@ -298,6 +333,26 @@ export function findProjectNameByPath(path: string): string | undefined {
     if (resolve(projectPath) === target) return name;
   }
   return undefined;
+}
+
+// --project の転送先で起動したプロジェクトのラベル絞り込み。名前は dispatcher が注入する CTW_PROJECT_NAME。
+// --project なしの起動（名前なし）には適用しない。プロジェクトはパスではなく名前で区別するため
+// （path の重複も許す）、パスから推測して別プロジェクトの指定を当てない。
+export function findProjectLabelFilters(
+  projectName: string | undefined = process.env.CTW_PROJECT_NAME,
+): ProjectLabelFilters {
+  const empty = { label: [], excludeLabel: [] };
+  if (!projectName) return empty;
+  let config: UserConfig;
+  try {
+    config = loadUserConfig();
+  } catch (err) {
+    console.warn(`[config] failed to read config file, project label filters are not applied: ${err}`);
+    return empty;
+  }
+  return Object.prototype.hasOwnProperty.call(config.projectLabelFilters, projectName)
+    ? config.projectLabelFilters[projectName]
+    : empty;
 }
 
 export function resolveTargetProjects(requested: string[], config: UserConfig): ResolvedProject[] {

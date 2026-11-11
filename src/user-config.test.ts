@@ -23,6 +23,7 @@ const {
   getPermissionMode,
   resetPermissionModeCache,
   findProjectNameByPath,
+  findProjectLabelFilters,
 } = (await import("./user-config")) as typeof UserConfigModule;
 
 const configDir = join(configHome, "claude-task-worker");
@@ -83,11 +84,36 @@ test("loadUserConfig loads a valid config.json normally", () => {
   assert.deepEqual(config.projectGroups, { mygroup: ["alpha"] });
 });
 
+test("loadUserConfig accepts object project entries with label / excludeLabel", () => {
+  writeConfigFile(
+    JSON.stringify({
+      projects: {
+        alpha: { path: process.cwd(), label: ["a", "b"], excludeLabel: ["wip"] },
+        beta: { path: process.cwd(), label: "not-an-array" },
+        gamma: process.cwd(),
+      },
+    }),
+  );
+  const config = loadUserConfig();
+  assert.deepEqual(config.projects, { alpha: process.cwd(), beta: process.cwd(), gamma: process.cwd() });
+  assert.deepEqual(config.projectLabelFilters, {
+    alpha: { label: ["a", "b"], excludeLabel: ["wip"] },
+    beta: { label: [], excludeLabel: [] },
+  });
+  // 名前（CTW_PROJECT_NAME）でだけ引く。path が同じでもプロジェクトごとの指定になる。
+  assert.deepEqual(findProjectLabelFilters("alpha"), { label: ["a", "b"], excludeLabel: ["wip"] });
+  assert.deepEqual(findProjectLabelFilters("gamma"), { label: [], excludeLabel: [] });
+  assert.deepEqual(findProjectLabelFilters("unknown"), { label: [], excludeLabel: [] });
+  // --project なし（名前なし）では適用しない
+  assert.deepEqual(findProjectLabelFilters(""), { label: [], excludeLabel: [] });
+});
+
 test("resolveTargetProjects throws UserConfigError for constructor/toString requests", () => {
   const config = {
     mode: "default" as const,
     advisor: false,
     permission: "bypassPermissions" as const,
+    projectLabelFilters: {},
     projects: { alpha: "/tmp/alpha" },
     projectGroups: { mygroup: ["alpha"] },
   };
@@ -101,6 +127,7 @@ test("resolveTargetProjects resolves known projects and groups normally", () => 
     mode: "default" as const,
     advisor: false,
     permission: "bypassPermissions" as const,
+    projectLabelFilters: {},
     projects: { alpha: "/tmp/alpha", beta: "/tmp/beta" },
     projectGroups: { mygroup: ["alpha", "beta"] },
   };
@@ -148,6 +175,7 @@ test("resolveTargetProjects throws UserConfigError when resolution yields no pro
     mode: "default" as const,
     advisor: false,
     permission: "bypassPermissions" as const,
+    projectLabelFilters: {},
     projects: {},
     projectGroups: { empty: [] },
   };

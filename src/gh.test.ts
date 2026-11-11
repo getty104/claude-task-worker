@@ -13,6 +13,7 @@ const {
   findCommentSince,
   parseClosingIssueNumbers,
   excludePrsByLabels,
+  listPullRequestsWithChecks,
 } = (await import("./gh")) as typeof GhModule;
 
 const REPO_INFO_STDOUT = JSON.stringify({
@@ -242,4 +243,23 @@ test("excludePrsByLabels drops PRs carrying any excluded label, judged from thei
     excludePrsByLabels(prs, ["cc-in-progress", "cc-need-human-check"]).map((pr) => pr.number),
     [1, 3],
   );
+});
+
+test("listPullRequestsWithChecks passes every label as --label (AND) and search-exclude labels as -label:", async (t) => {
+  const calls: string[][] = [];
+  t.mock.method(childProcess, "execFile", (_command: string, args: string[], callback: ExecFileCallback) => {
+    calls.push(args);
+    callback(null, "[]", "");
+  });
+
+  await listPullRequestsWithChecks("me", ["cc-triage-scope", "", "priority-high"], ["cc-in-progress"], 5, ["wip"]);
+
+  const list = calls.find((a) => a[0] === "pr" && a[1] === "list");
+  assert.ok(list);
+  const labels = list.flatMap((arg, i) => (arg === "--label" ? [list[i + 1]] : []));
+  assert.deepEqual(labels, ["cc-triage-scope", "priority-high"]);
+  const search = list[list.indexOf("--search") + 1];
+  assert.equal(search, 'sort:created-asc -label:"wip"');
+  // 頻繁に付け外しされる除外ラベルは検索クエリに入れない
+  assert.ok(!search.includes("cc-in-progress"));
 });

@@ -169,6 +169,23 @@ test("verifyPrCreated (local): adopts a PR whose head matches the worktree branc
   assert.ok(prEdits.some((r) => r.argv[2] === "7" && r.argv.includes("--add-assignee")));
 });
 
+test("verifyPrCreated: carries the --label filters to the created PR so PR workers still pick it up", async (t) => {
+  const stubs = installCliStubs({
+    gh: { view: { "5": { labels: [], state: "OPEN" } }, prList: [{ number: 7, headRefName: "adj-noun-1234" }] },
+  });
+  t.after(() => stubs.cleanup());
+
+  await verifyPrCreated(5, "adj-noun-1234", "output", {
+    cloud: false,
+    baseBranch: "main",
+    startedAt: Date.now() - 60_000,
+    labelFilters: ["priority-high"],
+  });
+
+  const prEdits = stubs.records().filter((r) => r.command === "gh" && r.argv[0] === "pr" && r.argv[1] === "edit");
+  assert.ok(prEdits.some((r) => r.argv[2] === "7" && r.argv.includes("priority-high")));
+});
+
 test("verifyPrCreated (cloud): adopts a closing PR by base + createdAt ownership, without calling `gh pr list`", async (t) => {
   const startedAt = Date.now() - 60_000;
   const stubs = installCliStubs({

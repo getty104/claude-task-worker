@@ -126,7 +126,7 @@ claude-task-worker apply-labels   # ラベルだけを作成（冪等）
 ## コマンド
 
 ```bash
-claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--project <name>]... [--cloud] [--debug]
+claude-task-worker <command> [--epic <issue-number>]... [--label <label>]... [--exclude-label <label>]... [--project <name>]... [--cloud] [--debug]
 ```
 
 | コマンド | 内容 |
@@ -154,11 +154,21 @@ claude-task-worker all --epic 100 --epic 200
 
 ### `--label <label>`
 
-トリガーラベルに加えて指定ラベルが付いた Issue のみに絞る。複数指定は AND。`--epic` と併用可能。
+トリガーラベルに加えて指定ラベルが付いた Issue・PR のみに絞る（Issue 系・PR 系ワーカーの両方に効く）。`exec-issue` / `epic-issue` / `create-ui-design` が Issue から作った PR にも同じラベルを付けるので、後続の PR 系ワーカーが拾える。複数指定は AND。`--epic` と併用可能。
 
 ```bash
 claude-task-worker all --label priority-high --label needs-design
 ```
+
+### `--exclude-label <label>`
+
+指定ラベルが付いた Issue・PR を対象から外す（Issue 系・PR 系ワーカーの両方に効く。定期ワーカーは対象を持たないため無関係）。複数指定は AND で、どれか1つでも付いていれば外れる。
+
+```bash
+claude-task-worker all --exclude-label wip --exclude-label on-hold
+```
+
+`--label` / `--exclude-label` は `config.json` の `projects` にプロジェクトごとの既定を書ける（下記）。`--project` 経由の起動でだけ CLI の指定に足し込まれる。
 
 ### `--project <name>`
 
@@ -272,7 +282,7 @@ node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画し
   "permission": "bypassPermissions",
   "projects": {
     "app-a": "/Users/me/repos/app-a",
-    "app-b": "/Users/me/repos/app-b"
+    "app-b": { "path": "/Users/me/repos/app-b", "label": ["priority-high"], "excludeLabel": ["wip"] }
   },
   "projectGroups": {
     "frontend": ["app-a", "app-b"]
@@ -282,13 +292,13 @@ node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画し
 
 | キー | 既定 | 説明 |
 |---|---|---|
-| `projects` | - | プロジェクト名 → 絶対パス |
+| `projects` | - | プロジェクト名 → 絶対パス、または `{ path, label, excludeLabel }`。`label` / `excludeLabel` は `--label` / `--exclude-label` と同じ意味で、`--project` でそのプロジェクトを指定して起動したワーカーにだけ足し込まれる（`--project` なしの起動には適用しない）。`path` の重複は可 |
 | `projectGroups` | `{}` | グループ名 → プロジェクト名配列 |
 | `mode` | `"default"` | `"default"`: `claude -p` の子プロセスとして実行 / `"herdr"`: herdr のタブ内で TUI 起動し、実行中の様子を覗ける（`--project` はこちらが必要） |
 | `advisor` | `false` | `true` で `--advisor <model>` を渡す。モデルは `claude-task-worker.json` の `advisorModel` |
 | `permission` | `"bypassPermissions"` | Claude CLI の[権限モード](https://code.claude.com/docs/ja/permission-modes)（`bypassPermissions` / `dontAsk` / `auto` / `acceptEdits` / `manual` / `plan`） |
 
-いずれもトップレベル一括で、プロジェクト単位・ワーカー単位の指定はできない。`permission` はワーカーに承認するユーザーがいないため、`bypassPermissions` / `dontAsk` 以外ではタスクが承認待ちで止まりうる。
+`projects` 以外はいずれもトップレベル一括で、プロジェクト単位・ワーカー単位の指定はできない。`permission` はワーカーに承認するユーザーがいないため、`bypassPermissions` / `dontAsk` 以外ではタスクが承認待ちで止まりうる。
 
 > ℹ️ `mode: "herdr"` の完了通知音はワーカー側から止められない。無音にするには `~/.config/herdr/config.toml` に `[ui.sound] enabled = false` を書いて `herdr server reload-config` する（herdr サーバー全体に効く）。
 
@@ -423,7 +433,7 @@ claude-task-worker all
 
 ## プロセス管理
 
-実行中のタスクはリアルタイムのステータステーブルで表示される（タスクID・タイトル・ステータス・開始時刻・経過時間）。SIGTERM/SIGINT で graceful shutdown し、もう一度送ると強制終了してラベル・worktree の後片付けを試みる。前回の異常終了で残った worktree はワーカー起動時に自動回収される。
+実行中のタスクはリアルタイムのステータステーブルで表示される（タスクID・タイトル・ステータス・開始時刻・経過時間）。SIGTERM/SIGINT で graceful shutdown し、もう一度送ると強制終了してラベル・worktree の後片付けを試みる。前回の異常終了で残った worktree は自動回収しない（同じ path のプロジェクトを並走させたとき他プロセスの作業中 worktree を消さないため）。不要なら `.claude/worktrees/` 配下を `git worktree remove` で手動削除する。
 
 ワーカーは応答するユーザーがいない状態でスキルを起動するため、処理が未完のままラベルだけ進む事故を防ぐガードを持つ（バックグラウンド実行と対話系ツールの無効化、自律実行原則のシステムプロンプト注入、PR 実在の完了検証、空出力セッションの失敗扱い、`Stop` フックによる残留プロセスの停止）。
 

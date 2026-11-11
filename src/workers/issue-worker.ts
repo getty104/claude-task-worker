@@ -26,6 +26,19 @@ import type { WorkerDefinition, WorkerStartOptions } from "./worker-definition";
 // cc-issue-created 再付与 → 再トリアージ、のループに入る。よって除去対象から外す。
 const STICKY_LABELS = ["cc-triage-scope", "cc-issue-created"];
 
+// 起動時の --label を、Issue から作った PR にも付ける（冪等）。失敗は PR 自体を壊さないのでログのみ。
+export async function carryLabelFiltersToPr(
+  workerName: string,
+  prNumber: number,
+  labelFilters: string[] = [],
+): Promise<void> {
+  for (const label of labelFilters) {
+    await addLabel("pr", prNumber, label).catch((err) =>
+      console.error(`[${workerName}] addLabel ${label} failed for PR #${prNumber}: ${err}`),
+    );
+  }
+}
+
 export const consumableTriggerLabels = (triggerLabels: string[]): string[] =>
   triggerLabels.filter((label) => !STICKY_LABELS.includes(label));
 
@@ -50,7 +63,9 @@ export interface IssueWorkerConfig {
     issueNumber: number,
     worktreeId: string,
     output: string,
-    ctx: { cloud: boolean; baseBranch: string; startedAt: number },
+    // labelFilters は起動時の --label（＋ projects.<name>.label）。PR 系ワーカーも同じラベルで絞るため、
+    // 作成した PR に付け直さないと後続の triage-pr / fix-review-point が拾わなくなる。
+    ctx: { cloud: boolean; baseBranch: string; startedAt: number; labelFilters?: string[] },
   ) => Promise<boolean | void>;
   // クラウド実行時に `--ref <baseBranch>` の代わりに `--on-branch` で起動するブランチを用意して返す。
   // 指定したワーカーだけセッションの作業ブランチを固定できる（create-ui-design の cc-ui-design-<N>）。
@@ -77,7 +92,12 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefin
       if (isShuttingDown()) return;
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
-        const excludeLabels = ["cc-in-progress", "cc-need-human-check", ...(config.excludeLabels ?? [])];
+        const excludeLabels = [
+          "cc-in-progress",
+          "cc-need-human-check",
+          ...(config.excludeLabels ?? []),
+          ...(opts.excludeLabelFilters ?? []),
+        ];
         const epicFilter =
           config.epicFilterTarget !== "self" && epicFilters && epicFilters.length > 0
             ? { owner, repo: name, numbers: epicFilters }
@@ -204,6 +224,7 @@ export function createIssuePollingWorker(config: IssueWorkerConfig): WorkerDefin
                         cloud,
                         baseBranch,
                         startedAt,
+                        labelFilters: labelFilters ?? [],
                       })) ?? true;
                     if (verified === false) {
                       await notifyTaskFailed(

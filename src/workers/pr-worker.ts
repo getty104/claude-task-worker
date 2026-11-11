@@ -13,7 +13,7 @@ import { isRunning, isWorkerAtCapacity, isShuttingDown, run } from "../process-m
 import { generateWorktreeName } from "../random-name";
 import { notifyTaskCompleted, notifyTaskFailed, notifyError } from "../slack";
 import { defineWorker } from "./worker-definition";
-import type { WorkerDefinition } from "./worker-definition";
+import type { WorkerDefinition, WorkerStartOptions } from "./worker-definition";
 import { getPermissionMode, getRunMode, isAdvisorEnabled } from "../user-config";
 import {
   createWorktreeFromBranch,
@@ -44,7 +44,7 @@ export interface PrWorkerConfig {
 }
 
 export function createPrPollingWorker(config: PrWorkerConfig): WorkerDefinition {
-  const start = async () => {
+  const start = async (opts: WorkerStartOptions = {}) => {
     const { owner, name, defaultBranch } = await getRepoInfo();
     const user = await getCurrentUser();
     const { pollingIntervalSeconds, cooldownSeconds } = getWorkerConfig(config.name);
@@ -61,7 +61,13 @@ export function createPrPollingWorker(config: PrWorkerConfig): WorkerDefinition 
       if (cooldownMs > 0 && lastCompletionAt > 0 && Date.now() - lastCompletionAt < cooldownMs) return;
       try {
         const excludeLabels = [LABEL_IN_PROGRESS, ...(config.excludeLabels ?? [])];
-        const candidates = await listPullRequestsWithChecks(user, config.triggerLabel, excludeLabels);
+        const candidates = await listPullRequestsWithChecks(
+          user,
+          [config.triggerLabel, ...(opts.labelFilters ?? [])],
+          excludeLabels,
+          undefined,
+          opts.excludeLabelFilters ?? [],
+        );
 
         for (const pr of candidates) {
           if (isRunning(pr.number)) continue;

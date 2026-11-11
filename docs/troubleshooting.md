@@ -13,7 +13,7 @@
 
 ## `cc-in-progress` が付いたまま残っている
 
-ワーカーが異常終了するとラベルが残る。ワーカーが動いていないことを確認してから `cc-in-progress` を外す。worktree の残骸は次回起動時に自動で回収される。
+ワーカーが異常終了するとラベルが残る。ワーカーが動いていないことを確認してから `cc-in-progress` を外す。worktree の残骸は起動時に自動回収されない。不要な worktree は、使用中でないことを確認してから `git worktree remove` で手動削除する。
 
 ## `cc-need-human-check` が付いた
 

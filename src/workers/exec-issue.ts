@@ -11,7 +11,7 @@ import {
   listPrsCrossReferencingIssue,
 } from "../gh";
 import type { ClosingPrRef } from "../gh";
-import { createIssuePollingWorker } from "./issue-worker";
+import { carryLabelFiltersToPr, createIssuePollingWorker } from "./issue-worker";
 
 // 最終報告（stdout）は長くなりうるためコメントには末尾のみ載せる。
 // PRを作らなかった理由は報告の結び（結論）に現れるため、先頭ではなく末尾を残す。
@@ -79,7 +79,8 @@ function prMissingComment(worktreeId: string, output: string, cloud: boolean): s
 // triage-pr は「cc-triage-scope ＋ 自分の Assignee」で PR を拾う。create-pr スキルが両方を付ける
 // 規約だが、クラウドでは MCP の create_pull_request が labels / assignees を持たず欠落しうるため、
 // ワーカー側（ローカルの gh）で付け直す。どちらも冪等。失敗しても PR は実在するので完了扱いは崩さない。
-async function ensurePrTriageMetadata(prNumber: number): Promise<void> {
+async function ensurePrTriageMetadata(prNumber: number, labelFilters?: string[]): Promise<void> {
+  await carryLabelFiltersToPr("exec-issue", prNumber, labelFilters);
   await addLabel("pr", prNumber, "cc-triage-scope").catch((err) =>
     console.error(`[exec-issue] addLabel cc-triage-scope failed for PR #${prNumber}: ${err}`),
   );
@@ -92,7 +93,7 @@ export async function verifyPrCreated(
   issueNumber: number,
   worktreeId: string,
   output: string,
-  ctx: { cloud: boolean; baseBranch: string; startedAt: number },
+  ctx: { cloud: boolean; baseBranch: string; startedAt: number; labelFilters?: string[] },
 ): Promise<boolean | void> {
   // スキルがPRを作成できず cc-need-human-check を付与した場合は、
   // PRが存在しないのに cc-pr-created を付けて完了扱いにしないよう抑止する。
@@ -144,7 +145,7 @@ export async function verifyPrCreated(
   }
   if (prNumber !== null) {
     await addLabel("issue", issueNumber, "cc-pr-created");
-    await ensurePrTriageMetadata(prNumber);
+    await ensurePrTriageMetadata(prNumber, ctx.labelFilters);
     return;
   }
   console.error(

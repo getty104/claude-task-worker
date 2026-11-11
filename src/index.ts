@@ -11,7 +11,6 @@ import {
   renderTable,
 } from "./process-manager";
 import { captureConsole } from "./table";
-import { removeStaleWorktrees } from "./worktree";
 import { init, applyLabels } from "./commands/init";
 import { install } from "./commands/install";
 import { cloudSetup } from "./commands/cloud-setup";
@@ -26,7 +25,13 @@ import {
   hasCloudFlag,
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
-import { loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import {
+  findProjectLabelFilters,
+  loadUserConfig,
+  resolveTargetProjects,
+  UserConfigError,
+  getRunMode,
+} from "./user-config";
 import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
 import {
   CONFIG_PATH,
@@ -82,7 +87,7 @@ async function loadCustomWorkersOrExit(): Promise<CustomWorker[]> {
 }
 
 function printUsage(): void {
-  console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>]
+  console.log(`Usage: claude-task-worker <command> [--project <name>] [--epic <issue-number>] [--label <label-name>] [--exclude-label <label-name>]
 
 Commands:
   init [--force]  Create required GitHub labels and config file (use --force to overwrite existing files)
@@ -110,7 +115,9 @@ Options:
   --inherit-config <path>  Use the given config file as the base. claude-task-worker.json and claude-task-worker.local.json in the current directory are layered on top (their keys win). Relative paths inside the file resolve from its own directory. With init, the config file is generated at this path.
   --debug           Post each task's final report as a comment on the target Issue/PR (off by default; the report is only sent to Slack). Works in both local and --cloud runs.
   --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue. Repeatable: any matching parent (OR).
-  --label <name>    Limit issue-based workers to issues that also carry the specified label. Repeatable: all must be present (AND).
+  --label <name>    Limit issue- and PR-based workers to issues/PRs that also carry the specified label. Repeatable: all must be present (AND).
+  --exclude-label <name>  Skip issues and PRs that carry the specified label. Repeatable: each is applied (AND), so any listed label excludes the item.
+                    Per-project defaults: write a project in config.json as { "path": "...", "label": [...], "excludeLabel": [...] }; they are added to the flags only when started via --project.
 
 Example:
   claude-task-worker init
@@ -119,6 +126,7 @@ Example:
   claude-task-worker all --epic 100 --epic 200
   claude-task-worker all --label priority-high
   claude-task-worker all --label priority-high --label needs-design
+  claude-task-worker all --exclude-label wip
   claude-task-worker yolo --epic 100 --epic 200 --label priority-high
   claude-task-worker all --project all
   claude-task-worker all --project web
@@ -223,8 +231,20 @@ function parseEpicFilters(): number[] {
   });
 }
 
-function parseLabelFilters(): string[] {
-  return collectFlagValues("--label");
+// CLI の --label / --exclude-label に、--project で指定されたプロジェクトの config.json の label / excludeLabel を足す（AND）。
+function parseLabelOptions(): Pick<WorkerStartOptions, "labelFilters" | "excludeLabelFilters"> {
+  const project = findProjectLabelFilters();
+  const uniq = (values: string[]) => [...new Set(values)];
+  const labelFilters = uniq([...collectFlagValues("--label"), ...project.label]);
+  const excludeLabelFilters = uniq([...collectFlagValues("--exclude-label"), ...project.excludeLabel]);
+  // 同じラベルが両方にあると対象が恒久的に0件になる。CLI と config.json の別々の指定から重なりうるため警告する
+  const overlapped = labelFilters.filter((l) => excludeLabelFilters.includes(l));
+  if (overlapped.length > 0) {
+    console.warn(
+      `[worker] label(s) in both --label and --exclude-label, no issue/PR will match: ${overlapped.join(", ")}`,
+    );
+  }
+  return { labelFilters, excludeLabelFilters };
 }
 
 process.on("unhandledRejection", (err) => {
@@ -487,34 +507,31 @@ if (hasProjectFilter()) {
   for (const c of customWorkers) printWorkerRow(c.definition.name, "custom", c.source);
 } else if (workerType === "all") {
   const epicFilters = parseEpicFilters();
-  const labelFilters = parseLabelFilters();
+  const labelOptions = parseLabelOptions();
   (async () => {
     await assertRunPrerequisites();
-    // 前回の異常終了で残った worktree・ブランチをワーカー起動前に回収する
-    await removeStaleWorktrees();
     await Promise.all(
       startEnabledWorkers(
         candidateNames((e) => e.inAll),
-        { epicFilters, labelFilters },
+        { epicFilters, ...labelOptions },
       ),
     );
   })();
 } else if (workerType === "yolo") {
   const epicFilters = parseEpicFilters();
-  const labelFilters = parseLabelFilters();
+  const labelOptions = parseLabelOptions();
   (async () => {
     await assertRunPrerequisites();
-    await removeStaleWorktrees();
     await Promise.all(
       startEnabledWorkers(
         candidateNames((e) => e.inYolo),
-        { epicFilters, labelFilters },
+        { epicFilters, ...labelOptions },
       ),
     );
   })();
 } else {
   const epicFilters = parseEpicFilters();
-  const labelFilters = parseLabelFilters();
+  const labelOptions = parseLabelOptions();
   (async () => {
     // assertRunPrerequisites() の console キャプチャより前に判定する（ログテーブルでは有効化方法が切り詰められるため）。
     if (!isWorkerEnabled(workerType)) {
@@ -522,7 +539,6 @@ if (hasProjectFilter()) {
       process.exit(1);
     }
     await assertRunPrerequisites();
-    await removeStaleWorktrees();
-    await WORKERS[workerType].start({ epicFilters, labelFilters });
+    await WORKERS[workerType].start({ epicFilters, ...labelOptions });
   })();
 }
