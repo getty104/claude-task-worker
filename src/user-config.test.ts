@@ -100,8 +100,16 @@ test("loadUserConfig accepts object project entries with label / excludeLabel", 
     alpha: { label: ["a", "b"], excludeLabel: ["wip"] },
     beta: { label: [], excludeLabel: [] },
   });
-  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd()), { label: ["a", "b"], excludeLabel: ["wip"] });
-  assert.deepEqual(findProjectLabelFiltersByPath("/nonexistent"), { label: [], excludeLabel: [] });
+  // 同じ path のプロジェクトが複数ある: 名前（CTW_PROJECT_NAME）で引く。名前が無ければ絞り込みなし。
+  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), "alpha"), { label: ["a", "b"], excludeLabel: ["wip"] });
+  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), "gamma"), { label: [], excludeLabel: [] });
+  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), ""), { label: [], excludeLabel: [] });
+  assert.deepEqual(findProjectLabelFiltersByPath("/nonexistent", ""), { label: [], excludeLabel: [] });
+});
+
+test("findProjectLabelFiltersByPath resolves a unique path without a project name", () => {
+  writeConfigFile(JSON.stringify({ projects: { alpha: { path: process.cwd(), excludeLabel: ["wip"] } } }));
+  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), ""), { label: [], excludeLabel: ["wip"] });
 });
 
 test("resolveTargetProjects throws UserConfigError for constructor/toString requests", () => {

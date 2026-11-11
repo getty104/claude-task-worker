@@ -545,7 +545,8 @@ const PR_LIST_FETCH_LIMIT = 50;
 
 export async function listPullRequestsWithChecks(
   assignee?: string,
-  label?: string,
+  // 配列なら全ラベルを要求する（gh の --label 繰り返しは AND）。
+  label?: string | string[],
   excludeLabels: string[] = [],
   limit = 5,
 ): Promise<PullRequestWithChecks[]> {
@@ -564,8 +565,8 @@ export async function listPullRequestsWithChecks(
   if (assignee) {
     args.push("--assignee", assignee);
   }
-  if (label) {
-    args.push("--label", label);
+  for (const l of [label ?? []].flat()) {
+    args.push("--label", l);
   }
   const output = await execGh(args);
   const prs = excludePrsByLabels(JSON.parse(output) as PullRequest[], excludeLabels).slice(0, limit);

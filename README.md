@@ -154,7 +154,7 @@ claude-task-worker all --epic 100 --epic 200
 
 ### `--label <label>`
 
-トリガーラベルに加えて指定ラベルが付いた Issue のみに絞る。複数指定は AND。`--epic` と併用可能。
+トリガーラベルに加えて指定ラベルが付いた Issue・PR のみに絞る（Issue 系・PR 系ワーカーの両方に効く）。複数指定は AND。`--epic` と併用可能。
 
 ```bash
 claude-task-worker all --label priority-high --label needs-design
@@ -292,7 +292,7 @@ node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画し
 
 | キー | 既定 | 説明 |
 |---|---|---|
-| `projects` | - | プロジェクト名 → 絶対パス、または `{ path, label, excludeLabel }`。`label` / `excludeLabel` は `--label` / `--exclude-label` と同じ意味で、そのディレクトリで起動したワーカー（`--project` 経由を含む）に足し込まれる |
+| `projects` | - | プロジェクト名 → 絶対パス、または `{ path, label, excludeLabel }`。`label` / `excludeLabel` は `--label` / `--exclude-label` と同じ意味で、そのプロジェクトで起動したワーカーに足し込まれる。`path` の重複は可。`--project` 経由ならプロジェクト名で引き、単体起動では path で引く（同じ path が複数あれば適用しない） |
 | `projectGroups` | `{}` | グループ名 → プロジェクト名配列 |
 | `mode` | `"default"` | `"default"`: `claude -p` の子プロセスとして実行 / `"herdr"`: herdr のタブ内で TUI 起動し、実行中の様子を覗ける（`--project` はこちらが必要） |
 | `advisor` | `false` | `true` で `--advisor <model>` を渡す。モデルは `claude-task-worker.json` の `advisorModel` |
