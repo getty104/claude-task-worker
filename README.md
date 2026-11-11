@@ -168,7 +168,7 @@ claude-task-worker all --label priority-high --label needs-design
 claude-task-worker all --exclude-label wip --exclude-label on-hold
 ```
 
-`--label` / `--exclude-label` は `config.json` の `projects` にプロジェクトごとの既定を書ける（下記）。CLI の指定に足し込まれる。
+`--label` / `--exclude-label` は `config.json` の `projects` にプロジェクトごとの既定を書ける（下記）。`--project` 経由の起動でだけ CLI の指定に足し込まれる。
 
 ### `--project <name>`
 
@@ -292,7 +292,7 @@ node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画し
 
 | キー | 既定 | 説明 |
 |---|---|---|
-| `projects` | - | プロジェクト名 → 絶対パス、または `{ path, label, excludeLabel }`。`label` / `excludeLabel` は `--label` / `--exclude-label` と同じ意味で、そのプロジェクトで起動したワーカーに足し込まれる。`path` の重複は可。`--project` 経由ならプロジェクト名で引き、単体起動では path で引く（同じ path が複数あれば適用しない） |
+| `projects` | - | プロジェクト名 → 絶対パス、または `{ path, label, excludeLabel }`。`label` / `excludeLabel` は `--label` / `--exclude-label` と同じ意味で、`--project` でそのプロジェクトを指定して起動したワーカーにだけ足し込まれる（`--project` なしの起動には適用しない）。`path` の重複は可 |
 | `projectGroups` | `{}` | グループ名 → プロジェクト名配列 |
 | `mode` | `"default"` | `"default"`: `claude -p` の子プロセスとして実行 / `"herdr"`: herdr のタブ内で TUI 起動し、実行中の様子を覗ける（`--project` はこちらが必要） |
 | `advisor` | `false` | `true` で `--advisor <model>` を渡す。モデルは `claude-task-worker.json` の `advisorModel` |

@@ -26,7 +26,7 @@ import {
   hasCloudFlag,
   assertCloudCompatibleCommand,
 } from "./dispatch-args";
-import { findProjectLabelFiltersByPath, loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
+import { findProjectLabelFilters, loadUserConfig, resolveTargetProjects, UserConfigError, getRunMode } from "./user-config";
 import { loadCustomWorkers, type CustomWorker } from "./custom-workers";
 import {
   CONFIG_PATH,
@@ -112,7 +112,7 @@ Options:
   --epic <number>   Limit issue-based workers to sub-issues of the specified epic issue. Repeatable: any matching parent (OR).
   --label <name>    Limit issue- and PR-based workers to issues/PRs that also carry the specified label. Repeatable: all must be present (AND).
   --exclude-label <name>  Skip issues and PRs that carry the specified label. Repeatable: each is applied (AND), so any listed label excludes the item.
-                    Per-project defaults: write a project in config.json as { "path": "...", "label": [...], "excludeLabel": [...] }; they are added to the flags.
+                    Per-project defaults: write a project in config.json as { "path": "...", "label": [...], "excludeLabel": [...] }; they are added to the flags only when started via --project.
 
 Example:
   claude-task-worker init
@@ -226,9 +226,9 @@ function parseEpicFilters(): number[] {
   });
 }
 
-// CLI の --label / --exclude-label に、config.json で cwd のプロジェクトに書いた label / excludeLabel を足す（AND）。
+// CLI の --label / --exclude-label に、--project で指定されたプロジェクトの config.json の label / excludeLabel を足す（AND）。
 function parseLabelOptions(): Pick<WorkerStartOptions, "labelFilters" | "excludeLabelFilters"> {
-  const project = findProjectLabelFiltersByPath(process.cwd());
+  const project = findProjectLabelFilters();
   const uniq = (values: string[]) => [...new Set(values)];
   return {
     labelFilters: uniq([...collectFlagValues("--label"), ...project.label]),

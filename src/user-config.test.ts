@@ -23,7 +23,7 @@ const {
   getPermissionMode,
   resetPermissionModeCache,
   findProjectNameByPath,
-  findProjectLabelFiltersByPath,
+  findProjectLabelFilters,
 } = (await import("./user-config")) as typeof UserConfigModule;
 
 const configDir = join(configHome, "claude-task-worker");
@@ -100,16 +100,12 @@ test("loadUserConfig accepts object project entries with label / excludeLabel", 
     alpha: { label: ["a", "b"], excludeLabel: ["wip"] },
     beta: { label: [], excludeLabel: [] },
   });
-  // 同じ path のプロジェクトが複数ある: 名前（CTW_PROJECT_NAME）で引く。名前が無ければ絞り込みなし。
-  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), "alpha"), { label: ["a", "b"], excludeLabel: ["wip"] });
-  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), "gamma"), { label: [], excludeLabel: [] });
-  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), ""), { label: [], excludeLabel: [] });
-  assert.deepEqual(findProjectLabelFiltersByPath("/nonexistent", ""), { label: [], excludeLabel: [] });
-});
-
-test("findProjectLabelFiltersByPath resolves a unique path without a project name", () => {
-  writeConfigFile(JSON.stringify({ projects: { alpha: { path: process.cwd(), excludeLabel: ["wip"] } } }));
-  assert.deepEqual(findProjectLabelFiltersByPath(process.cwd(), ""), { label: [], excludeLabel: ["wip"] });
+  // 名前（CTW_PROJECT_NAME）でだけ引く。path が同じでもプロジェクトごとの指定になる。
+  assert.deepEqual(findProjectLabelFilters("alpha"), { label: ["a", "b"], excludeLabel: ["wip"] });
+  assert.deepEqual(findProjectLabelFilters("gamma"), { label: [], excludeLabel: [] });
+  assert.deepEqual(findProjectLabelFilters("unknown"), { label: [], excludeLabel: [] });
+  // --project なし（名前なし）では適用しない
+  assert.deepEqual(findProjectLabelFilters(""), { label: [], excludeLabel: [] });
 });
 
 test("resolveTargetProjects throws UserConfigError for constructor/toString requests", () => {

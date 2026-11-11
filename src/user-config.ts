@@ -325,32 +325,23 @@ export function findProjectNameByPath(path: string): string | undefined {
   return undefined;
 }
 
-// 起動中プロジェクトのラベル絞り込み。projects の path は重複を許すため、ディスパッチャーが注入する
-// CTW_PROJECT_NAME（--project の転送先）で名前から引く。単体起動ではパスで引き、
-// 同じパスのプロジェクトが複数あればどれの指定か決められないので絞り込みなしにする。
-export function findProjectLabelFiltersByPath(
-  path: string,
+// --project の転送先で起動したプロジェクトのラベル絞り込み。名前は dispatcher が注入する CTW_PROJECT_NAME。
+// --project なしの起動（名前なし）には適用しない。プロジェクトはパスではなく名前で区別するため
+// （path の重複も許す）、パスから推測して別プロジェクトの指定を当てない。
+export function findProjectLabelFilters(
   projectName: string | undefined = process.env.CTW_PROJECT_NAME,
 ): ProjectLabelFilters {
   const empty = { label: [], excludeLabel: [] };
+  if (!projectName) return empty;
   let config: UserConfig;
   try {
     config = loadUserConfig();
   } catch {
     return empty;
   }
-  if (projectName && Object.prototype.hasOwnProperty.call(config.projects, projectName)) {
-    return config.projectLabelFilters[projectName] ?? empty;
-  }
-  const target = resolve(path);
-  const matches = Object.keys(config.projects).filter((name) => resolve(config.projects[name]) === target);
-  if (matches.length > 1) {
-    console.warn(
-      `[config] multiple projects share ${target} (${matches.join(", ")}); ignoring their label / excludeLabel. Use --project to pick one.`,
-    );
-    return empty;
-  }
-  return matches.length === 1 ? (config.projectLabelFilters[matches[0]] ?? empty) : empty;
+  return Object.prototype.hasOwnProperty.call(config.projectLabelFilters, projectName)
+    ? config.projectLabelFilters[projectName]
+    : empty;
 }
 
 export function resolveTargetProjects(requested: string[], config: UserConfig): ResolvedProject[] {
