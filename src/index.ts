@@ -235,10 +235,16 @@ function parseEpicFilters(): number[] {
 function parseLabelOptions(): Pick<WorkerStartOptions, "labelFilters" | "excludeLabelFilters"> {
   const project = findProjectLabelFilters();
   const uniq = (values: string[]) => [...new Set(values)];
-  return {
-    labelFilters: uniq([...collectFlagValues("--label"), ...project.label]),
-    excludeLabelFilters: uniq([...collectFlagValues("--exclude-label"), ...project.excludeLabel]),
-  };
+  const labelFilters = uniq([...collectFlagValues("--label"), ...project.label]);
+  const excludeLabelFilters = uniq([...collectFlagValues("--exclude-label"), ...project.excludeLabel]);
+  // 同じラベルが両方にあると対象が恒久的に0件になる。CLI と config.json の別々の指定から重なりうるため警告する
+  const overlapped = labelFilters.filter((l) => excludeLabelFilters.includes(l));
+  if (overlapped.length > 0) {
+    console.warn(
+      `[worker] label(s) in both --label and --exclude-label, no issue/PR will match: ${overlapped.join(", ")}`,
+    );
+  }
+  return { labelFilters, excludeLabelFilters };
 }
 
 process.on("unhandledRejection", (err) => {

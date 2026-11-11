@@ -570,6 +570,7 @@ export async function listPullRequestsWithChecks(
     args.push("--assignee", assignee);
   }
   for (const l of [label ?? []].flat()) {
+    if (!l) continue;
     args.push("--label", l);
   }
   const output = await execGh(args);

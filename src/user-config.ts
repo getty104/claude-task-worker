@@ -197,6 +197,12 @@ export function loadUserConfig(): UserConfig {
     projects[name] = value;
     if (isObjectEntry) {
       const obj = entry as Record<string, unknown>;
+      // タイプミス（exludeLabel など）で絞り込みが黙って効かなくならないよう、未知のキーは警告する
+      for (const key of Object.keys(obj)) {
+        if (!PROJECT_ENTRY_KEYS.includes(key)) {
+          console.warn(`[config] unknown key "${key}" in projects.${name}, ignoring`);
+        }
+      }
       projectLabelFilters[name] = {
         label: parseLabelList(obj["label"], `projects.${name}.label`),
         excludeLabel: parseLabelList(obj["excludeLabel"], `projects.${name}.excludeLabel`),
@@ -227,10 +233,14 @@ export function loadUserConfig(): UserConfig {
   return { mode, advisor, permission, projects, projectGroups, projectLabelFilters };
 }
 
+const PROJECT_ENTRY_KEYS = ["path", "label", "excludeLabel"];
+
 function parseLabelList(value: unknown, key: string): string[] {
   if (value === undefined) return [];
   if (Array.isArray(value) && value.every((v) => typeof v === "string" && v.length > 0)) return value as string[];
-  console.warn(`[config] invalid ${key}: expected an array of non-empty strings, ignoring`);
+  console.warn(
+    `[config] invalid ${key}: expected an array of non-empty strings, got ${JSON.stringify(value)}, ignoring`,
+  );
   return [];
 }
 
@@ -336,7 +346,8 @@ export function findProjectLabelFilters(
   let config: UserConfig;
   try {
     config = loadUserConfig();
-  } catch {
+  } catch (err) {
+    console.warn(`[config] failed to read config file, project label filters are not applied: ${err}`);
     return empty;
   }
   return Object.prototype.hasOwnProperty.call(config.projectLabelFilters, projectName)
