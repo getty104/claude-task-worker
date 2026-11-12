@@ -395,7 +395,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - **`--cloud` を付けたプロセスが起動するワーカーはすべてクラウド実行になる**。かつての許可リスト（`exec-issue` / `fix-review-point`）は撤去済み
 - 撤去できたのは、除外の根拠が**成立するかどうか**の2点だったから。(1) 定期ワーカーは `cc-cloud-done` を置く対象 Issue/PR を持たなかった → **実行記録PR（`ctw-last-run-<worker>`）を置き先に使う**（後述）。(2) `create-ui-design` は worktree 外で必ず中断した → worktree ガードの免除指示（`CLOUD_WORKTREE_EXEMPT_SKILLS`）を同スキルへも渡し、あわせてスキル本文へデフォルトブランチ比較を追加した（免除でガードがゼロにならないようにするため）
 - **「成立する」と「有用」は別**。GraphQL ゲート（`gh ... --json` の 403）は残っているため、PR 詳細・CI 結果・レビュースレッドを大量に読むワーカー（`triage-pr` / `check-dependabot` / `resolve-conflict`）は MCP に代替の無い操作へ当たると空振りしうる。`.pen` のスナップショットを描画するワーカー（`create-ui-design`）はクラウド VM 側に Playwright の Chrome が要る（セットアップスクリプトの `install` が取得する）。下表の適合性を見て、実行のたびに `--cloud` の付け外しで選ぶ
-- 空振りが**ループにならない**ことは既存の経路で担保されている。タイムアウト・セッションID抽出失敗・シャットダウン中断はいずれも `runViaCloud()` が `cc-need-human-check` を付け、同ラベルは `issue-worker.ts` / `pr-worker.ts` 共通の除外ラベルなのでポーリング対象から外れる。危険なのは「セッションが `cc-cloud-done` を付けたが成果はゼロ」の場合で、これはトリガーラベルが再付与されるワーカー（`triage-pr` / `cc-fix-repeat`）でクラウドセッションを焼き続けうる（ローカルでも同じループになるが、セッションが実際に状態を進めるので収束する）
+- 空振りが**ループにならない**ことは既存の経路で担保されている。タイムアウト・セッションID抽出失敗・シャットダウン中断はいずれも `runViaCloud()` が `cc-need-human-check` を付け、同ラベルは `issue-worker.ts` / `pr-worker.ts` 共通の除外ラベルなのでポーリング対象から外れる。危険なのは「セッションが `cc-cloud-done` を付けたが成果はゼロ」の場合で、これはトリガーラベルが再付与されるワーカー（`triage-pr`）でクラウドセッションを焼き続けうる（ローカルでも同じループになるが、セッションが実際に状態を進めるので収束する）
 - **`--cloud` を指定しない実行（ローカル default / herdr）の挙動は一切変わらない**。`checkCloudConfig()` は `cloud` が false のとき `scriptAvailable` / `auth` を一切参照せず、そのための I/O（`resolveScriptAvailable()` / `readCloudAuthStatus()`）自体を行わない
 
 #### クラウド時に worktree を作らない理由
@@ -466,7 +466,7 @@ claude.ai はクラウドセッションのターン終了後に最終メッセ�
 
 - **プロンプトへの指示はワーカー側で付ける**（`appendCloudDoneInstruction()`、`src/claude-args.ts`）。スキル本文（`plugin/skills/*`）は変更しない — クラウド実行はプロセス単位の指定であり、ローカル実行のスキルに同じ指示を持たせても意味が無いため。指示は `buildCloudGitHubAccessInstruction()` が渡す「クラウドでは GitHub MCP 優先」の規約に沿わせてある
 - **ポーリングは実行中のクラウドタスク全体を1クエリずつで判定する**（`listNumbersWithLabel()`、`src/gh.ts`）。`gh issue list --label cc-cloud-done --json number` / 同 `pr list` を type ごとに1回だけ叩き、待機中のタスクを一括で照合する。個別番号の `gh issue view` ポーリングにするとタスク数に比例して API を叩くことになる。`--state all` にしているのは、`exec-issue` の「コード変更なし」経路が Issue をクローズしてからラベルを付けるため（既定の open 限定だと取りこぼす）
-- **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。セッション作成完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` / `cc-fix-repeat` で毎ポーリングごとにクラウドセッションが量産されていた
+- **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。セッション作成完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` で毎ポーリングごとにクラウドセッションが量産されていた
 - **検知したら `cc-cloud-done` を除去してから `finishTask()` へ渡す**。以降のラベル遷移（`onCompleted` の PR 実在検証 → `cc-pr-created` / `cc-need-human-check`）はローカル実行と完全に同一の経路を通る
 - **ラベルの付与に MCP（`issue_write` / `pull_request_write` の method: `update`）を使わせない**。同ツールの `labels` は指定配列で**全置換**するため、「`cc-cloud-done` を1つ足す」つもりの呼び出しが `cc-triage-scope` / `cc-in-progress` を巻き添えで消す。実測では定期ワーカーの実行記録PRがこれで無ラベルになり、`triage-pr` のポーリング条件（ラベル＋Assignee）から外れて約10時間放置された（次回実行の `addLabel` 冪等付与で復旧するまで気づけない）。`appendCloudDoneInstruction()` は `gh-compat.sh add-label`（REST の追加専用API `POST issues/{n}/labels`）を指定し、MCP の update を明文で禁止する。スキル本文の `gh (issue|pr) edit --add-label` / `--remove-label` も同じ理由で `plugin/references/github-access.md` の対応表から MCP を外し、`gh-compat.sh add-label` / `remove-label` へ寄せてある（`gh issue edit` は GraphQL 経由でクラウドでは 403 になるため、フォールバック止まり）
 - **起動前に対象から `cc-cloud-done` を除去する**（`issue-worker.ts` / `pr-worker.ts`）。前回実行の残骸で即座に完了と誤判定するのを防ぐ。同一番号の同時実行は `isRunning()` が止めるため nonce は不要
@@ -584,7 +584,7 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 | Worker | トリガーラベル | 完了時 |
 |--------|-------------|--------|
 | exec-issue | `cc-exec-issue` | `cc-in-progress` 除去 |
-| fix-review-point | `cc-fix-onetime` or `cc-fix-repeat` | `cc-in-progress` 除去、`cc-fix-onetime` は除去・`cc-fix-repeat` は維持 |
+| fix-review-point | `cc-fix-onetime` | `cc-in-progress` 除去、`cc-fix-onetime` 除去 |
 | create-issue | `cc-triage-scope`（Open な blockedBy を持たない場合のみ） | Issue クローズ |
 | update-issue | `cc-update-issue` | `@author Updated` コメント投稿 |
 | create-ui-design | `cc-create-ui-design` | PR に `cc-ui-design` + `cc-triage-scope`、Issue に `cc-ui-design-pr-created` を付与 |
@@ -629,7 +629,7 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 ### `triage-pr` は自分で修正する（OpenCodeReview の delegate-review）
 
-`triage-pr` は判定（ステップ2）に加えて、PR差分を OpenCodeReview の delegate モード（`/open-code-review:delegate-review --from origin/<base> --to HEAD --background <Issueの要件>`。OCR はファイル選定とルール解決だけを行い、レビューは本セッションが行う）でレビューし、対応すべき項目（未解決のレビュー指摘・CI失敗・delegate-review の指摘）を**自分で修正 → テスト/Lint → `commit-push` → 要件優先で見送った指摘への返信 → `resolve-pr-comments`** まで行う。かつては `cc-fix-onetime` を付けて `fix-review-point` へ引き継いでいたが、同じPRの差分・指摘・要件を2セッションで読み直すことになるため撤去した（`fix-review-point` ワーカーは人が `cc-fix-onetime` / `cc-fix-repeat` を付けた場合のために残っている）。
+`triage-pr` は判定（ステップ2）に加えて、PR差分を OpenCodeReview の delegate モード（`/open-code-review:delegate-review --from origin/<base> --to HEAD --background <Issueの要件>`。OCR はファイル選定とルール解決だけを行い、レビューは本セッションが行う）でレビューし、対応すべき項目（未解決のレビュー指摘・CI失敗・delegate-review の指摘）を**自分で修正 → テスト/Lint → `commit-push` → 要件優先で見送った指摘への返信 → `resolve-pr-comments`** まで行う。かつては `cc-fix-onetime` を付けて `fix-review-point` へ引き継いでいたが、同じPRの差分・指摘・要件を2セッションで読み直すことになるため撤去した（`fix-review-point` ワーカーは人が `cc-fix-onetime` を付けた場合のために残っている）。
 
 - **修正を push したセッションではマージしない**。push 後のCIと新しい指摘は未評価なので、`cc-triage-scope` を残したまま次回ポーリングで再評価させる
 - **ループの上限**: 修正のたびに見出し `## triage-pr による自動修正` のPRコメントを残し、それが3件以上あるのにまだ対応すべき項目があれば `cc-need-human-check` を付けて止める（A-0）。delegate-review は毎回差分全体を見るため、上限が無いと修正 → 新しい指摘 → 修正が収束しないことがある
