@@ -105,7 +105,7 @@ CHECKS_EXIT=$?
 上記のCI状況取得は、GitHub MCP の `pull_request_read`（method: `get_status` / `get_check_runs`）を優先し、利用不可なら`gh pr checks`にフォールバックする。
 
 ```bash
-gh pr view $ARGUMENTS --json title,body,labels
+gh pr view $ARGUMENTS --json title,body,labels,baseRefName
 ```
 
 上記のPR本文・ラベル取得は、GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら`gh pr view`にフォールバックする。
@@ -165,7 +165,7 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 2-1〜2-3 はレビュアーとCIが既に出した指摘の判定であり、まだ誰も見ていない問題は拾えない。PRの差分そのものを OpenCodeReview の delegate モード（OCR はレビュー対象ファイルの選定とレビュールールの解決だけを行い、レビュー自体は本セッションが行う）でレビューする。**デザインPR（`cc-ui-design`）では実行しない**（コードレビューのルールが `.pen` に当てはまらないため。下記のデザインPRの評価基準で代える）。
 
-`Skill` ツールで `open-code-review:delegate-review` を呼び、引数でPRの差分範囲（range モード）と関連Issueの要件を渡す。`<BASE>` は2-1で取得したPRの `baseRefName`。
+`Skill` ツールで `open-code-review:delegate-review` を呼び、引数でPRの差分範囲（range モード）と関連Issueの要件を渡す。`<BASE>` は2-1で取得したPRの `baseRefName`（取得できていなければ delegate-review を実行せず、下記の「実行できない場合」と同じ扱いにする）。
 
 ```text
 --from origin/<BASE> --to HEAD --background "<2-1で「正」とした要件・確定事項の要約（無ければ省略）>"
@@ -220,6 +220,8 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 「対応すべき」と判定された項目（未解決のレビュー指摘・CI失敗・2-4の delegate-review の指摘）が1つでもある場合、または2-4で delegate-review が修正を入れた場合、**このスキル自身で修正して push する**。
 
+**パターンCが優先する**: CI失敗のいずれかがパターンC（差分の修正では解消不能）に該当する場合は、他に「対応すべき」項目や delegate-review の修正があってもパターンAへ進まず、パターンC（C-1 → C-2）で終える。push してもCIは直らず、次回ポーリングで修正と push を繰り返すことになるため。このとき delegate-review が入れた未 push の変更は `git restore .`（新規ファイルは `git clean -fd`）で破棄し、残っていた指摘はC-2の理由コメントと報告に要約する。
+
 **A-0. 自動修正の上限**: このPRに見出し `## triage-pr による自動修正` のPRコメントが既に3件以上ある場合は修正しない（修正 → 新しい指摘 → 修正の往復が収束していない）。C-2 と同じ手順で `cc-need-human-check` を付与し、理由コメントの「失敗チェック」「失敗内容」「根拠」を「自動修正の上限（3回）に到達」「残っている対応すべき項目の要約」に置き換えて投稿して終了する。これはCI失敗以外を根拠に同ラベルを付ける唯一の例外。
 
 1. **修正**: 各項目を直す。自分で直すか委譲するかは、委譲のコスト（ブリーフィングとサブエージェントの再探索）と効果（コンテキストの隔離・独立タスクの並列化・専門エージェントの知識）を比べて決める。委譲する場合は1タスク1エージェントで、`general-purpose-assistant`（自明な単一ステップなら `lightweight-assistant`）に指摘全文・対象ファイル・関連Issueの要件を渡す（effort の選び方は `${CLAUDE_PLUGIN_ROOT}/references/agent-effort.md`）。デザインPRの `.pen` の修正は `pencil-design-updater` に委譲する。要件と矛盾する指摘は直さず、手順4で返信する
@@ -227,7 +229,8 @@ gh pr view $ARGUMENTS --json title,body,labels
 3. **コミットと push**: `commit-push` スキルを呼ぶ。push の失敗は報告して終了し、手順4以降に進まない
 4. **返信と Resolve**（push 完了後にのみ行う。push 前に Resolve すると、直していない指摘まで解決済みになる）:
    - 要件と矛盾するため直さなかったレビュー指摘のスレッドへ、「Issue #<N> の要件（または確認事項への回答）『<該当箇所の引用>』に従い、この指摘は反映しません」と1-2行で返信する。インラインスレッドは GitHub MCP の `add_reply_to_pull_request_comment`、会話コメントは `add_issue_comment` を優先し、利用不可なら `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/<comment_id>/replies -f body=...` / `gh pr comment` にフォールバックする。返信に失敗したスレッドの thread ID は記録する
-   - `resolve-pr-comments` スキルを PR 番号（返信に失敗したスレッドがあれば、続けてその thread ID を除外対象として列挙）で呼ぶ
+   - 未解決スレッドを取り直し、**2-1で取得していなかったスレッド**（修正・push の間に投稿された、未評価の指摘）の thread ID を控える。`resolve-pr-comments` は除外指定以外を内容を問わず全件 Resolve するため、控えないと未評価の指摘まで解決済みになり、次回ポーリングで判定から漏れる
+   - `resolve-pr-comments` スキルを PR 番号と、除外対象の thread ID（返信に失敗したスレッドと、上で控えた未評価のスレッド）を続けて列挙して呼ぶ
 5. **記録**: PRへ次のコメントを投稿する（A-0 の回数判定に使うため見出しは変えない）
 
    ```bash
