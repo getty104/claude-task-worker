@@ -45,8 +45,9 @@ claude-task-worker all             # Run all workers concurrently
   - 書き出す設定は5つ。**`permissions.allow`**（`CLOUD_PERMISSION_ALLOW` = `Bash(gh *)` / `Bash(git *)` / `Bash(bash *)`）は、auto モードでも `gh` / `git` の実行で確認が挟まると応答するユーザーのいないクラウドセッションが止まるため。`Bash(bash *)` は Issue/PR の作成・ラベル/Assignee 付与を担う `bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh ...` 形式の呼び出しが `Bash(gh *)` にマッチしないため。既存の allow は残して欠けているルールだけを追記する（配列の和集合なので `--force` の対象外）。**`env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`**（`CLOUD_SETTINGS_ENV` = `"1"`）は、ローカル実行でワーカーが spawn 時に渡している同名の環境変数が**クラウドでは VM のセッションに届かない**（作成コマンドを叩くローカルの `claude --cloud` プロセスにしか効かない）ため。無いと VM ではサブエージェントが自動でバックグラウンド化され、メインエージェントが「Wait for background agents」を繰り返してターンを空費する（実運用で観測）。VM のセッションへ環境変数を効かせる経路は settings ファイルの `env` だけ。**`permissions.defaultMode`**（`CLOUD_DEFAULT_PERMISSION_MODE` = `"auto"`）はクラウドの権限モードを決めるため。クラウドセッションは `--permission-mode` を**受理するが VM 側に反映しない**（`--disallowedTools` / `--append-system-prompt-file` と同じ。Issue #307）うえ、`bypassPermissions` がクラウドのモード一覧に無いため既定の `acceptEdits`（「編集を受け入れる」）へ落ちる。公式が挙げるクラウドセッションの設定手段は「環境変数」と「設定ファイル」の2つで、権限モードを指す環境変数は存在しない（`CLAUDE_CODE_*` に該当なし）ため、設定ファイルが唯一の経路になる。**`outputStyle`**（`Proactive`）はタスクセッションが応答するユーザーの常駐しない自律実行であるため、**`language`**（`Japanese`）は成果物の言語を揃えるため。ローカル実行（default / herdr）はワーカーが `--permission-mode` フラグを渡し、フラグが settings に勝つため挙動は変わらない
   - 書き込みは**キー単位のマージ**で、既存ファイルを丸ごと上書きしない。既に指定があるキーは触らず欠けているキーだけを埋め、`--force` のときだけ上書きする。**セットアップスクリプトは非0終了でセッションの起動ごと失敗する**ため、JSON として読めない・書き込みに失敗した場合も例外を投げずログのみで終える（コマンドは常に正常終了する）。環境キャッシュの再構築で何度も走るので、追加するステップも冪等であること
   - CodeGraph 関連でここが行うのは**グローバル gitignore への `.codegraph/` 登録だけ**（`ensureCodegraphGitIgnore()`）。VM 全体に一度効けばよく、環境キャッシュにも残るため。**インデックス構築（`codegraph init`）は置かない** — セットアップスクリプトが走るのは**環境キャッシュが無いときだけ**で、キャッシュはリポジトリを問わず再利用されるため、毎セッションのインデックスを保証できない。構築は `SessionStart` フック（`plugin/scripts/setup-codegraph.sh`）が担う。**CLI 本体（`npm install -g`）もここでは入れない**（`install` が同じことをするので、セットアップスクリプトに両方書けば二重に走るだけ）
-- **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI / DESIGN.md CLI のインストール・Playwright ブラウザの取得を一括で行うコマンド
-- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI / DESIGN.md CLI・Playwright ブラウザの更新コマンド
+- **`src/commands/install.ts`** - マーケットプレイス追加・プラグインインストール・CLI自体のインストール・CodeGraph CLI / DESIGN.md CLI のインストール・Playwright ブラウザの取得・OpenCodeReview（CLI とプラグイン）の導入を一括で行うコマンド
+- **`src/commands/update.ts`** - プラグイン/マーケットプレイス・CLI自体・CodeGraph CLI / DESIGN.md CLI・Playwright ブラウザ・OpenCodeReview（CLI とプラグイン）の更新コマンド
+- **`src/commands/open-code-review.ts`** - OpenCodeReview（[`@alibaba-group/open-code-review`](https://github.com/alibaba/open-code-review)）連携。`installOpenCodeReview()` が CLI（`npm install -g`）と Claude Code プラグイン（`open-code-review@open-code-review`。install はマーケットプレイス `alibaba/open-code-review` の追加 → インストール、update はマーケットプレイス更新 → プラグイン更新、失敗時はインストールへフォールバック）を導入する。`triage-pr` が `/open-code-review:delegate-review` を使うため。delegate モードは OCR 側で LLM を呼ばないので `ocr config` は不要
 - **`src/commands/codegraph.ts`** - CodeGraph（`@colbymchenry/codegraph`）連携。`installCodegraphCli()`（`npm install -g` によるインストール）、`upgradeCodegraphCli()`（`codegraph upgrade` による更新。CodeGraph 自身の更新機構を使うことで配布方法の変更に追随できる。未インストール環境では `codegraph` コマンドが無く失敗するため `installCodegraphCli()` へフォールバックする）、`runCodegraphInit()`（`codegraph init`）、`ensureCodegraphGitIgnore()`（グローバル gitignore への `.codegraph/` 追記）、`globalGitIgnorePath()`/`appendIgnoreEntry()`（テスト可能な純粋関数）
   - **`codegraph install` はあえて実行しない**。同コマンドは各エージェントの設定ファイルへ MCP サーバー定義を書き込むが、その役割は本プラグインの `plugin/.mcp.json`（`codegraph serve --mcp`）が担っているため、両方走らせると同じサーバーが二重登録される。CLI のインストールだけを `npm install -g` で行う
   - グローバル gitignore（`~/.config/git/ignore`、`XDG_CONFIG_HOME` があればその配下）へ入れるのは、`.codegraph/` がプロジェクトごとのローカルインデックス（SQLite）でコミット対象ではない一方、対象リポジトリの `.gitignore` を汚したくないため。追記は冪等で、`.codegraph/` と `.codegraph` の両方を登録済みとみなす（`!.codegraph/` のような否定パターンは登録済み扱いにしない）
@@ -137,7 +138,7 @@ Open な blockedBy（GitHub Issue Dependencies）を持つIssueの除外は、`l
 
 ### `exec-issue` は PR の CI を待たない
 
-`exec-issue` の完了は「PR を作成した」時点で、PR の CI（Actions の成否・CI が PR に投稿するコメント）は完了条件にしない（スキル本文の「CI を待たない」節）。CI の確認は `triage-pr`、CI 失敗の修正は `cc-fix-onetime` → `fix-review-point` の担当。
+`exec-issue` の完了は「PR を作成した」時点で、PR の CI（Actions の成否・CI が PR に投稿するコメント）は完了条件にしない（スキル本文の「CI を待たない」節）。CI の確認と CI 失敗の修正は `triage-pr` の担当。
 
 きっかけは、description の完了条件と実装プランが CI の出力を前提にしていたIssue（「一時定義を push して CI が PR に投稿する出力から実測値を採る」「CI の出力が差分なしであること」）。クラウド実行ではその値をローカルで得る手段が無く、セッションは push → CI 待ち → 反映を繰り返してワーカーのタスクを張り付かせた。システムプロンプトの「全ステップを完遂してから終了する」が、CI 待ちも省けないステップとして扱わせる。
 
@@ -394,7 +395,7 @@ TUI起動時の引数は `buildClaudeArgs()` が組み立て、`-p` の有無以
 - **`--cloud` を付けたプロセスが起動するワーカーはすべてクラウド実行になる**。かつての許可リスト（`exec-issue` / `fix-review-point`）は撤去済み
 - 撤去できたのは、除外の根拠が**成立するかどうか**の2点だったから。(1) 定期ワーカーは `cc-cloud-done` を置く対象 Issue/PR を持たなかった → **実行記録PR（`ctw-last-run-<worker>`）を置き先に使う**（後述）。(2) `create-ui-design` は worktree 外で必ず中断した → worktree ガードの免除指示（`CLOUD_WORKTREE_EXEMPT_SKILLS`）を同スキルへも渡し、あわせてスキル本文へデフォルトブランチ比較を追加した（免除でガードがゼロにならないようにするため）
 - **「成立する」と「有用」は別**。GraphQL ゲート（`gh ... --json` の 403）は残っているため、PR 詳細・CI 結果・レビュースレッドを大量に読むワーカー（`triage-pr` / `check-dependabot` / `resolve-conflict`）は MCP に代替の無い操作へ当たると空振りしうる。`.pen` のスナップショットを描画するワーカー（`create-ui-design`）はクラウド VM 側に Playwright の Chrome が要る（セットアップスクリプトの `install` が取得する）。下表の適合性を見て、実行のたびに `--cloud` の付け外しで選ぶ
-- 空振りが**ループにならない**ことは既存の経路で担保されている。タイムアウト・セッションID抽出失敗・シャットダウン中断はいずれも `runViaCloud()` が `cc-need-human-check` を付け、同ラベルは `issue-worker.ts` / `pr-worker.ts` 共通の除外ラベルなのでポーリング対象から外れる。危険なのは「セッションが `cc-cloud-done` を付けたが成果はゼロ」の場合で、これはトリガーラベルが再付与されるワーカー（`triage-pr` / `cc-fix-repeat`）でクラウドセッションを焼き続けうる（ローカルでも同じループになるが、セッションが実際に状態を進めるので収束する）
+- 空振りが**ループにならない**ことは既存の経路で担保されている。タイムアウト・セッションID抽出失敗・シャットダウン中断はいずれも `runViaCloud()` が `cc-need-human-check` を付け、同ラベルは `issue-worker.ts` / `pr-worker.ts` 共通の除外ラベルなのでポーリング対象から外れる。危険なのは「セッションが `cc-cloud-done` を付けたが成果はゼロ」の場合で、これはトリガーラベルが再付与されるワーカー（`triage-pr`）でクラウドセッションを焼き続けうる（ローカルでも同じループになるが、セッションが実際に状態を進めるので収束する）
 - **`--cloud` を指定しない実行（ローカル default / herdr）の挙動は一切変わらない**。`checkCloudConfig()` は `cloud` が false のとき `scriptAvailable` / `auth` を一切参照せず、そのための I/O（`resolveScriptAvailable()` / `readCloudAuthStatus()`）自体を行わない
 
 #### クラウド時に worktree を作らない理由
@@ -465,7 +466,7 @@ claude.ai はクラウドセッションのターン終了後に最終メッセ�
 
 - **プロンプトへの指示はワーカー側で付ける**（`appendCloudDoneInstruction()`、`src/claude-args.ts`）。スキル本文（`plugin/skills/*`）は変更しない — クラウド実行はプロセス単位の指定であり、ローカル実行のスキルに同じ指示を持たせても意味が無いため。指示は `buildCloudGitHubAccessInstruction()` が渡す「クラウドでは GitHub MCP 優先」の規約に沿わせてある
 - **ポーリングは実行中のクラウドタスク全体を1クエリずつで判定する**（`listNumbersWithLabel()`、`src/gh.ts`）。`gh issue list --label cc-cloud-done --json number` / 同 `pr list` を type ごとに1回だけ叩き、待機中のタスクを一括で照合する。個別番号の `gh issue view` ポーリングにするとタスク数に比例して API を叩くことになる。`--state all` にしているのは、`exec-issue` の「コード変更なし」経路が Issue をクローズしてからラベルを付けるため（既定の open 限定だと取りこぼす）
-- **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。セッション作成完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` / `cc-fix-repeat` で毎ポーリングごとにクラウドセッションが量産されていた
+- **待機中は台帳エントリを `running` のまま維持する**。これが本機構のもう一つの目的で、`isRunning()` が効くようになる。セッション作成完了で `finishTask()` へ進んでいた暫定実装では、トリガーラベルが再装填される `triage-pr` で毎ポーリングごとにクラウドセッションが量産されていた
 - **検知したら `cc-cloud-done` を除去してから `finishTask()` へ渡す**。以降のラベル遷移（`onCompleted` の PR 実在検証 → `cc-pr-created` / `cc-need-human-check`）はローカル実行と完全に同一の経路を通る
 - **ラベルの付与に MCP（`issue_write` / `pull_request_write` の method: `update`）を使わせない**。同ツールの `labels` は指定配列で**全置換**するため、「`cc-cloud-done` を1つ足す」つもりの呼び出しが `cc-triage-scope` / `cc-in-progress` を巻き添えで消す。実測では定期ワーカーの実行記録PRがこれで無ラベルになり、`triage-pr` のポーリング条件（ラベル＋Assignee）から外れて約10時間放置された（次回実行の `addLabel` 冪等付与で復旧するまで気づけない）。`appendCloudDoneInstruction()` は `gh-compat.sh add-label`（REST の追加専用API `POST issues/{n}/labels`）を指定し、MCP の update を明文で禁止する。スキル本文の `gh (issue|pr) edit --add-label` / `--remove-label` も同じ理由で `plugin/references/github-access.md` の対応表から MCP を外し、`gh-compat.sh add-label` / `remove-label` へ寄せてある（`gh issue edit` は GraphQL 経由でクラウドでは 403 になるため、フォールバック止まり）
 - **起動前に対象から `cc-cloud-done` を除去する**（`issue-worker.ts` / `pr-worker.ts`）。前回実行の残骸で即座に完了と誤判定するのを防ぐ。同一番号の同時実行は `isRunning()` が止めるため nonce は不要
@@ -583,7 +584,7 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 | Worker | トリガーラベル | 完了時 |
 |--------|-------------|--------|
 | exec-issue | `cc-exec-issue` | `cc-in-progress` 除去 |
-| fix-review-point | `cc-fix-onetime` or `cc-fix-repeat` | `cc-in-progress` 除去、`cc-fix-onetime` は除去・`cc-fix-repeat` は維持 |
+| fix-review-point | `cc-fix-onetime` | `cc-in-progress` 除去、`cc-fix-onetime` 除去 |
 | create-issue | `cc-triage-scope`（Open な blockedBy を持たない場合のみ） | Issue クローズ |
 | update-issue | `cc-update-issue` | `@author Updated` コメント投稿 |
 | create-ui-design | `cc-create-ui-design` | PR に `cc-ui-design` + `cc-triage-scope`、Issue に `cc-ui-design-pr-created` を付与 |
@@ -626,16 +627,27 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 あわせて、クローズの実体を `gh issue close` から **`gh-compat.sh close-issue`（REST の `PATCH .../issues/{n}` に `state=closed` / `state_reason`）** へ寄せた。`gh issue close` は GraphQL の `closeIssue` mutation を叩くためクラウドセッションのゲートに掛かりうる一方、この操作には MCP の安全な代替が無い（`issue_write` の method: `update` は `labels` を全置換するので state だけ変えるつもりの呼び出しでラベルが消える）。対象は `triage-pr` / `fix-review-point` / `triage-created-issue` / `exec-issue` の各スキル。
 
+### `triage-pr` は自分で修正する（OpenCodeReview の delegate-review）
+
+`triage-pr` は判定（ステップ2）に加えて、PR差分を OpenCodeReview の delegate モード（`/open-code-review:delegate-review --from origin/<base> --to HEAD --background <Issueの要件>`。OCR はファイル選定とルール解決だけを行い、レビューは本セッションが行う）でレビューし、対応すべき項目（未解決のレビュー指摘・CI失敗・delegate-review の指摘）を**自分で修正 → テスト/Lint → `commit-push` → 要件優先で見送った指摘への返信 → 評価済みスレッドだけを thread ID 指定で Resolve** まで行う（`resolve-pr-comments` は呼び出し時点の未解決スレッドを全件 Resolve するため使わない。修正中に投稿された未評価の指摘まで解決済みになるため）。かつては `cc-fix-onetime` を付けて `fix-review-point` へ引き継いでいたが、同じPRの差分・指摘・要件を2セッションで読み直すことになるため撤去した（`fix-review-point` ワーカーは人が `cc-fix-onetime` を付けた場合のために残っている）。
+
+- **修正を push したセッションではマージしない**。push 後のCIと新しい指摘は未評価なので、`cc-triage-scope` を残したまま次回ポーリングで再評価させる
+- **ループの上限**: 修正のたびに見出し `## triage-pr による自動修正` のPRコメントを残し、それが3件以上あるのにまだ対応すべき項目があれば `cc-need-human-check` を付けて止める（A-0）。delegate-review は毎回差分全体を見るため、上限が無いと修正 → 新しい指摘 → 修正が収束しないことがある
+- **delegate-review は Issue の要件を知らない**ので、`--background` に要件を渡したうえで、要件と矛盾する修正は戻す（「レビュー指摘の判定は Issue の要件を正とする」と同じ扱い）。デザインPR（`cc-ui-design`）では実行しない
+- `ocr` / プラグインが無い環境では delegate-review を飛ばし、既存の指摘とCIだけで判定する（PRを止めない）
+
 ### `cc-need-human-check`（PR側）と解けないコンフリクトのループ遮断
 
 PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリング候補から除外する（`src/workers/triage-pr.ts` の `excludeLabels`）。同ラベルが付く経路は3つ:
 
-1. **`triage-pr` のパターンC**: CI失敗の原因が**このPRの差分をどう変更しても解消しない種類**（APIコスト/使用量の上限超過、クレジット枯渇、外部サービス障害・レート制限、シークレット/権限不足、CIランナー障害）の場合のみ。型チェック・テスト・Lint・ビルドの失敗や、ベースブランチ由来のテスト失敗は**リポジトリ内の変更（コード・`.pen`・リベース）で直せる余地がある**のでパターンA（`cc-fix-onetime`）へ倒す。デザインPR（`cc-ui-design`）でも基準は同じで、CI失敗を理由に `cc-fix-onetime` を回避しない。あわせて2つの制約がある:
+1. **`triage-pr` のパターンC**: CI失敗の原因が**このPRの差分をどう変更しても解消しない種類**（APIコスト/使用量の上限超過、クレジット枯渇、外部サービス障害・レート制限、シークレット/権限不足、CIランナー障害）の場合のみ。型チェック・テスト・Lint・ビルドの失敗や、ベースブランチ由来のテスト失敗は**リポジトリ内の変更（コード・`.pen`・リベース）で直せる余地がある**のでパターンA（`triage-pr` 自身が修正して push）へ倒す。デザインPR（`cc-ui-design`）でも基準は同じで、デザインPRであることを理由に修正を回避しない。あわせて2つの制約がある:
    - **一過性の失敗は先に再実行で切り分ける（C-1）**: ネットワーク到達不能・レート制限・イメージ取得失敗・CIキャッシュ破損・同一run内の他ジョブが同じコードで成功しているのに特定ジョブだけ落ちている、といった失敗は再実行で解消しうる。`gh run view <run-id> --json attempt` が `1` の場合に限り `gh run rerun --failed` を1回だけ実行し、ラベルを付けずに「保留（CI再実行）」で終える（結果の評価は次のポーリングに任せる）。`attempt` を見ずに再実行すると、直らない失敗を毎ポーリングで再実行し続けるループになる。クレジット枯渇・シークレット欠落のような恒久的な失敗は再実行せず直接付与する。実運用では GitHub Actions のキャッシュ破損（`TypeError: __turbopack_context__.a is not a function`）で複数PRが恒久停止していた
    - **根拠はCI失敗に限る＋理由コメントを必ず残す（C-2）**: PR body の「`terraform apply` 未実施」のような作者の人間ゲート・承認待ちを根拠に付けない（CI以外の保留はラベルなしの「保留」報告で終える）。付与時は `gh pr comment` で失敗チェック名・失敗内容・差分では直せないと判断した根拠・ラベルを外せば再開する旨を投稿する。同ラベルはPRをポーリング対象から恒久的に外すため、GitHub上に根拠が残らないと「理由なくPRが止まった」ようにしか見えない
 2. **`resolve-conflict` ワーカーの `onCompleted`**: `resolve-pr-conflict` は解消困難（人間の仕様判断が必要・`.pen` の両側の変更が両立しないなど）の場合 `git rebase --abort` して「判定: `aborted`」を報告し**正常終了**する。`pr-worker` はこれを完了とみなして `cc-resolve-conflict` を外し `cc-triage-scope` を戻すため、そのままだと `triage-pr` が同じコンフリクトを再検知してラベルを付け直し、解けないコンフリクトを永久にリトライする（毎周Slack通知＋2セッション分のトークンを焼く）。`onCompleted` は出力が `aborted` かつ `getPrMergeable()` が **`CONFLICTING` を返した場合だけ** `cc-need-human-check` を付けてループを断つ（`shouldFlagUnresolvedConflict()`）。`UNKNOWN`（GitHub が再計算中）では付けない。判定にスキルの報告本文だけを使わないのは、abort 後に別経路で解消済みの可能性を排除できないため。この検証のため `PrWorkerConfig.onCompleted` はスキルの stdout を第2引数で受け取る
 
-3. **`fix-review-point` の「修正点がないのにCIが失敗している場合」**: 修正タスクが0件なのにCIが落ちている＝失敗の原因が指摘の外（ベースブランチ由来・時刻依存のテスト等）にある。ラベルを付けずに終えると `triage-pr` がパターンA（`cc-fix-onetime`）を付け直し、両スキルが数分おきに空振りし続ける（実測で数十往復）。同ラベルと理由コメントを付けたうえで、CI修正のIssueを `create-issue` で起票する（同じ失敗を扱う open なIssueがあれば再利用する。ベース由来の失敗は複数PRで同時に起きるため）
+3. **`fix-review-point` の「修正点がないのにCIが失敗している場合」**: 修正タスクが0件なのにCIが落ちている＝失敗の原因が指摘の外（ベースブランチ由来・時刻依存のテスト等）にある。ラベルを付けずに終えると `triage-pr` が同じPRを数分おきに再評価し続ける（旧フローでは `cc-fix-onetime` の付け直しで両スキルが数十往復した）。同ラベルと理由コメントを付けたうえで、CI修正のIssueを `create-issue` で起票する（同じ失敗を扱う open なIssueがあれば再利用する。ベース由来の失敗は複数PRで同時に起きるため）
+
+4. **`triage-pr` のパターンA の A-0（自動修正の上限）**: 見出し `## triage-pr による自動修正` のPRコメントが3件以上あるのに、まだ対応すべき項目が残る場合。修正 → 新しい指摘 → 修正の往復が収束していないため、CI失敗以外を根拠にする唯一の例外として付ける
 
 `.pen` のコンフリクトを `triage-pr` が判別する必要はない（`resolve-pr-conflict` が `git status` で検出して `resolve-pencil-conflict` スキルへ内部委譲するため）。PR側の `cc-need-human-check` を外すと `triage-pr` のポーリングが再開する。
 
@@ -776,6 +788,8 @@ Issue Dependencies / sub-issue の POST（`add-blocked-by` / `add-blocking` / `a
   - プロジェクトごとのインデックス構築は `claude-task-worker init`（内部で `codegraph init`）。未インストール・未初期化でもワーカーは動作する（探索がテキスト検索に落ちるだけ）
 - DESIGN.md CLI (`designmd`) がインストール済み（`claude-task-worker install` / `update` が面倒を見る）
   - `update-design-md` スキルが `designmd lint DESIGN.md` で使う。未インストールでも同スキルは動作するが lint を実行できないため、その旨を報告とPR本文に明記して続行する（フォールバックとして `npx -y -p @google/design.md designmd` も試す。パッケージ名兼bin名の `.` を含む `@google/design.md` を直接bin名として呼ぶとWindowsの拡張子関連付けと衝突しうるため、`-p` でパッケージを指定しdotフリーの `designmd` を明示的に呼ぶ）
+- OpenCodeReview の CLI（`ocr`）とプラグイン（`open-code-review@open-code-review`）が導入済み（`claude-task-worker install` / `update` が面倒を見る）
+  - `triage-pr` がPR差分のレビューに `/open-code-review:delegate-review` を使う。未導入でも `triage-pr` は既存のレビューコメントとCIだけで判定を続け、実行できなかった旨を報告する
 - Playwright のブラウザ（Google Chrome）が取得済み（`claude-task-worker install` / `update` が面倒を見る）
   - `.pen` のスナップショット描画（`plugin/scripts/pen.mjs render`）もこの Chrome を使う
   - MCP サーバーとして `plugin/.mcp.json` から起動される（`npx -y @playwright/mcp@latest --cdp-endpoint http://localhost:9222`）。MCP は起動済みの Chrome に CDP 接続するため、事前に Chrome を `--remote-debugging-port=9222` 付きで起動しておく（例: macOS なら `open -n -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=<任意のディレクトリ>`。Chrome 136 以降は既定プロファイルでのリモートデバッグを受け付けないため `--user-data-dir` が要る）。サーバー本体は npx がその都度解決するため事前導入は不要だが、ブラウザバイナリが未取得だと MCP ツールの初回呼び出しが実行時に失敗する

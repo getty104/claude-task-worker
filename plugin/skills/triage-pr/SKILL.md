@@ -1,6 +1,6 @@
 ---
 name: triage-pr
-description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), collect unresolved review comments and CI status and judge only whether each item must be fixed, then take action (add cc-fix-onetime label if fixes are needed; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
+description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), review the diff with OpenCodeReview's delegate-review, collect unresolved review comments and CI status, then take action (if fixes are needed, fix them in this session, commit, push, and resolve the threads; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
 argument-hint: "[pr-number]"
 hooks:
   Stop:
@@ -17,18 +17,15 @@ hooks:
 ## このスキルがやること・やらないこと
 
 **やること**:
-- ステップ1のコンフリクト検知（`gh pr status`で確認し、コンフリクトがあれば`cc-resolve-conflict`ラベル付与のみで終了）
-- ステップ2の未解決レビューコメント・CIステータスの収集と、各項目が「修正すべきか」の二分判定のみ
-- ステップ3のアクション: 修正が必要なら`cc-fix-onetime`ラベル付与 / マージ可能なら、Epic PR（`cc-epic-issue`付き）は`cc-release-ready`ラベル付与（マージしない）、通常PRはマージ / CI失敗が差分の変更では直せない場合は失敗ジョブの1回だけの再実行（C-1）を経て`cc-need-human-check`ラベル付与＋理由コメント投稿（C-2）
+- ステップ1のコンフリクト検知（コンフリクトがあれば`cc-resolve-conflict`ラベル付与のみで終了）
+- ステップ2の判定材料の収集（未解決レビューコメント・CIステータス・関連Issueの要件）と、OpenCodeReview の delegate-review（`/open-code-review:delegate-review`）によるPR差分のレビュー、各項目が「修正すべきか」の二分判定
+- ステップ3のアクション: 修正が必要なら**このスキル自身で修正 → テスト/Lint → commit-push → スレッドのResolve**まで行い、マージは次回ポーリングへ回す / マージ可能なら、Epic PR（`cc-epic-issue`付き）は`cc-release-ready`ラベル付与（マージしない）、通常PRはマージ / CI失敗が差分の変更では直せない場合は失敗ジョブの1回だけの再実行（C-1）を経て`cc-need-human-check`ラベル付与＋理由コメント投稿（C-2）
 
-**絶対にやらないこと**:
-- **PRのコード修正・実装**: 「対応すべき」と判定された項目があってもコードを変更しない。修正の実行は`cc-fix-onetime`付与後の別スキル（`fix-review-point`など）の責務
+**やらないこと**:
+- **`cc-fix-onetime` の付与**: 修正は本スキルが自分で行う。`fix-review-point` へ引き継がない（同じPRの差分・指摘・要件を2セッションで読み直すことになるため）
 - **コンフリクト解消の直接実行**: rebase・コンフリクトファイルの編集・force-pushは行わない。検知したら`cc-resolve-conflict`を付けて終了し、解消は同ラベルをトリガーに別スキル（`resolve-pr-conflict`等）が担当する
-- **修正プランの作成**: `create-review-fix-plan` スキルを呼び出してはならない。修正方針・タスク分解・影響範囲の見積もりは `cc-fix-onetime` を拾う `fix-review-point` 側の責務であり、ここで作ると同じ分析をPRごとに二重に行いトークンを無駄に消費する。本スキルは「修正すべきコメントが1件でもあるか」だけを判定する
-- **新規コミットの作成**: コミット・push・commit amendを行わない
-- **テスト追加・Lint修正・リファクタリング**: 評価対象であっても実行せずラベル付与にとどめる
-
-ファイル編集ツール（`Edit` / `Write` / `MultiEdit` / `NotebookEdit`）はこのスキルの本文では一切呼び出さない。コードを触る作業はすべて「ラベル付与 → 別スキルが拾って実行」の流れに委ねる（ステップ1の`cc-resolve-conflict`、ステップ3パターンAの`cc-fix-onetime`）。
+- **修正を push したセッションでのマージ**: push 後のCIとレビューは未評価なので、同じセッションでマージに進まない（次回ポーリングで再評価する）
+- **対応すべき項目の外への変更**: 気づいた別の改善・依頼されていないテストやリファクタリングは混ぜず、報告に1行で挙げる
 
 # Instructions
 
@@ -42,7 +39,7 @@ hooks:
 
 ## 実行モードの制約
 
-本スキル固有のリスク: 本スキルは `claude-task-worker` の `triage-pr` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-fix-onetime` の付与やマージ、`cc-triage-scope` の除去を進める。処理が未確定のままターンを終えると、判定未確定のまま `cc-fix-onetime` が付かず `fix-review-point` ワーカーへの引き継ぎが空振りしたり、マージ判定前にラベルが外れてPRが放置される状態壊れが起きる。
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `triage-pr` ワーカー（`cc-triage-scope` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に次のタスクへ進む。修正の途中（push 前、または push 後・Resolve 前）でターンを終えると、修正が未 push のまま worktree ごと消えたり、修正済みの指摘が未解決のまま残って次回ポーリングで同じ修正をやり直す状態壊れが起きる。
 
 ## 実行内容
 
@@ -84,11 +81,9 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-mergeable $ARGUMENTS
 
 - **判定不能（`UNKNOWN` のままリトライ後も継続する場合）**: マージ可能性が未確定のまま先へ進むのは危険なため、**後続のステップに進まず**、ラベル操作は一切行わずに「判定: エラー」で結果報告を行い終了する（ステップ0の失敗時と同様の扱い）。自前のリトライはこの1回のみとする（ブロッカー解消後のポーリングで自動的に再実行される）
 
-### ステップ2: 修正要否の判定（**判定のみ・実行禁止**）
+### ステップ2: 修正要否の判定
 
-**修正プラン（`create-review-fix-plan`）は生成しない**（「やること・やらないこと」参照）。本スキルが必要とするのは「修正すべき項目が1件でもあるか」という真偽値だけなので、判定に必要な最小限の情報だけを集める。
-
-**重要**: 判定は内部的な思考にとどめ、ファイルの編集・コミット・pushは行わない。対応すべき項目があると判断したら **コードに手を加えず** ステップ3のパターンA（ラベル付与）へ進むこと。裏取りのための`Read`/`Grep`/codegraph参照は許容するが、判定が変わらない範囲では省略する。
+このステップでは判定だけを行い、修正はステップ3のパターンAでまとめて行う（判定の途中で直し始めると、パターンC・保留に該当するPRまで編集してしまうため）。例外は2-4の delegate-review が自身の手順で適用する修正で、その扱いは2-4に従う。
 
 #### 2-1. 判定材料の収集
 
@@ -110,7 +105,7 @@ CHECKS_EXIT=$?
 上記のCI状況取得は、GitHub MCP の `pull_request_read`（method: `get_status` / `get_check_runs`）を優先し、利用不可なら`gh pr checks`にフォールバックする。
 
 ```bash
-gh pr view $ARGUMENTS --json title,body,labels
+gh pr view $ARGUMENTS --json title,body,labels,baseRefName
 ```
 
 上記のPR本文・ラベル取得は、GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら`gh pr view`にフォールバックする。
@@ -151,20 +146,36 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 #### 2-3. 各項目の二分判定
 
-残った各コメント・各CI失敗を、下記の評価基準に照らして **「対応すべき」／「対応不要」の二値** に振り分ける。修正方針・修正手順・対象ファイルの列挙は書かない（`fix-review-point` が行う）。
+残った各コメント・各CI失敗を、下記の評価基準に照らして **「対応すべき」／「対応不要」の二値** に振り分ける。修正方針はパターンAで決める。
 
 **判定の基準線**: 「重要か」「軽微か」といった主観的な軽重で切らない。**不正な動作・テスト失敗・誤解を招く結果・将来の障害につながる設計上の穴を引き起こしうる指摘はすべて「対応すべき」**とし、「対応不要」に落とすのは下記「対応不要の可能性あり」に**具体的に該当するもの（純粋なスタイル/命名の好み、PR範囲外の提案、既存規約と矛盾する提案、Issueの要件と矛盾する提案）だけ**に限る。どちらにも当てはまらない指摘は「対応すべき」に倒す（このスキルはマージのゲートであり、取りこぼした指摘は誰も直さないまま PR がマージされる）。
 
 **Issueの要件を正とする**: レビュー指摘（特に OpenCodeReview / Gemini / CodeRabbit 等の自動レビュー）はPRの差分しか見ておらず、Issueで確定した要件や確認事項への回答を知らない。指摘の内容が2-1で「正」とした確定事項（要件・実装プラン・回答コメント・確定方針を示す人間コメント）と**矛盾する**場合（例: 要件で「Aの場合はBとする」と確定しているのに「Bではなく C にすべき」と提案している、確認事項の回答で選ばれた方式を別方式へ変える提案、要件に無い利用者から見える挙動の追加を求める提案）、その指摘は「対応不要」に落とす。逆に、PRの実装がIssueの要件を満たしていない点を突く指摘は、文面が軽くても「対応すべき」。落とすときは必ず該当する要件・回答の箇所を特定する（「要件に反しそう」という印象で落とさない）。要件が無い・取得できなかった場合はこの判定を行わない。
 
-**「対応すべき」が1件見つかった時点で残りの項目の精査を打ち切り、ステップ3のパターンAへ進んでよい**（以降の項目をいくら精査しても付与するラベルは変わらないため）。ただしCI失敗がパターンC（差分の修正では解消不能）に該当しうる場合は、その切り分けを終えてから分岐する。
+パターンAでは「対応すべき」項目をすべて直すため、1件見つかっても精査を打ち切らず全項目を振り分ける。CI失敗がパターンC（差分の修正では解消不能）に該当しうる場合は、その切り分けを終えてから分岐する。
 
 **ステップ3のパターンB（マージ可能）へ進めるのは、2-1で取得した全チェックが `SUCCESS` 等の明示的な成功状態であることを確認できた場合に限る。** `PENDING` や実行中など未完了のチェックが1件でも残っている場合は、CIが失敗しているわけではなくても「対応不要」の暗黙扱いにせず、パターンBへは進まない。
 
 未完了チェックが残っている場合の分岐は「対応すべき」項目の有無で決まる。
 
-- **「対応すべき」が1件以上ある場合**: CIの完了を待たずステップ3のパターンA（CI失敗が差分の修正では解消不能ならパターンC）へ進む。CI結果に関わらず修正は必要であり、待っても付与するラベルは変わらないため
+- **「対応すべき」が1件以上ある場合**: CIの完了を待たずステップ3のパターンA（CI失敗が差分の修正では解消不能ならパターンC）へ進む。CI結果に関わらず修正は必要であり、push すればCIは走り直すため
 - **「対応すべき」が1件もない場合**: 判定を確定させず、ステップ3に進まずに「判定: 保留（CI未完了）」として結果報告のみ行い終了する（次回ポーリングで再評価させる。ラベル操作は行わない）
+
+#### 2-4. OpenCodeReview（delegate-review）によるレビュー
+
+2-1〜2-3 はレビュアーとCIが既に出した指摘の判定であり、まだ誰も見ていない問題は拾えない。PRの差分そのものを OpenCodeReview の delegate モード（OCR はレビュー対象ファイルの選定とレビュールールの解決だけを行い、レビュー自体は本セッションが行う）でレビューする。**デザインPR（`cc-ui-design`）では実行しない**（コードレビューのルールが `.pen` に当てはまらないため。下記のデザインPRの評価基準で代える）。
+
+`Skill` ツールで `open-code-review:delegate-review` を呼び、引数でPRの差分範囲（range モード）と関連Issueの要件を渡す。`<BASE>` は2-1で取得したPRの `baseRefName`（取得できていなければ delegate-review を実行せず、下記の「実行できない場合」と同じ扱いにする）。
+
+```text
+--from origin/<BASE> --to HEAD --background "<2-1で「正」とした要件・確定事項の要約（無ければ省略）>"
+```
+
+- `--background` へ渡す要件は、シェルで評価される文字（`$` / バッククォート / `"`）を含めない要約にする。長い場合は要約し、要件を落として切り詰めない
+- delegate-review は High / Medium の指摘のうち安全で明確なものを自身の手順で修正する。その修正はそのまま残してよいが、**2-1の要件・確定事項と矛盾する修正**（要件で確定した挙動を変える・要件に無い利用者から見える挙動を足す）は `git restore` で戻し、「Issueの要件と矛盾する提案」として報告に残す
+- 修正されずに残った High / Medium の指摘は、2-3と同じ基準（「対応不要の可能性あり」の7項目）で振り分け、「対応すべき」はパターンAで直す。Low はスキル側で捨てられるので扱わない
+- delegate-review が修正した差分、または「対応すべき」の指摘が1件でもあれば、ステップ3はパターンAになる（未 push の変更を残したままマージに進まない）
+- `ocr` が見つからない・プラグインが無いなどで delegate-review を実行できない場合は、PRを止めず2-3の判定だけで進み、実行できなかった理由を報告に残す（導入は `npx claude-task-worker install` / `update`）。レビュー中にエラーで中断した場合も同じ扱いにするが、途中で入った修正があれば `git status --short` で確認し、パターンAの対象に含める
 
 #### デザインPR（`cc-ui-design` ラベル付き）の場合の評価基準
 
@@ -178,7 +189,7 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 `.pen` は平文JSONなので `Read` / `jq` で属性は読めるが、見た目の確認はスナップショットPNGとPR bodyの記述で行う（レイアウト解決後の値が必要なら `inspect-pencil-node` スキルを使う）。
 
-上記以外の観点（テストカバレッジ・Lint・型安全性など）はデザインPRには適用しない。**CIが失敗している場合は、失敗の種類を問わず通常PRと同様に「対応すべき」とする**（`.pen`/スナップショットPNGの変更で直せるもの・実装コードに対する必須チェック・ベースブランチ側の障害のいずれも含む）。デザインPRであることを理由に `cc-fix-onetime` を回避しない。例外は下記パターンC（差分をどう変更しても解消しない失敗）のみで、これはデザインPRか通常PRかを問わず同じ基準で判定する。
+上記以外の観点（テストカバレッジ・Lint・型安全性など）はデザインPRには適用しない。**CIが失敗している場合は、失敗の種類を問わず通常PRと同様に「対応すべき」とする**（`.pen`/スナップショットPNGの変更で直せるもの・実装コードに対する必須チェック・ベースブランチ側の障害のいずれも含む）。デザインPRであることを理由に修正を回避しない。例外は下記パターンC（差分をどう変更しても解消しない失敗）のみで、これはデザインPRか通常PRかを問わず同じ基準で判定する。
 
 #### 対応すべき
 - **バグ・正確性の問題**: ロジックエラー、不正な動作、欠落したエッジケース
@@ -207,15 +218,34 @@ gh pr view $ARGUMENTS --json title,body,labels
 
 #### パターンA: 修正が必要な場合
 
-「対応すべき」と判定された項目が1つでもある場合、`cc-fix-onetime`ラベルを追加する。**ラベル付与のみで終了し、コード修正は行わない**。修正項目が明確で実装が容易に見えても、コード変更・コミット・pushを行ってはならない（実際の修正は`cc-fix-onetime`ラベルをトリガーに別スキルが担当する）。
+「対応すべき」と判定された項目（未解決のレビュー指摘・CI失敗・2-4の delegate-review の指摘）が1つでもある場合、または2-4で delegate-review が修正を入れた場合、**このスキル自身で修正して push する**。
 
-```
-gh pr edit $ARGUMENTS --add-label "cc-fix-onetime"
-```
+**パターンCが優先する**: CI失敗のいずれかがパターンC（差分の修正では解消不能）に該当する場合は、他に「対応すべき」項目や delegate-review の修正があってもパターンAへ進まず、パターンC（C-1 → C-2）で終える。push してもCIは直らず、次回ポーリングで修正と push を繰り返すことになるため。このとき delegate-review が入れた未 push の変更は `git restore .`（新規ファイルは `git clean -fd`）で破棄し、残っていた指摘はC-2の理由コメントと報告に要約する。
+
+**A-0. 自動修正の上限**: このPRに見出し `## triage-pr による自動修正` のPRコメントが既に3件以上ある場合は修正しない（修正 → 新しい指摘 → 修正の往復が収束していない）。C-2 と同じ手順で `cc-need-human-check` を付与し、理由コメントの「失敗チェック」「失敗内容」「根拠」を「自動修正の上限（3回）に到達」「残っている対応すべき項目の要約」に置き換えて投稿して終了する。これはCI失敗以外を根拠に同ラベルを付ける唯一の例外。
+
+1. **修正**: 各項目を直す。自分で直すか委譲するかは、委譲のコスト（ブリーフィングとサブエージェントの再探索）と効果（コンテキストの隔離・独立タスクの並列化・専門エージェントの知識）を比べて決める。委譲する場合は1タスク1エージェントで、`general-purpose-assistant`（自明な単一ステップなら `lightweight-assistant`）に指摘全文・対象ファイル・関連Issueの要件を渡す（effort の選び方は `${CLAUDE_PLUGIN_ROOT}/references/agent-effort.md`）。デザインPRの `.pen` の修正は `pencil-design-updater` に委譲する。要件と矛盾する指摘は直さず、手順4で返信する
+2. **テスト・Lint**: `package.json` 等にあるユニットテスト・Lint（E2E の扱いは `${CLAUDE_PLUGIN_ROOT}/references/e2e-tests.md`）を実行し、失敗がなくなるまで直す。コマンドが無ければ省略して報告に残す
+3. **コミットと push**: `commit-push` スキルを呼ぶ。push の失敗は報告して終了し、手順4以降に進まない
+4. **返信と Resolve**（push 完了後にのみ行う。push 前に Resolve すると、直していない指摘まで解決済みになる）:
+   - 要件と矛盾するため直さなかったレビュー指摘のスレッドへ、「Issue #<N> の要件（または確認事項への回答）『<該当箇所の引用>』に従い、この指摘は反映しません」と1-2行で返信する。インラインスレッドは GitHub MCP の `add_reply_to_pull_request_comment`、会話コメントは `add_issue_comment` を優先し、利用不可なら `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/<comment_id>/replies -f body=...` / `gh pr comment` にフォールバックする。返信に失敗したスレッドの thread ID は記録する
+   - **2-1で評価し、修正済み、または要件優先で見送って返信済みと確認したスレッドの thread ID（`PRRT_...`）だけ**を1件ずつ Resolve する。GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）を優先し、利用不可なら `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread ID>` にフォールバックする。返信に失敗したスレッドは対象に含めない。`resolve-pr-comments` スキルは呼び出し時点の未解決スレッドを全件 Resolve するため使わない（修正・push の間に投稿された、未評価の指摘まで解決済みになり、次回ポーリングで判定から漏れる）。Resolve に失敗したスレッドは thread ID を報告に残す
+5. **記録**: PRへ次のコメントを投稿する（A-0 の回数判定に使うため見出しは変えない）
+
+   ```bash
+   gh pr comment $ARGUMENTS --body-file - <<'EOF'
+   ## triage-pr による自動修正
+
+   - <直した項目の要約（指摘元: レビューコメント / CI / OpenCodeReview）>
+   - 要件優先で見送り: <指摘の要約>（根拠: Issue #<N> の<要件・回答の箇所>）
+   EOF
+   ```
+
+6. **終了**: マージには進まず、「判定: パターンA（修正をpush）」で結果報告して終了する。`cc-triage-scope` は付いたままなので、次回ポーリングで push 後のCIと新しい指摘を含めて再評価される
 
 #### パターンC: CI失敗がリポジトリの変更では修正不能な場合
 
-CI失敗の原因が、**このPRの差分をどう変更しても解消しない種類**である場合に限り、`cc-need-human-check`ラベルを追加し終了する。`cc-fix-onetime`は付与しない（修正で直らない失敗を直させ続ける triage-pr ⇔ fix-review-point の無限ループを避けるため）。デザインPR（`cc-ui-design`）か通常PRかは問わず、同じ基準で判定する。
+CI失敗の原因が、**このPRの差分をどう変更しても解消しない種類**である場合に限り、`cc-need-human-check`ラベルを追加し終了する。パターンAで直そうとしない（修正で直らない失敗を毎ポーリングで直そうとし続けるループを避けるため）。デザインPR（`cc-ui-design`）か通常PRかは問わず、同じ基準で判定する。
 
 該当する例（人手での対処や環境側の復旧が必要なもの）:
 
@@ -269,7 +299,7 @@ EOF
 
 #### パターンB: マージ可能な場合
 
-すべての項目が「対応不要」、または対象となるコメント・CI失敗が1件もない場合、マージ可能（リリース問題なし）と判定する。
+すべての項目（2-4の delegate-review の指摘を含む）が「対応不要」、または対象となるコメント・CI失敗・指摘が1件もなく、`git status --short` が空の場合、マージ可能（リリース問題なし）と判定する。
 
 **まず対象PRが Epic PR（`cc-epic-issue` ラベル付き）かどうかを、2-1で取得したラベル一覧で確認する**（再取得はしない）。
 
@@ -349,15 +379,14 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> not_pl
 
 ## 注意事項
 
-- 作業は全てworktree上で行い、デフォルトブランチで作業は絶対に行わないこと
+- 作業は全てworktree（クラウド実行ではPRの head ブランチ）上で行い、デフォルトブランチで作業は絶対に行わないこと
 - ファイル編集などの作業を行う際は、pwdコマンドでworktree内部であることを確認してから行うこと
   - 作業ディレクトリ: !`pwd`
 - `cc-triage-scope`ラベルがPRに付与されている場合、いかなる操作においても**絶対に削除しない**こと。`gh pr edit`で`--remove-label`を使用する際も`cc-triage-scope`を対象に含めない
-- **このスキル本文では一切コードを変更しない**（「やること・やらないこと」参照）。コンフリクト解消も修正実行もラベル経由で別スキルに委譲する
 
 ## 出力
 
 処理結果として以下を報告する：
 
-- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正が必要・`cc-fix-onetime`ラベル付与） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / パターンC（CI失敗がリポジトリの変更では修正不能・`cc-need-human-check`ラベル付与＋理由コメント投稿） / 保留（CI未完了 / CI再実行 / CI以外の事由でマージ見送り・いずれもラベル操作なし） / PRクローズ（関連IssueもClose） / エラー
-- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目の要約、マージ可能と判断した理由、Issueの要件との矛盾で「対応不要」に落とした指摘があればその要約と該当する要件・回答の箇所、関連Issueの要件を取得できなかった場合はその旨、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、CI未完了で保留した場合は未完了チェック名、CI再実行で保留した場合は再実行したrun-idと失敗ジョブ名、エラー時は`gh pr view`のmergeable判定不能または`gh pr checks`出力のパース失敗など発生箇所、またはクローズ理由と連動Closeした関連Issue番号）
+- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正をpush・マージは次回ポーリング。A-0の上限到達時は`cc-need-human-check`） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / パターンC（CI失敗がリポジトリの変更では修正不能・`cc-need-human-check`ラベル付与＋理由コメント投稿） / 保留（CI未完了 / CI再実行 / CI以外の事由でマージ見送り・いずれもラベル操作なし） / PRクローズ（関連IssueもClose） / エラー
+- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目と直した内容の要約（指摘元: レビューコメント / CI / OpenCodeReview）、delegate-review を実行できなかった場合はその理由、マージ可能と判断した理由、Issueの要件との矛盾で「対応不要」に落とした指摘があればその要約と該当する要件・回答の箇所、関連Issueの要件を取得できなかった場合はその旨、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、CI未完了で保留した場合は未完了チェック名、CI再実行で保留した場合は再実行したrun-idと失敗ジョブ名、エラー時は`gh pr view`のmergeable判定不能または`gh pr checks`出力のパース失敗など発生箇所、またはクローズ理由と連動Closeした関連Issue番号）

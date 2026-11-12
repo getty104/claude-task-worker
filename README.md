@@ -62,6 +62,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) | コード探索用インデックス（任意。未導入ならテキスト検索に落ちる） |
 | [Playwright](https://playwright.dev/) のブラウザ（Google Chrome） | Playwright MCP でのブラウザ確認（起動済みの Chrome に CDP `http://localhost:9222` で接続する。Chrome を `--remote-debugging-port=9222 --user-data-dir=<任意のディレクトリ>` 付きで起動しておく）、`.pen` のスナップショット描画 |
 | [DESIGN.md CLI](https://github.com/google-labs-code/design.md) | `DESIGN.md` の lint。`update-design-md` 使用時のみ（未導入でも動く） |
+| [OpenCodeReview](https://github.com/alibaba/open-code-review)（CLI `ocr` と Claude Code プラグイン） | `triage-pr` の PR 差分レビュー（`/open-code-review:delegate-review`。未導入でも動く） |
 | [herdr](https://herdr.dev) | `--project` / `mode: "herdr"` 使用時のみ（`--cloud` は herdr に依存しない） |
 | [GitHub MCP](https://github.com/github/github-mcp-server) | GitHub アクセスの高速化・クラウド実行時のプロキシ制限回避（任意。Claude 側のコネクタで有効化） |
 
@@ -73,7 +74,7 @@ CLI 本体に npm の実行時依存はない（Node.js 標準モジュールの
 npx claude-task-worker install
 ```
 
-マーケットプレイス追加・プラグイン導入・CLI 本体のグローバルインストール・各種 CLI（CodeGraph / DESIGN.md / Pen）と Playwright ブラウザの取得を一括で行う。いずれかが失敗しても処理は継続する。インストール後、Claude Code のセッションを再起動するとプラグインが有効になる。
+マーケットプレイス追加・プラグイン導入・CLI 本体のグローバルインストール・各種 CLI（CodeGraph / DESIGN.md / OpenCodeReview）・OpenCodeReview プラグインの導入と Playwright ブラウザの取得を一括で行う。いずれかが失敗しても処理は継続する。インストール後、Claude Code のセッションを再起動するとプラグインが有効になる。
 
 個別にやる場合:
 
