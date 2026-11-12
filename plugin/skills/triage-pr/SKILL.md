@@ -229,8 +229,7 @@ gh pr view $ARGUMENTS --json title,body,labels,baseRefName
 3. **コミットと push**: `commit-push` スキルを呼ぶ。push の失敗は報告して終了し、手順4以降に進まない
 4. **返信と Resolve**（push 完了後にのみ行う。push 前に Resolve すると、直していない指摘まで解決済みになる）:
    - 要件と矛盾するため直さなかったレビュー指摘のスレッドへ、「Issue #<N> の要件（または確認事項への回答）『<該当箇所の引用>』に従い、この指摘は反映しません」と1-2行で返信する。インラインスレッドは GitHub MCP の `add_reply_to_pull_request_comment`、会話コメントは `add_issue_comment` を優先し、利用不可なら `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/<comment_id>/replies -f body=...` / `gh pr comment` にフォールバックする。返信に失敗したスレッドの thread ID は記録する
-   - 未解決スレッドを取り直し、**2-1で取得していなかったスレッド**（修正・push の間に投稿された、未評価の指摘）の thread ID を控える。`resolve-pr-comments` は除外指定以外を内容を問わず全件 Resolve するため、控えないと未評価の指摘まで解決済みになり、次回ポーリングで判定から漏れる
-   - `resolve-pr-comments` スキルを PR 番号と、除外対象の thread ID（返信に失敗したスレッドと、上で控えた未評価のスレッド）を続けて列挙して呼ぶ
+   - **2-1で評価し、修正済み、または要件優先で見送って返信済みと確認したスレッドの thread ID（`PRRT_...`）だけ**を1件ずつ Resolve する。GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）を優先し、利用不可なら `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread ID>` にフォールバックする。返信に失敗したスレッドは対象に含めない。`resolve-pr-comments` スキルは呼び出し時点の未解決スレッドを全件 Resolve するため使わない（修正・push の間に投稿された、未評価の指摘まで解決済みになり、次回ポーリングで判定から漏れる）。Resolve に失敗したスレッドは thread ID を報告に残す
 5. **記録**: PRへ次のコメントを投稿する（A-0 の回数判定に使うため見出しは変えない）
 
    ```bash

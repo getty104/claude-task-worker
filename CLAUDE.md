@@ -629,7 +629,7 @@ herdr は `workspace close` の際、**閉じたワークスペースがフォ�
 
 ### `triage-pr` は自分で修正する（OpenCodeReview の delegate-review）
 
-`triage-pr` は判定（ステップ2）に加えて、PR差分を OpenCodeReview の delegate モード（`/open-code-review:delegate-review --from origin/<base> --to HEAD --background <Issueの要件>`。OCR はファイル選定とルール解決だけを行い、レビューは本セッションが行う）でレビューし、対応すべき項目（未解決のレビュー指摘・CI失敗・delegate-review の指摘）を**自分で修正 → テスト/Lint → `commit-push` → 要件優先で見送った指摘への返信 → `resolve-pr-comments`** まで行う。かつては `cc-fix-onetime` を付けて `fix-review-point` へ引き継いでいたが、同じPRの差分・指摘・要件を2セッションで読み直すことになるため撤去した（`fix-review-point` ワーカーは人が `cc-fix-onetime` を付けた場合のために残っている）。
+`triage-pr` は判定（ステップ2）に加えて、PR差分を OpenCodeReview の delegate モード（`/open-code-review:delegate-review --from origin/<base> --to HEAD --background <Issueの要件>`。OCR はファイル選定とルール解決だけを行い、レビューは本セッションが行う）でレビューし、対応すべき項目（未解決のレビュー指摘・CI失敗・delegate-review の指摘）を**自分で修正 → テスト/Lint → `commit-push` → 要件優先で見送った指摘への返信 → 評価済みスレッドだけを thread ID 指定で Resolve** まで行う（`resolve-pr-comments` は呼び出し時点の未解決スレッドを全件 Resolve するため使わない。修正中に投稿された未評価の指摘まで解決済みになるため）。かつては `cc-fix-onetime` を付けて `fix-review-point` へ引き継いでいたが、同じPRの差分・指摘・要件を2セッションで読み直すことになるため撤去した（`fix-review-point` ワーカーは人が `cc-fix-onetime` を付けた場合のために残っている）。
 
 - **修正を push したセッションではマージしない**。push 後のCIと新しい指摘は未評価なので、`cc-triage-scope` を残したまま次回ポーリングで再評価させる
 - **ループの上限**: 修正のたびに見出し `## triage-pr による自動修正` のPRコメントを残し、それが3件以上あるのにまだ対応すべき項目があれば `cc-need-human-check` を付けて止める（A-0）。delegate-review は毎回差分全体を見るため、上限が無いと修正 → 新しい指摘 → 修正が収束しないことがある
