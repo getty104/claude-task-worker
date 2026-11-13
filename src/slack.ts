@@ -12,7 +12,7 @@ const execAsync = promisify(exec);
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 /** `usage` コマンドが利用状況をポーリングする間隔 */
-export const USAGE_POLL_INTERVAL_SECONDS = 360;
+export const USAGE_POLL_INTERVAL_SECONDS = 600;
 const USAGE_CACHE_TTL_SECONDS = 360;
 
 export async function send(payload: Record<string, unknown>): Promise<void> {
