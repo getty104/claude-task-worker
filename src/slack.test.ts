@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type * as SlackModule from "./slack";
 import { appendCloudFailureGuidance } from "./task-result";
 
-const { buildTaskNotificationText, formatTokenLimitText, parseUsageResponse } =
+const { buildTaskNotificationText, extractCredential, formatTokenLimitText, parseUsageResponse, rateLimitBackoffMs } =
   (await import("./slack")) as typeof SlackModule;
 
 const base = {
@@ -124,4 +124,20 @@ test("parseUsageResponse tolerates a missing five_hour window (e.g. Ultra plan)"
 
 test("formatTokenLimitText returns an empty string when no window is present", () => {
   assert.equal(formatTokenLimitText(parseUsageResponse({})), "");
+});
+
+test("extractCredential reads accessToken and expiresAt from Claude Code credentials", () => {
+  assert.deepEqual(extractCredential({ claudeAiOauth: { accessToken: "tok", expiresAt: 123 } }), {
+    token: "tok",
+    expiresAt: 123,
+  });
+  assert.deepEqual(extractCredential("raw"), { token: "raw" });
+});
+
+test("rateLimitBackoffMs honors Retry-After seconds and HTTP-date, else falls back to the default", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+  assert.equal(rateLimitBackoffMs("30", now), 30_000);
+  assert.equal(rateLimitBackoffMs("Thu, 01 Jan 2026 00:01:00 GMT", now), 60_000);
+  assert.equal(rateLimitBackoffMs(null, now), 600_000);
+  assert.equal(rateLimitBackoffMs("garbage", now), 600_000);
 });

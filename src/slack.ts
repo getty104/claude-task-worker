@@ -14,6 +14,8 @@ const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 /** `usage` コマンドが利用状況をポーリングする間隔 */
 export const USAGE_POLL_INTERVAL_SECONDS = 600;
 const USAGE_CACHE_TTL_SECONDS = 360;
+const USAGE_BACKOFF_PATH = "/tmp/claude-usage-backoff.json";
+const USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 600;
 
 export async function send(payload: Record<string, unknown>): Promise<void> {
   if (!WEBHOOK_URL) return;
@@ -56,23 +58,35 @@ export function parseUsageResponse(body: {
 }
 
 interface CredentialPayload {
-  claudeAiOauth?: { accessToken?: string };
+  claudeAiOauth?: { accessToken?: string; expiresAt?: number };
   oauth_token?: string;
   access_token?: string;
 }
 
-function extractToken(credentials: CredentialPayload | string): string {
-  if (typeof credentials === "string") return credentials;
-  return credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? "";
+export interface OAuthCredential {
+  token: string;
+  // ミリ秒のエポック。Claude Code の credentials（claudeAiOauth.expiresAt）にだけある
+  expiresAt?: number;
 }
 
-async function getOAuthToken(): Promise<string> {
+export function extractCredential(credentials: CredentialPayload | string): OAuthCredential {
+  if (typeof credentials === "string") return { token: credentials };
+  return {
+    token: credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? "",
+    expiresAt: credentials.claudeAiOauth?.expiresAt,
+  };
+}
+
+async function getOAuthCredential(): Promise<OAuthCredential> {
+  // `claude setup-token` で発行した長期トークン。Keychain / credentials の短期トークンより優先する
+  const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  if (envToken) return { token: envToken };
   try {
     const { stdout } = await execAsync('security find-generic-password -s "Claude Code-credentials" -w');
-    return extractToken(JSON.parse(stdout.trim()));
+    return extractCredential(JSON.parse(stdout.trim()));
   } catch {
     const raw = readFileSync(join(homedir(), ".claude", ".credentials.json"), "utf-8");
-    return extractToken(JSON.parse(raw));
+    return extractCredential(JSON.parse(raw));
   }
 }
 
@@ -97,13 +111,62 @@ function writeUsageCache(data: UsageInfo): void {
   }
 }
 
+/**
+ * 429 後に API を叩かない期間（ミリ秒）。Retry-After（秒 or HTTP-date）を優先し、
+ * 無い・読めないときは既定値。失敗のたびに叩き直すと制限が明けないため
+ */
+export function rateLimitBackoffMs(retryAfter: string | null, now = Date.now()): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    const date = Date.parse(retryAfter);
+    if (!Number.isNaN(date) && date > now) return date - now;
+  }
+  return USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS * 1000;
+}
+
+// 複数のワーカープロセスで共有するため、キャッシュと同じくファイルに置く
+function readBackoffUntil(): number {
+  try {
+    return Number(JSON.parse(readFileSync(USAGE_BACKOFF_PATH, "utf-8")).until) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeBackoffUntil(until: number): void {
+  try {
+    writeFileSync(USAGE_BACKOFF_PATH, JSON.stringify({ until }));
+  } catch {
+    // ignore
+  }
+}
+
 async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
   // fresh は `usage` の定期取得用。キャッシュの経過時間（取得完了時刻）に左右されず毎回取り直す
   const cached = fresh ? null : readUsageCache();
   if (cached) return cached;
 
+  // fresh でもバックオフ中は叩かない（制限中に叩くと明けるのが遅れる）
+  const backoffUntil = readBackoffUntil();
+  if (Date.now() < backoffUntil) {
+    console.error(`[slack] Usage API rate limited; skipping until ${new Date(backoffUntil).toISOString()}`);
+    return null;
+  }
+
   try {
-    const token = await getOAuthToken();
+    const { token, expiresAt } = await getOAuthCredential();
+    if (!token) {
+      console.error("[slack] No OAuth token found (set CLAUDE_CODE_OAUTH_TOKEN or sign in to Claude Code)");
+      return null;
+    }
+    // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら 401 を待たずに止める
+    if (expiresAt !== undefined && expiresAt <= Date.now()) {
+      console.error(
+        `[slack] OAuth token expired at ${new Date(expiresAt).toISOString()} (it is refreshed when claude runs; or set CLAUDE_CODE_OAUTH_TOKEN)`,
+      );
+      return null;
+    }
     const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -111,7 +174,14 @@ async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
       },
     });
     if (!res.ok) {
-      console.error(`[slack] Usage API returned ${res.status}`);
+      const body = (await res.text().catch(() => "")).slice(0, 500);
+      if (res.status === 429) {
+        const until = Date.now() + rateLimitBackoffMs(res.headers.get("retry-after"));
+        writeBackoffUntil(until);
+        console.error(`[slack] Usage API returned 429; backing off until ${new Date(until).toISOString()}: ${body}`);
+      } else {
+        console.error(`[slack] Usage API returned ${res.status}: ${body}`);
+      }
       return null;
     }
     const data = parseUsageResponse(await res.json());
