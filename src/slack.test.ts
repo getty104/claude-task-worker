@@ -12,23 +12,19 @@ const base = {
   id: 238,
   title: "Add cloud session URL",
   url: "https://github.com/owner/repo/pull/238",
-  tokenText: " | 🟢 5h: 1.0% (reset: 1/1 0:00) / 7d: 1.0% (reset: 1/1 0:00)",
 };
 
 test("completed without cloud param keeps the legacy body untouched", () => {
   const text = buildTaskNotificationText({ status: "completed", ...base });
   assert.equal(
     text,
-    `✅ [${base.workerName}] ${base.repoName} | Task completed: <${base.url}|#${base.id} ${base.title}>${base.tokenText}`,
+    `✅ [${base.workerName}] ${base.repoName} | Task completed: <${base.url}|#${base.id} ${base.title}>`,
   );
 });
 
 test("failed without cloud param keeps the legacy body untouched", () => {
   const text = buildTaskNotificationText({ status: "failed", ...base });
-  assert.equal(
-    text,
-    `❌ [${base.workerName}] ${base.repoName} | Task failed: <${base.url}|#${base.id} ${base.title}>${base.tokenText}`,
-  );
+  assert.equal(text, `❌ [${base.workerName}] ${base.repoName} | Task failed: <${base.url}|#${base.id} ${base.title}>`);
 });
 
 test("completed with cloud.sessionId prepends the session URL as line 1", () => {
@@ -103,11 +99,6 @@ test("cloud failure guidance survives truncation alongside the error tail when o
   const text = buildTaskNotificationText({ status: "failed", ...base, output });
   assert.ok(text.includes("docs/cloud.md"), "guidance text must survive truncation");
   assert.ok(text.includes(longError.slice(-1000)), "tail of the actual error must survive truncation");
-});
-
-test("tokenText is included in the body", () => {
-  const text = buildTaskNotificationText({ status: "completed", ...base });
-  assert.ok(text.includes(base.tokenText));
 });
 
 test("parseUsageResponse tolerates a missing five_hour window (e.g. Ultra plan)", () => {

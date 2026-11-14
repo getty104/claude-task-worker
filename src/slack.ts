@@ -10,10 +10,8 @@ import { CLOUD_FAILURE_GUIDANCE } from "./task-result";
 const execAsync = promisify(exec);
 
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
-const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 /** `usage` コマンドが利用状況をポーリングする間隔 */
 export const USAGE_POLL_INTERVAL_SECONDS = 600;
-const USAGE_CACHE_TTL_SECONDS = 360;
 const USAGE_BACKOFF_PATH = "/tmp/claude-usage-backoff.json";
 const USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 600;
 
@@ -90,27 +88,6 @@ async function getOAuthCredential(): Promise<OAuthCredential> {
   }
 }
 
-function readUsageCache(): UsageInfo | null {
-  try {
-    const raw = readFileSync(USAGE_CACHE_PATH, "utf-8");
-    const cached = JSON.parse(raw);
-    if (Date.now() - cached.timestamp < USAGE_CACHE_TTL_SECONDS * 1000) {
-      return cached.data as UsageInfo;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-function writeUsageCache(data: UsageInfo): void {
-  try {
-    writeFileSync(USAGE_CACHE_PATH, JSON.stringify({ timestamp: Date.now(), data }));
-  } catch {
-    // ignore
-  }
-}
-
 /**
  * 429 後に API を叩かない期間（ミリ秒）。Retry-After（秒 or HTTP-date）を優先し、
  * 無い・読めないときは既定値。失敗のたびに叩き直すと制限が明けないため
@@ -142,12 +119,8 @@ function writeBackoffUntil(until: number): void {
   }
 }
 
-async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
-  // fresh は `usage` の定期取得用。キャッシュの経過時間（取得完了時刻）に左右されず毎回取り直す
-  const cached = fresh ? null : readUsageCache();
-  if (cached) return cached;
-
-  // fresh でもバックオフ中は叩かない（制限中に叩くと明けるのが遅れる）
+async function fetchUsageInfo(): Promise<UsageInfo | null> {
+  // バックオフ中は叩かない（制限中に叩くと明けるのが遅れる）
   const backoffUntil = readBackoffUntil();
   if (Date.now() < backoffUntil) {
     console.error(`[slack] Usage API rate limited; skipping until ${new Date(backoffUntil).toISOString()}`);
@@ -185,7 +158,6 @@ async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
       return null;
     }
     const data = parseUsageResponse(await res.json());
-    writeUsageCache(data);
     return data;
   } catch (err) {
     console.error(`[slack] Failed to fetch usage info: ${err}`);
@@ -229,12 +201,11 @@ export function formatTokenLimitText(usage: UsageInfo): string {
 
 /**
  * 現在の利用状況を取得し、RunCat Neo 用スナップショットを更新したうえで通知に添えるテキストを返す。
- * ワーカーの完了/失敗通知はすべてここを通るため、タスクが終わるたびに RunCat 側も最新化される
- * （Slack webhook 未設定でも通知が no-op になるだけで、スナップショットの更新は行われる）。
+ * 呼ぶのは `usage` コマンドだけ（ワーカーの通知からは呼ばない。usage API のレート制限をワーカーと分け合わないため）。
  * 取得に失敗したときだけ null を返す（どの枠も返らない正常応答は空文字）。
  */
-export async function buildTokenLimitText(fresh = false): Promise<string | null> {
-  const usage = await fetchUsageInfo(fresh);
+export async function buildTokenLimitText(): Promise<string | null> {
+  const usage = await fetchUsageInfo();
   if (!usage) return null;
   writeRuncatUsage(usage);
   return formatTokenLimitText(usage);
@@ -268,16 +239,15 @@ export function buildTaskNotificationText(params: {
   id: number;
   title: string;
   url: string;
-  tokenText: string;
   output?: string;
   cloud?: { sessionId?: string };
 }): string {
-  const { status, workerName, repoName, id, title, url, tokenText, output, cloud } = params;
+  const { status, workerName, repoName, id, title, url, output, cloud } = params;
   const emoji = status === "completed" ? "✅" : "❌";
   const label = status === "completed" ? "completed" : "failed";
   const truncatedOutput = output ? truncateOutputForNotification(output) : output;
   const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
-  const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${tokenText}${outputBlock}`;
+  const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${outputBlock}`;
   let sessionUrlPrefix = "";
   if (cloud) {
     sessionUrlPrefix = cloud.sessionId?.trim()
@@ -296,7 +266,6 @@ export async function notifyTaskCompleted(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "completed",
@@ -305,7 +274,6 @@ export async function notifyTaskCompleted(
       id,
       title,
       url,
-      tokenText,
       output,
       cloud,
     }),
@@ -321,7 +289,6 @@ export async function notifyTaskFailed(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "failed",
@@ -330,7 +297,6 @@ export async function notifyTaskFailed(
       id,
       title,
       url,
-      tokenText,
       output,
       cloud,
     }),
