@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,10 +10,10 @@ import { CLOUD_FAILURE_GUIDANCE } from "./task-result";
 const execAsync = promisify(exec);
 
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
-const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
 /** `usage` コマンドが利用状況をポーリングする間隔 */
 export const USAGE_POLL_INTERVAL_SECONDS = 600;
-const USAGE_CACHE_TTL_SECONDS = 360;
+const USAGE_BACKOFF_PATH = "/tmp/claude-usage-backoff.json";
+const USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 600;
 
 export async function send(payload: Record<string, unknown>): Promise<void> {
   if (!WEBHOOK_URL) return;
@@ -56,71 +56,129 @@ export function parseUsageResponse(body: {
 }
 
 interface CredentialPayload {
-  claudeAiOauth?: { accessToken?: string };
+  claudeAiOauth?: { accessToken?: string; expiresAt?: number };
   oauth_token?: string;
   access_token?: string;
 }
 
-function extractToken(credentials: CredentialPayload | string): string {
-  if (typeof credentials === "string") return credentials;
-  return credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? "";
+export interface OAuthCredential {
+  token: string;
+  // ミリ秒のエポック。Claude Code の credentials（claudeAiOauth.expiresAt）にだけある
+  expiresAt?: number;
 }
 
-async function getOAuthToken(): Promise<string> {
+export function extractCredential(credentials: CredentialPayload | string): OAuthCredential {
+  if (typeof credentials === "string") return { token: credentials };
+  return {
+    token: credentials.claudeAiOauth?.accessToken ?? credentials.oauth_token ?? credentials.access_token ?? "",
+    expiresAt: credentials.claudeAiOauth?.expiresAt,
+  };
+}
+
+async function getStoredCredential(): Promise<OAuthCredential> {
   try {
     const { stdout } = await execAsync('security find-generic-password -s "Claude Code-credentials" -w');
-    return extractToken(JSON.parse(stdout.trim()));
+    return extractCredential(JSON.parse(stdout.trim()));
   } catch {
     const raw = readFileSync(join(homedir(), ".claude", ".credentials.json"), "utf-8");
-    return extractToken(JSON.parse(raw));
+    return extractCredential(JSON.parse(raw));
   }
 }
 
-function readUsageCache(): UsageInfo | null {
+/**
+ * 429 後に API を叩かない期間（ミリ秒）。Retry-After（秒 or HTTP-date）を優先し、
+ * 無い・読めないときは既定値。失敗のたびに叩き直すと制限が明けないため
+ */
+export function rateLimitBackoffMs(retryAfter: string | null, now = Date.now()): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    const date = Date.parse(retryAfter);
+    if (!Number.isNaN(date) && date > now) return date - now;
+  }
+  return USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS * 1000;
+}
+
+// 複数のワーカープロセスで共有するため、キャッシュと同じくファイルに置く
+function readBackoffUntil(): number {
   try {
-    const raw = readFileSync(USAGE_CACHE_PATH, "utf-8");
-    const cached = JSON.parse(raw);
-    if (Date.now() - cached.timestamp < USAGE_CACHE_TTL_SECONDS * 1000) {
-      return cached.data as UsageInfo;
+    return Number(JSON.parse(readFileSync(USAGE_BACKOFF_PATH, "utf-8")).until) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeBackoffUntil(until: number): void {
+  try {
+    // 他プロセスが書いた長い期限を縮めない。読み手が書きかけを掴まないよう一時ファイル + rename で置き換える
+    const tmp = `${USAGE_BACKOFF_PATH}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ until: Math.max(until, readBackoffUntil()) }));
+    renameSync(tmp, USAGE_BACKOFF_PATH);
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchUsageInfo(): Promise<UsageInfo | null> {
+  // バックオフ中は叩かない（制限中に叩くと明けるのが遅れる）
+  const backoffUntil = readBackoffUntil();
+  if (Date.now() < backoffUntil) {
+    console.error(`[slack] Usage API rate limited; skipping until ${new Date(backoffUntil).toISOString()}`);
+    return null;
+  }
+
+  try {
+    // `claude setup-token` の長期トークンを優先する。usage API に拒否されたら保存済みの認証情報で取り直す
+    const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+    if (envToken) {
+      const res = await requestUsage(envToken);
+      if (res.status !== 401 && res.status !== 403) return await handleUsageResponse(res);
+      console.error(
+        `[slack] Usage API rejected CLAUDE_CODE_OAUTH_TOKEN (${res.status}); falling back to stored credentials`,
+      );
     }
-  } catch {
-    // ignore
-  }
-  return null;
-}
 
-function writeUsageCache(data: UsageInfo): void {
-  try {
-    writeFileSync(USAGE_CACHE_PATH, JSON.stringify({ timestamp: Date.now(), data }));
-  } catch {
-    // ignore
-  }
-}
-
-async function fetchUsageInfo(fresh: boolean): Promise<UsageInfo | null> {
-  // fresh は `usage` の定期取得用。キャッシュの経過時間（取得完了時刻）に左右されず毎回取り直す
-  const cached = fresh ? null : readUsageCache();
-  if (cached) return cached;
-
-  try {
-    const token = await getOAuthToken();
-    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "anthropic-beta": "oauth-2025-04-20",
-      },
-    });
-    if (!res.ok) {
-      console.error(`[slack] Usage API returned ${res.status}`);
+    const { token, expiresAt } = await getStoredCredential();
+    if (!token) {
+      console.error("[slack] No OAuth token found (set CLAUDE_CODE_OAUTH_TOKEN or sign in to Claude Code)");
       return null;
     }
-    const data = parseUsageResponse(await res.json());
-    writeUsageCache(data);
-    return data;
+    // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら 401 を待たずに止める
+    if (expiresAt !== undefined && expiresAt <= Date.now()) {
+      console.error(
+        `[slack] OAuth token expired at ${new Date(expiresAt).toISOString()} (it is refreshed when claude runs)`,
+      );
+      return null;
+    }
+    return await handleUsageResponse(await requestUsage(token));
   } catch (err) {
     console.error(`[slack] Failed to fetch usage info: ${err}`);
     return null;
   }
+}
+
+function requestUsage(token: string): Promise<Response> {
+  return fetch("https://api.anthropic.com/api/oauth/usage", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "anthropic-beta": "oauth-2025-04-20",
+    },
+  });
+}
+
+async function handleUsageResponse(res: Response): Promise<UsageInfo | null> {
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).slice(0, 500);
+    if (res.status === 429) {
+      const until = Date.now() + rateLimitBackoffMs(res.headers.get("retry-after"));
+      writeBackoffUntil(until);
+      console.error(`[slack] Usage API returned 429; backing off until ${new Date(until).toISOString()}: ${body}`);
+    } else {
+      console.error(`[slack] Usage API returned ${res.status}: ${body}`);
+    }
+    return null;
+  }
+  return parseUsageResponse(await res.json());
 }
 
 function utilizationEmoji(value: number): string {
@@ -159,12 +217,11 @@ export function formatTokenLimitText(usage: UsageInfo): string {
 
 /**
  * 現在の利用状況を取得し、RunCat Neo 用スナップショットを更新したうえで通知に添えるテキストを返す。
- * ワーカーの完了/失敗通知はすべてここを通るため、タスクが終わるたびに RunCat 側も最新化される
- * （Slack webhook 未設定でも通知が no-op になるだけで、スナップショットの更新は行われる）。
+ * 呼ぶのは `usage` コマンドだけ（ワーカーの通知からは呼ばない。usage API のレート制限をワーカーと分け合わないため）。
  * 取得に失敗したときだけ null を返す（どの枠も返らない正常応答は空文字）。
  */
-export async function buildTokenLimitText(fresh = false): Promise<string | null> {
-  const usage = await fetchUsageInfo(fresh);
+export async function buildTokenLimitText(): Promise<string | null> {
+  const usage = await fetchUsageInfo();
   if (!usage) return null;
   writeRuncatUsage(usage);
   return formatTokenLimitText(usage);
@@ -198,16 +255,15 @@ export function buildTaskNotificationText(params: {
   id: number;
   title: string;
   url: string;
-  tokenText: string;
   output?: string;
   cloud?: { sessionId?: string };
 }): string {
-  const { status, workerName, repoName, id, title, url, tokenText, output, cloud } = params;
+  const { status, workerName, repoName, id, title, url, output, cloud } = params;
   const emoji = status === "completed" ? "✅" : "❌";
   const label = status === "completed" ? "completed" : "failed";
   const truncatedOutput = output ? truncateOutputForNotification(output) : output;
   const outputBlock = truncatedOutput ? `\n\`\`\`${truncatedOutput}\`\`\`` : "";
-  const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${tokenText}${outputBlock}`;
+  const body = `${emoji} [${workerName}] ${repoName} | Task ${label}: <${url}|#${id} ${title}>${outputBlock}`;
   let sessionUrlPrefix = "";
   if (cloud) {
     sessionUrlPrefix = cloud.sessionId?.trim()
@@ -226,7 +282,6 @@ export async function notifyTaskCompleted(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "completed",
@@ -235,7 +290,6 @@ export async function notifyTaskCompleted(
       id,
       title,
       url,
-      tokenText,
       output,
       cloud,
     }),
@@ -251,7 +305,6 @@ export async function notifyTaskFailed(
   output?: string,
   cloud?: { sessionId?: string },
 ): Promise<void> {
-  const tokenText = (await buildTokenLimitText()) ?? "";
   await send({
     text: buildTaskNotificationText({
       status: "failed",
@@ -260,7 +313,6 @@ export async function notifyTaskFailed(
       id,
       title,
       url,
-      tokenText,
       output,
       cloud,
     }),

@@ -430,7 +430,7 @@ export CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx
 claude-task-worker all
 ```
 
-通知には Claude API の使用状況も含まれる。あわせて [RunCat Neo](https://kyome.io/runcat/) 用のスナップショットを `~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で変更可）へ書き出す。クラウド実行のタスクは通知の先頭行にセッションURLが入る。
+Claude API の使用状況はタスク通知には含めない（`usage` コマンドを実行したときだけ取得する）。[RunCat Neo](https://kyome.io/runcat/) 用のスナップショット `~/.claude/runcat-usage.json`（`RUNCAT_OUT_FILE` で変更可）も `usage` が書き出す。クラウド実行のタスクは通知の先頭行にセッションURLが入る。
 
 ## プロセス管理
 

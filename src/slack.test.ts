@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type * as SlackModule from "./slack";
 import { appendCloudFailureGuidance } from "./task-result";
 
-const { buildTaskNotificationText, formatTokenLimitText, parseUsageResponse } =
+const { buildTaskNotificationText, extractCredential, formatTokenLimitText, parseUsageResponse, rateLimitBackoffMs } =
   (await import("./slack")) as typeof SlackModule;
 
 const base = {
@@ -12,23 +12,19 @@ const base = {
   id: 238,
   title: "Add cloud session URL",
   url: "https://github.com/owner/repo/pull/238",
-  tokenText: " | 🟢 5h: 1.0% (reset: 1/1 0:00) / 7d: 1.0% (reset: 1/1 0:00)",
 };
 
 test("completed without cloud param keeps the legacy body untouched", () => {
   const text = buildTaskNotificationText({ status: "completed", ...base });
   assert.equal(
     text,
-    `✅ [${base.workerName}] ${base.repoName} | Task completed: <${base.url}|#${base.id} ${base.title}>${base.tokenText}`,
+    `✅ [${base.workerName}] ${base.repoName} | Task completed: <${base.url}|#${base.id} ${base.title}>`,
   );
 });
 
 test("failed without cloud param keeps the legacy body untouched", () => {
   const text = buildTaskNotificationText({ status: "failed", ...base });
-  assert.equal(
-    text,
-    `❌ [${base.workerName}] ${base.repoName} | Task failed: <${base.url}|#${base.id} ${base.title}>${base.tokenText}`,
-  );
+  assert.equal(text, `❌ [${base.workerName}] ${base.repoName} | Task failed: <${base.url}|#${base.id} ${base.title}>`);
 });
 
 test("completed with cloud.sessionId prepends the session URL as line 1", () => {
@@ -105,11 +101,6 @@ test("cloud failure guidance survives truncation alongside the error tail when o
   assert.ok(text.includes(longError.slice(-1000)), "tail of the actual error must survive truncation");
 });
 
-test("tokenText is included in the body", () => {
-  const text = buildTaskNotificationText({ status: "completed", ...base });
-  assert.ok(text.includes(base.tokenText));
-});
-
 test("parseUsageResponse tolerates a missing five_hour window (e.g. Ultra plan)", () => {
   const usage = parseUsageResponse({
     five_hour: null,
@@ -124,4 +115,20 @@ test("parseUsageResponse tolerates a missing five_hour window (e.g. Ultra plan)"
 
 test("formatTokenLimitText returns an empty string when no window is present", () => {
   assert.equal(formatTokenLimitText(parseUsageResponse({})), "");
+});
+
+test("extractCredential reads accessToken and expiresAt from Claude Code credentials", () => {
+  assert.deepEqual(extractCredential({ claudeAiOauth: { accessToken: "tok", expiresAt: 123 } }), {
+    token: "tok",
+    expiresAt: 123,
+  });
+  assert.deepEqual(extractCredential("raw"), { token: "raw" });
+});
+
+test("rateLimitBackoffMs honors Retry-After seconds and HTTP-date, else falls back to the default", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+  assert.equal(rateLimitBackoffMs("30", now), 30_000);
+  assert.equal(rateLimitBackoffMs("Thu, 01 Jan 2026 00:01:00 GMT", now), 60_000);
+  assert.equal(rateLimitBackoffMs(null, now), 600_000);
+  assert.equal(rateLimitBackoffMs("garbage", now), 600_000);
 });
