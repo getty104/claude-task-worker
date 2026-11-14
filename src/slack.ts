@@ -14,6 +14,9 @@ const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 export const USAGE_POLL_INTERVAL_SECONDS = 600;
 const USAGE_BACKOFF_PATH = "/tmp/claude-usage-backoff.json";
 const USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 600;
+const USAGE_CACHE_PATH = "/tmp/claude-usage-cache.json";
+/** 取得結果を使い回す期間。この間は usage API を叩かない */
+export const USAGE_CACHE_TTL_SECONDS = 600;
 
 export async function send(payload: Record<string, unknown>): Promise<void> {
   if (!WEBHOOK_URL) return;
@@ -99,7 +102,7 @@ export function rateLimitBackoffMs(retryAfter: string | null, now = Date.now()):
   return USAGE_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS * 1000;
 }
 
-// 複数のワーカープロセスで共有するため、キャッシュと同じくファイルに置く
+// 複数のプロセスで共有するため、ファイルに置く
 function readBackoffUntil(): number {
   try {
     return Number(JSON.parse(readFileSync(USAGE_BACKOFF_PATH, "utf-8")).until) || 0;
@@ -119,6 +122,26 @@ function writeBackoffUntil(until: number): void {
   }
 }
 
+// バックオフと同じくファイルに置き、全プロセスで共有する
+function readUsageCache(now = Date.now()): UsageInfo | null {
+  try {
+    const { fetchedAt, usage } = JSON.parse(readFileSync(USAGE_CACHE_PATH, "utf-8"));
+    return now - Number(fetchedAt) < USAGE_CACHE_TTL_SECONDS * 1000 ? (usage as UsageInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeUsageCache(usage: UsageInfo): void {
+  try {
+    const tmp = `${USAGE_CACHE_PATH}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ fetchedAt: Date.now(), usage }));
+    renameSync(tmp, USAGE_CACHE_PATH);
+  } catch {
+    // ignore
+  }
+}
+
 async function fetchUsageInfo(): Promise<UsageInfo | null> {
   // バックオフ中は叩かない（制限中に叩くと明けるのが遅れる）
   const backoffUntil = readBackoffUntil();
@@ -127,20 +150,13 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
     return null;
   }
 
-  try {
-    // `claude setup-token` の長期トークンを優先する。usage API に拒否されたら保存済みの認証情報で取り直す
-    const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-    if (envToken) {
-      const res = await requestUsage(envToken);
-      if (res.status !== 401 && res.status !== 403) return await handleUsageResponse(res);
-      console.error(
-        `[slack] Usage API rejected CLAUDE_CODE_OAUTH_TOKEN (${res.status}); falling back to stored credentials`,
-      );
-    }
+  const cached = readUsageCache();
+  if (cached) return cached;
 
+  try {
     const { token, expiresAt } = await getStoredCredential();
     if (!token) {
-      console.error("[slack] No OAuth token found (set CLAUDE_CODE_OAUTH_TOKEN or sign in to Claude Code)");
+      console.error("[slack] No OAuth token found (sign in to Claude Code)");
       return null;
     }
     // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら 401 を待たずに止める
@@ -150,7 +166,9 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
       );
       return null;
     }
-    return await handleUsageResponse(await requestUsage(token));
+    const usage = await handleUsageResponse(await requestUsage(token));
+    if (usage) writeUsageCache(usage);
+    return usage;
   } catch (err) {
     console.error(`[slack] Failed to fetch usage info: ${err}`);
     return null;
