@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -75,10 +75,7 @@ export function extractCredential(credentials: CredentialPayload | string): OAut
   };
 }
 
-async function getOAuthCredential(): Promise<OAuthCredential> {
-  // `claude setup-token` で発行した長期トークン。Keychain / credentials の短期トークンより優先する
-  const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-  if (envToken) return { token: envToken };
+async function getStoredCredential(): Promise<OAuthCredential> {
   try {
     const { stdout } = await execAsync('security find-generic-password -s "Claude Code-credentials" -w');
     return extractCredential(JSON.parse(stdout.trim()));
@@ -113,7 +110,10 @@ function readBackoffUntil(): number {
 
 function writeBackoffUntil(until: number): void {
   try {
-    writeFileSync(USAGE_BACKOFF_PATH, JSON.stringify({ until }));
+    // 他プロセスが書いた長い期限を縮めない。読み手が書きかけを掴まないよう一時ファイル + rename で置き換える
+    const tmp = `${USAGE_BACKOFF_PATH}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ until: Math.max(until, readBackoffUntil()) }));
+    renameSync(tmp, USAGE_BACKOFF_PATH);
   } catch {
     // ignore
   }
@@ -128,7 +128,17 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
   }
 
   try {
-    const { token, expiresAt } = await getOAuthCredential();
+    // `claude setup-token` の長期トークンを優先する。usage API に拒否されたら保存済みの認証情報で取り直す
+    const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+    if (envToken) {
+      const res = await requestUsage(envToken);
+      if (res.status !== 401 && res.status !== 403) return await handleUsageResponse(res);
+      console.error(
+        `[slack] Usage API rejected CLAUDE_CODE_OAUTH_TOKEN (${res.status}); falling back to stored credentials`,
+      );
+    }
+
+    const { token, expiresAt } = await getStoredCredential();
     if (!token) {
       console.error("[slack] No OAuth token found (set CLAUDE_CODE_OAUTH_TOKEN or sign in to Claude Code)");
       return null;
@@ -136,33 +146,39 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
     // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら 401 を待たずに止める
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       console.error(
-        `[slack] OAuth token expired at ${new Date(expiresAt).toISOString()} (it is refreshed when claude runs; or set CLAUDE_CODE_OAUTH_TOKEN)`,
+        `[slack] OAuth token expired at ${new Date(expiresAt).toISOString()} (it is refreshed when claude runs)`,
       );
       return null;
     }
-    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "anthropic-beta": "oauth-2025-04-20",
-      },
-    });
-    if (!res.ok) {
-      const body = (await res.text().catch(() => "")).slice(0, 500);
-      if (res.status === 429) {
-        const until = Date.now() + rateLimitBackoffMs(res.headers.get("retry-after"));
-        writeBackoffUntil(until);
-        console.error(`[slack] Usage API returned 429; backing off until ${new Date(until).toISOString()}: ${body}`);
-      } else {
-        console.error(`[slack] Usage API returned ${res.status}: ${body}`);
-      }
-      return null;
-    }
-    const data = parseUsageResponse(await res.json());
-    return data;
+    return await handleUsageResponse(await requestUsage(token));
   } catch (err) {
     console.error(`[slack] Failed to fetch usage info: ${err}`);
     return null;
   }
+}
+
+function requestUsage(token: string): Promise<Response> {
+  return fetch("https://api.anthropic.com/api/oauth/usage", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "anthropic-beta": "oauth-2025-04-20",
+    },
+  });
+}
+
+async function handleUsageResponse(res: Response): Promise<UsageInfo | null> {
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).slice(0, 500);
+    if (res.status === 429) {
+      const until = Date.now() + rateLimitBackoffMs(res.headers.get("retry-after"));
+      writeBackoffUntil(until);
+      console.error(`[slack] Usage API returned 429; backing off until ${new Date(until).toISOString()}: ${body}`);
+    } else {
+      console.error(`[slack] Usage API returned ${res.status}: ${body}`);
+    }
+    return null;
+  }
+  return parseUsageResponse(await res.json());
 }
 
 function utilizationEmoji(value: number): string {
