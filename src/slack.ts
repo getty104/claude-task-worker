@@ -183,13 +183,13 @@ function isExpired(expiresAt: number | undefined): boolean {
   return expiresAt !== undefined && expiresAt <= Date.now();
 }
 
-/** claude を最小のプロンプトで1回実行し、保存済みの OAuth トークンを更新させる */
+/** claude を起動してすぐ終了させ、保存済みの OAuth トークンを更新させる（/exit はモデルを呼ばない） */
 async function refreshTokenByRunningClaude(): Promise<void> {
   // 長期トークンが env にあると claude はそちらを使い、保存済みトークンを更新しない
   const { CLAUDE_CODE_OAUTH_TOKEN: _ignored, ...env } = process.env;
   try {
     // cwd を tmpdir にするのは、対象リポジトリのフック・設定を走らせないため
-    await execFileAsync("claude", ["-p", "ok", "--model", "haiku"], { cwd: tmpdir(), env, timeout: 120_000 });
+    await execFileAsync("claude", ["-p", "/exit"], { cwd: tmpdir(), env, timeout: 120_000 });
   } catch (err) {
     console.error(`[slack] Failed to run claude for token refresh: ${err}`);
   }
