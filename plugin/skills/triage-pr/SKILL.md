@@ -159,7 +159,7 @@ gh pr view $ARGUMENTS --json title,body,labels,baseRefName
 未完了チェックが残っている場合の分岐は「対応すべき」項目の有無で決まる。
 
 - **「対応すべき」が1件以上ある場合**: CIの完了を待たずステップ3のパターンA（CI失敗が差分の修正では解消不能ならパターンC）へ進む。CI結果に関わらず修正は必要であり、push すればCIは走り直すため
-- **「対応すべき」が1件もない場合**: 判定を確定させず、ステップ3に進まずに「判定: 保留（CI未完了）」として結果報告のみ行い終了する（次回ポーリングで再評価させる。ラベル操作は行わない）
+- **「対応すべき」が1件もない場合**: 判定を確定させず、ステップ3に進まずに「判定: 保留（CI未完了）」として結果報告のみ行い終了する（次回ポーリングで再評価させる。ラベル操作は行わない）。ただし未完了のチェックが**人の承認を待っている**場合（Environment の承認待ち・外部コントリビューターの workflow 実行承認待ちなど、run の status が `waiting` / conclusion が `action_required`）は時間経過では完了しないため、保留にせずステップ3のパターンDで止める
 
 #### 2-4. OpenCodeReview（delegate-review）によるレビュー
 
@@ -224,11 +224,11 @@ gh pr view $ARGUMENTS --json title,body,labels,baseRefName
 
 **パターンDも優先する**: 「対応すべき」項目のいずれかがパターンD（直し方が人の判断に依存して決まらない）に該当する場合も同様に、パターンAへ進まずパターンDで終える。未 push の変更の扱いはパターンCと同じ。
 
-**A-0. 自動修正の上限**: このPRに見出し `## triage-pr による自動修正` のPRコメントが既に3件以上ある場合は修正しない（修正 → 新しい指摘 → 修正の往復が収束していない）。C-2 と同じ手順で `cc-need-human-check` を付与し、理由コメントの「失敗チェック」「失敗内容」「根拠」を「自動修正の上限（3回）に到達」「残っている対応すべき項目の要約」に置き換えて投稿して終了する。自動修正が収束しないのは人の判断が要る状態であり、パターンDの一種として扱う。
+**A-0. 自動修正の上限**: このPRに見出し `## triage-pr による自動修正` のPRコメントが既に3件以上ある場合は修正しない。数えるのは、見出し `## 自動トリアージを停止しました` の最新のコメントより**後**に投稿されたものだけ（人が対応してラベルを外した後は、回数を数え直すため）（修正 → 新しい指摘 → 修正の往復が収束していない）。C-2 と同じ手順で `cc-need-human-check` を付与し、理由コメントの「失敗チェック」「失敗内容」「根拠」を「自動修正の上限（3回）に到達」「残っている対応すべき項目の要約」に置き換えて投稿して終了する。自動修正が収束しないのは人の判断が要る状態であり、パターンDの一種として扱う。
 
 1. **修正**: 各項目を直す。自分で直すか委譲するかは、委譲のコスト（ブリーフィングとサブエージェントの再探索）と効果（コンテキストの隔離・独立タスクの並列化・専門エージェントの知識）を比べて決める。委譲する場合は1タスク1エージェントで、`general-purpose-assistant`（自明な単一ステップなら `lightweight-assistant`）に指摘全文・対象ファイル・関連Issueの要件を渡す（effort の選び方は `${CLAUDE_PLUGIN_ROOT}/references/agent-effort.md`）。デザインPRの `.pen` の修正は `pencil-design-updater` に委譲する。要件と矛盾する指摘は直さず、手順4で返信する
 2. **テスト・Lint**: `package.json` 等にあるユニットテスト・Lint（E2E の扱いは `${CLAUDE_PLUGIN_ROOT}/references/e2e-tests.md`）を実行し、失敗がなくなるまで直す。コマンドが無ければ省略して報告に残す
-3. **コミットと push**: `commit-push` スキルを呼ぶ。push の失敗は報告して終了し、手順4以降に進まない。失敗の原因が権限不足・ブランチ保護による拒否・fork の head など、再実行しても変わらない種類ならパターンDの手順でラベルとコメントを付けて終える（付けずに終えると次回ポーリングで同じ修正と push の失敗を繰り返す）
+3. **コミットと push**: `commit-push` スキルを呼ぶ。push の失敗は報告して終了し、手順4以降に進まない。失敗の原因が権限不足・ブランチ保護による拒否・fork の head など、再実行しても変わらない種類ならパターンDの手順でラベルとコメントを付けて終える（付けずに終えると次回ポーリングで同じ修正と push の失敗を繰り返す）。ローカル実行では終了後に worktree とブランチが削除され未 push のコミットが失われるため、理由コメントに `git format-patch --stdout @{u}..HEAD` の出力を `<details>` で添付し、人が `git am` で取り込めるようにする
 4. **返信と Resolve**（push 完了後にのみ行う。push 前に Resolve すると、直していない指摘まで解決済みになる）:
    - 要件と矛盾するため直さなかったレビュー指摘のスレッドへ、「Issue #<N> の要件（または確認事項への回答）『<該当箇所の引用>』に従い、この指摘は反映しません」と1-2行で返信する。インラインスレッドは GitHub MCP の `add_reply_to_pull_request_comment`、会話コメントは `add_issue_comment` を優先し、利用不可なら `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/<comment_id>/replies -f body=...` / `gh pr comment` にフォールバックする。返信に失敗したスレッドの thread ID は記録する
    - **2-1で評価し、修正済み、または要件優先で見送って返信済みと確認したスレッドの thread ID（`PRRT_...`）だけ**を1件ずつ Resolve する。GitHub MCP の `pull_request_review_write`（method: `resolve_thread`）を優先し、利用不可なら `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread ID>` にフォールバックする。返信に失敗したスレッドは対象に含めない。`resolve-pr-comments` スキルは呼び出し時点の未解決スレッドを全件 Resolve するため使わない（修正・push の間に投稿された、未評価の指摘まで解決済みになり、次回ポーリングで判定から漏れる）。Resolve に失敗したスレッドは thread ID を報告に残す
@@ -282,11 +282,10 @@ gh run view <run-id> --json attempt -q .attempt
 
 ##### C-2: ラベル付与と理由の記録
 
-`cc-need-human-check` を付与し、**同じコマンド内でPRへ理由コメントも投稿する**。ラベルだけを付けるとGitHub上に判断根拠が残らず、後から見た人にはPRが理由なく停止したようにしか見えない。
+PRへ理由コメントを投稿し、**投稿に成功した場合だけ** `cc-need-human-check` を付与する。ラベルだけを付けるとGitHub上に判断根拠が残らず、後から見た人にはPRが理由なく停止したようにしか見えない。投稿に失敗した場合はラベルを付けず「判定: エラー」で報告して終了する。
 
 ```bash
-gh pr edit $ARGUMENTS --add-label "cc-need-human-check"
-gh pr comment $ARGUMENTS --body-file - <<'EOF'
+gh pr comment $ARGUMENTS --body-file - <<'EOF' && gh pr edit $ARGUMENTS --add-label "cc-need-human-check"
 ## 自動トリアージを停止しました（cc-need-human-check）
 
 CI失敗の原因がこのPRの差分では解消できない種類のため、`cc-need-human-check` ラベルを付与しました。
@@ -308,15 +307,15 @@ EOF
 - PR body・コメントに作者や人間が書いた人間ゲート（手動デプロイ・`terraform apply` 等の手作業・外部の承認・「人がマージする」の明示など）が未完了で、マージを見送る
 - 人間のレビュー・コメントが求める変更や問いが、2-1で「正」とした要件・確定方針・コードベースの規約のいずれからも一意に決まらない仕様判断・選好・スコープの是非に依存する（どちらに直しても誤りになりうるため、自分で選んで直さない）
 - Issue の要件同士、または要件と人間レビュアーの明示的な要求が食い違い、どちらを正とするか決められない
+- 人の承認を待って止まっている CI（2-3 の未完了チェックの但し書き）
 - パターンAの A-0（自動修正の上限）・手順3（再実行しても変わらない push の失敗）
 
 自分で決められるもの（要件や規約から結論が出る指摘、2-3で「対応不要」に落とせる指摘）はこのパターンに入れない。
 
-C-2 と同じ手順で `cc-need-human-check` を付与し、**同じコマンド内でPRへ理由コメントも投稿する**（ラベルだけではGitHub上に判断根拠が残らない）。delegate-review が入れた未 push の変更はパターンCと同じく破棄する。
+C-2 と同じ手順で理由コメントを投稿し、成功した場合だけ `cc-need-human-check` を付与する（ラベルだけではGitHub上に判断根拠が残らない）。delegate-review が入れた未 push の変更はパターンCと同じく破棄する。
 
 ```bash
-gh pr edit $ARGUMENTS --add-label "cc-need-human-check"
-gh pr comment $ARGUMENTS --body-file - <<'EOF'
+gh pr comment $ARGUMENTS --body-file - <<'EOF' && gh pr edit $ARGUMENTS --add-label "cc-need-human-check"
 ## 自動トリアージを停止しました（cc-need-human-check）
 
 人の判断・操作が無いと先へ進めないため、`cc-need-human-check` ラベルを付与しました。
