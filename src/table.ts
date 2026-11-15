@@ -194,7 +194,7 @@ export function buildTaskTableLines(entries: TaskTableEntry[], now: Date = new D
       truncPath(t.path),
       hasPath,
       t.agentStatus ? `${t.status}:${t.agentStatus}` : t.status,
-      formatTime(t.startedAt),
+      formatDateTime(t.startedAt),
       formatDuration(t.startedAt, now),
     ),
   );
