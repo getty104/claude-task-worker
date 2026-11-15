@@ -1,6 +1,6 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 // runcat.ts 側の slack.ts への import は type-only なので、実行時の循環参照は発生しない
@@ -8,6 +8,7 @@ import { writeRuncatUsage } from "./runcat";
 import { CLOUD_FAILURE_GUIDANCE } from "./task-result";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const WEBHOOK_URL = process.env.CLAUDE_TASK_WORKER_SLACK_WEBHOOK_URL;
 /** `usage` コマンドが利用状況をポーリングする間隔 */
@@ -154,17 +155,22 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
   if (cached) return cached;
 
   try {
-    const { token, expiresAt } = await getStoredCredential();
+    let { token, expiresAt } = await getStoredCredential();
     if (!token) {
       console.error("[slack] No OAuth token found (sign in to Claude Code)");
       return null;
     }
-    // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら 401 を待たずに止める
-    if (expiresAt !== undefined && expiresAt <= Date.now()) {
+    // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら claude を1回動かして更新させる
+    if (isExpired(expiresAt)) {
       console.error(
-        `[slack] OAuth token expired at ${new Date(expiresAt).toISOString()} (it is refreshed when claude runs)`,
+        `[slack] OAuth token expired at ${new Date(expiresAt!).toISOString()}; running claude to refresh it`,
       );
-      return null;
+      await refreshTokenByRunningClaude();
+      ({ token, expiresAt } = await getStoredCredential());
+      if (!token || isExpired(expiresAt)) {
+        console.error("[slack] OAuth token is still expired after running claude");
+        return null;
+      }
     }
     const usage = await handleUsageResponse(await requestUsage(token));
     if (usage) writeUsageCache(usage);
@@ -172,6 +178,22 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
   } catch (err) {
     console.error(`[slack] Failed to fetch usage info: ${err}`);
     return null;
+  }
+}
+
+function isExpired(expiresAt: number | undefined): boolean {
+  return expiresAt !== undefined && expiresAt <= Date.now();
+}
+
+/** claude を起動してすぐ終了させ、保存済みの OAuth トークンを更新させる（/exit はモデルを呼ばない） */
+async function refreshTokenByRunningClaude(): Promise<void> {
+  // 長期トークンが env にあると claude はそちらを使い、保存済みトークンを更新しない
+  const { CLAUDE_CODE_OAUTH_TOKEN: _ignored, ...env } = process.env;
+  try {
+    // cwd を tmpdir にするのは、対象リポジトリのフック・設定を走らせないため
+    await execFileAsync("claude", ["-p", "/exit"], { cwd: tmpdir(), env, timeout: 120_000 });
+  } catch (err) {
+    console.error(`[slack] Failed to run claude for token refresh: ${err}`);
   }
 }
 
