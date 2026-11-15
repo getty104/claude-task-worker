@@ -162,7 +162,9 @@ async function fetchUsageInfo(): Promise<UsageInfo | null> {
     }
     // 短期トークンは claude 本体が動いたときにしか更新されないため、期限切れなら claude を1回動かして更新させる
     if (isExpired(expiresAt)) {
-      console.error(`[slack] OAuth token expired at ${new Date(expiresAt!).toISOString()}; running claude to refresh it`);
+      console.error(
+        `[slack] OAuth token expired at ${new Date(expiresAt!).toISOString()}; running claude to refresh it`,
+      );
       await refreshTokenByRunningClaude();
       ({ token, expiresAt } = await getStoredCredential());
       if (!token || isExpired(expiresAt)) {
