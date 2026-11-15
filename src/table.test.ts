@@ -559,3 +559,10 @@ test("captureConsole keeps console output in the log buffer instead of the termi
     logLines.length = 0;
   }
 });
+
+test("buildTaskTableLines shows the date with the finish time of finished tasks", () => {
+  const finishedAt = new Date(2026, 6, 20, 12, 34, 56);
+  const lines = buildTaskTableLines([task({ id: 1, status: "completed", finishedAt })], NOW);
+
+  assert.match(dataRows(lines)[0], /2026-07-20 12:34:56/);
+});

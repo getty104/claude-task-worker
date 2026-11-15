@@ -106,6 +106,13 @@ function formatTime(date: Date): string {
   return `${h}:${m}:${s}`;
 }
 
+function formatDateTime(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${d} ${formatTime(date)}`;
+}
+
 /**
  * 罫線付きテーブルを組み立てる汎用ヘルパー。列幅はヘッダーと全行の表示幅から算出し、
  * 全角を幅2として桁揃えする。`groups` は行グループの配列で、空でないグループの境目に
@@ -198,7 +205,7 @@ export function buildTaskTableLines(entries: TaskTableEntry[], now: Date = new D
       truncPath(t.path),
       hasPath,
       t.status,
-      formatTime(t.finishedAt ?? t.startedAt),
+      formatDateTime(t.finishedAt ?? t.startedAt),
       formatDuration(t.startedAt, t.finishedAt ?? now),
     ),
   );
