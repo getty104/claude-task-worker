@@ -1,18 +1,12 @@
 ---
 name: resolve-pr-conflict
-description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。push後はCIの完了を待ち、同じセッションで triage-pr（OpenCodeReview のレビューとマージ判定）へ引き継ぎます。PRをマージ可能な状態に整えたいときに使用してください。
+description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。PRをマージ可能な状態に整えたいときに使用してください。
 argument-hint: "[pr-number]"
-hooks:
-  Stop:
-    - matcher: ""
-      hooks:
-        - type: command
-          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Resolve PR Conflict
 
-指定されたPR番号のPRがターゲットブランチ（`baseRefName`）とコンフリクトしていないかを確認し、コンフリクトがあればrebaseで解消したうえで`--force-with-lease`でpushするスキル。push した場合はCIの完了を待ち、`triage-pr` スキルを同じセッションで呼んでレビュー・マージ判定まで進める（ステップ5）。レビュー指摘の対応・ラベル付与・マージ判定そのものは `triage-pr` の手順に従い、本スキルの本文では行わない。
+指定されたPR番号のPRがターゲットブランチ（`baseRefName`）とコンフリクトしていないかを確認し、コンフリクトがあればrebaseで解消したうえで`--force-with-lease`でpushするスキル。レビュー指摘の対応・修正プランの評価・ラベル付与・マージ判定といった他の責務には立ち入らない。
 
 ## このスキルがやること・やらないこと
 
@@ -20,12 +14,11 @@ hooks:
 - `gh pr checkout`によるPRブランチへの切り替え
 - ターゲットブランチとのコンフリクト有無の判定
 - コンフリクトがある場合のrebase実行・コンフリクト解消・`--force-with-lease`でのpush
-- push後のCI完了待ちと、`triage-pr` スキルへの引き継ぎ（ステップ5）
 
 **絶対にやらないこと**:
 - コンフリクト解消以外の目的でのコード変更（リファクタリング、レビュー指摘対応、Lint修正、テスト追加など）
 - rebase以外での新規commit作成（`git commit`単体での新規commitは作らない）
-- PRへのラベル付与・コメント投稿・マージ・close を本スキルの手順として行うこと（ステップ5で呼ぶ `triage-pr` がその手順で行うものに限る）
+- PRへのラベル付与・コメント投稿・マージ・close（上位スキルの責務）
 - `git push --force`（`--force-with-lease`以外のforce-push）
 
 # Instructions
@@ -36,13 +29,13 @@ hooks:
 
 ## 実行モードの制約
 
-本スキル固有のリスク: 本スキルは `claude-task-worker` の `resolve-conflict` ワーカー（`cc-resolve-conflict` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-resolve-conflict` の除去を進める。処理が未完のままターンを終えると、rebase未完了のまま `triage-pr` ワーカーが再度PRを拾ってコンフリクトを再検知する無限ループや、リモート未反映のまま次工程に進む状態壊れが起きる。
+本スキル固有のリスク: 本スキルは `triage-pr` スキルのステップ1から呼ばれ、呼び出し元は本スキルの判定を受けてCI待機とマージ判定へ進む。rebase が未完了のまま、または push せずに `resolved-and-pushed` を返すと、呼び出し元はリモートに反映されていない状態を前提にマージ判定を進めてしまう。
 
 `$ARGUMENTS`がPR番号を表す。空・非数値・複数値の場合は、その旨を出力して即中断する。
 
 ## ステップ0: 作業ディレクトリの安全確認
 
-このスキルは単独でも `triage-pr` 等からの委譲でも起動される。いずれのケースでも、呼び出し元が用意した作業コンテキストを尊重するため、現在地を変更しない・新規worktreeを作らない。
+このスキルは単独でも `triage-pr` からの委譲でも起動される。いずれのケースでも、呼び出し元が用意した作業コンテキストを尊重するため、現在地を変更しない・新規worktreeを作らない。
 
 ```bash
 pwd
@@ -74,7 +67,7 @@ gh pr checkout $ARGUMENTS
 
 （`gh pr checkout` はローカル作業ツリーへの checkout であり、リモート API では代替できないため `gh` のまま残す）
 
-**クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
+**クラウド実行時は実行しない。** クラウドセッションは `triage-pr` ワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
 
 **チェックアウトを省略した場合のfail-safe**: `git rev-parse --abbrev-ref HEAD` の値が、ステップ1冒頭で取得済みの `headRefName` と一致することを確認する。一致しない場合は `--on-branch` が反映されていない想定外の状態のため、rebase・force-pushを行わずその場で中断する。
 
@@ -93,7 +86,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 ターゲットブランチは`baseRefName`から動的に取得する。デフォルトブランチではなく、PRが実際にマージされる先のブランチを基準にすること（Epic PRなど、デフォルトブランチ以外をターゲットにするケースに対応するため）。
 
-コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`cc-resolve-conflict`ラベルの付与と除去が繰り返される無限ループになる。
+コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`triage-pr` がコンフリクトを残したままマージ判定へ進むか、毎ポーリングで同じ解消を繰り返すことになる。
 
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
@@ -161,16 +154,6 @@ git push origin HEAD --force-with-lease
 
 `--force-with-lease`を使うのは、自分の認識していないリモートの新規commitを上書きしない（他人のpushを巻き戻さない）ため。pushが失敗した場合は、エラー内容をそのまま呼び出し元に返却して中断する。自動再試行はしない（再試行が必要なケースはリモートに新規pushが来ているなど人間判断が必要な状況のため）。
 
-## ステップ5: CIの完了を待って `triage-pr` へ引き継ぐ
-
-ステップ4で push した場合のみ行う（`no-conflict` / `aborted` では行わない）。
-
-push 後にラベルを戻して終えると、`triage-pr` はCI未完了で「保留」にし、その待ち時間の間に他のPRがマージされてベースが進み、同じPRが再びコンフリクトする（解消 → CI待ち → 再コンフリクトが収束しない）。そこで同じセッションでCIの完了を待ち、そのままレビューとマージ判定まで進める。
-
-1. **CIの完了を待つ**: push したコミットのチェックがすべて完了（成功・失敗を問わない）するまで待つ。ローカル実行では `gh pr checks $ARGUMENTS --watch --fail-fast=false` をフォアグラウンドで実行する（Bash ツールの `timeout` は最大の 600000 を指定し、タイムアウトしたら同じコマンドを再実行する）。クラウド実行では `gh pr checks` が 403 になるため、GitHub MCP の `pull_request_read`（method: `get_check_runs` / `get_status`）を `sleep 60` を挟んで繰り返す。push 直後はチェックがまだ登録されていないことがあるので、最初の確認の前に `sleep 30` を入れる。合計60分を超えても完了しなければ待機を打ち切り、手順3へ進む（`triage-pr` が「保留（CI未完了）」として扱い、次回ポーリングで再評価される）。バックグラウンド実行・`Monitor` は使わない
-2. **コンフリクトの再確認**: ステップ2と同じ方法で `mergeable` を取り直す。CIを待つ間にベースが進んで `CONFLICTING` になっていたら、ステップ3からやり直す（`git fetch` してから rebase する）。やり直しは2回までとし、3回目も `CONFLICTING` なら `triage-pr` を呼ばずに「判定: `aborted`」（理由: CI待機中のベース更新でコンフリクトが収束しない）で終える
-3. **`triage-pr` を呼ぶ**: `Skill` ツールで `claude-task-worker:triage-pr` を引数 `$ARGUMENTS` で呼び、その手順（OpenCodeReview の delegate-review を含むレビュー、マージ / `cc-release-ready` / 修正の push / `cc-need-human-check`）を最後まで実行する。PRブランチは checkout 済みなので、`triage-pr` のステップ0は現在ブランチが head ブランチと一致することの確認だけでよい
-
 ## 出力
 
 呼び出し元には以下を構造化して返却する。
@@ -178,11 +161,11 @@ push 後にラベルを戻して終えると、`triage-pr` はCI未完了で「�
 - **判定**: `no-conflict` / `resolved-and-pushed` / `aborted` のいずれか
 - **詳細**:
   - `no-conflict`: ターゲットブランチ名と判定根拠（`mergeable`の値、またはフォールバック時は`git merge-tree --write-tree`の結果）
-  - `resolved-and-pushed`: 解消したファイル一覧と各ファイルの解消方針の要点、CI待機の結果（完了 / 60分で打ち切り）、ステップ5で呼んだ `triage-pr` の判定と理由
+  - `resolved-and-pushed`: 解消したファイル一覧と各ファイルの解消方針の要点
   - `aborted`: 中断理由（PRがOPENでない / checkout失敗 / コンフリクト解消困難 / push失敗 など）と、その時点のgitの状態（`git status`の要約）
 
 ## 注意事項
 
 - スコープは **コンフリクト解消のみ**。ステップ3のrebase中の`Edit` / `Write`以外でコードを変更しない。コンフリクトと無関係な「ついで修正」を入れると、後続のレビューと履歴が複雑になる
-- PRに付与されているラベル（`cc-triage-scope`等を含む）は、ステップ5で呼んだ `triage-pr` の手順による操作を除いて触らない（`cc-resolve-conflict` の除去と `cc-triage-scope` の戻しはワーカーが行う）
+- PRに付与されているラベル（`cc-triage-scope`等を含む）は一切操作しない。ラベル管理は上位スキルの責務
 - `git push --force`は使わず、必ず`--force-with-lease`を使う

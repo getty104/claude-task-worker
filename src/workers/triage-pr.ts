@@ -16,7 +16,6 @@ export function shouldCloseLinkedIssues(
   return pr !== null && pr.state === "MERGED" && pr.baseRefName !== defaultBranch;
 }
 
-// resolve-conflict もセッション内で triage-pr を呼んでマージしうるため共有する。
 export async function closeLinkedIssuesAfterMerge(workerName: string, prNumber: number): Promise<void> {
   const detail = await getPrDetail(prNumber);
   const { defaultBranch } = await getRepoInfo();
@@ -35,6 +34,6 @@ export const triagePrWorker = createPrPollingWorker({
   name: "triage-pr",
   command: "/claude-task-worker:triage-pr",
   triggerLabel: "cc-triage-scope",
-  excludeLabels: ["cc-fix-onetime", "cc-resolve-conflict", "cc-release-ready", "cc-need-human-check"],
+  excludeLabels: ["cc-fix-onetime", "cc-release-ready", "cc-need-human-check"],
   onCompleted: (pr) => closeLinkedIssuesAfterMerge("triage-pr", pr.number),
 });

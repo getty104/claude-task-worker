@@ -50,7 +50,6 @@ import { appendIgnoreEntry, ensureCodegraphGitIgnore, runCodegraphInit } from ".
 export const LABELS: { name: string; color: string }[] = [
   { name: "cc-need-human-check", color: "eb1700" }, // vivid red (H6 S100 L46 / L*50 C*97)
   { name: "cc-fix-onetime", color: "960837" }, // vivid wine red (H340 S90 L31 / L*32 C*56)
-  { name: "cc-resolve-conflict", color: "6e7e07" }, // vivid olive (H68 S90 L26 / L*50 C*57)
   { name: "cc-update-issue", color: "fff700" }, // vivid yellow (H58 S100 L50 / L*95 C*95)
   { name: "cc-in-progress", color: "14ed0c" }, // vivid green (H118 S90 L49 / L*82 C*112)
   { name: "cc-release-ready", color: "00328a" }, // vivid navy (H218 S100 L27 / L*24 C*58)

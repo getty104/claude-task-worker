@@ -46,7 +46,6 @@ test("worker entry skills do not pin a model", () => {
     "update-issue",
     "triage-created-issue",
     "triage-pr",
-    "resolve-pr-conflict",
     "check-dependabot",
     "create-epic-pr",
     "create-ui-design",
