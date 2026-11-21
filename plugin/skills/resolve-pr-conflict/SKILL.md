@@ -2,6 +2,12 @@
 name: resolve-pr-conflict
 description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。PRをマージ可能な状態に整えたいときに使用してください。
 argument-hint: "[pr-number]"
+hooks:
+  Stop:
+    - matcher: ""
+      hooks:
+        - type: command
+          command: node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-servers.mjs"
 ---
 
 # Resolve PR Conflict
@@ -29,13 +35,13 @@ argument-hint: "[pr-number]"
 
 ## 実行モードの制約
 
-本スキル固有のリスク: 本スキルは `triage-pr` スキルのステップ1から呼ばれ、呼び出し元は本スキルの判定を受けてCI待機とマージ判定へ進む。rebase が未完了のまま、または push せずに `resolved-and-pushed` を返すと、呼び出し元はリモートに反映されていない状態を前提にマージ判定を進めてしまう。
+本スキル固有のリスク: 本スキルは `claude-task-worker` の `resolve-conflict` ワーカー（`cc-resolve-conflict` ラベル）から自動起動され、ワーカーはスキルプロセスの同期完了を根拠に `cc-resolve-conflict` の除去を進める。処理が未完のままターンを終えると、rebase未完了のまま `triage-pr` ワーカーが再度PRを拾ってコンフリクトを再検知する無限ループや、リモート未反映のまま次工程に進む状態壊れが起きる。
 
 `$ARGUMENTS`がPR番号を表す。空・非数値・複数値の場合は、その旨を出力して即中断する。
 
 ## ステップ0: 作業ディレクトリの安全確認
 
-このスキルは単独でも `triage-pr` からの委譲でも起動される。いずれのケースでも、呼び出し元が用意した作業コンテキストを尊重するため、現在地を変更しない・新規worktreeを作らない。
+このスキルは単独でも `triage-pr` 等からの委譲でも起動される。いずれのケースでも、呼び出し元が用意した作業コンテキストを尊重するため、現在地を変更しない・新規worktreeを作らない。
 
 ```bash
 pwd
@@ -67,7 +73,7 @@ gh pr checkout $ARGUMENTS
 
 （`gh pr checkout` はローカル作業ツリーへの checkout であり、リモート API では代替できないため `gh` のまま残す）
 
-**クラウド実行時は実行しない。** クラウドセッションは `triage-pr` ワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
+**クラウド実行時は実行しない。** クラウドセッションはワーカーが `--on-branch` で指定した PR の head ブランチ上で開始しており、既に目的のブランチにいる（`gh pr checkout` は GraphQL 経由でもあり、クラウドでは 403 で失敗する）。ワーカーが起動プロンプトへ同じ趣旨の指示を入れているが、`git rev-parse --abbrev-ref HEAD` が既に対象PRの head ブランチを指している場合も同様に checkout を省略してよい。
 
 **チェックアウトを省略した場合のfail-safe**: `git rev-parse --abbrev-ref HEAD` の値が、ステップ1冒頭で取得済みの `headRefName` と一致することを確認する。一致しない場合は `--on-branch` が反映されていない想定外の状態のため、rebase・force-pushを行わずその場で中断する。
 
@@ -86,19 +92,13 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 ターゲットブランチは`baseRefName`から動的に取得する。デフォルトブランチではなく、PRが実際にマージされる先のブランチを基準にすること（Epic PRなど、デフォルトブランチ以外をターゲットにするケースに対応するため）。
 
-コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`triage-pr` がコンフリクトを残したままマージ判定へ進むか、毎ポーリングで同じ解消を繰り返すことになる。
+コンフリクト有無の一次判定には、呼び出し元の`triage-pr`と同じGitHubの`mergeable`フィールドを使う。判定基準を呼び出し元と揃えないと、「`triage-pr`はコンフリクトありと判定したのに本スキルはなしと判定して何もせず終了する」という食い違いが起き、`cc-resolve-conflict`ラベルの付与と除去が繰り返される無限ループになる。
 
 > GitHub MCP が使える場合は `pull_request_read`（method: `get`）を使う。以下は MCP 利用不可時のフォールバック。
 
 ```bash
 TARGET_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)
 MERGEABLE=$(gh pr view $ARGUMENTS --json mergeable -q .mergeable)
-```
-
-`TARGET_BRANCH` が決まったら、クラウド実行でも（ステップ1の `git fetch -p` を省略した場合でも）必ず取得し直す。古い `origin/$TARGET_BRANCH` に対して rebase すると、ローカルでは完走しても新しいベースとはコンフリクトしたままになる（`triage-pr` からの再解消で特に起きる）。
-
-```bash
-git fetch origin "$TARGET_BRANCH"
 ```
 
 判定基準:

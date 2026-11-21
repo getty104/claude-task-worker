@@ -598,14 +598,16 @@ test("E1: script が利用できない環境で --cloud を渡すと起動せず
   assert.ok(handle.stdout().includes("script"), "エラーメッセージが script(1) の不可用を案内していない");
 });
 
-// 許可リストは撤去済み。--cloud を付けたプロセスでは check-dependabot のような
+// 許可リストは撤去済み。--cloud を付けたプロセスでは resolve-conflict のような
 // PR 系ワーカーもクラウド実行になる（worktree を作らず --on-branch で PR ブランチから始める）。
-test("E2: --cloud 下では check-dependabot もクラウド実行になる", { timeout: 45_000 }, async (t) => {
+test("E2: --cloud 下では resolve-conflict もクラウド実行になる", { timeout: 45_000 }, async (t) => {
   const stubs = installCliStubs({
     gh: {
       login: "octocat",
       repo: { owner: "acme", name: "demo", defaultBranch: "main" },
-      prList: [{ number: 801, headRefName: "conflict-branch", labels: [{ name: "dependencies" }], title: "Fix" }],
+      prList: [
+        { number: 801, headRefName: "conflict-branch", labels: [{ name: "cc-resolve-conflict" }], title: "Fix" },
+      ],
       view: { "801": { checks: [] } },
     },
     claude: {
@@ -613,7 +615,7 @@ test("E2: --cloud 下では check-dependabot もクラウド実行になる", { 
     },
   });
   const handle = await startWorker({
-    worker: "check-dependabot",
+    worker: "resolve-conflict",
     workerConfig: { workers: {} },
     userConfig: { mode: "herdr" },
     records: stubs.records,
