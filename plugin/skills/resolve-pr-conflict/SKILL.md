@@ -95,6 +95,12 @@ TARGET_BRANCH=$(gh pr view $ARGUMENTS --json baseRefName -q .baseRefName)
 MERGEABLE=$(gh pr view $ARGUMENTS --json mergeable -q .mergeable)
 ```
 
+`TARGET_BRANCH` が決まったら、クラウド実行でも（ステップ1の `git fetch -p` を省略した場合でも）必ず取得し直す。古い `origin/$TARGET_BRANCH` に対して rebase すると、ローカルでは完走しても新しいベースとはコンフリクトしたままになる（`triage-pr` からの再解消で特に起きる）。
+
+```bash
+git fetch origin "$TARGET_BRANCH"
+```
+
 判定基準:
 
 - **`CONFLICTING`**: コンフリクトありと判定し、ステップ3に進む
