@@ -605,9 +605,7 @@ test("E2: --cloud 下では check-dependabot もクラウド実行になる", { 
     gh: {
       login: "octocat",
       repo: { owner: "acme", name: "demo", defaultBranch: "main" },
-      prList: [
-        { number: 801, headRefName: "conflict-branch", labels: [{ name: "dependencies" }], title: "Fix" },
-      ],
+      prList: [{ number: 801, headRefName: "conflict-branch", labels: [{ name: "dependencies" }], title: "Fix" }],
       view: { "801": { checks: [] } },
     },
     claude: {
