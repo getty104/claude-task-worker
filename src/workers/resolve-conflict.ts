@@ -1,5 +1,6 @@
 import { addLabel, commentOnPR, getPrMergeable } from "../gh";
 import { createPrPollingWorker } from "./pr-worker";
+import { closeLinkedIssuesAfterMerge } from "./triage-pr";
 
 const LABEL_NEED_HUMAN_CHECK = "cc-need-human-check";
 
@@ -19,6 +20,8 @@ export const resolveConflictWorker = createPrPollingWorker({
   command: "/claude-task-worker:resolve-pr-conflict",
   triggerLabel: "cc-resolve-conflict",
   onCompleted: async (pr) => {
+    // スキルは push 後に CI を待って triage-pr を呼び、そのままマージまで進めうる（Epic 配下の連動クローズを担保する）。
+    await closeLinkedIssuesAfterMerge("resolve-conflict", pr.number);
     const mergeable = await getPrMergeable(pr.number);
     if (!shouldFlagUnresolvedConflict(mergeable)) return;
     await addLabel("pr", pr.number, LABEL_NEED_HUMAN_CHECK);

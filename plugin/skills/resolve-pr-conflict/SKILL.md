@@ -1,6 +1,6 @@
 ---
 name: resolve-pr-conflict
-description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。PRをマージ可能な状態に整えたいときに使用してください。
+description: 指定されたGitHub PRがターゲットブランチとコンフリクトしていないかを確認し、コンフリクトしている場合はrebaseで解消してforce-pushします。push後はCIの完了を待ち、同じセッションで triage-pr（OpenCodeReview のレビューとマージ判定）へ引き継ぎます。PRをマージ可能な状態に整えたいときに使用してください。
 argument-hint: "[pr-number]"
 hooks:
   Stop:
@@ -12,7 +12,7 @@ hooks:
 
 # Resolve PR Conflict
 
-指定されたPR番号のPRがターゲットブランチ（`baseRefName`）とコンフリクトしていないかを確認し、コンフリクトがあればrebaseで解消したうえで`--force-with-lease`でpushするスキル。レビュー指摘の対応・修正プランの評価・ラベル付与・マージ判定といった他の責務には立ち入らない。
+指定されたPR番号のPRがターゲットブランチ（`baseRefName`）とコンフリクトしていないかを確認し、コンフリクトがあればrebaseで解消したうえで`--force-with-lease`でpushするスキル。push した場合はCIの完了を待ち、`triage-pr` スキルを同じセッションで呼んでレビュー・マージ判定まで進める（ステップ5）。レビュー指摘の対応・ラベル付与・マージ判定そのものは `triage-pr` の手順に従い、本スキルの本文では行わない。
 
 ## このスキルがやること・やらないこと
 
@@ -20,11 +20,12 @@ hooks:
 - `gh pr checkout`によるPRブランチへの切り替え
 - ターゲットブランチとのコンフリクト有無の判定
 - コンフリクトがある場合のrebase実行・コンフリクト解消・`--force-with-lease`でのpush
+- push後のCI完了待ちと、`triage-pr` スキルへの引き継ぎ（ステップ5）
 
 **絶対にやらないこと**:
 - コンフリクト解消以外の目的でのコード変更（リファクタリング、レビュー指摘対応、Lint修正、テスト追加など）
 - rebase以外での新規commit作成（`git commit`単体での新規commitは作らない）
-- PRへのラベル付与・コメント投稿・マージ・close（上位スキルの責務）
+- PRへのラベル付与・コメント投稿・マージ・close を本スキルの手順として行うこと（ステップ5で呼ぶ `triage-pr` がその手順で行うものに限る）
 - `git push --force`（`--force-with-lease`以外のforce-push）
 
 # Instructions
@@ -160,6 +161,16 @@ git push origin HEAD --force-with-lease
 
 `--force-with-lease`を使うのは、自分の認識していないリモートの新規commitを上書きしない（他人のpushを巻き戻さない）ため。pushが失敗した場合は、エラー内容をそのまま呼び出し元に返却して中断する。自動再試行はしない（再試行が必要なケースはリモートに新規pushが来ているなど人間判断が必要な状況のため）。
 
+## ステップ5: CIの完了を待って `triage-pr` へ引き継ぐ
+
+ステップ4で push した場合のみ行う（`no-conflict` / `aborted` では行わない）。
+
+push 後にラベルを戻して終えると、`triage-pr` はCI未完了で「保留」にし、その待ち時間の間に他のPRがマージされてベースが進み、同じPRが再びコンフリクトする（解消 → CI待ち → 再コンフリクトが収束しない）。そこで同じセッションでCIの完了を待ち、そのままレビューとマージ判定まで進める。
+
+1. **CIの完了を待つ**: push したコミットのチェックがすべて完了（成功・失敗を問わない）するまで待つ。ローカル実行では `gh pr checks $ARGUMENTS --watch --fail-fast=false` をフォアグラウンドで実行する（Bash ツールの `timeout` は最大の 600000 を指定し、タイムアウトしたら同じコマンドを再実行する）。クラウド実行では `gh pr checks` が 403 になるため、GitHub MCP の `pull_request_read`（method: `get_check_runs` / `get_status`）を `sleep 60` を挟んで繰り返す。push 直後はチェックがまだ登録されていないことがあるので、最初の確認の前に `sleep 30` を入れる。合計60分を超えても完了しなければ待機を打ち切り、手順3へ進む（`triage-pr` が「保留（CI未完了）」として扱い、次回ポーリングで再評価される）。バックグラウンド実行・`Monitor` は使わない
+2. **コンフリクトの再確認**: ステップ2と同じ方法で `mergeable` を取り直す。CIを待つ間にベースが進んで `CONFLICTING` になっていたら、ステップ3からやり直す（`git fetch` してから rebase する）。やり直しは2回までとし、3回目も `CONFLICTING` なら `triage-pr` を呼ばずに「判定: `aborted`」（理由: CI待機中のベース更新でコンフリクトが収束しない）で終える
+3. **`triage-pr` を呼ぶ**: `Skill` ツールで `claude-task-worker:triage-pr` を引数 `$ARGUMENTS` で呼び、その手順（OpenCodeReview の delegate-review を含むレビュー、マージ / `cc-release-ready` / 修正の push / `cc-need-human-check`）を最後まで実行する。PRブランチは checkout 済みなので、`triage-pr` のステップ0は現在ブランチが head ブランチと一致することの確認だけでよい
+
 ## 出力
 
 呼び出し元には以下を構造化して返却する。
@@ -167,11 +178,11 @@ git push origin HEAD --force-with-lease
 - **判定**: `no-conflict` / `resolved-and-pushed` / `aborted` のいずれか
 - **詳細**:
   - `no-conflict`: ターゲットブランチ名と判定根拠（`mergeable`の値、またはフォールバック時は`git merge-tree --write-tree`の結果）
-  - `resolved-and-pushed`: 解消したファイル一覧と各ファイルの解消方針の要点
+  - `resolved-and-pushed`: 解消したファイル一覧と各ファイルの解消方針の要点、CI待機の結果（完了 / 60分で打ち切り）、ステップ5で呼んだ `triage-pr` の判定と理由
   - `aborted`: 中断理由（PRがOPENでない / checkout失敗 / コンフリクト解消困難 / push失敗 など）と、その時点のgitの状態（`git status`の要約）
 
 ## 注意事項
 
 - スコープは **コンフリクト解消のみ**。ステップ3のrebase中の`Edit` / `Write`以外でコードを変更しない。コンフリクトと無関係な「ついで修正」を入れると、後続のレビューと履歴が複雑になる
-- PRに付与されているラベル（`cc-triage-scope`等を含む）は一切操作しない。ラベル管理は上位スキルの責務
+- PRに付与されているラベル（`cc-triage-scope`等を含む）は、ステップ5で呼んだ `triage-pr` の手順による操作を除いて触らない（`cc-resolve-conflict` の除去と `cc-triage-scope` の戻しはワーカーが行う）
 - `git push --force`は使わず、必ず`--force-with-lease`を使う

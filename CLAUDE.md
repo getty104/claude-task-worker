@@ -650,6 +650,10 @@ PRに `cc-need-human-check` が付いている間は `triage-pr` がポーリン
 4. **`triage-pr` のパターンD（人の判断・操作待ち）**: 基準線は「人が判断・操作しない限り、次回ポーリングでも同じ判定になるか」。PR body の人間ゲート（`terraform apply` 未実施・外部承認待ちなど）、人の承認待ちで止まった CI（`waiting` / `action_required`）、要件・規約から一意に決まらない仕様判断を求めるレビュー、A-0（直近の `## 自動トリアージを停止しました` コメント以降に `## triage-pr による自動修正` のPRコメントが3件以上あるのに対応すべき項目が残る。起点を停止コメントにするのは、人がラベルを外した後に数え直すため）、再実行しても変わらない push の失敗（権限不足・ブランチ保護）が該当する。理由コメントの投稿は C-2 と同じ（コメント投稿の成功後にだけラベルを付ける。先に付けると投稿失敗時に根拠の無い停止が残る）。ラベルなしの「保留」で終えてよいのは時間経過で状態が変わるもの（CI未完了・C-1 の再実行待ち）だけ
    - かつては「CI失敗以外を根拠に付けない（CI以外の保留はラベルなしの『保留』で終える）」としていたが、人の判断待ちのPRが `cc-triage-scope` を持ったまま毎ポーリング（60秒）再評価され、delegate-review を含む全手順のセッションを焼き続ける無限ループになったため撤回した。人がラベルを外すまで自動処理から外れるのは、人が動くまで状態が変わらない以上むしろ正しい
 
+#### `resolve-conflict` は push 後に CI を待ってマージまで進める
+
+`resolve-pr-conflict` は rebase して push した場合、同じセッションで CI の完了を待ち（ローカルは `gh pr checks --watch`、クラウドは MCP の `pull_request_read` をポーリング。上限60分）、`mergeable` を取り直してから `triage-pr` スキルを呼ぶ（ステップ5）。以前は push してラベルを戻すだけだったため、`triage-pr` がCI未完了で「保留」にしている間に他のPRがマージされてベースが進み、同じPRが再びコンフリクトする往復が収束しなかった。CI待機中に再び `CONFLICTING` になったら rebase からやり直し（2回まで）、それでも収束しなければ `aborted` で終える（`onCompleted` が `cc-need-human-check` を付ける）。セッション内でマージしうるため、`resolve-conflict` の `onCompleted` も `triage-pr` と同じ `closeLinkedIssuesAfterMerge()` で Epic 配下の関連Issueを閉じ直す。待機中は `cc-resolve-conflict` が付いたままなので、他の `triage-pr` はこのPRを拾わない（`excludeLabels`）。
+
 `.pen` のコンフリクトを `triage-pr` が判別する必要はない（`resolve-pr-conflict` が `git status` で検出して `resolve-pencil-conflict` スキルへ内部委譲するため）。PR側の `cc-need-human-check` を外すと `triage-pr` のポーリングが再開する。
 
 ### UIデザイン先行ワークフロー（`uiDesign`）
