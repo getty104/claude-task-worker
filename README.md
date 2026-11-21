@@ -35,6 +35,7 @@ CLI が GitHub ラベルを検知してタスクを起動し、プラグイン�
 | `apply-ui-design` | `cc-ui-design-pr-created` (Issue) | `/claude-task-worker:apply-ui-design` | 5分 |
 | `fix-review-point` | `cc-fix-onetime` (PR) | `/claude-task-worker:fix-review-point` | 1分 |
 | `triage-pr` | `cc-triage-scope` (PR) | `/claude-task-worker:triage-pr` | 1分 |
+| `resolve-conflict` | `cc-resolve-conflict` (PR) | `/claude-task-worker:resolve-pr-conflict` | 1分 |
 | `check-dependabot` | `dependencies` (PR) | `/claude-task-worker:check-dependabot` | 1時間 |
 | `update-coding-guidelines` | 24時間経過 | `/claude-task-worker:update-coding-guidelines` | 1時間 |
 | `update-requirement-rules` | 24時間経過 | `/claude-task-worker:update-requirement-rules` | 1時間 |
@@ -113,7 +114,7 @@ claude-task-worker apply-labels   # ラベルだけを作成（冪等）
 | `cc-issue-request` | 人が Issue テンプレートから作成を依頼した印。起票者を assignee に自動設定するワークフローの発火条件（`cc-triage-scope` と役割を分けてあり、ワーカーの自動起票では付かない） |
 | `cc-issue-created` | `create-issue` 由来の Issue マーク |
 | `cc-update-issue` / `cc-answer-issue-questions` / `cc-exec-issue` | Issue の更新 / 確認事項回答 / 実行トリガー |
-| `cc-fix-onetime` | PR の修正トリガー |
+| `cc-fix-onetime` / `cc-resolve-conflict` | PR の修正 / コンフリクト解消トリガー |
 | `cc-in-progress` | 処理中ステータス |
 | `cc-need-human-check` | 人間の確認が必要（付与中はワーカーの対象外） |
 | `cc-pr-created` | PR 作成完了マーク |
@@ -347,7 +348,7 @@ node plugin/scripts/pen.mjs render design.pen --out out/   # Chrome で描画し
 
 | ワーカー | `model` | `effort` | `pollingIntervalSeconds` |
 |---|---|---|---|
-| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design` / `triage-pr` / `update-issue` / `triage-created-issue` | `opus` | `medium` | 60 |
+| `exec-issue` / `fix-review-point` / `answer-issue-questions` / `create-issue` / `create-ui-design` / `triage-pr` / `update-issue` / `triage-created-issue` / `resolve-conflict` | `opus` | `medium` | 60 |
 | `epic-issue` / `apply-ui-design` | `opus` | `medium` | 300 |
 | `check-dependabot` | `opus` | `medium` | 3600 |
 | `update-coding-guidelines` / `update-requirement-rules` / `update-design-md` | `opus` | `medium` | 3600 |

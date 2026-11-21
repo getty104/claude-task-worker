@@ -16,24 +16,22 @@ export function shouldCloseLinkedIssues(
   return pr !== null && pr.state === "MERGED" && pr.baseRefName !== defaultBranch;
 }
 
-export async function closeLinkedIssuesAfterMerge(workerName: string, prNumber: number): Promise<void> {
-  const detail = await getPrDetail(prNumber);
-  const { defaultBranch } = await getRepoInfo();
-  if (!shouldCloseLinkedIssues(detail, defaultBranch)) return;
-  for (const issueNumber of parseClosingIssueNumbers(detail!.body)) {
-    try {
-      await closeIssue(issueNumber);
-      console.log(`[${workerName}] closed issue #${issueNumber} (PR #${prNumber} merged into ${detail!.baseRefName})`);
-    } catch (err) {
-      console.error(`[${workerName}] failed to close issue #${issueNumber} for PR #${prNumber}: ${err}`);
-    }
-  }
-}
-
 export const triagePrWorker = createPrPollingWorker({
   name: "triage-pr",
   command: "/claude-task-worker:triage-pr",
   triggerLabel: "cc-triage-scope",
-  excludeLabels: ["cc-fix-onetime", "cc-release-ready", "cc-need-human-check"],
-  onCompleted: (pr) => closeLinkedIssuesAfterMerge("triage-pr", pr.number),
+  excludeLabels: ["cc-fix-onetime", "cc-resolve-conflict", "cc-release-ready", "cc-need-human-check"],
+  onCompleted: async (pr) => {
+    const detail = await getPrDetail(pr.number);
+    const { defaultBranch } = await getRepoInfo();
+    if (!shouldCloseLinkedIssues(detail, defaultBranch)) return;
+    for (const issueNumber of parseClosingIssueNumbers(detail!.body)) {
+      try {
+        await closeIssue(issueNumber);
+        console.log(`[triage-pr] closed issue #${issueNumber} (PR #${pr.number} merged into ${detail!.baseRefName})`);
+      } catch (err) {
+        console.error(`[triage-pr] failed to close issue #${issueNumber} for PR #${pr.number}: ${err}`);
+      }
+    }
+  },
 });

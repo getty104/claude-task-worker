@@ -6,21 +6,21 @@ import type * as WorkerDefinitionModule from "./worker-definition";
 const { PRESET_WORKERS } = (await import("./registry")) as typeof RegistryModule;
 const { defineWorker, isWorkerDefinition } = (await import("./worker-definition")) as typeof WorkerDefinitionModule;
 
-test("PRESET_WORKERS has 14 unique names", () => {
+test("PRESET_WORKERS has 15 unique names", () => {
   const names = PRESET_WORKERS.map((e) => e.definition.name);
-  assert.equal(names.length, 14);
-  assert.equal(new Set(names).size, 14);
+  assert.equal(names.length, 15);
+  assert.equal(new Set(names).size, 15);
 });
 
 test("PRESET_WORKERS membership in all / yolo", () => {
-  assert.equal(PRESET_WORKERS.filter((e) => e.inAll).length, 11);
-  assert.equal(PRESET_WORKERS.filter((e) => e.inYolo).length, 14);
+  assert.equal(PRESET_WORKERS.filter((e) => e.inAll).length, 12);
+  assert.equal(PRESET_WORKERS.filter((e) => e.inYolo).length, 15);
   const notInAll = PRESET_WORKERS.filter((e) => !e.inAll).map((e) => e.definition.name);
   assert.deepEqual(notInAll, ["triage-created-issue", "triage-pr", "check-dependabot"]);
 });
 
 test("every preset is a WorkerDefinition with the expected kind", () => {
-  const prNames = ["fix-review-point", "triage-pr", "check-dependabot"];
+  const prNames = ["fix-review-point", "triage-pr", "resolve-conflict", "check-dependabot"];
   const scheduledNames = ["update-coding-guidelines", "update-requirement-rules", "update-design-md"];
   for (const { definition } of PRESET_WORKERS) {
     assert.ok(isWorkerDefinition(definition), definition.name);

@@ -26,7 +26,7 @@ EXPECTED_HERDR_VERSION="0.8.2"
 
 # src/config.ts の CLOUD_DENIED_WORKERS と揃える。--cloud を付けてもこれらの
 # ワーカーはローカル実行のまま残る（起動時エラーにはならない）。
-CLOUD_DENIED_WORKERS="create-ui-design apply-ui-design update-coding-guidelines update-requirement-rules update-design-md"
+CLOUD_DENIED_WORKERS="resolve-conflict create-ui-design apply-ui-design update-coding-guidelines update-requirement-rules update-design-md"
 
 ok_count=0
 ng_count=0
