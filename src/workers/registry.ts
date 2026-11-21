@@ -6,7 +6,6 @@ import { createUiDesignWorker } from "./create-ui-design";
 import { epicIssueWorker } from "./epic-issue";
 import { execIssueWorker } from "./exec-issue";
 import { fixReviewPointWorker } from "./fix-review-point";
-import { resolveConflictWorker } from "./resolve-conflict";
 import { triageCreatedIssueWorker } from "./triage-created-issue";
 import { triagePrWorker } from "./triage-pr";
 import { updateCodingGuidelinesWorker } from "./update-coding-guidelines";
@@ -42,12 +41,6 @@ export const PRESET_WORKERS: readonly PresetWorkerEntry[] = [
     inYolo: true,
   },
   { definition: triagePrWorker, description: "Poll and triage PRs every 5 minutes", inAll: false, inYolo: true },
-  {
-    definition: resolveConflictWorker,
-    description: "Poll cc-resolve-conflict PRs and run /resolve-conflict",
-    inAll: true,
-    inYolo: true,
-  },
   { definition: checkDependabotWorker, description: "Poll dependabot PRs every 1 hour", inAll: false, inYolo: true },
   {
     definition: epicIssueWorker,

@@ -71,7 +71,7 @@ npx claude-task-worker cloud-setup
 | ワーカー | 目安 |
 |---|---|
 | `exec-issue` / `fix-review-point` | 向いている（動作確認済み） |
-| Issue 分析系（`create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue`）、`epic-issue`、`triage-pr`、`check-dependabot`、`resolve-conflict`、定期ワーカー | 動く想定だが運用実績が少ない |
+| Issue 分析系（`create-issue` / `update-issue` / `answer-issue-questions` / `triage-created-issue`）、`epic-issue`、`triage-pr`、`check-dependabot`、定期ワーカー | 動く想定だが運用実績が少ない |
 | `create-ui-design` / `apply-ui-design` | 動く想定だが運用実績が少ない。`create-ui-design` はスナップショットの描画に Chrome を使う（セットアップスクリプトの `install` が取得する） |
 
 プロセス単位のフラグなので、向いているワーカーだけクラウドで動かすなら別プロセスに分ける。

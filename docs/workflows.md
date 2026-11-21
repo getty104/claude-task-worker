@@ -15,8 +15,8 @@
         └─ 着手可能         → cc-exec-issue
                                    │ exec-issue
                                    ▼
-[PR]  cc-triage-scope ──triage-pr（yolo のみ）──▶ マージ / cc-fix-onetime / cc-resolve-conflict
-                                                     │ fix-review-point / resolve-conflict
+[PR]  cc-triage-scope ──triage-pr（yolo のみ。コンフリクトは解消して CI を待ってから判定）──▶ マージ / cc-fix-onetime
+                                                     │ fix-review-point
                                                      └──▶ cc-triage-scope に戻る
 ```
 
@@ -29,7 +29,6 @@
 | `cc-update-issue` | 人 | コメントの内容を description に反映し直す |
 | `cc-answer-issue-questions` | 人 / ワーカー | 確認事項にコードベースを調べて回答する |
 | `cc-fix-onetime` | 人 / ワーカー | PR のレビュー指摘・CI 失敗に1回対応する |
-| `cc-resolve-conflict` | 人 / ワーカー | PR のコンフリクトを解消する |
 | `cc-in-progress` | ワーカー | 処理中（手で付けると対象外になる） |
 | `cc-need-human-check` | ワーカー / 人 | 人の確認待ち。付いている間はどのワーカーも触らない。外すと再開する |
 

@@ -1,6 +1,6 @@
 ---
 name: triage-pr
-description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch via `gh pr status` (and label the PR with `cc-resolve-conflict` if any are found), review the diff with OpenCodeReview's delegate-review, collect unresolved review comments and CI status, then take action (if fixes are needed, fix them in this session, commit, push, and resolve the threads; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
+description: Triage a single GitHub PR by PR number. Check out the PR's branch, detect conflicts with the target branch (and, if any are found, resolve them by rebase via the resolve-pr-conflict skill, push, and wait for CI to finish), review the diff with OpenCodeReview's delegate-review, collect unresolved review comments and CI status, then take action (if fixes are needed, fix them in this session, commit, push, and resolve the threads; if release-ready, add cc-release-ready label for an Epic PR marked `cc-epic-issue` instead of merging, otherwise merge the PR).
 argument-hint: "[pr-number]"
 hooks:
   Stop:
@@ -12,19 +12,18 @@ hooks:
 
 # Triage PR
 
-指定されたPR番号のPRに対して、コンフリクト検知から修正要否の判定、最終アクション（ラベル付与またはマージ）までを一貫して実行するスキルです。
+指定されたPR番号のPRに対して、コンフリクトの検知・解消から修正要否の判定、最終アクション（ラベル付与またはマージ）までを一貫して実行するスキルです。
 
 ## このスキルがやること・やらないこと
 
 **やること**:
-- ステップ1のコンフリクト検知（コンフリクトがあれば`cc-resolve-conflict`ラベル付与のみで終了）
+- ステップ1のコンフリクト検知と解消（コンフリクトがあれば `resolve-pr-conflict` スキルで rebase・push し、CIの完了を待ってからステップ2へ進む）
 - ステップ2の判定材料の収集（未解決レビューコメント・CIステータス・関連Issueの要件）と、OpenCodeReview の delegate-review（`/open-code-review:delegate-review`）によるPR差分のレビュー、各項目が「修正すべきか」の二分判定
 - ステップ3のアクション: 修正が必要なら**このスキル自身で修正 → テスト/Lint → commit-push → スレッドのResolve**まで行い、マージは次回ポーリングへ回す / マージ可能なら、Epic PR（`cc-epic-issue`付き）は`cc-release-ready`ラベル付与（マージしない）、通常PRはマージ / CI失敗が差分の変更では直せない場合は失敗ジョブの1回だけの再実行（C-1）を経て`cc-need-human-check`ラベル付与＋理由コメント投稿（C-2） / 人の判断・操作が無いと次回以降も同じ判定になる場合は`cc-need-human-check`ラベル付与＋理由コメント投稿（パターンD）
 
 **やらないこと**:
 - **`cc-fix-onetime` の付与**: 修正は本スキルが自分で行う。`fix-review-point` へ引き継がない（同じPRの差分・指摘・要件を2セッションで読み直すことになるため）
-- **コンフリクト解消の直接実行**: rebase・コンフリクトファイルの編集・force-pushは行わない。検知したら`cc-resolve-conflict`を付けて終了し、解消は同ラベルをトリガーに別スキル（`resolve-pr-conflict`等）が担当する
-- **修正を push したセッションでのマージ**: push 後のCIとレビューは未評価なので、同じセッションでマージに進まない（次回ポーリングで再評価する）
+- **修正を push したセッションでのマージ**: push 後のCIとレビューは未評価なので、同じセッションでマージに進まない（次回ポーリングで再評価する）。例外はステップ1のコンフリクト解消による push で、CIの完了を待ってからステップ2で評価するため同じセッションでマージまで進めてよい
 - **対応すべき項目の外への変更**: 気づいた別の改善・依頼されていないテストやリファクタリングは混ぜず、報告に1行で挙げる
 
 # Instructions
@@ -56,7 +55,7 @@ gh pr checkout $ARGUMENTS
 
 このコマンドが**失敗した場合**（典型例: `fatal: '<branch>' is already used by worktree at ...` — PRブランチが別のworktreeでcheckout中）は、**後続のステップに進まず**、エラー出力をそのまま含めて「判定: エラー」で結果報告を行い終了する。ラベル操作・自前のリトライは行わない（ブロッカー解消後のポーリングで自動的に再実行される）。
 
-### ステップ1: コンフリクト検知とラベル付与
+### ステップ1: コンフリクトの検知と解消
 
 対象PRの `mergeable` を取得してコンフリクトの有無を判定する。GitHub MCP の `pull_request_read`（method: `get`）を優先し、利用不可なら以下にフォールバックする。
 
@@ -73,13 +72,20 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh pr-mergeable $ARGUMENTS
 判定に応じて分岐する。
 
 - **マージ可能（`MERGEABLE`）**: ステップ2に進む
-- **コンフリクトあり（`CONFLICTING`）**: `cc-resolve-conflict` ラベルを付与して終了する。ステップ2・3には進まない（コンフリクト解消前に修正要否の判定やマージを行っても意味がないため）
-
-  ```bash
-  gh pr edit $ARGUMENTS --add-label "cc-resolve-conflict"
-  ```
+- **コンフリクトあり（`CONFLICTING`）**: 下記「1-1. コンフリクトの解消」を行ってからステップ2に進む
 
 - **判定不能（`UNKNOWN` のままリトライ後も継続する場合）**: マージ可能性が未確定のまま先へ進むのは危険なため、**後続のステップに進まず**、ラベル操作は一切行わずに「判定: エラー」で結果報告を行い終了する（ステップ0の失敗時と同様の扱い）。自前のリトライはこの1回のみとする（ブロッカー解消後のポーリングで自動的に再実行される）
+
+#### 1-1. コンフリクトの解消
+
+コンフリクトの解消からマージ判定までを1セッションで行う。解消を push しただけで終えると、次回ポーリングまでの間（CI待ちの間）に他のPRがマージされてベースが進み、同じPRが再びコンフリクトする往復が収束しないため。
+
+1. **解消**: `Skill` ツールで `claude-task-worker:resolve-pr-conflict` を引数 `$ARGUMENTS` で呼ぶ。判定ごとの扱い:
+   - `resolved-and-pushed`: 手順2へ進む
+   - `no-conflict`（GitHub の判定が古かった等）: 手順3へ進む
+   - `aborted`: 解消を進めずパターンDと同じ手順で理由コメント（「失敗チェック」「失敗内容」「根拠」を「コンフリクトを自動解消できない」「中断理由と `git status` の要約」に置き換え、手動で解消したらラベルを外せば再開する旨を書く）を投稿し、成功した場合だけ `cc-need-human-check` を付与して「判定: パターンD」で終了する（付けずに終えると、解けないコンフリクトを毎ポーリングで解き直す）。ステップ2・3には進まない
+2. **CIの完了を待つ**: push したコミットのチェックがすべて完了（成功・失敗を問わない）するまで待つ。ローカル実行では `gh pr checks $ARGUMENTS --watch --fail-fast=false` をフォアグラウンドで実行する（Bash ツールの `timeout` は最大の 600000 を指定し、タイムアウトしたら同じコマンドを再実行する）。クラウド実行では `gh pr checks` が 403 になるため、GitHub MCP の `pull_request_read`（method: `get_check_runs` / `get_status`）を `sleep 60` を挟んで繰り返す。push 直後はチェックがまだ登録されていないことがあるので、最初の確認の前に `sleep 30` を入れる。**チェックが0件なら「全チェック成功」とみなさない**: push 前の head（ステップ0時点のコミット）にチェックがあった場合は登録待ちとして最大5分まで確認を繰り返し、それでも0件なら「判定: 保留（CI未完了）」で終える（パターンBへ進まない）。push 前の head にもチェックが1件も無かった場合だけ、CI の無いリポジトリとして手順3へ進む。合計60分を超えても完了しなければ待機を打ち切って手順3へ進む（未完了のチェックはステップ2の「保留（CI未完了）」の扱いになる）。バックグラウンド実行・`Monitor` は使わない
+3. **コンフリクトの再確認**: ステップ1の方法で `mergeable` を取り直す。CIを待つ間にベースが進んで `CONFLICTING` になっていたら手順1からやり直す。やり直しは2回までとし、3回目も `CONFLICTING` なら手順1の `aborted` と同じ扱い（根拠: CI待機中のベース更新でコンフリクトが収束しない）で終える。`MERGEABLE` ならステップ2に進む
 
 ### ステップ2: 修正要否の判定
 
@@ -418,5 +424,5 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/gh-compat.sh close-issue <issue番号> not_pl
 
 処理結果として以下を報告する：
 
-- **判定**: コンフリクト検知（`cc-resolve-conflict`ラベル付与） / パターンA（修正をpush・マージは次回ポーリング。A-0の上限到達時は`cc-need-human-check`） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / パターンC（CI失敗がリポジトリの変更では修正不能・`cc-need-human-check`ラベル付与＋理由コメント投稿） / パターンD（人の判断・操作待ち・`cc-need-human-check`ラベル付与＋理由コメント投稿） / 保留（CI未完了 / CI再実行・いずれもラベル操作なし） / PRクローズ（関連IssueもClose） / エラー
-- **理由**: 判定の根拠（コンフリクト検知時はターゲットブランチ名、対応すべき項目と直した内容の要約（指摘元: レビューコメント / CI / OpenCodeReview）、delegate-review を実行できなかった場合はその理由、マージ可能と判断した理由、Issueの要件との矛盾で「対応不要」に落とした指摘があればその要約と該当する要件・回答の箇所、関連Issueの要件を取得できなかった場合はその旨、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、CI未完了で保留した場合は未完了チェック名、CI再実行で保留した場合は再実行したrun-idと失敗ジョブ名、パターンDの場合は待っている判断・操作、エラー時は`gh pr view`のmergeable判定不能または`gh pr checks`出力のパース失敗など発生箇所、またはクローズ理由と連動Closeした関連Issue番号）
+- **判定**: パターンA（修正をpush・マージは次回ポーリング。A-0の上限到達時は`cc-need-human-check`） / パターンB-Epic（Epic PRのリリースゲート・`cc-release-ready`ラベル付与、マージせず終了） / パターンB-通常（マージ済み。非デフォルトブランチへのマージ時は連動Closeした関連Issue番号も明記） / パターンC（CI失敗がリポジトリの変更では修正不能・`cc-need-human-check`ラベル付与＋理由コメント投稿） / パターンD（人の判断・操作待ち・`cc-need-human-check`ラベル付与＋理由コメント投稿） / 保留（CI未完了 / CI再実行・いずれもラベル操作なし） / PRクローズ（関連IssueもClose） / エラー
+- **理由**: 判定の根拠（コンフリクトを解消した場合は解消したファイルと方針の要点・CI待機の結果（完了 / 60分で打ち切り）、対応すべき項目と直した内容の要約（指摘元: レビューコメント / CI / OpenCodeReview）、delegate-review を実行できなかった場合はその理由、マージ可能と判断した理由、Issueの要件との矛盾で「対応不要」に落とした指摘があればその要約と該当する要件・回答の箇所、関連Issueの要件を取得できなかった場合はその旨、Epic PRで`cc-release-ready`を付与した旨、非デフォルトブランチへのマージで`--reason completed`により連動Closeした関連Issue番号、CI未完了で保留した場合は未完了チェック名、CI再実行で保留した場合は再実行したrun-idと失敗ジョブ名、パターンDの場合は待っている判断・操作、エラー時は`gh pr view`のmergeable判定不能または`gh pr checks`出力のパース失敗など発生箇所、またはクローズ理由と連動Closeした関連Issue番号）

@@ -12,7 +12,6 @@ export type WorkerName =
   | "fix-review-point"
   | "check-dependabot"
   | "triage-pr"
-  | "resolve-conflict"
   | "epic-issue"
   | "create-ui-design"
   | "apply-ui-design"
@@ -160,16 +159,6 @@ export const WORKER_DEFAULTS: Record<string, WorkerRuntimeConfig> = {
     maxConcurrentTasks: 1,
     enabled: true,
   },
-  "resolve-conflict": {
-    skill: "/claude-task-worker:resolve-pr-conflict",
-    model: "opus",
-    advisorModel: "",
-    effort: "medium",
-    pollingIntervalSeconds: 60,
-    cooldownSeconds: 0,
-    maxConcurrentTasks: 1,
-    enabled: true,
-  },
   "check-dependabot": {
     skill: "/claude-task-worker:check-dependabot",
     model: "opus",
@@ -268,7 +257,7 @@ export const CLOUD_DONE_LABEL = "cc-cloud-done";
 //
 // 成立しうるかどうかと、実際に有用かどうかは別。`gh ... --json`（GraphQL）がクラウドの
 // プロキシで 403 になる制約は残っているため、PR 詳細・CI 結果を大量に読むワーカー
-// （triage-pr / check-dependabot / resolve-conflict）は GitHub MCP で代替できない操作に
+// （triage-pr / check-dependabot）は GitHub MCP で代替できない操作に
 // 当たると空振りしうる。`.pen` のスナップショットを描画するワーカー（create-ui-design）は
 // クラウド VM 側に Playwright の Chrome が要る。どのワーカーをクラウドへ
 // 振るかは実行のたびに --cloud の付け外しで選ぶ。
